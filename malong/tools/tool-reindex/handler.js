@@ -31,7 +31,7 @@ export async function handle(args, context) {
 
   // 估算文件数量
   const malongignorePath = join(workspaceDir, '.malongignore')
-  const ignoreRules = existsSync(malongignorePath) ? parseMalongignore(malongignorePath) : null
+  const ignoreRules = existsSync(malongignorePath) ? parseMalongignore(malongignorePath) : []
   const files = collectFiles(workspaceDir, { ignoreRules })
   const estimatedFiles = files.length
   const estimatedTimeSeconds = Math.ceil(estimatedFiles / 3) // 约 3 文件/秒

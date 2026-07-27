@@ -27,7 +27,7 @@ export async function handle(args, context) {
   }
 
   const malongignorePath = join(workspaceDir, '.malongignore')
-  const ignoreRules = existsSync(malongignorePath) ? parseMalongignore(malongignorePath) : null
+  const ignoreRules = existsSync(malongignorePath) ? parseMalongignore(malongignorePath) : []
 
   const opts = {
     ignoreRules,
