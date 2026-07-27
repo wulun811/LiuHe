@@ -260,6 +260,25 @@ class CodeIndex {
         return { workspace_dir: workspaceDir, db_path: join(core.getWorkspaceDir(workspaceDir), 'code-index.db') }
       },
 
+      // 索引单个文件（供 reindex handler 调用）
+      indexFile(filePath, repo) {
+        return self.indexFile(filePath, repo)
+      },
+
+      // 解析跨文件引用（供 reindex handler 调用）
+      resolveCrossFileRefs() {
+        return self._resolveCrossFileRefs()
+      },
+
+      // 索引状态（供 reindex handler 调用）
+      get indexing() {
+        return self._indexing
+      },
+
+      set indexing(value) {
+        self._indexing = value
+      },
+
       async getSymbols(filePath, { timeout = 5000 } = {}) {
         const f = self._db.prepare('SELECT id FROM files WHERE path = ?').get(filePath)
         if (!f) return []

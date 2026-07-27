@@ -25,7 +25,7 @@ export async function handle(args, context) {
   // 初始化 workspace 数据库
   codeIndexService.initWorkspace(workspaceDir)
 
-  if (codeIndexService._indexing) {
+  if (codeIndexService.indexing) {
     return { status: 'already indexing', workspace_dir: workspaceDir }
   }
 
@@ -36,7 +36,7 @@ export async function handle(args, context) {
   const estimatedFiles = files.length
   const estimatedTimeSeconds = Math.ceil(estimatedFiles / 3) // 约 3 文件/秒
 
-  codeIndexService._indexing = true
+  codeIndexService.indexing = true
   setImmediate(async () => {
     try {
       const t0 = Date.now()
@@ -44,12 +44,12 @@ export async function handle(args, context) {
         codeIndexService.indexFile(files[i].path, workspaceDir)
         if (i > 0 && i % 50 === 0) await new Promise(r => setImmediate(r))
       }
-      const crossResolved = codeIndexService._resolveCrossFileRefs()
-      codeIndexService._indexing = false
+      const crossResolved = codeIndexService.resolveCrossFileRefs()
+      codeIndexService.indexing = false
       log('info', `[reindex] done: ${files.length} files, ${crossResolved} cross-refs, ${Date.now() - t0}ms`)
     } catch (e) {
       log('error', `[reindex] failed: ${e.message}`)
-      codeIndexService._indexing = false
+      codeIndexService.indexing = false
     }
   })
 
