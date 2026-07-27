@@ -13,6 +13,14 @@ const workspacesDir = join(stateDir, 'workspaces')
 if (!existsSync(stateDir)) mkdirSync(stateDir, { recursive: true })
 if (!existsSync(workspacesDir)) mkdirSync(workspacesDir, { recursive: true })
 
+// 获取 workspace 的数据库目录
+function getWorkspaceDir(workspaceDir) {
+  const hash = crypto.createHash('md5').update(resolve(workspaceDir)).digest('hex').slice(0, 12)
+  const wsDir = join(workspacesDir, hash)
+  if (!existsSync(wsDir)) mkdirSync(wsDir, { recursive: true })
+  return wsDir
+}
+
 const core = {
   stateDir,
   services,
@@ -23,6 +31,7 @@ const core = {
   get(_, def) { return def },
   registerService(name, svc) { services[name] = svc },
   getService(name) { return services[name] },
+  getWorkspaceDir,
 }
 
 let langParserMod, codeIndexMod, repoMapMod
@@ -44,14 +53,6 @@ async function initModules() {
 
   _ready = true
   core.log('info', `[mcp] modules initialized, stateDir=${stateDir}, tools=${registry.getToolCount()}`)
-}
-
-// 获取 workspace 的数据库目录
-function getWorkspaceDir(workspaceDir) {
-  const hash = crypto.createHash('md5').update(resolve(workspaceDir)).digest('hex').slice(0, 12)
-  const wsDir = join(workspacesDir, hash)
-  if (!existsSync(wsDir)) mkdirSync(wsDir, { recursive: true })
-  return wsDir
 }
 
 function buildContext() {
