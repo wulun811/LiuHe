@@ -35,7 +35,8 @@ CREATE TABLE IF NOT EXISTS refs (
   target_symbol_id INTEGER REFERENCES symbols(id) ON DELETE SET NULL,
   target_name TEXT DEFAULT '',
   kind TEXT NOT NULL CHECK(kind IN ('call','import','extends','implements','assign','use')),
-  line INTEGER DEFAULT 0
+  line INTEGER DEFAULT 0,
+  call_expr TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_sym_name ON symbols(name);
 CREATE INDEX IF NOT EXISTS idx_sym_file ON symbols(file_id);
@@ -111,6 +112,7 @@ function initDb(dir) {
   db.pragma('temp_store=MEMORY')
   db.exec(SCHEMA)
   try { db.exec('ALTER TABLE refs ADD COLUMN line INTEGER DEFAULT 0') } catch {}
+  try { db.exec("ALTER TABLE refs ADD COLUMN call_expr TEXT DEFAULT ''") } catch {}
   return db
 }
 
@@ -124,6 +126,7 @@ class CodeIndex {
     this._watcher = null
     this._watchedDir = null
     this._watcherTimer = null
+    this._impactCache = new Map()
   }
 
   _resolveRepoDir(filePath) {
@@ -168,6 +171,7 @@ class CodeIndex {
       const r = this._db.prepare('INSERT OR IGNORE INTO files (path, repo, size, mtime) VALUES (?, ?, ?, ?)').run(relPath, '', sourceLength, mtime)
       fileId = r.lastInsertRowid
     }
+    this._impactCache?.clear()
 
     if (symbols.length > 0) {
       const ph = symbols.map(() => '(?,?,?,?,?)').join(',')
@@ -181,6 +185,7 @@ class CodeIndex {
     for (const r of refs) {
       if (r.type === 'call') {
         const callName = r.name.includes('.') ? r.name.split('.').pop() : r.name
+        const callExpr = r.name.includes('.') ? r.name : ''
         let sourceSymId = null
         let bestRange = Infinity
         for (const fs of funcSyms) {
@@ -189,19 +194,19 @@ class CodeIndex {
             if (range < bestRange) { bestRange = range; sourceSymId = fs.id }
           }
         }
-        refRows.push([fileId, sourceSymId, callName, 'call', r.line])
+        refRows.push([fileId, sourceSymId, callName, 'call', r.line, callExpr])
       } else if (r.type === 'import') {
-        refRows.push([fileId, null, r.module || '', 'import', r.line])
+        refRows.push([fileId, null, r.module || '', 'import', r.line, ''])
         if (r.symbols && r.symbols.length > 0) {
           for (const symName of r.symbols) {
-            refRows.push([fileId, null, symName, 'import', r.line])
+            refRows.push([fileId, null, symName, 'import', r.line, ''])
           }
         }
       }
     }
     if (refRows.length > 0) {
-      const ph = refRows.map(() => '(?,?,?,?,?)').join(',')
-      this._db.prepare(`INSERT INTO refs (source_file_id, source_symbol_id, target_name, kind, line) VALUES ${ph}`).run(...refRows.flat())
+      const ph = refRows.map(() => '(?,?,?,?,?,?)').join(',')
+      this._db.prepare(`INSERT INTO refs (source_file_id, source_symbol_id, target_name, kind, line, call_expr) VALUES ${ph}`).run(...refRows.flat())
     }
 
     const updateRef = this._db.prepare('UPDATE refs SET target_symbol_id = ? WHERE id = ?')
@@ -286,23 +291,22 @@ class CodeIndex {
 
   _findIndirectCallers(symbolName, maxDepth, excludeFile) {
     const direct = excludeFile
-      ? this._db.prepare("SELECT DISTINCT s.name AS caller_func FROM refs r JOIN files f ON r.source_file_id = f.id LEFT JOIN symbols s ON r.source_symbol_id = s.id WHERE r.target_name = ? AND r.kind = 'call' AND f.path != ?").all(symbolName, excludeFile)
-      : this._db.prepare("SELECT DISTINCT s.name AS caller_func FROM refs r JOIN files f ON r.source_file_id = f.id LEFT JOIN symbols s ON r.source_symbol_id = s.id WHERE r.target_name = ? AND r.kind = 'call'").all(symbolName)
+      ? this._db.prepare("SELECT DISTINCT r.source_symbol_id, f.path AS caller_file, s.name AS caller_func FROM refs r JOIN files f ON r.source_file_id = f.id LEFT JOIN symbols s ON r.source_symbol_id = s.id WHERE r.target_name = ? AND r.kind = 'call' AND f.path != ? AND r.source_symbol_id IS NOT NULL").all(symbolName, excludeFile)
+      : this._db.prepare("SELECT DISTINCT r.source_symbol_id, f.path AS caller_file, s.name AS caller_func FROM refs r JOIN files f ON r.source_file_id = f.id LEFT JOIN symbols s ON r.source_symbol_id = s.id WHERE r.target_name = ? AND r.kind = 'call' AND r.source_symbol_id IS NOT NULL").all(symbolName)
 
-    const visited = new Set([symbolName])
-    let queue = direct.filter(d => d.caller_func).map(d => d.caller_func)
-    for (const q of queue) visited.add(q)
+    const visited = new Set(direct.map(d => d.source_symbol_id))
+    let queue = direct.map(d => ({ symId: d.source_symbol_id, func: d.caller_func, file: d.caller_file }))
 
     const results = []
     for (let d = 2; d <= maxDepth; d++) {
       const nextQueue = []
-      for (const funcName of queue) {
-        const higher = this._db.prepare("SELECT DISTINCT f.path AS caller_file, s.name AS caller_func, r.line AS caller_line FROM refs r JOIN files f ON r.source_file_id = f.id LEFT JOIN symbols s ON r.source_symbol_id = s.id WHERE r.target_name = ? AND r.kind = 'call'").all(funcName)
+      for (const { symId, func: funcName } of queue) {
+        const higher = this._db.prepare("SELECT DISTINCT f.path AS caller_file, s.name AS caller_func, r.line AS caller_line, r.source_symbol_id AS higher_sym_id FROM refs r JOIN files f ON r.source_file_id = f.id LEFT JOIN symbols s ON r.source_symbol_id = s.id WHERE r.target_symbol_id = ? AND r.kind = 'call'").all(symId)
         for (const h of higher) {
           results.push({ file: h.caller_file, function: h.caller_func, line: h.caller_line || 0, depth: d, via: funcName })
-          if (h.caller_func && !visited.has(h.caller_func)) {
-            visited.add(h.caller_func)
-            nextQueue.push(h.caller_func)
+          if (h.higher_sym_id && !visited.has(h.higher_sym_id)) {
+            visited.add(h.higher_sym_id)
+            nextQueue.push({ symId: h.higher_sym_id, func: h.caller_func, file: h.caller_file })
           }
         }
       }
@@ -572,8 +576,13 @@ class CodeIndex {
       },
 
       async getImpactAnalysis(filePath, { symbol, changeType = 'modify', maxCallers = 20, depth = 2 } = {}) {
+        const cacheKey = `${filePath}\0${symbol || ''}\0${changeType}\0${maxCallers}\0${depth}`
+        if (self._impactCache.has(cacheKey)) {
+          return self._impactCache.get(cacheKey)
+        }
+
         const f = self._db.prepare('SELECT id FROM files WHERE path = ?').get(filePath)
-        if (!f) return { file: filePath, symbol: symbol || null, callers: [], truncated: false, caller_count: { direct: 0, indirect: 0, test: 0 }, risk_level: 'low' }
+        if (!f) return { file: filePath, symbol: symbol || null, callers: [], importers: [], truncated: false, caller_count: { direct: 0, indirect: 0, test: 0, import: 0 }, risk_level: 'low', limitations: [] }
 
         let symLine = 0
         if (symbol) {
@@ -585,13 +594,13 @@ class CodeIndex {
         let refs
         if (symbol) {
           refs = self._db.prepare(
-            "SELECT r.id, r.source_file_id, f.path AS source_file_path, r.target_name, r.kind, r.source_symbol_id, r.target_symbol_id, r.line " +
+            "SELECT r.id, r.source_file_id, f.path AS source_file_path, r.target_name, r.kind, r.source_symbol_id, r.target_symbol_id, r.line, r.call_expr " +
             "FROM refs r JOIN files f ON r.source_file_id = f.id " +
             "WHERE r.target_name = ? AND r.source_file_id != ?"
           ).all(symbol, f.id)
         } else {
           refs = self._db.prepare(
-            "SELECT r.id, r.source_file_id, f.path AS source_file_path, r.target_name, r.kind, r.source_symbol_id, r.target_symbol_id, r.line " +
+            "SELECT r.id, r.source_file_id, f.path AS source_file_path, r.target_name, r.kind, r.source_symbol_id, r.target_symbol_id, r.line, r.call_expr " +
             "FROM refs r JOIN files f ON r.source_file_id = f.id " +
             "WHERE r.target_name IN (SELECT name FROM symbols WHERE file_id = ?) AND r.source_file_id != ?"
           ).all(f.id, f.id)
@@ -599,9 +608,14 @@ class CodeIndex {
 
         const directCallers = []
         const testCallers = []
+        const importers = []
         const seenKeys = new Set()
 
         for (const r of refs) {
+          if (r.kind === 'import') {
+            importers.push({ file: r.source_file_path, line: r.line || 0, ref_type: 'import' })
+            continue
+          }
           const { func: callerFunc } = self._resolveRefDetail(r.source_symbol_id)
           const refLine = r.line || 0
           const isTest = self._isTestFile(r.source_file_path)
@@ -613,6 +627,7 @@ class CodeIndex {
             file: r.source_file_path,
             line: refLine,
             function: callerFunc,
+            call_expr: r.call_expr || '',
             context: self._extractContext(r.source_file_path, refLine),
           }
           if (isTest) testCallers.push(info)
@@ -633,6 +648,7 @@ class CodeIndex {
               file: entry.file,
               line: entry.line || 0,
               function: entry.function,
+              call_expr: '',
               context: self._extractContext(entry.file, entry.line || 0),
               depth: entry.depth,
               via: entry.via,
@@ -645,20 +661,26 @@ class CodeIndex {
         const allCallers = [...directCallers, ...indirectCallers, ...testCallers]
         const truncated = allCallers.length > maxCallers
 
-        return {
+        const result = {
           symbol: symbol || null,
           file: filePath,
           line: symLine,
           change_type: changeType,
           callers: allCallers.slice(0, maxCallers),
+          importers: importers.slice(0, maxCallers),
           truncated,
           caller_count: {
             direct: directCallers.length,
             indirect: indirectCallers.length,
             test: testCallers.length,
+            import: importers.length,
           },
           risk_level: self._calculateRisk(directCallers.length, testCallers.length, changeType),
+          limitations: ['dynamic_calls_invisible', 'method_dispatch_by_name'],
         }
+
+        self._impactCache.set(cacheKey, result)
+        return result
       },
 
       async getModuleDependencies(filePath, { depth = 3 } = {}) {
