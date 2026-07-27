@@ -1,7 +1,7 @@
 {
   "name": "impact_analysis",
   "version": "2.0.0",
-  "description": "Analyze the impact scope of changing a symbol or file. Returns direct callers, indirect callers (BFS), and test references with code context snippets, risk level, and caller counts. Use this before modifying shared utilities to understand the blast radius. REQUIRED: Call reindex first if this is a new workspace.",
+  "description": "Analyze the impact scope of changing a symbol or file. Returns direct callers, indirect callers (BFS), test references, importers, and callees (downward impact - what this function calls) with code context snippets, risk level, and caller counts. Use this before modifying shared utilities to understand the blast radius. REQUIRED: Call reindex first if this is a new workspace.",
   "inputSchema": {
     "type": "object",
     "properties": {

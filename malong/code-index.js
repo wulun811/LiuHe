@@ -322,6 +322,50 @@ class CodeIndex {
     return results
   }
 
+  _findCallees(symId, sourceFilePath) {
+    if (!symId) return []
+    const rows = this._db.prepare(
+      "SELECT r.target_name, r.target_symbol_id, r.target_file_id, r.line, r.call_expr, " +
+      "f2.path AS target_file_path " +
+      "FROM refs r " +
+      "LEFT JOIN files f2 ON r.target_file_id = f2.id " +
+      "WHERE r.source_symbol_id = ? AND r.kind = 'call'"
+    ).all(symId)
+
+    const callees = []
+    const seen = new Set()
+    for (const r of rows) {
+      const key = `${r.target_name}\0${r.line || 0}`
+      if (seen.has(key)) continue
+      seen.add(key)
+
+      let calleeFile = r.target_file_path || null
+      let calleeLine = 0
+      if (r.target_symbol_id) {
+        const ts = this._db.prepare('SELECT start_line, file_id FROM symbols WHERE id = ?').get(r.target_symbol_id)
+        if (ts) {
+          calleeLine = ts.start_line
+          if (!calleeFile) {
+            const cf = this._db.prepare('SELECT path FROM files WHERE id = ?').get(ts.file_id)
+            if (cf) calleeFile = cf.path
+          }
+        }
+      }
+
+      callees.push({
+        function: r.target_name,
+        file: sourceFilePath,
+        line: r.line || 0,
+        call_expr: r.call_expr || '',
+        context: this._extractContext(sourceFilePath, r.line || 0),
+        callee_file: calleeFile,
+        callee_line: calleeLine,
+        resolved: !!r.target_symbol_id,
+      })
+    }
+    return callees
+  }
+
   async walkAndIndex(dir, rootDir) {
     const { readdirSync } = await import('node:fs')
     const { join: joinPath } = await import('node:path')
@@ -588,13 +632,14 @@ class CodeIndex {
         }
 
         const f = self._db.prepare('SELECT id FROM files WHERE path = ?').get(filePath)
-        if (!f) return { file: filePath, symbol: symbol || null, callers: [], importers: [], truncated: false, caller_count: { direct: 0, indirect: 0, test: 0, import: 0 }, risk_level: 'low', limitations: [] }
+        if (!f) return { file: filePath, symbol: symbol || null, callers: [], importers: [], callees: [], truncated: false, caller_count: { direct: 0, indirect: 0, test: 0, import: 0 }, risk_level: 'low', limitations: [] }
 
         let symLine = 0
+        let symId = 0
         if (symbol) {
-          const sym = self._db.prepare('SELECT start_line FROM symbols WHERE name = ? AND file_id = ?').get(symbol, f.id)
-                     || self._db.prepare('SELECT start_line FROM symbols WHERE name = ?').get(symbol)
-          if (sym) symLine = sym.start_line
+          const sym = self._db.prepare('SELECT id, start_line FROM symbols WHERE name = ? AND file_id = ?').get(symbol, f.id)
+                     || self._db.prepare('SELECT id, start_line FROM symbols WHERE name = ?').get(symbol)
+          if (sym) { symLine = sym.start_line; symId = sym.id }
         }
 
         let refs
@@ -667,6 +712,8 @@ class CodeIndex {
         const allCallers = [...directCallers, ...indirectCallers, ...testCallers]
         const truncated = allCallers.length > maxCallers
 
+        const callees = symbol && symId ? self._findCallees(symId, filePath) : []
+
         const result = {
           symbol: symbol || null,
           file: filePath,
@@ -674,6 +721,7 @@ class CodeIndex {
           change_type: changeType,
           callers: allCallers.slice(0, maxCallers),
           importers: importers.slice(0, maxCallers),
+          callees: callees.slice(0, maxCallers),
           truncated,
           caller_count: {
             direct: directCallers.length,
