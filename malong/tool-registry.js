@@ -2,9 +2,9 @@
 // 自动发现 tools/*/manifest.json，动态加载 handler
 // 详见：PROTOCOL.md §工具注册协议
 
-import { readdirSync, readFileSync, existsSync, statSync } from 'node:fs'
+import { readdirSync, readFileSync, existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -54,7 +54,7 @@ class ToolRegistry {
           continue
         }
 
-        const handlerModule = await import(handlerPath)
+        const handlerModule = await import(pathToFileURL(handlerPath).href)
         if (typeof handlerModule.handle !== 'function') {
           this.log('error', `${entry.name}/ handler.js must export 'handle' function`)
           continue
