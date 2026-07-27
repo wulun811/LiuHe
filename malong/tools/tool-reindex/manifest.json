@@ -1,5 +1,5 @@
 {
-  "name": "malong_reindex",
+  "name": "reindex",
   "version": "1.0.0",
   "description": "Trigger full re-index of the 0通天/ project. Call this once before using other tools — first-time index takes ~3 minutes (456 files, tree-sitter parsing). Subsequent calls are fast if nothing changed.",
   "inputSchema": {

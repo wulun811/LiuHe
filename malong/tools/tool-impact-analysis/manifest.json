@@ -1,5 +1,5 @@
 {
-  "name": "malong_impact_analysis",
+  "name": "impact_analysis",
   "version": "1.0.0",
   "description": "Analyze the impact scope of changing a file. Returns direct callers (which functions call symbols defined in this file) plus transitive callers up to N levels deep. Use this before modifying shared utilities to understand the blast radius.",
   "inputSchema": {

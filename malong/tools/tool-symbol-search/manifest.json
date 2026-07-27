@@ -1,5 +1,5 @@
 {
-  "name": "malong_symbol_search",
+  "name": "symbol_search",
   "version": "1.0.0",
   "description": "Search for symbols (functions, classes, methods, variables) by name across the entire 0通天/ project. Returns file path, line number, and symbol type. Substring match — e.g. query \"spawnFix\" finds both \"spawnFixer\" and \"_handleSpawnFixer\".",
   "inputSchema": {

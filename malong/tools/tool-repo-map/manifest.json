@@ -1,5 +1,5 @@
 {
-  "name": "malong_repo_map",
+  "name": "repo_map",
   "version": "1.0.0",
   "description": "Generate a structured code map of the project. Full output is ~36K tokens (~456 files with top-level symbols). For token-efficient queries, use focused=true + relevantEntities to get a targeted ~50 token map of only the files containing specific symbols.",
   "inputSchema": {

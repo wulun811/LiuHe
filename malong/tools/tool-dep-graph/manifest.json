@@ -1,5 +1,5 @@
 {
-  "name": "malong_dep_graph",
+  "name": "dep_graph",
   "version": "1.0.0",
   "description": "Show the import dependency graph for a file — what modules it imports (directImports) and transitive dependencies up to N levels deep. Use this to understand module coupling before refactoring.",
   "inputSchema": {
