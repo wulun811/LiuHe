@@ -38,15 +38,16 @@ export function collectFiles(rootDir, opts = {}) {
     ignoreRules = [],
     cachedExt = DEFAULT_CACHED_EXT,
     ignoreDirs = DEFAULT_IGNORE_DIRS,
-    maxFiles = 500,
+    maxFiles = 5000,
   } = opts
 
   const files = []
   function walk(d, depth = 0) {
-    if (depth > 8 || files.length >= maxFiles) return
+    if (depth > 8) return
     let entries
     try { entries = readdirSync(d, { withFileTypes: true }) } catch { return }
     for (const e of entries) {
+      if (files.length >= maxFiles) return
       if (ignoreDirs.has(e.name) || e.name.startsWith('.')) continue
       const full = join(d, e.name)
       const relPath = relative(rootDir, full)
