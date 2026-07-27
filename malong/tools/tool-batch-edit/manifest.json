@@ -10,8 +10,17 @@
         "description": "Absolute path to the file to edit"
       },
       "edits": {
-        "type": "string",
-        "description": "JSON array of edits. Example: [{\"old_string\":\"foo\",\"new_string\":\"bar\",\"replace_all\":false}]"
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "old_string": { "type": "string", "description": "Text to search for (must uniquely match)" },
+            "new_string": { "type": "string", "description": "Text to replace with" },
+            "replace_all": { "type": "boolean", "description": "Replace all occurrences (default: false)" }
+          },
+          "required": ["old_string", "new_string"]
+        },
+        "description": "Array of edits to apply. Example: [{\"old_string\": \"foo\", \"new_string\": \"bar\"}]"
       },
       "dry_run": {
         "type": "boolean",
