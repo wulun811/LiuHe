@@ -1,17 +1,18 @@
 {
   "name": "symbol_search",
   "version": "1.0.0",
-  "description": "Search for symbols (functions, classes, methods, variables) by name across the entire 0通天/ project. Returns file path, line number, and symbol type. Substring match — e.g. query \"spawnFix\" finds both \"spawnFixer\" and \"_handleSpawnFixer\".",
+  "description": "Search for symbols (functions, classes, methods, variables) by name across the entire project. Returns file path, line number, and symbol type. Substring match — e.g. query \"spawnFix\" finds both \"spawnFixer\" and \"_handleSpawnFixer\". REQUIRED: Call reindex first if this is a new workspace.",
   "inputSchema": {
     "type": "object",
     "properties": {
+      "workspace_dir": { "type": "string", "description": "REQUIRED: Absolute path to the project root directory. Call reindex first if this is a new workspace." },
       "query": { "type": "string", "description": "Symbol name substring to search (case-sensitive)" },
       "limit": { "type": "number", "description": "Max results (default 30)" }
     },
-    "required": ["query"]
+    "required": ["workspace_dir", "query"]
   },
   "handler": "./handler.js",
   "protocol_version": "1.0",
   "tags": ["search", "symbol"],
-  "dependencies": []
+  "dependencies": ["reindex"]
 }

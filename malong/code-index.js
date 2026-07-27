@@ -4,7 +4,7 @@
 
 import Database from 'better-sqlite3'
 import { join, relative, extname, resolve } from 'node:path'
-import { readFileSync, existsSync, mkdirSync, unlinkSync, watch, chmodSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, watch, chmodSync } from 'node:fs'
 import { createServer } from 'node:http'
 
 const SCHEMA = `
@@ -224,14 +224,42 @@ class CodeIndex {
 
   async init(core) {
     this._core = core
-    const stateDir = core.stateDir || join(process.cwd(), 'data')
-    if (!existsSync(stateDir)) mkdirSync(stateDir, { recursive: true })
-    this._db = initDb(stateDir)
     this._langParser = core.getService('langParser')
     if (!this._langParser) throw new Error('[code-index] lang-parser service required but not registered')
+    // 延迟初始化数据库，等待 workspace_dir 参数
+    this._db = null
+    this._currentWorkspace = null
 
     const self = this
+
+    // 初始化指定 workspace 的数据库
+    function initWorkspaceDb(workspaceDir) {
+      const wsDir = core.getWorkspaceDir(workspaceDir)
+      if (self._db && self._currentWorkspace === workspaceDir) {
+        return // 已经初始化过
+      }
+      if (self._db) {
+        self._db.close()
+      }
+      self._db = initDb(wsDir)
+      self._currentWorkspace = workspaceDir
+      // 写入 metadata
+      const metadataPath = join(wsDir, 'metadata.json')
+      const metadata = {
+        workspace_dir: workspaceDir,
+        created_at: new Date().toISOString(),
+        last_accessed: new Date().toISOString()
+      }
+      writeFileSync(metadataPath, JSON.stringify(metadata, null, 2))
+    }
+
     core.registerService('codeIndex', {
+      // 初始化 workspace（供 handler 调用）
+      initWorkspace(workspaceDir) {
+        initWorkspaceDb(workspaceDir)
+        return { workspace_dir: workspaceDir, db_path: join(core.getWorkspaceDir(workspaceDir), 'code-index.db') }
+      },
+
       async getSymbols(filePath, { timeout = 5000 } = {}) {
         const f = self._db.prepare('SELECT id FROM files WHERE path = ?').get(filePath)
         if (!f) return []

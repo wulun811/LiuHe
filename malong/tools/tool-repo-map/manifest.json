@@ -5,11 +5,13 @@
   "inputSchema": {
     "type": "object",
     "properties": {
-      "dir": { "type": "string", "description": "Root directory to map (default: workspace root, a subdir of 0通天/)" },
+      "workspace_dir": { "type": "string", "description": "REQUIRED: Absolute path to the project root directory to map." },
+      "dir": { "type": "string", "description": "Subdirectory to map (default: workspace_dir)" },
       "focused": { "type": "boolean", "description": "If true, limit output to ~2000 tokens by pruning symbols. Combine with relevantEntities for best results." },
       "relevantFiles": { "type": "array", "items": { "type": "string" }, "description": "Only include these specific files (paths relative to workspace root, e.g. [\"scripts/lib/tools/spawn.mjs\"])" },
       "relevantEntities": { "type": "array", "items": { "type": "string" }, "description": "Only include files that contain these top-level symbols (e.g. [\"spawnFixer\", \"agentLoop\"])" }
-    }
+    },
+    "required": ["workspace_dir"]
   },
   "handler": "./handler.js",
   "protocol_version": "1.0",

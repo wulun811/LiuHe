@@ -1,17 +1,18 @@
 {
   "name": "dep_graph",
   "version": "1.0.0",
-  "description": "Show the import dependency graph for a file — what modules it imports (directImports) and transitive dependencies up to N levels deep. Use this to understand module coupling before refactoring.",
+  "description": "Show the import dependency graph for a file — what modules it imports (directImports) and transitive dependencies up to N levels deep. Use this to understand module coupling before refactoring. REQUIRED: Call reindex first if this is a new workspace.",
   "inputSchema": {
     "type": "object",
     "properties": {
-      "file": { "type": "string", "description": "File path relative to 0通天/ (e.g. \"scripts/lib/tools/spawn.mjs\")" },
+      "workspace_dir": { "type": "string", "description": "REQUIRED: Absolute path to the project root directory. Call reindex first if this is a new workspace." },
+      "file": { "type": "string", "description": "File path relative to workspace_dir (e.g. \"scripts/lib/tools/spawn.mjs\")" },
       "depth": { "type": "number", "description": "Transitive depth (default 3, max 10)" }
     },
-    "required": ["file"]
+    "required": ["workspace_dir", "file"]
   },
   "handler": "./handler.js",
   "protocol_version": "1.0",
   "tags": ["dependency", "graph"],
-  "dependencies": []
+  "dependencies": ["reindex"]
 }

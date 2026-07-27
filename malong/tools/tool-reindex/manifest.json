@@ -1,10 +1,13 @@
 {
   "name": "reindex",
   "version": "1.0.0",
-  "description": "Trigger full re-index of the 0通天/ project. Call this once before using other tools — first-time index takes ~3 minutes (456 files, tree-sitter parsing). Subsequent calls are fast if nothing changed.",
+  "description": "Trigger full re-index of a project. REQUIRED: workspace_dir must be specified. First-time index takes ~3 minutes per 1000 files (tree-sitter parsing). Subsequent calls are fast if nothing changed. This is required before using other malong tools (symbol_search, references, impact_analysis, dep_graph).",
   "inputSchema": {
     "type": "object",
-    "properties": {}
+    "properties": {
+      "workspace_dir": { "type": "string", "description": "REQUIRED: Absolute path to the project root directory to index. This is the directory that will be scanned and indexed for symbol search, references, etc." }
+    },
+    "required": ["workspace_dir"]
   },
   "handler": "./handler.js",
   "protocol_version": "1.0",

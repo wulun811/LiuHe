@@ -2,18 +2,16 @@ import { existsSync, mkdirSync } from 'node:fs'
 import { join, resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { homedir } from 'node:os'
-import { parseMalongignore } from './file-collector.js'
 import ToolRegistry from './tool-registry.js'
+import crypto from 'node:crypto'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
-const args = process.argv.slice(2)
-const wsIdx = args.indexOf('--workspace')
-const workspaceDir = resolve(wsIdx >= 0 ? args[wsIdx + 1] : '0通天/')
-
 const services = {}
 const stateDir = join(process.cwd(), 'data', 'malong-mcp')
+const workspacesDir = join(stateDir, 'workspaces')
 if (!existsSync(stateDir)) mkdirSync(stateDir, { recursive: true })
+if (!existsSync(workspacesDir)) mkdirSync(workspacesDir, { recursive: true })
 
 const core = {
   stateDir,
@@ -27,10 +25,7 @@ const core = {
   getService(name) { return services[name] },
 }
 
-const malongignorePath = join(process.cwd(), '.malongignore')
-const ignoreRules = parseMalongignore(malongignorePath)
-
-let langParserMod, codeIndexMod, codeIndexInstance, repoMapMod
+let langParserMod, codeIndexMod, repoMapMod
 let _ready = false
 let registry
 
@@ -39,7 +34,6 @@ async function initModules() {
   await langParserMod.init(core)
   codeIndexMod = await import('./code-index.js')
   await codeIndexMod.init(core)
-  codeIndexInstance = (await import('./code-index.js')).default
   repoMapMod = await import('./repo-map.js')
   await repoMapMod.init(core)
 
@@ -49,17 +43,24 @@ async function initModules() {
   await registry.loadAll()
 
   _ready = true
-  core.log('info', `[mcp] modules initialized, workspace=${workspaceDir}, stateDir=${stateDir}, tools=${registry.getToolCount()}`)
+  core.log('info', `[mcp] modules initialized, stateDir=${stateDir}, tools=${registry.getToolCount()}`)
+}
+
+// 获取 workspace 的数据库目录
+function getWorkspaceDir(workspaceDir) {
+  const hash = crypto.createHash('md5').update(resolve(workspaceDir)).digest('hex').slice(0, 12)
+  const wsDir = join(workspacesDir, hash)
+  if (!existsSync(wsDir)) mkdirSync(wsDir, { recursive: true })
+  return wsDir
 }
 
 function buildContext() {
   return {
-    workspaceDir,
     stateDir,
-    ignoreRules,
+    workspacesDir,
     log: core.log,
     services,
-    codeIndexInstance,
+    getWorkspaceDir,
     codeIndexService: core.getService('codeIndex'),
     repoMapService: core.getService('repoMap'),
   }
