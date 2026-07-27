@@ -13,6 +13,11 @@ export async function handle(args, context) {
     return { error: 'workspace_dir parameter required — specify the project root directory to index' }
   }
 
+  // 验证 workspace_dir 存在
+  if (!existsSync(workspaceDir)) {
+    return { error: 'invalid_workspace', message: `workspace_dir not found: ${workspaceDir}` }
+  }
+
   if (!codeIndexService) {
     return { error: 'codeIndex service not available' }
   }

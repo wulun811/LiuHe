@@ -5,11 +5,21 @@ import { existsSync } from 'node:fs'
 import { parseMalongignore } from '../../file-collector.js'
 
 export async function handle(args, context) {
-  const { repoMapService } = context
+  const { repoMapService, getWorkspaceDir } = context
   const workspaceDir = args?.workspace_dir
 
   if (!workspaceDir) {
     return { error: 'workspace_dir parameter required — specify the project root directory to map' }
+  }
+
+  // 检查 workspace 是否已索引
+  const dbPath = join(getWorkspaceDir(workspaceDir), 'code-index.db')
+  if (!existsSync(dbPath)) {
+    return { 
+      error: 'workspace_not_indexed',
+      message: `Workspace not indexed: ${workspaceDir}`,
+      suggestion: `Call reindex(workspace_dir="${workspaceDir}") first`
+    }
   }
 
   if (!repoMapService) {
