@@ -17,7 +17,7 @@ export const version = '0.3.0'
 
 let _core
 
-const LANG_MAP = {
+export const LANG_MAP = {
   '.js': { lang: JavaScript, name: 'javascript' },
   '.mjs': { lang: JavaScript, name: 'javascript' },
   '.cjs': { lang: JavaScript, name: 'javascript' },
@@ -46,7 +46,7 @@ function parserFor(ext) {
 
 // ── Language-specific symbol extraction ──
 
-const LANG_HANDLERS = {
+export const LANG_HANDLERS = {
   javascript: {
     extractSymbols(tree, source) {
       const symbols = []
@@ -133,6 +133,52 @@ const LANG_HANDLERS = {
       }
       walk(tree.rootNode)
       return refs
+    },
+
+    extractAll(tree, source) {
+      const symbols = []
+      const refs = []
+      function walk(node, depth = 0) {
+        if (depth > 100) return
+        if (node.type === 'export_statement') {
+          for (let i = 0; i < node.childCount; i++) walk(node.child(i), depth)
+          return
+        }
+        if (node.type === 'function_declaration') {
+          const name = node.childForFieldName('name')
+          if (name) symbols.push({ name: source.slice(name.startIndex, name.endIndex), type: 'function', startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 })
+        } else if (node.type === 'class_declaration') {
+          const name = node.childForFieldName('name')
+          if (name) symbols.push({ name: source.slice(name.startIndex, name.endIndex), type: 'class', startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 })
+        } else if (node.type === 'method_definition') {
+          const name = node.childForFieldName('name')
+          if (name) symbols.push({ name: source.slice(name.startIndex, name.endIndex), type: 'method', startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 })
+        } else if ((node.type === 'lexical_declaration' || node.type === 'variable_declaration') && (depth === 1 || !node.parent)) {
+          for (const c of node.children) {
+            if (c.type === 'variable_declarator') {
+              const name = c.childForFieldName('name')
+              if (name) symbols.push({ name: source.slice(name.startIndex, name.endIndex), type: 'variable', startLine: c.startPosition.row + 1, endLine: c.endPosition.row + 1 })
+            }
+          }
+        }
+        if (node.type === 'call_expression') {
+          const fn = node.childForFieldName('function')
+          if (fn) refs.push({ type: 'call', name: source.slice(fn.startIndex, fn.endIndex), line: node.startPosition.row + 1 })
+        } else if (node.type === 'import_statement') {
+          const sourceNode = node.childForFieldName('source')
+          const imported = []
+          for (const c of node.children) {
+            if (c.type === 'import_specifier' || c.type === 'namespace_import') {
+              const n = c.childForFieldName('name') || c.childForFieldName('local')
+              if (n) imported.push(source.slice(n.startIndex, n.endIndex))
+            }
+          }
+          refs.push({ type: 'import', module: sourceNode ? source.slice(sourceNode.startIndex, sourceNode.endIndex).replace(/['"]/g, '') : '', symbols: imported, line: node.startPosition.row + 1 })
+        }
+        for (let i = 0; i < node.childCount; i++) walk(node.child(i), depth + 1)
+      }
+      walk(tree.rootNode)
+      return { symbols, refs }
     },
 
     simplifyAST(node, source, depth = 0) {
@@ -259,6 +305,51 @@ const LANG_HANDLERS = {
       return refs
     },
 
+    extractAll(tree, source) {
+      const symbols = []
+      const refs = []
+      function walk(node, depth = 0) {
+        if (depth > 100) return
+        if (node.type === 'function_definition') {
+          const name = node.childForFieldName('name')
+          if (name) symbols.push({ name: source.slice(name.startIndex, name.endIndex), type: 'function', startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 })
+        } else if (node.type === 'class_definition') {
+          const name = node.childForFieldName('name')
+          if (name) symbols.push({ name: source.slice(name.startIndex, name.endIndex), type: 'class', startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 })
+        } else if (node.type === 'decorated_definition') {
+          for (const c of node.children) walk(c, depth + 1)
+          return
+        } else if (node.type === 'assignment') {
+          const left = node.childForFieldName('left')
+          if (left && (left.type === 'identifier' || left.type === 'attribute')) {
+            const name = source.slice(left.startIndex, left.endIndex).split('.')[0]
+            if (/^[a-zA-Z_]/.test(name)) symbols.push({ name, type: 'variable', startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 })
+          }
+        }
+        if (node.type === 'call') {
+          const fn = node.childForFieldName('function')
+          if (fn) refs.push({ type: 'call', name: source.slice(fn.startIndex, fn.endIndex), line: node.startPosition.row + 1 })
+        } else if (node.type === 'import_statement') {
+          for (const c of node.children) {
+            if (c.type === 'dotted_name') {
+              refs.push({ type: 'import', module: source.slice(c.startIndex, c.endIndex), symbols: [], line: node.startPosition.row + 1 })
+            }
+          }
+        } else if (node.type === 'import_from_statement') {
+          const module = node.childForFieldName('module_name')
+          const modName = module ? source.slice(module.startIndex, module.endIndex) : ''
+          const imported = []
+          for (const c of node.children) {
+            if (c.type === 'dotted_name' && c !== module) imported.push(source.slice(c.startIndex, c.endIndex))
+          }
+          refs.push({ type: 'import', module: modName, symbols: imported, line: node.startPosition.row + 1 })
+        }
+        for (let i = 0; i < node.childCount; i++) walk(node.child(i), depth + 1)
+      }
+      walk(tree.rootNode)
+      return { symbols, refs }
+    },
+
     simplifyAST(node, source, depth = 0) {
       return simplifyASTJS(node, source, depth)
     },
@@ -370,6 +461,57 @@ const LANG_HANDLERS = {
       }
       walk(tree.rootNode)
       return refs
+    },
+
+    extractAll(tree, source) {
+      const symbols = []
+      const refs = []
+      function walk(node, depth = 0) {
+        if (depth > 100) return
+        if (node.type === 'function_declaration') {
+          const name = node.childForFieldName('name')
+          if (name) symbols.push({ name: source.slice(name.startIndex, name.endIndex), type: 'function', startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 })
+        } else if (node.type === 'method_declaration') {
+          const name = node.childForFieldName('name')
+          if (name) symbols.push({ name: source.slice(name.startIndex, name.endIndex), type: 'method', startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 })
+        } else if (node.type === 'type_declaration') {
+          for (const c of node.children) {
+            if (c.type === 'type_spec') {
+              const name = c.childForFieldName('name')
+              if (name) symbols.push({ name: source.slice(name.startIndex, name.endIndex), type: 'type', startLine: c.startPosition.row + 1, endLine: c.endPosition.row + 1 })
+            }
+          }
+        } else if (node.type === 'short_var_declaration' || node.type === 'var_declaration') {
+          for (const c of node.children) {
+            if (c.type === 'identifier') symbols.push({ name: source.slice(c.startIndex, c.endIndex), type: 'variable', startLine: c.startPosition.row + 1, endLine: c.endPosition.row + 1 })
+            else if (c.type === 'var_spec') {
+              const name = c.childForFieldName('name')
+              if (name) symbols.push({ name: source.slice(name.startIndex, name.endIndex), type: 'variable', startLine: c.startPosition.row + 1, endLine: c.endPosition.row + 1 })
+            }
+          }
+        }
+        if (node.type === 'call_expression') {
+          const fn = node.childForFieldName('function')
+          if (fn) refs.push({ type: 'call', name: source.slice(fn.startIndex, fn.endIndex), line: node.startPosition.row + 1 })
+        } else if (node.type === 'import_declaration') {
+          for (const c of node.children) {
+            if (c.type === 'import_spec') {
+              const p = c.childForFieldName('path')
+              if (p) refs.push({ type: 'import', module: source.slice(p.startIndex, p.endIndex).replace(/"/g, ''), symbols: [], line: node.startPosition.row + 1 })
+            } else if (c.type === 'import_spec_list') {
+              for (const s of c.children) {
+                if (s.type === 'import_spec') {
+                  const p = s.childForFieldName('path')
+                  if (p) refs.push({ type: 'import', module: source.slice(p.startIndex, p.endIndex).replace(/"/g, ''), symbols: [], line: s.startPosition.row + 1 })
+                }
+              }
+            }
+          }
+        }
+        for (let i = 0; i < node.childCount; i++) walk(node.child(i), depth + 1)
+      }
+      walk(tree.rootNode)
+      return { symbols, refs }
     },
 
     simplifyAST(node, source, depth = 0) {
@@ -487,6 +629,59 @@ const LANG_HANDLERS = {
       return refs
     },
 
+    extractAll(tree, source) {
+      const symbols = []
+      const refs = []
+      function walk(node, depth = 0) {
+        if (depth > 100) return
+        if (node.type === 'function_item') {
+          const name = node.childForFieldName('name')
+          if (name) symbols.push({ name: source.slice(name.startIndex, name.endIndex), type: 'function', startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 })
+        } else if (node.type === 'struct_item') {
+          const name = node.childForFieldName('name')
+          if (name) symbols.push({ name: source.slice(name.startIndex, name.endIndex), type: 'class', startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 })
+        } else if (node.type === 'enum_item') {
+          const name = node.childForFieldName('name')
+          if (name) symbols.push({ name: source.slice(name.startIndex, name.endIndex), type: 'type', startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 })
+        } else if (node.type === 'trait_item') {
+          const name = node.childForFieldName('name')
+          if (name) symbols.push({ name: source.slice(name.startIndex, name.endIndex), type: 'type', startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 })
+        } else if (node.type === 'impl_item') {
+          const trait = node.childForFieldName('trait')
+          const type = node.childForFieldName('type')
+          if (type) symbols.push({ name: source.slice(type.startIndex, type.endIndex), type: 'method', startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1, implFor: trait ? source.slice(trait.startIndex, trait.endIndex) : '' })
+        } else if (node.type === 'let_declaration') {
+          const pat = node.childForFieldName('pattern')
+          if (pat && pat.type === 'identifier') symbols.push({ name: source.slice(pat.startIndex, pat.endIndex), type: 'variable', startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 })
+        }
+        if (node.type === 'call_expression') {
+          const fn = node.childForFieldName('function')
+          if (fn) refs.push({ type: 'call', name: source.slice(fn.startIndex, fn.endIndex), line: node.startPosition.row + 1 })
+        } else if (node.type === 'use_declaration') {
+          for (const c of node.children) {
+            if (c.type === 'use_as_clause') continue
+            if (c.type === 'scoped_use_list') {
+              const path = c.childForFieldName('path')
+              const pathStr = path ? source.slice(path.startIndex, path.endIndex) : ''
+              for (const item of c.children) {
+                if (item.type === 'use_list') {
+                  for (const u of item.children) {
+                    if (u.type === 'identifier') refs.push({ type: 'import', module: `${pathStr}::${source.slice(u.startIndex, u.endIndex)}`, symbols: [], line: u.startPosition.row + 1 })
+                    else if (u.type === 'scoped_identifier') refs.push({ type: 'import', module: source.slice(u.startIndex, u.endIndex), symbols: [], line: u.startPosition.row + 1 })
+                  }
+                }
+              }
+            } else if (c.type === 'scoped_identifier' || c.type === 'identifier') {
+              refs.push({ type: 'import', module: source.slice(c.startIndex, c.endIndex), symbols: [], line: c.startPosition.row + 1 })
+            }
+          }
+        }
+        for (let i = 0; i < node.childCount; i++) walk(node.child(i), depth + 1)
+      }
+      walk(tree.rootNode)
+      return { symbols, refs }
+    },
+
     simplifyAST(node, source, depth = 0) {
       return simplifyASTJS(node, source, depth)
     },
@@ -587,6 +782,13 @@ export async function init(core) {
       const handler = LANG_HANDLERS[lang]
       if (!handler) return []
       return handler.extractReferences(tree, source)
+    },
+
+    extractAll(tree, source, ext) {
+      const lang = langFor(ext)
+      const handler = LANG_HANDLERS[lang]
+      if (!handler || !handler.extractAll) return { symbols: [], refs: [] }
+      return handler.extractAll(tree, source)
     },
 
     simplifyAST(node, source, ext, depth = 0) {

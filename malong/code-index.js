@@ -6,6 +6,7 @@ import Database from 'better-sqlite3'
 import { join, relative, extname, resolve } from 'node:path'
 import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, watch, chmodSync } from 'node:fs'
 import { createServer } from 'node:http'
+import { Worker } from 'node:worker_threads'
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS files (
@@ -143,40 +144,42 @@ class CodeIndex {
     const ext = extname(filePath)
     const tree = this._langParser.parse(source, ext)
     if (!tree) return null
-    const { symbols, imports } = this._langParser.extractSymbols(tree, source, ext)
-    const refs = this._langParser.extractReferences(tree, source, ext)
+    const { symbols, refs } = this._langParser.extractAll(tree, source, ext)
     const relPath = repo ? relative(repo, filePath) : filePath
     return this._db.transaction(() => {
-      return this._indexFileDb(relPath, source, symbols, imports, refs)
+      return this._indexFileDb(relPath, source.length, symbols, refs)
     })()
   }
 
-  _indexFileDb(relPath, source, symbols, imports, refs) {
+  _indexFileDb(relPath, sourceLength, symbols, refs) {
     let fileId = null
     const existing = this._db.prepare('SELECT id FROM files WHERE path = ?').get(relPath)
     if (existing) {
       fileId = existing.id
       this._db.prepare('DELETE FROM symbols WHERE file_id = ?').run(fileId)
       this._db.prepare('DELETE FROM refs WHERE source_file_id = ?').run(fileId)
-      this._db.prepare("UPDATE files SET size = ?, mtime = ?, indexed_at = datetime('now') WHERE id = ?").run(source.length, Date.now(), fileId)
+      this._db.prepare("UPDATE files SET size = ?, mtime = ?, indexed_at = datetime('now') WHERE id = ?").run(sourceLength, Date.now(), fileId)
     }
     if (!fileId) {
-      const r = this._db.prepare('INSERT OR IGNORE INTO files (path, repo, size, mtime) VALUES (?, ?, ?, ?)').run(relPath, '', source.length, Date.now())
+      const r = this._db.prepare('INSERT OR IGNORE INTO files (path, repo, size, mtime) VALUES (?, ?, ?, ?)').run(relPath, '', sourceLength, Date.now())
       fileId = r.lastInsertRowid
     }
 
-    const insSym = this._db.prepare('INSERT INTO symbols (file_id, name, type, start_line, end_line) VALUES (?, ?, ?, ?, ?)')
-    const symIdMap = new Map()
-    for (const s of symbols) {
-      const r = insSym.run(fileId, s.name, s.type, s.startLine, s.endLine)
-      symIdMap.set(s.name, r.lastInsertRowid)
+    if (symbols.length > 0) {
+      const ph = symbols.map(() => '(?,?,?,?,?)').join(',')
+      this._db.prepare(`INSERT INTO symbols (file_id, name, type, start_line, end_line) VALUES ${ph}`).run(...symbols.flatMap(s => [fileId, s.name, s.type, s.startLine, s.endLine]))
     }
+    const insertedSyms = this._db.prepare('SELECT id, name FROM symbols WHERE file_id = ?').all(fileId)
+    const symIdMap = new Map(insertedSyms.map(s => [s.name, s.id]))
 
-    const insRef = this._db.prepare('INSERT INTO refs (source_file_id, target_name, kind) VALUES (?, ?, ?)')
-    for (const i of imports) insRef.run(fileId, i.target, i.kind)
+    const refRows = []
     for (const r of refs) {
-      if (r.type === 'call') insRef.run(fileId, r.name, 'call')
-      if (r.type === 'import') insRef.run(fileId, r.module || '', 'import')
+      if (r.type === 'call') refRows.push([fileId, r.name, 'call'])
+      else if (r.type === 'import') refRows.push([fileId, r.module || '', 'import'])
+    }
+    if (refRows.length > 0) {
+      const ph = refRows.map(() => '(?,?,?)').join(',')
+      this._db.prepare(`INSERT INTO refs (source_file_id, target_name, kind) VALUES ${ph}`).run(...refRows.flat())
     }
 
     const updateRef = this._db.prepare('UPDATE refs SET target_symbol_id = ? WHERE id = ?')
@@ -186,7 +189,7 @@ class CodeIndex {
       if (symId) updateRef.run(symId, nr.id)
     }
 
-    return { path: relPath, symbols: symbols.length, refs: refs.length, imports: imports.length }
+    return { path: relPath, symbols: symbols.length, refs: refs.length }
   }
 
   _resolveCrossFileRefs() {
@@ -229,37 +232,43 @@ class CodeIndex {
   }
 
   async indexBatch(filePaths, repo, onProgress) {
+    const validFiles = filePaths.filter(fp => CACHED_EXT.has(extname(fp)))
+    if (!validFiles.length) return []
+
     this._db.pragma('synchronous=OFF')
+    this._db.exec('DROP INDEX IF EXISTS idx_sym_name; DROP INDEX IF EXISTS idx_sym_file; DROP INDEX IF EXISTS idx_sym_type; DROP INDEX IF EXISTS idx_sym_parent; DROP INDEX IF EXISTS idx_ref_source; DROP INDEX IF EXISTS idx_ref_target; DROP INDEX IF EXISTS idx_ref_file; DROP INDEX IF EXISTS idx_ref_name')
     try {
+      const workerUrl = new URL('./parse-worker.js', import.meta.url)
+      const mid = Math.ceil(validFiles.length / 2)
+      const batches = [validFiles.slice(0, mid), validFiles.slice(mid)].filter(b => b.length > 0)
+
+      const runWorker = (files) => new Promise((res, rej) => {
+        const w = new Worker(workerUrl)
+        w.on('message', (msg) => { res(msg.results); w.terminate() })
+        w.on('error', rej)
+        w.postMessage({ files, repo })
+      })
+
+      const workerResults = await Promise.all(batches.map(b => runWorker(b)))
+      const parsed = workerResults.flat()
+
       const CHUNK = 200
       const results = []
-      for (let i = 0; i < filePaths.length; i += CHUNK) {
-        const chunk = filePaths.slice(i, i + CHUNK)
-        const parsed = []
-        for (const fp of chunk) {
-          if (!CACHED_EXT.has(extname(fp))) continue
-          let source
-          try { source = readFileSync(fp, 'utf-8') } catch { continue }
-          const ext = extname(fp)
-          const tree = this._langParser.parse(source, ext)
-          if (!tree) continue
-          const { symbols, imports } = this._langParser.extractSymbols(tree, source, ext)
-          const refs = this._langParser.extractReferences(tree, source, ext)
-          const relPath = repo ? relative(repo, fp) : fp
-          parsed.push({ relPath, source, symbols, imports, refs })
-        }
+      for (let i = 0; i < parsed.length; i += CHUNK) {
+        const chunk = parsed.slice(i, i + CHUNK)
         const txResults = this._db.transaction(() => {
           const r = []
-          for (const p of parsed) r.push(this._indexFileDb(p.relPath, p.source, p.symbols, p.imports, p.refs))
+          for (const p of chunk) r.push(this._indexFileDb(p.relPath, p.sourceLength, p.symbols, p.refs))
           return r
         })()
         results.push(...txResults)
-        if (onProgress) onProgress(Math.min(i + CHUNK, filePaths.length), filePaths.length)
-        if (i + CHUNK < filePaths.length) await new Promise(r => setImmediate(r))
+        if (onProgress) onProgress(Math.min(i + CHUNK, parsed.length), parsed.length)
+        if (i + CHUNK < parsed.length) await new Promise(r => setImmediate(r))
       }
       this._resolveCrossFileRefs()
       return results
     } finally {
+      this._db.exec('CREATE INDEX IF NOT EXISTS idx_sym_name ON symbols(name); CREATE INDEX IF NOT EXISTS idx_sym_file ON symbols(file_id); CREATE INDEX IF NOT EXISTS idx_sym_type ON symbols(type); CREATE INDEX IF NOT EXISTS idx_sym_parent ON symbols(parent_id); CREATE INDEX IF NOT EXISTS idx_ref_source ON refs(source_symbol_id); CREATE INDEX IF NOT EXISTS idx_ref_target ON refs(target_symbol_id); CREATE INDEX IF NOT EXISTS idx_ref_file ON refs(source_file_id); CREATE INDEX IF NOT EXISTS idx_ref_name ON refs(target_name)')
       this._db.pragma('synchronous=NORMAL')
     }
   }
