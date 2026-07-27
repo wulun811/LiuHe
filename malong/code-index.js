@@ -502,8 +502,8 @@ class CodeIndex {
         const files = self._db.prepare('SELECT COUNT(*) as cnt FROM files').get().cnt
         const symbols = self._db.prepare('SELECT COUNT(*) as cnt FROM symbols').get().cnt
         const refs = self._db.prepare('SELECT COUNT(*) as cnt FROM refs').get().cnt
-        const fileSize = existsSync(join(self._core.stateDir || join(process.cwd(), 'data'), 'code-index.db'))
-          ? readFileSync(join(self._core.stateDir || join(process.cwd(), 'data'), 'code-index.db')).length : 0
+        const dbPath = self._currentWorkspace ? join(self._core.getWorkspaceDir(self._currentWorkspace), 'code-index.db') : null
+        const fileSize = dbPath && existsSync(dbPath) ? readFileSync(dbPath).length : 0
         return { files, symbols, refs, dbSize: fileSize, indexing: self._indexing }
       },
 

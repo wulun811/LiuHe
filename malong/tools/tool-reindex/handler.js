@@ -1,5 +1,5 @@
 import { setImmediate } from 'node:timers'
-import { collectFiles, collectFilesWithDirStats, parseMalongignore } from '../../file-collector.js'
+import { DEFAULT_IGNORE_DIRS, collectFilesWithDirStats, parseMalongignore } from '../../file-collector.js'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 
@@ -74,11 +74,16 @@ export async function handle(args, context) {
   const userIgnoreDirs = args?.ignoreDirs ?? []
   const threshold = args?.threshold ?? DEFAULT_THRESHOLD
 
+  // 合并默认忽略目录与用户自定义
+  const mergedIgnoreDirs = new Set(DEFAULT_IGNORE_DIRS)
+  for (const d of userIgnoreDirs) mergedIgnoreDirs.add(d)
+
   // 预检：收集文件并统计目录分布
   const { files, dirStats } = collectFilesWithDirStats(workspaceDir, {
     ignoreRules,
     skipDirs: userSkipDirs,
     maxFiles: userMaxFiles,
+    ignoreDirs: mergedIgnoreDirs,
   })
 
   const totalFiles = files.length
