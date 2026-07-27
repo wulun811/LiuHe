@@ -218,6 +218,78 @@ class CodeIndex {
     return resolved
   }
 
+  _isTestFile(filePath) {
+    const base = filePath.split('/').pop().toLowerCase()
+    return base.includes('test') || base.includes('spec')
+  }
+
+  _extractContext(filePath, line, window = 1) {
+    if (line <= 0) return ''
+    let absPath = filePath
+    if (!absPath.startsWith('/')) absPath = join(this._currentWorkspace || '', filePath)
+    try {
+      const lines = readFileSync(absPath, 'utf-8').split('\n')
+      const start = Math.max(0, line - 1 - window)
+      const end = Math.min(lines.length, line + window)
+      return lines.slice(start, end).join('\n')
+    } catch {
+      return ''
+    }
+  }
+
+  _calculateRisk(direct, tests, changeType) {
+    const total = direct + tests
+    if (changeType === 'delete') {
+      if (total >= 3) return 'high'
+      if (total >= 1) return 'medium'
+    } else if (changeType === 'rename') {
+      if (total >= 4) return 'high'
+      if (total >= 1) return 'medium'
+    } else {
+      if (total >= 6) return 'high'
+      if (total >= 2) return 'medium'
+    }
+    return 'low'
+  }
+
+  _resolveRefDetail(sourceSymbolId) {
+    if (!sourceSymbolId) return { line: 0, func: null }
+    const row = this._db.prepare('SELECT name, type, start_line FROM symbols WHERE id = ?').get(sourceSymbolId)
+    if (!row) return { line: 0, func: null }
+    return {
+      line: row.start_line,
+      func: (row.type === 'function' || row.type === 'method') ? row.name : null,
+    }
+  }
+
+  _findIndirectCallers(symbolName, maxDepth, excludeFile) {
+    const direct = excludeFile
+      ? this._db.prepare("SELECT DISTINCT s.name AS caller_func FROM refs r JOIN files f ON r.source_file_id = f.id LEFT JOIN symbols s ON r.source_symbol_id = s.id WHERE r.target_name = ? AND r.kind = 'call' AND f.path != ?").all(symbolName, excludeFile)
+      : this._db.prepare("SELECT DISTINCT s.name AS caller_func FROM refs r JOIN files f ON r.source_file_id = f.id LEFT JOIN symbols s ON r.source_symbol_id = s.id WHERE r.target_name = ? AND r.kind = 'call'").all(symbolName)
+
+    const visited = new Set([symbolName])
+    let queue = direct.filter(d => d.caller_func).map(d => d.caller_func)
+    for (const q of queue) visited.add(q)
+
+    const results = []
+    for (let d = 2; d <= maxDepth; d++) {
+      const nextQueue = []
+      for (const funcName of queue) {
+        const higher = this._db.prepare("SELECT DISTINCT f.path AS caller_file, s.name AS caller_func FROM refs r JOIN files f ON r.source_file_id = f.id LEFT JOIN symbols s ON r.source_symbol_id = s.id WHERE r.target_name = ? AND r.kind = 'call'").all(funcName)
+        for (const h of higher) {
+          results.push({ file: h.caller_file, function: h.caller_func, depth: d, via: funcName })
+          if (h.caller_func && !visited.has(h.caller_func)) {
+            visited.add(h.caller_func)
+            nextQueue.push(h.caller_func)
+          }
+        }
+      }
+      queue = nextQueue
+      if (!queue.length) break
+    }
+    return results
+  }
+
   async walkAndIndex(dir, rootDir) {
     const { readdirSync } = await import('node:fs')
     const { join: joinPath } = await import('node:path')
@@ -477,33 +549,93 @@ class CodeIndex {
         return self._db.prepare("SELECT r.target_name, r.kind, f.path AS source_file, f2.path AS target_file FROM symbols s JOIN refs r ON r.source_file_id = s.file_id JOIN files f ON s.file_id = f.id LEFT JOIN files f2 ON r.target_file_id = f2.id WHERE s.name = ? AND r.kind IN ('call','import')").all(symbolName)
       },
 
-      async getImpactAnalysis(filePath, { depth = 3 } = {}) {
+      async getImpactAnalysis(filePath, { symbol, changeType = 'modify', maxCallers = 20, depth = 2 } = {}) {
         const f = self._db.prepare('SELECT id FROM files WHERE path = ?').get(filePath)
-        if (!f) return { file: filePath, callers: [], transitive: [] }
-        const callers = self._db.prepare("SELECT DISTINCT f.path AS caller_file, r.target_name FROM refs r JOIN files f ON r.source_file_id = f.id WHERE r.kind = 'call' AND r.target_name IN (SELECT name FROM symbols WHERE file_id = ?)").all(f.id)
-        const transitive = []
-        if (depth > 1) {
-          const visited = new Set([filePath])
-          let queue = callers.map(c => c.caller_file).filter(Boolean)
-          for (let d = 1; d < depth && queue.length; d++) {
-            const next = []
-            for (const qf of queue) {
-              if (visited.has(qf)) continue
-              visited.add(qf)
-              const q = self._db.prepare("SELECT id FROM files WHERE path = ?").get(qf)
-              if (!q) continue
-              const higher = self._db.prepare("SELECT DISTINCT f.path FROM refs r JOIN files f ON r.source_file_id = f.id WHERE r.kind = 'call' AND r.target_name IN (SELECT name FROM symbols WHERE file_id = ?)").all(q.id)
-              for (const h of higher) {
-                if (!visited.has(h.path)) {
-                  transitive.push({ depth: d, caller: h.path, target: qf })
-                  next.push(h.path)
-                }
-              }
+        if (!f) return { file: filePath, symbol: symbol || null, callers: [], truncated: false, caller_count: { direct: 0, indirect: 0, test: 0 }, risk_level: 'low' }
+
+        let symLine = 0
+        if (symbol) {
+          const sym = self._db.prepare('SELECT start_line FROM symbols WHERE name = ? AND file_id = ?').get(symbol, f.id)
+                     || self._db.prepare('SELECT start_line FROM symbols WHERE name = ?').get(symbol)
+          if (sym) symLine = sym.start_line
+        }
+
+        let refs
+        if (symbol) {
+          refs = self._db.prepare(
+            "SELECT r.id, r.source_file_id, f.path AS source_file_path, r.target_name, r.kind, r.source_symbol_id, r.target_symbol_id " +
+            "FROM refs r JOIN files f ON r.source_file_id = f.id " +
+            "WHERE r.target_name = ? AND r.source_file_id != ?"
+          ).all(symbol, f.id)
+        } else {
+          refs = self._db.prepare(
+            "SELECT r.id, r.source_file_id, f.path AS source_file_path, r.target_name, r.kind, r.source_symbol_id, r.target_symbol_id " +
+            "FROM refs r JOIN files f ON r.source_file_id = f.id " +
+            "WHERE r.target_name IN (SELECT name FROM symbols WHERE file_id = ?) AND r.source_file_id != ?"
+          ).all(f.id, f.id)
+        }
+
+        const directCallers = []
+        const testCallers = []
+        const seenKeys = new Set()
+
+        for (const r of refs) {
+          const { line: refLine, func: callerFunc } = self._resolveRefDetail(r.source_symbol_id)
+          const isTest = self._isTestFile(r.source_file_path)
+          const key = `${r.source_file_path}\0${callerFunc || ''}`
+          seenKeys.add(key)
+          const info = {
+            type: isTest ? 'test' : 'direct',
+            ref_type: r.kind,
+            file: r.source_file_path,
+            line: refLine,
+            function: callerFunc,
+            context: self._extractContext(r.source_file_path, refLine),
+          }
+          if (isTest) testCallers.push(info)
+          else directCallers.push(info)
+        }
+
+        const indirectCallers = []
+        if (symbol && depth >= 2) {
+          const indirect = self._findIndirectCallers(symbol, depth, filePath)
+          for (const entry of indirect) {
+            const key = `${entry.file}\0${entry.function || ''}`
+            if (seenKeys.has(key)) continue
+            seenKeys.add(key)
+            const isTest = self._isTestFile(entry.file)
+            const info = {
+              type: isTest ? 'test' : 'indirect',
+              ref_type: 'indirect',
+              file: entry.file,
+              line: 0,
+              function: entry.function,
+              context: '',
+              depth: entry.depth,
+              via: entry.via,
             }
-            queue = next
+            if (isTest) testCallers.push(info)
+            else indirectCallers.push(info)
           }
         }
-        return { file: filePath, directCallers: callers.length, callers, transitiveCallers: transitive }
+
+        const allCallers = [...directCallers, ...indirectCallers, ...testCallers]
+        const truncated = allCallers.length > maxCallers
+
+        return {
+          symbol: symbol || null,
+          file: filePath,
+          line: symLine,
+          change_type: changeType,
+          callers: allCallers.slice(0, maxCallers),
+          truncated,
+          caller_count: {
+            direct: directCallers.length,
+            indirect: indirectCallers.length,
+            test: testCallers.length,
+          },
+          risk_level: self._calculateRisk(directCallers.length, testCallers.length, changeType),
+        }
       },
 
       async getModuleDependencies(filePath, { depth = 3 } = {}) {

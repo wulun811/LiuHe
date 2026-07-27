@@ -1,13 +1,16 @@
 {
   "name": "impact_analysis",
-  "version": "1.0.0",
-  "description": "Analyze the impact scope of changing a file. Returns direct callers (which functions call symbols defined in this file) plus transitive callers up to N levels deep. Use this before modifying shared utilities to understand the blast radius. REQUIRED: Call reindex first if this is a new workspace.",
+  "version": "2.0.0",
+  "description": "Analyze the impact scope of changing a symbol or file. Returns direct callers, indirect callers (BFS), and test references with code context snippets, risk level, and caller counts. Use this before modifying shared utilities to understand the blast radius. REQUIRED: Call reindex first if this is a new workspace.",
   "inputSchema": {
     "type": "object",
     "properties": {
       "workspace_dir": { "type": "string", "description": "REQUIRED: Absolute path to the project root directory. Call reindex first if this is a new workspace." },
       "file": { "type": "string", "description": "File path relative to workspace_dir (e.g. \"scripts/lib/tools/spawn.mjs\", not the full absolute path)" },
-      "depth": { "type": "number", "description": "Transitive caller depth (default 3, max 10)" }
+      "symbol": { "type": "string", "description": "Symbol name (function, class, method, variable) to analyze. When provided, does symbol-level analysis. When omitted, does file-level analysis (all symbols in the file)." },
+      "change_type": { "type": "string", "enum": ["modify", "delete", "rename"], "description": "Change type. Affects risk threshold (default: modify)" },
+      "max_callers": { "type": "number", "description": "Max callers to return (default: 20). caller_count always includes full counts." },
+      "depth": { "type": "number", "description": "Indirect caller BFS depth (default: 2, max: 10). Only used when symbol is provided." }
     },
     "required": ["workspace_dir", "file"]
   },
