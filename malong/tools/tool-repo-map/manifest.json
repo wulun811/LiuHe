@@ -1,0 +1,18 @@
+{
+  "name": "malong_repo_map",
+  "version": "1.0.0",
+  "description": "Generate a structured code map of the project. Full output is ~36K tokens (~456 files with top-level symbols). For token-efficient queries, use focused=true + relevantEntities to get a targeted ~50 token map of only the files containing specific symbols.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "dir": { "type": "string", "description": "Root directory to map (default: workspace root, a subdir of 0通天/)" },
+      "focused": { "type": "boolean", "description": "If true, limit output to ~2000 tokens by pruning symbols. Combine with relevantEntities for best results." },
+      "relevantFiles": { "type": "array", "items": { "type": "string" }, "description": "Only include these specific files (paths relative to workspace root, e.g. [\"scripts/lib/tools/spawn.mjs\"])" },
+      "relevantEntities": { "type": "array", "items": { "type": "string" }, "description": "Only include files that contain these top-level symbols (e.g. [\"spawnFixer\", \"agentLoop\"])" }
+    }
+  },
+  "handler": "./handler.js",
+  "protocol_version": "1.0",
+  "tags": ["map", "overview"],
+  "dependencies": []
+}

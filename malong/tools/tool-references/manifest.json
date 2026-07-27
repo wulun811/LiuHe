@@ -1,0 +1,17 @@
+{
+  "name": "malong_references",
+  "version": "1.0.0",
+  "description": "Find all cross-file references to a symbol (call targets, imports, extends). NOTE: searches by target_name stored in refs table — for member expressions like spawn.spawnFixer, search \"spawn.spawnFixer\" not just \"spawnFixer\". For best results, first use malong_symbol_search to confirm the exact symbol name, then search references.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "symbol": { "type": "string", "description": "Symbol name / call target to find references for" },
+      "file": { "type": "string", "description": "Restrict search to a specific file (path relative to workspace root, e.g. \"scripts/lib/tools/spawn.mjs\")" }
+    },
+    "required": ["symbol"]
+  },
+  "handler": "./handler.js",
+  "protocol_version": "1.0",
+  "tags": ["references", "symbol"],
+  "dependencies": []
+}

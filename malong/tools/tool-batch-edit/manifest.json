@@ -1,0 +1,27 @@
+{
+  "name": "malong_edit_batch",
+  "version": "1.0.0",
+  "description": "Batch edit: apply multiple text replacements to a single file atomically. Saves tokens vs multiple edit calls. Whitespace-tolerant: trailing spaces normalized during matching. Each old_string must uniquely match in original file (unless replace_all=true). Does NOT support chained replacement (A→B→C); merge as single edit (A→C). Returns error_summary with all errors aggregated. Includes usage stats (cumulative_stats).",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "file_path": {
+        "type": "string",
+        "description": "Absolute path to the file to edit"
+      },
+      "edits": {
+        "type": "string",
+        "description": "JSON array of edits. Example: [{\"old_string\":\"foo\",\"new_string\":\"bar\",\"replace_all\":false}]"
+      },
+      "dry_run": {
+        "type": "boolean",
+        "description": "Preview changes as unified diff, do not apply"
+      }
+    },
+    "required": ["file_path", "edits"]
+  },
+  "handler": "./handler.js",
+  "protocol_version": "1.0",
+  "tags": ["edit", "batch", "atomic", "whitespace-tolerant"],
+  "dependencies": []
+}

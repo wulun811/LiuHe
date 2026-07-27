@@ -1,0 +1,17 @@
+{
+  "name": "malong_dep_graph",
+  "version": "1.0.0",
+  "description": "Show the import dependency graph for a file — what modules it imports (directImports) and transitive dependencies up to N levels deep. Use this to understand module coupling before refactoring.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "file": { "type": "string", "description": "File path relative to 0通天/ (e.g. \"scripts/lib/tools/spawn.mjs\")" },
+      "depth": { "type": "number", "description": "Transitive depth (default 3, max 10)" }
+    },
+    "required": ["file"]
+  },
+  "handler": "./handler.js",
+  "protocol_version": "1.0",
+  "tags": ["dependency", "graph"],
+  "dependencies": []
+}

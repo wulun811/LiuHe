@@ -1,0 +1,17 @@
+{
+  "name": "malong_impact_analysis",
+  "version": "1.0.0",
+  "description": "Analyze the impact scope of changing a file. Returns direct callers (which functions call symbols defined in this file) plus transitive callers up to N levels deep. Use this before modifying shared utilities to understand the blast radius.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "file": { "type": "string", "description": "File path relative to 0通天/ (e.g. \"scripts/lib/tools/spawn.mjs\", not the full absolute path)" },
+      "depth": { "type": "number", "description": "Transitive caller depth (default 3, max 10)" }
+    },
+    "required": ["file"]
+  },
+  "handler": "./handler.js",
+  "protocol_version": "1.0",
+  "tags": ["impact", "analysis"],
+  "dependencies": []
+}

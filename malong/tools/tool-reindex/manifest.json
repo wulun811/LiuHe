@@ -1,0 +1,13 @@
+{
+  "name": "malong_reindex",
+  "version": "1.0.0",
+  "description": "Trigger full re-index of the 0通天/ project. Call this once before using other tools — first-time index takes ~3 minutes (456 files, tree-sitter parsing). Subsequent calls are fast if nothing changed.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  },
+  "handler": "./handler.js",
+  "protocol_version": "1.0",
+  "tags": ["index", "init"],
+  "dependencies": []
+}
