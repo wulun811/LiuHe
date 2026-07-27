@@ -33,7 +33,10 @@ export async function handle(args, context) {
 
   const opts = {}
   if (args?.symbol) opts.symbol = args.symbol
-  if (args?.change_type) opts.changeType = args.change_type
+  if (args?.change_type) {
+    const VALID_CHANGE_TYPES = ['modify', 'delete', 'rename']
+    opts.changeType = VALID_CHANGE_TYPES.includes(args.change_type) ? args.change_type : 'modify'
+  }
   if (args?.max_callers) opts.maxCallers = args.max_callers
   if (args?.depth) {
     const d = parseInt(args.depth)

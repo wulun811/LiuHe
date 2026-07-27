@@ -296,6 +296,10 @@ export const LANG_HANDLERS = {
           const imported = []
           for (const c of node.children) {
             if (c !== module && (c.type === 'dotted_name' || c.type === 'identifier')) imported.push(source.slice(c.startIndex, c.endIndex))
+            else if (c.type === 'aliased_import') {
+              const alias = c.childForFieldName('alias')
+              if (alias) imported.push(source.slice(alias.startIndex, alias.endIndex))
+            }
           }
           refs.push({ type: 'import', module: modName, symbols: imported, line: node.startPosition.row + 1 })
         }
@@ -341,6 +345,10 @@ export const LANG_HANDLERS = {
           const imported = []
           for (const c of node.children) {
             if (c !== module && (c.type === 'dotted_name' || c.type === 'identifier')) imported.push(source.slice(c.startIndex, c.endIndex))
+            else if (c.type === 'aliased_import') {
+              const alias = c.childForFieldName('alias')
+              if (alias) imported.push(source.slice(alias.startIndex, alias.endIndex))
+            }
           }
           refs.push({ type: 'import', module: modName, symbols: imported, line: node.startPosition.row + 1 })
         }

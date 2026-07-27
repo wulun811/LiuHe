@@ -10,7 +10,7 @@
       "symbol": { "type": "string", "description": "Symbol name (function, class, method, variable) to analyze. When provided, does symbol-level analysis. When omitted, does file-level analysis (all symbols in the file)." },
       "change_type": { "type": "string", "enum": ["modify", "delete", "rename"], "description": "Change type. Affects risk threshold (default: modify)" },
       "max_callers": { "type": "number", "description": "Max callers to return (default: 20). caller_count always includes full counts." },
-      "depth": { "type": "number", "description": "Indirect caller BFS depth (default: 2, max: 10). Only used when symbol is provided." }
+      "depth": { "type": "number", "minimum": 1, "maximum": 10, "description": "Indirect caller BFS depth (default: 2, max: 10). Only used when symbol is provided." }
     },
     "required": ["workspace_dir", "file"]
   },

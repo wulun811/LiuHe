@@ -111,8 +111,8 @@ function initDb(dir) {
   db.pragma('mmap_size=268435456')
   db.pragma('temp_store=MEMORY')
   db.exec(SCHEMA)
-  try { db.exec('ALTER TABLE refs ADD COLUMN line INTEGER DEFAULT 0') } catch {}
-  try { db.exec("ALTER TABLE refs ADD COLUMN call_expr TEXT DEFAULT ''") } catch {}
+  try { db.exec('ALTER TABLE refs ADD COLUMN line INTEGER DEFAULT 0') } catch (e) { if (!e.message?.includes('duplicate column')) console.error('[code-index] migration error:', e.message) }
+  try { db.exec("ALTER TABLE refs ADD COLUMN call_expr TEXT DEFAULT ''") } catch (e) { if (!e.message?.includes('duplicate column')) console.error('[code-index] migration error:', e.message) }
   return db
 }
 
@@ -127,6 +127,8 @@ class CodeIndex {
     this._watchedDir = null
     this._watcherTimer = null
     this._impactCache = new Map()
+    this._contextCache = new Map()
+    this._impactCacheMax = 500
   }
 
   _resolveRepoDir(filePath) {
@@ -172,6 +174,7 @@ class CodeIndex {
       fileId = r.lastInsertRowid
     }
     this._impactCache?.clear()
+    this._contextCache?.clear()
 
     if (symbols.length > 0) {
       const ph = symbols.map(() => '(?,?,?,?,?)').join(',')
@@ -251,11 +254,14 @@ class CodeIndex {
   }
 
   _extractContext(filePath, line, window = 1) {
-    if (line <= 0) return ''
+    if (!line || line <= 0) return ''
     let absPath = filePath
     if (!absPath.startsWith('/')) absPath = join(this._currentWorkspace || '', filePath)
     try {
-      const lines = readFileSync(absPath, 'utf-8').split('\n')
+      if (!this._contextCache.has(absPath)) {
+        this._contextCache.set(absPath, readFileSync(absPath, 'utf-8').split('\n'))
+      }
+      const lines = this._contextCache.get(absPath)
       const start = Math.max(0, line - 1 - window)
       const end = Math.min(lines.length, line + window)
       return lines.slice(start, end).join('\n')
@@ -576,7 +582,7 @@ class CodeIndex {
       },
 
       async getImpactAnalysis(filePath, { symbol, changeType = 'modify', maxCallers = 20, depth = 2 } = {}) {
-        const cacheKey = `${filePath}\0${symbol || ''}\0${changeType}\0${maxCallers}\0${depth}`
+        const cacheKey = `${self._currentWorkspace || ''}\0${filePath}\0${symbol || ''}\0${changeType}\0${maxCallers}\0${depth}`
         if (self._impactCache.has(cacheKey)) {
           return self._impactCache.get(cacheKey)
         }
@@ -680,6 +686,10 @@ class CodeIndex {
         }
 
         self._impactCache.set(cacheKey, result)
+        if (self._impactCache.size > self._impactCacheMax) {
+          const oldest = self._impactCache.keys().next().value
+          self._impactCache.delete(oldest)
+        }
         return result
       },
 
