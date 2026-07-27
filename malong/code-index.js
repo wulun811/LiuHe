@@ -277,6 +277,16 @@ class CodeIndex {
 
       set indexing(value) {
         self._indexing = value
+        if (!value) self._indexProgress = null
+      },
+
+      // 索引进度（供 reindex handler 查询）
+      _indexProgress: null,
+      get indexProgress() {
+        return self._indexProgress
+      },
+      set indexProgress(value) {
+        self._indexProgress = value
       },
 
       async getSymbols(filePath, { timeout = 5000 } = {}) {

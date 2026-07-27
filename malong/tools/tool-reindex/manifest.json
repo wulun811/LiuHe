@@ -1,13 +1,16 @@
 {
   "name": "reindex",
-  "version": "1.0.0",
-  "description": "Trigger full re-index of a project. REQUIRED: workspace_dir must be specified. First-time index takes ~3 minutes per 1000 files (tree-sitter parsing). Subsequent calls are fast if nothing changed. This is required before using other malong tools (symbol_search, references, impact_analysis, dep_graph).",
+  "version": "1.1.0",
+  "description": "Index a project for symbol search, references, and impact analysis. If called without workspace_dir, returns current indexing status. If project has >2000 files, returns needs_review with top directories so you can exclude non-essential dirs via skipDirs. FIRST-TIME USAGE: call reindex(workspace_dir=\"...\") to start. Indexing runs in background — you can continue other tasks while it runs.",
   "inputSchema": {
     "type": "object",
     "properties": {
-      "workspace_dir": { "type": "string", "description": "REQUIRED: Absolute path to the project root directory to index. This is the directory that will be scanned and indexed for symbol search, references, etc." }
-    },
-    "required": ["workspace_dir"]
+      "workspace_dir": { "type": "string", "description": "Absolute path to the project root directory. Omit this to check current indexing status / progress." },
+      "maxFiles": { "type": "number", "description": "Max files to index (default 5000, 0=unlimited). Increase if project has many files." },
+      "skipDirs": { "type": "array", "items": { "type": "string" }, "description": "Skip specific directories by relative path, e.g. [\"runtime1\", \"0通天/eval-cases\"]. Useful when pre-check says too many files." },
+      "ignoreDirs": { "type": "array", "items": { "type": "string" }, "description": "Additional directory names to skip globally (e.g. [\"deps\", \"archive\"]). Combined with built-in defaults." },
+      "threshold": { "type": "number", "description": "File count threshold for pre-check review (default 2000). Set higher to skip pre-check." }
+    }
   },
   "handler": "./handler.js",
   "protocol_version": "1.0",
