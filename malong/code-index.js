@@ -104,7 +104,9 @@ function initDb(dir) {
   const db = new Database(dbPath)
   db.pragma('journal_mode=WAL')
   db.pragma('synchronous=NORMAL')
-  db.pragma('cache_size=-8000')
+  db.pragma('cache_size=-65536')
+  db.pragma('mmap_size=268435456')
+  db.pragma('temp_store=MEMORY')
   db.exec(SCHEMA)
   return db
 }
@@ -143,28 +145,32 @@ class CodeIndex {
     if (!tree) return null
     const { symbols, imports } = this._langParser.extractSymbols(tree, source, ext)
     const refs = this._langParser.extractReferences(tree, source, ext)
-
     const relPath = repo ? relative(repo, filePath) : filePath
+    return this._db.transaction(() => {
+      return this._indexFileDb(relPath, source, symbols, imports, refs)
+    })()
+  }
+
+  _indexFileDb(relPath, source, symbols, imports, refs) {
     let fileId = null
     const existing = this._db.prepare('SELECT id FROM files WHERE path = ?').get(relPath)
-    const altExisting = !existing ? this._db.prepare('SELECT id, path FROM files WHERE path LIKE ?').get(`%${filePath.slice(filePath.lastIndexOf('/') + 1)}`) : null
-    const matched = existing || altExisting
-    if (matched) {
-      fileId = matched.id
+    if (existing) {
+      fileId = existing.id
       this._db.prepare('DELETE FROM symbols WHERE file_id = ?').run(fileId)
       this._db.prepare('DELETE FROM refs WHERE source_file_id = ?').run(fileId)
       this._db.prepare("UPDATE files SET size = ?, mtime = ?, indexed_at = datetime('now') WHERE id = ?").run(source.length, Date.now(), fileId)
-      if (repo && altExisting) {
-        this._db.prepare('UPDATE files SET path = ? WHERE id = ?').run(relPath, fileId)
-      }
     }
     if (!fileId) {
-      const r = this._db.prepare('INSERT OR IGNORE INTO files (path, repo, size, mtime) VALUES (?, ?, ?, ?)').run(relPath, repo || '', source.length, Date.now())
-      fileId = matched?.id || r.lastInsertRowid
+      const r = this._db.prepare('INSERT OR IGNORE INTO files (path, repo, size, mtime) VALUES (?, ?, ?, ?)').run(relPath, '', source.length, Date.now())
+      fileId = r.lastInsertRowid
     }
 
     const insSym = this._db.prepare('INSERT INTO symbols (file_id, name, type, start_line, end_line) VALUES (?, ?, ?, ?, ?)')
-    for (const s of symbols) insSym.run(fileId, s.name, s.type, s.startLine, s.endLine)
+    const symIdMap = new Map()
+    for (const s of symbols) {
+      const r = insSym.run(fileId, s.name, s.type, s.startLine, s.endLine)
+      symIdMap.set(s.name, r.lastInsertRowid)
+    }
 
     const insRef = this._db.prepare('INSERT INTO refs (source_file_id, target_name, kind) VALUES (?, ?, ?)')
     for (const i of imports) insRef.run(fileId, i.target, i.kind)
@@ -173,37 +179,42 @@ class CodeIndex {
       if (r.type === 'import') insRef.run(fileId, r.module || '', 'import')
     }
 
-    const symNameMap = {}
-    for (const s of symbols) symNameMap[s.name] = true
-    const localResolve = this._db.prepare("UPDATE refs SET target_symbol_id = (SELECT id FROM symbols WHERE file_id = ? AND name = ? LIMIT 1) WHERE id = ?")
+    const updateRef = this._db.prepare('UPDATE refs SET target_symbol_id = ? WHERE id = ?')
     const namedRefs = this._db.prepare("SELECT id, target_name FROM refs WHERE source_file_id = ? AND target_symbol_id IS NULL AND target_name != ''").all(fileId)
     for (const nr of namedRefs) {
-      if (symNameMap[nr.target_name]) {
-        localResolve.run(fileId, nr.target_name, nr.id)
-      }
+      const symId = symIdMap.get(nr.target_name)
+      if (symId) updateRef.run(symId, nr.id)
     }
 
-    return { path: relPath, symbols: symbols.length, refs: refs.length, imports: imports.length, errors: tree.rootNode.type === 'ERROR' ? 1 : 0 }
+    return { path: relPath, symbols: symbols.length, refs: refs.length, imports: imports.length }
   }
 
   _resolveCrossFileRefs() {
     const unbound = this._db.prepare("SELECT r.id, r.source_file_id, r.target_name FROM refs r WHERE r.target_symbol_id IS NULL AND r.kind IN ('call','extends','implements') AND r.target_name != ''").all()
     if (!unbound.length) return 0
-    let resolved = 0
-    const findSym = this._db.prepare('SELECT s.id, s.file_id FROM symbols s JOIN files f ON s.file_id = f.id WHERE s.name = ? AND s.file_id != ? LIMIT 1')
+    const allSyms = this._db.prepare('SELECT s.id, s.name, s.file_id FROM symbols s').all()
+    const symMap = new Map()
+    for (const s of allSyms) {
+      if (!symMap.has(s.name)) symMap.set(s.name, [])
+      symMap.get(s.name).push(s)
+    }
     const updateRef = this._db.prepare('UPDATE refs SET target_symbol_id = ?, target_file_id = ? WHERE id = ?')
-    for (const r of unbound) {
-      const sym = findSym.get(r.target_name, r.source_file_id)
-      if (sym) {
+    let resolved = 0
+    this._db.transaction(() => {
+      for (const r of unbound) {
+        const candidates = symMap.get(r.target_name)
+        if (!candidates) continue
+        const sym = candidates.find(s => s.file_id !== r.source_file_id)
+        if (!sym) continue
         updateRef.run(sym.id, sym.file_id, r.id)
         resolved++
       }
-    }
+    })()
     return resolved
   }
 
   async walkAndIndex(dir, rootDir) {
-    const { readdirSync, statSync } = await import('node:fs')
+    const { readdirSync } = await import('node:fs')
     const { join: joinPath } = await import('node:path')
     const files = []
     const walk = (d) => {
@@ -214,12 +225,43 @@ class CodeIndex {
       }
     }
     walk(rootDir || dir)
-    const results = []
-    for (const f of files) {
-      const r = this.indexFile(f, rootDir || dir)
-      if (r) results.push(r)
+    return this.indexBatch(files, rootDir || dir)
+  }
+
+  async indexBatch(filePaths, repo, onProgress) {
+    this._db.pragma('synchronous=OFF')
+    try {
+      const CHUNK = 200
+      const results = []
+      for (let i = 0; i < filePaths.length; i += CHUNK) {
+        const chunk = filePaths.slice(i, i + CHUNK)
+        const parsed = []
+        for (const fp of chunk) {
+          if (!CACHED_EXT.has(extname(fp))) continue
+          let source
+          try { source = readFileSync(fp, 'utf-8') } catch { continue }
+          const ext = extname(fp)
+          const tree = this._langParser.parse(source, ext)
+          if (!tree) continue
+          const { symbols, imports } = this._langParser.extractSymbols(tree, source, ext)
+          const refs = this._langParser.extractReferences(tree, source, ext)
+          const relPath = repo ? relative(repo, fp) : fp
+          parsed.push({ relPath, source, symbols, imports, refs })
+        }
+        const txResults = this._db.transaction(() => {
+          const r = []
+          for (const p of parsed) r.push(this._indexFileDb(p.relPath, p.source, p.symbols, p.imports, p.refs))
+          return r
+        })()
+        results.push(...txResults)
+        if (onProgress) onProgress(Math.min(i + CHUNK, filePaths.length), filePaths.length)
+        if (i + CHUNK < filePaths.length) await new Promise(r => setImmediate(r))
+      }
+      this._resolveCrossFileRefs()
+      return results
+    } finally {
+      this._db.pragma('synchronous=NORMAL')
     }
-    return results
   }
 
   async init(core) {
@@ -268,6 +310,10 @@ class CodeIndex {
       // 解析跨文件引用（供 reindex handler 调用）
       resolveCrossFileRefs() {
         return self._resolveCrossFileRefs()
+      },
+
+      async indexBatch(filePaths, repo, onProgress) {
+        return self.indexBatch(filePaths, repo, onProgress)
       },
 
       // 索引状态（供 reindex handler 调用）
@@ -467,9 +513,7 @@ class CodeIndex {
       async syncFileChange(filePath) {
         if (!existsSync(filePath)) {
           const relPath = self._watchedDir ? relative(self._watchedDir, filePath) : filePath
-          const existing = self._db.prepare('SELECT id FROM files WHERE path = ?').get(relPath)
-          const altExisting = !existing ? self._db.prepare('SELECT id FROM files WHERE path LIKE ?').get(`%${filePath.slice(filePath.lastIndexOf('/') + 1)}`) : null
-          const matched = existing || altExisting
+          const matched = self._db.prepare('SELECT id FROM files WHERE path = ?').get(relPath)
           if (matched) {
             self._db.prepare('DELETE FROM symbols WHERE file_id = ?').run(matched.id)
             self._db.prepare('DELETE FROM refs WHERE source_file_id = ?').run(matched.id)
@@ -491,11 +535,10 @@ class CodeIndex {
         self._core.log('info', `[code-index] indexing ${rootDir}...`)
         const t0 = Date.now()
         const results = await self.walkAndIndex(rootDir)
-        const crossResolved = self._resolveCrossFileRefs()
         self._indexing = false
         const elapsed = Date.now() - t0
-        self._core.log('info', `[code-index] indexed ${results.length} files in ${elapsed}ms (${crossResolved} cross-refs)`)
-        return { status: 'done', files: results.length, crossRefs: crossResolved, elapsed }
+        self._core.log('info', `[code-index] indexed ${results.length} files in ${elapsed}ms`)
+        return { status: 'done', files: results.length, elapsed }
       },
 
       getStats() {

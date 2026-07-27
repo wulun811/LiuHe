@@ -122,14 +122,12 @@ export async function handle(args, context) {
 
   setImmediate(async () => {
     try {
-      for (let i = 0; i < files.length; i++) {
-        codeIndexService.indexFile(files[i].path, workspaceDir)
-        codeIndexService.indexProgress = { ...codeIndexService.indexProgress, indexed: i + 1 }
-        if (i > 0 && i % 50 === 0) await new Promise(r => setImmediate(r))
-      }
-      const crossResolved = codeIndexService.resolveCrossFileRefs()
+      const filePaths = files.map(f => f.path)
+      await codeIndexService.indexBatch(filePaths, workspaceDir, (indexed) => {
+        codeIndexService.indexProgress = { ...codeIndexService.indexProgress, indexed }
+      })
       codeIndexService.indexing = false
-      log('info', `[reindex] done: ${files.length} files, ${crossResolved} cross-refs, ${Date.now() - codeIndexService.indexProgress.startTime}ms`)
+      log('info', `[reindex] done: ${files.length} files, ${Date.now() - codeIndexService.indexProgress.startTime}ms`)
     } catch (e) {
       log('error', `[reindex] failed: ${e.message}`)
       codeIndexService.indexing = false
