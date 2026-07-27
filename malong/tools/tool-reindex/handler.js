@@ -26,7 +26,19 @@ export async function handle(args, context) {
         elapsed_seconds: Math.round((Date.now() - p.startTime) / 1000),
       }
     }
-    return { status: 'idle', suggestion: 'Call reindex(workspace_dir="...") to start indexing' }
+    const last = codeIndexService.lastIndexed
+    if (last) {
+      return {
+        status: 'completed',
+        workspace_dir: last.workspace_dir,
+        files_indexed: last.files,
+        symbols: last.symbols,
+        refs: last.refs,
+        completed_at: last.completed_at,
+        suggestion: 'Call reindex(workspace_dir="...") to index a different workspace',
+      }
+    }
+    return { status: 'not_started', suggestion: 'Call reindex(workspace_dir="...") to start indexing' }
   }
 
   if (!existsSync(workspaceDir)) {

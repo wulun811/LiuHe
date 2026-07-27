@@ -277,7 +277,19 @@ class CodeIndex {
 
       set indexing(value) {
         self._indexing = value
-        if (!value) self._indexProgress = null
+        if (!value) {
+          self._indexProgress = null
+          if (self._db) {
+            const stats = {
+              workspace_dir: self._currentWorkspace,
+              files: self._db.prepare('SELECT COUNT(*) as cnt FROM files').get().cnt,
+              symbols: self._db.prepare('SELECT COUNT(*) as cnt FROM symbols').get().cnt,
+              refs: self._db.prepare('SELECT COUNT(*) as cnt FROM refs').get().cnt,
+              completed_at: new Date().toISOString(),
+            }
+            self._lastIndexed = stats
+          }
+        }
       },
 
       // 索引进度（供 reindex handler 查询）
@@ -287,6 +299,12 @@ class CodeIndex {
       },
       set indexProgress(value) {
         self._indexProgress = value
+      },
+
+      // 上次索引完成记录（供 reindex handler 查询）
+      _lastIndexed: null,
+      get lastIndexed() {
+        return self._lastIndexed
       },
 
       async getSymbols(filePath, { timeout = 5000 } = {}) {
