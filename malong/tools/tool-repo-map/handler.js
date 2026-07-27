@@ -9,7 +9,7 @@ export async function handle(args, context) {
   const workspaceDir = args?.workspace_dir
 
   if (!workspaceDir) {
-    return { error: 'workspace_dir parameter required — specify the project root directory to map' }
+    return { error: 'missing_parameter', message: 'workspace_dir is required', suggestion: 'Provide the absolute path to the project root directory to map' }
   }
 
   // 检查 workspace 是否已索引
@@ -23,7 +23,7 @@ export async function handle(args, context) {
   }
 
   if (!repoMapService) {
-    return { error: 'repoMap service not available' }
+    return { error: 'service_unavailable', message: 'repoMap service not available', suggestion: 'Check MCP server configuration and ensure repo-map.js is loaded' }
   }
 
   const malongignorePath = join(workspaceDir, '.malongignore')

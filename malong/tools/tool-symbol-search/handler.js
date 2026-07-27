@@ -8,7 +8,7 @@ export async function handle(args, context) {
   const workspaceDir = args?.workspace_dir
 
   if (!workspaceDir) {
-    return { error: 'workspace_dir parameter required — specify the project root directory. Call reindex first if this is a new workspace.' }
+    return { error: 'missing_parameter', message: 'workspace_dir is required', suggestion: 'Provide the absolute path to the project root directory. Call reindex first if this is a new workspace.' }
   }
 
   // 检查 workspace 是否已索引
@@ -22,7 +22,7 @@ export async function handle(args, context) {
   }
 
   if (!codeIndexService) {
-    return { error: 'codeIndex service not available' }
+    return { error: 'service_unavailable', message: 'codeIndex service not available', suggestion: 'Check MCP server configuration and ensure code-index.js is loaded' }
   }
 
   // 初始化 workspace 数据库
@@ -32,7 +32,7 @@ export async function handle(args, context) {
   const limit = args?.limit || 30
 
   if (!query) {
-    return { error: 'query parameter required' }
+    return { error: 'missing_parameter', message: 'query is required', suggestion: 'Provide a symbol name substring to search (case-sensitive)' }
   }
 
   const results = await codeIndexService.searchSymbols(query, { limit })

@@ -44,8 +44,8 @@ export async function handle(args, context) {
   const editsRaw = args?.edits || ''
   const dryRun = !!args?.dry_run
 
-  if (!filePath) return { error: 'file_path parameter required' }
-  if (!editsRaw) return { error: 'edits parameter required' }
+  if (!filePath) return { error: 'missing_parameter', message: 'file_path is required', suggestion: 'Provide the absolute path to the file to edit' }
+  if (!editsRaw) return { error: 'missing_parameter', message: 'edits is required', suggestion: 'Provide a JSON array of edits: [{"old_string": "...", "new_string": "..."}]' }
 
   const pythonScript = join(__dirname, 'batch_edit_mvp.py')
   const tmpFile = join(__dirname, `.edit_batch_tmp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.json`)

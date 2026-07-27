@@ -8,7 +8,7 @@ export async function handle(args, context) {
   const workspaceDir = args?.workspace_dir
 
   if (!workspaceDir) {
-    return { error: 'workspace_dir parameter required — specify the project root directory. Call reindex first if this is a new workspace.' }
+    return { error: 'missing_parameter', message: 'workspace_dir is required', suggestion: 'Provide the absolute path to the project root directory. Call reindex first if this is a new workspace.' }
   }
 
   // 检查 workspace 是否已索引
@@ -22,7 +22,7 @@ export async function handle(args, context) {
   }
 
   if (!codeIndexService) {
-    return { error: 'codeIndex service not available' }
+    return { error: 'service_unavailable', message: 'codeIndex service not available', suggestion: 'Check MCP server configuration and ensure code-index.js is loaded' }
   }
 
   // 初始化 workspace 数据库
@@ -30,7 +30,7 @@ export async function handle(args, context) {
 
   const file = args?.file || ''
   if (!file) {
-    return { error: 'file parameter required' }
+    return { error: 'missing_parameter', message: 'file is required', suggestion: 'Provide a file path relative to workspace_dir (e.g. "scripts/lib/tools/spawn.mjs")' }
   }
 
   return await codeIndexService.getImpactAnalysis(file, { depth: args?.depth || 3 })
