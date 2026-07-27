@@ -123,8 +123,8 @@ export async function handle(args, context) {
   setImmediate(async () => {
     try {
       const filePaths = files.map(f => f.path)
-      await codeIndexService.indexBatch(filePaths, workspaceDir, (indexed) => {
-        codeIndexService.indexProgress = { ...codeIndexService.indexProgress, indexed }
+      await codeIndexService.indexBatch(filePaths, workspaceDir, (indexed, total) => {
+        codeIndexService.indexProgress = { ...codeIndexService.indexProgress, indexed, total }
       })
       codeIndexService.indexing = false
       log('info', `[reindex] done: ${files.length} files, ${Date.now() - codeIndexService.indexProgress.startTime}ms`)

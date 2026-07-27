@@ -4,7 +4,7 @@
 
 import Database from 'better-sqlite3'
 import { join, relative, extname, resolve } from 'node:path'
-import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, watch, chmodSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, watch, chmodSync, statSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { Worker } from 'node:worker_threads'
 
@@ -146,22 +146,24 @@ class CodeIndex {
     if (!tree) return null
     const { symbols, refs } = this._langParser.extractAll(tree, source, ext)
     const relPath = repo ? relative(repo, filePath) : filePath
+    let mtime = Date.now()
+    try { mtime = statSync(filePath).mtimeMs } catch {}
     return this._db.transaction(() => {
-      return this._indexFileDb(relPath, source.length, symbols, refs)
+      return this._indexFileDb(relPath, source.length, symbols, refs, mtime)
     })()
   }
 
-  _indexFileDb(relPath, sourceLength, symbols, refs) {
+  _indexFileDb(relPath, sourceLength, symbols, refs, mtime) {
     let fileId = null
     const existing = this._db.prepare('SELECT id FROM files WHERE path = ?').get(relPath)
     if (existing) {
       fileId = existing.id
       this._db.prepare('DELETE FROM symbols WHERE file_id = ?').run(fileId)
       this._db.prepare('DELETE FROM refs WHERE source_file_id = ?').run(fileId)
-      this._db.prepare("UPDATE files SET size = ?, mtime = ?, indexed_at = datetime('now') WHERE id = ?").run(sourceLength, Date.now(), fileId)
+      this._db.prepare("UPDATE files SET size = ?, mtime = ?, indexed_at = datetime('now') WHERE id = ?").run(sourceLength, mtime, fileId)
     }
     if (!fileId) {
-      const r = this._db.prepare('INSERT OR IGNORE INTO files (path, repo, size, mtime) VALUES (?, ?, ?, ?)').run(relPath, '', sourceLength, Date.now())
+      const r = this._db.prepare('INSERT OR IGNORE INTO files (path, repo, size, mtime) VALUES (?, ?, ?, ?)').run(relPath, '', sourceLength, mtime)
       fileId = r.lastInsertRowid
     }
 
@@ -235,22 +237,55 @@ class CodeIndex {
     const validFiles = filePaths.filter(fp => CACHED_EXT.has(extname(fp)))
     if (!validFiles.length) return []
 
+    const existingFiles = new Map(this._db.prepare('SELECT path, mtime FROM files').all().map(f => [f.path, f.mtime]))
+    const changedFiles = []
+    const mtimeMap = new Map()
+    const currentPaths = new Set()
+    for (const fp of validFiles) {
+      const relPath = repo ? relative(repo, fp) : fp
+      currentPaths.add(relPath)
+      let st
+      try { st = statSync(fp) } catch { continue }
+      const oldMtime = existingFiles.get(relPath)
+      if (oldMtime !== undefined && oldMtime >= st.mtimeMs) continue
+      changedFiles.push(fp)
+      mtimeMap.set(relPath, st.mtimeMs)
+    }
+
+    const deletedIds = this._db.prepare('SELECT id, path FROM files').all().filter(f => !currentPaths.has(f.path)).map(f => f.id)
+
+    if (!changedFiles.length && !deletedIds.length) {
+      if (onProgress) onProgress(0, 0)
+      return []
+    }
+
     this._db.pragma('synchronous=OFF')
     this._db.exec('DROP INDEX IF EXISTS idx_sym_name; DROP INDEX IF EXISTS idx_sym_file; DROP INDEX IF EXISTS idx_sym_type; DROP INDEX IF EXISTS idx_sym_parent; DROP INDEX IF EXISTS idx_ref_source; DROP INDEX IF EXISTS idx_ref_target; DROP INDEX IF EXISTS idx_ref_file; DROP INDEX IF EXISTS idx_ref_name')
     try {
-      const workerUrl = new URL('./parse-worker.js', import.meta.url)
-      const mid = Math.ceil(validFiles.length / 2)
-      const batches = [validFiles.slice(0, mid), validFiles.slice(mid)].filter(b => b.length > 0)
+      if (deletedIds.length) {
+        this._db.transaction(() => {
+          for (const id of deletedIds) {
+            this._db.prepare('DELETE FROM symbols WHERE file_id = ?').run(id)
+            this._db.prepare('DELETE FROM refs WHERE source_file_id = ?').run(id)
+            this._db.prepare('DELETE FROM files WHERE id = ?').run(id)
+          }
+        })()
+      }
 
-      const runWorker = (files) => new Promise((res, rej) => {
-        const w = new Worker(workerUrl)
-        w.on('message', (msg) => { res(msg.results); w.terminate() })
-        w.on('error', rej)
-        w.postMessage({ files, repo })
-      })
-
-      const workerResults = await Promise.all(batches.map(b => runWorker(b)))
-      const parsed = workerResults.flat()
+      let parsed = []
+      if (changedFiles.length) {
+        const workerUrl = new URL('./parse-worker.js', import.meta.url)
+        const mid = Math.ceil(changedFiles.length / 2)
+        const batches = [changedFiles.slice(0, mid), changedFiles.slice(mid)].filter(b => b.length > 0)
+        const runWorker = (files) => new Promise((res, rej) => {
+          const w = new Worker(workerUrl)
+          w.on('message', (msg) => { res(msg.results); w.terminate() })
+          w.on('error', rej)
+          w.postMessage({ files, repo })
+        })
+        const workerResults = await Promise.all(batches.map(b => runWorker(b)))
+        parsed = workerResults.flat()
+      }
 
       const CHUNK = 200
       const results = []
@@ -258,7 +293,7 @@ class CodeIndex {
         const chunk = parsed.slice(i, i + CHUNK)
         const txResults = this._db.transaction(() => {
           const r = []
-          for (const p of chunk) r.push(this._indexFileDb(p.relPath, p.sourceLength, p.symbols, p.refs))
+          for (const p of chunk) r.push(this._indexFileDb(p.relPath, p.sourceLength, p.symbols, p.refs, mtimeMap.get(p.relPath) || Date.now()))
           return r
         })()
         results.push(...txResults)
