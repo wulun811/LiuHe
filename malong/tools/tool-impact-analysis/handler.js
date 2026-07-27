@@ -35,7 +35,10 @@ export async function handle(args, context) {
   if (args?.symbol) opts.symbol = args.symbol
   if (args?.change_type) opts.changeType = args.change_type
   if (args?.max_callers) opts.maxCallers = args.max_callers
-  if (args?.depth) opts.depth = args.depth
+  if (args?.depth) {
+    const d = parseInt(args.depth)
+    opts.depth = (d > 0 && d <= 10) ? d : 2
+  }
 
   return await codeIndexService.getImpactAnalysis(file, opts)
 }

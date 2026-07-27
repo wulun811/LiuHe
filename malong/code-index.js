@@ -34,7 +34,8 @@ CREATE TABLE IF NOT EXISTS refs (
   target_file_id INTEGER REFERENCES files(id) ON DELETE SET NULL,
   target_symbol_id INTEGER REFERENCES symbols(id) ON DELETE SET NULL,
   target_name TEXT DEFAULT '',
-  kind TEXT NOT NULL CHECK(kind IN ('call','import','extends','implements','assign','use'))
+  kind TEXT NOT NULL CHECK(kind IN ('call','import','extends','implements','assign','use')),
+  line INTEGER DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_sym_name ON symbols(name);
 CREATE INDEX IF NOT EXISTS idx_sym_file ON symbols(file_id);
@@ -109,6 +110,7 @@ function initDb(dir) {
   db.pragma('mmap_size=268435456')
   db.pragma('temp_store=MEMORY')
   db.exec(SCHEMA)
+  try { db.exec('ALTER TABLE refs ADD COLUMN line INTEGER DEFAULT 0') } catch {}
   return db
 }
 
@@ -171,21 +173,39 @@ class CodeIndex {
       const ph = symbols.map(() => '(?,?,?,?,?)').join(',')
       this._db.prepare(`INSERT INTO symbols (file_id, name, type, start_line, end_line) VALUES ${ph}`).run(...symbols.flatMap(s => [fileId, s.name, s.type, s.startLine, s.endLine]))
     }
-    const insertedSyms = this._db.prepare('SELECT id, name FROM symbols WHERE file_id = ?').all(fileId)
+    const insertedSyms = this._db.prepare('SELECT id, name, type, start_line, end_line FROM symbols WHERE file_id = ?').all(fileId)
     const symIdMap = new Map(insertedSyms.map(s => [s.name, s.id]))
+    const funcSyms = insertedSyms.filter(s => s.type === 'function' || s.type === 'method')
 
     const refRows = []
     for (const r of refs) {
-      if (r.type === 'call') refRows.push([fileId, r.name, 'call'])
-      else if (r.type === 'import') refRows.push([fileId, r.module || '', 'import'])
+      if (r.type === 'call') {
+        const callName = r.name.includes('.') ? r.name.split('.').pop() : r.name
+        let sourceSymId = null
+        let bestRange = Infinity
+        for (const fs of funcSyms) {
+          if (fs.start_line <= r.line && r.line <= fs.end_line) {
+            const range = fs.end_line - fs.start_line
+            if (range < bestRange) { bestRange = range; sourceSymId = fs.id }
+          }
+        }
+        refRows.push([fileId, sourceSymId, callName, 'call', r.line])
+      } else if (r.type === 'import') {
+        refRows.push([fileId, null, r.module || '', 'import', r.line])
+        if (r.symbols && r.symbols.length > 0) {
+          for (const symName of r.symbols) {
+            refRows.push([fileId, null, symName, 'import', r.line])
+          }
+        }
+      }
     }
     if (refRows.length > 0) {
-      const ph = refRows.map(() => '(?,?,?)').join(',')
-      this._db.prepare(`INSERT INTO refs (source_file_id, target_name, kind) VALUES ${ph}`).run(...refRows.flat())
+      const ph = refRows.map(() => '(?,?,?,?,?)').join(',')
+      this._db.prepare(`INSERT INTO refs (source_file_id, source_symbol_id, target_name, kind, line) VALUES ${ph}`).run(...refRows.flat())
     }
 
     const updateRef = this._db.prepare('UPDATE refs SET target_symbol_id = ? WHERE id = ?')
-    const namedRefs = this._db.prepare("SELECT id, target_name FROM refs WHERE source_file_id = ? AND target_symbol_id IS NULL AND target_name != ''").all(fileId)
+    const namedRefs = this._db.prepare("SELECT id, target_name FROM refs WHERE source_file_id = ? AND target_symbol_id IS NULL AND target_name != '' AND kind = 'call'").all(fileId)
     for (const nr of namedRefs) {
       const symId = symIdMap.get(nr.target_name)
       if (symId) updateRef.run(symId, nr.id)
@@ -195,7 +215,7 @@ class CodeIndex {
   }
 
   _resolveCrossFileRefs() {
-    const unbound = this._db.prepare("SELECT r.id, r.source_file_id, r.target_name FROM refs r WHERE r.target_symbol_id IS NULL AND r.kind IN ('call','extends','implements') AND r.target_name != ''").all()
+    const unbound = this._db.prepare("SELECT r.id, r.source_file_id, r.target_name FROM refs r WHERE r.target_symbol_id IS NULL AND r.kind IN ('call','import','extends','implements') AND r.target_name != ''").all()
     if (!unbound.length) return 0
     const allSyms = this._db.prepare('SELECT s.id, s.name, s.file_id FROM symbols s').all()
     const symMap = new Map()
@@ -219,8 +239,10 @@ class CodeIndex {
   }
 
   _isTestFile(filePath) {
-    const base = filePath.split('/').pop().toLowerCase()
-    return base.includes('test') || base.includes('spec')
+    const lower = filePath.toLowerCase()
+    if (lower.includes('__tests__/') || lower.includes('/tests/') || lower.includes('/test/') || lower.startsWith('tests/') || lower.startsWith('test/')) return true
+    const base = lower.split('/').pop()
+    return /^test[_-]./.test(base) || /[_-]test\./.test(base) || /\.test\./.test(base) || /\.spec\./.test(base) || /^test\.[^.]+$/.test(base)
   }
 
   _extractContext(filePath, line, window = 1) {
@@ -275,9 +297,9 @@ class CodeIndex {
     for (let d = 2; d <= maxDepth; d++) {
       const nextQueue = []
       for (const funcName of queue) {
-        const higher = this._db.prepare("SELECT DISTINCT f.path AS caller_file, s.name AS caller_func FROM refs r JOIN files f ON r.source_file_id = f.id LEFT JOIN symbols s ON r.source_symbol_id = s.id WHERE r.target_name = ? AND r.kind = 'call'").all(funcName)
+        const higher = this._db.prepare("SELECT DISTINCT f.path AS caller_file, s.name AS caller_func, r.line AS caller_line FROM refs r JOIN files f ON r.source_file_id = f.id LEFT JOIN symbols s ON r.source_symbol_id = s.id WHERE r.target_name = ? AND r.kind = 'call'").all(funcName)
         for (const h of higher) {
-          results.push({ file: h.caller_file, function: h.caller_func, depth: d, via: funcName })
+          results.push({ file: h.caller_file, function: h.caller_func, line: h.caller_line || 0, depth: d, via: funcName })
           if (h.caller_func && !visited.has(h.caller_func)) {
             visited.add(h.caller_func)
             nextQueue.push(h.caller_func)
@@ -563,13 +585,13 @@ class CodeIndex {
         let refs
         if (symbol) {
           refs = self._db.prepare(
-            "SELECT r.id, r.source_file_id, f.path AS source_file_path, r.target_name, r.kind, r.source_symbol_id, r.target_symbol_id " +
+            "SELECT r.id, r.source_file_id, f.path AS source_file_path, r.target_name, r.kind, r.source_symbol_id, r.target_symbol_id, r.line " +
             "FROM refs r JOIN files f ON r.source_file_id = f.id " +
             "WHERE r.target_name = ? AND r.source_file_id != ?"
           ).all(symbol, f.id)
         } else {
           refs = self._db.prepare(
-            "SELECT r.id, r.source_file_id, f.path AS source_file_path, r.target_name, r.kind, r.source_symbol_id, r.target_symbol_id " +
+            "SELECT r.id, r.source_file_id, f.path AS source_file_path, r.target_name, r.kind, r.source_symbol_id, r.target_symbol_id, r.line " +
             "FROM refs r JOIN files f ON r.source_file_id = f.id " +
             "WHERE r.target_name IN (SELECT name FROM symbols WHERE file_id = ?) AND r.source_file_id != ?"
           ).all(f.id, f.id)
@@ -580,7 +602,8 @@ class CodeIndex {
         const seenKeys = new Set()
 
         for (const r of refs) {
-          const { line: refLine, func: callerFunc } = self._resolveRefDetail(r.source_symbol_id)
+          const { func: callerFunc } = self._resolveRefDetail(r.source_symbol_id)
+          const refLine = r.line || 0
           const isTest = self._isTestFile(r.source_file_path)
           const key = `${r.source_file_path}\0${callerFunc || ''}`
           seenKeys.add(key)
@@ -608,9 +631,9 @@ class CodeIndex {
               type: isTest ? 'test' : 'indirect',
               ref_type: 'indirect',
               file: entry.file,
-              line: 0,
+              line: entry.line || 0,
               function: entry.function,
-              context: '',
+              context: self._extractContext(entry.file, entry.line || 0),
               depth: entry.depth,
               via: entry.via,
             }
