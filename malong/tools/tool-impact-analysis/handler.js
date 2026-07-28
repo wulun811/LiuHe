@@ -3,6 +3,17 @@
 import { join } from 'node:path'
 import { existsSync, statSync } from 'node:fs'
 
+function detectMisuse(symbol) {
+  if (!symbol) return null
+  if (/^[A-Z][A-Z0-9_]*$/.test(symbol) && symbol.length > 2) {
+    return {
+      warning: 'likely_wrong_tool',
+      suggestion: `"${symbol}" looks like a constant name. For tracing constant values and finding hardcoded copies, use trace_symbol(symbol="${symbol}").`
+    }
+  }
+  return null
+}
+
 export async function handle(args, context) {
   const { codeIndexService, getWorkspaceDir } = context
   const workspaceDir = args?.workspace_dir
@@ -43,6 +54,7 @@ export async function handle(args, context) {
     opts.depth = (d > 0 && d <= 10) ? d : 2
   }
 
+  const misuseWarning = detectMisuse(args?.symbol)
   const result = await codeIndexService.getImpactAnalysis(file, opts)
 
   const absPath = join(workspaceDir, file)
@@ -54,6 +66,10 @@ export async function handle(args, context) {
       result.suggestion = `File "${file}" was modified after last index. Call reindex to refresh, or results may be outdated.`
     }
   } catch {}
+
+  if (misuseWarning) {
+    result.misuse_warning = misuseWarning
+  }
 
   return result
 }

@@ -169,6 +169,10 @@ export async function handle(args, context) {
     result.transaction_ready = transactionReady
   }
 
+  if (issues.length === 0) {
+    result.hint = 'No import issues found. If you recently changed function signatures, use impact_analysis to check for broken callers.'
+  }
+
   if (!autoFix) {
     _fixImportsCache.set(cacheKey, result)
     if (_fixImportsCache.size > _fixImportsCacheMax) {

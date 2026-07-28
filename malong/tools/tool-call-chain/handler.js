@@ -1,6 +1,18 @@
 import { join } from 'node:path'
 import { existsSync, statSync } from 'node:fs'
 
+function detectMisuse(args) {
+  const line = parseInt(args?.line) || 0
+  const symbol = args?.symbol
+  if (symbol && line === 0) {
+    return {
+      warning: 'likely_wrong_tool',
+      suggestion: `You provided symbol="${symbol}" but no line number. For symbol-level impact analysis, use impact_analysis(symbol="${symbol}") which includes risk level and test references. call_chain is designed for line-level precision when you know the line but not the symbol name.`
+    }
+  }
+  return null
+}
+
 export async function handle(args, context) {
   const startTime = Date.now()
   const { codeIndexService, getWorkspaceDir } = context
@@ -31,6 +43,8 @@ export async function handle(args, context) {
   const depth = Number.isNaN(depthRaw) ? 2 : Math.max(0, Math.min(depthRaw, 10))
   const maxCallers = parseInt(args?.max_callers) || 20
   const maxCallees = parseInt(args?.max_callees) || 20
+
+  const misuseWarning = detectMisuse(args)
 
   let symbol = args?.symbol
   let symbolSignature = null
@@ -91,6 +105,10 @@ export async function handle(args, context) {
   if (indexStale) {
     result.warning = 'index_stale'
     result.suggestion = `File "${file}" was modified after last index. Call reindex to refresh.`
+  }
+
+  if (misuseWarning) {
+    result.misuse_warning = misuseWarning
   }
 
   return result

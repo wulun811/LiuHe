@@ -6,6 +6,19 @@ const SOURCE_EXTS = new Set(['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.mts
 const _traceCache = new Map()
 const _traceCacheMax = 200
 
+const VERB_PREFIXES = /^(get|set|handle|process|create|delete|update|find|check|validate|login|logout|register|send|fetch|load|save|init|start|stop|run|execute|parse|format|convert|transform|filter|sort|map|reduce|count|verify|authenticate|authorize|encrypt|decrypt|encode|decode|read|write|open|close|connect|disconnect|subscribe|unsubscribe|emit|on|off|add|remove|insert|append|push|pop|shift|unshift)/
+
+function detectMisuse(symbol) {
+  if (!symbol) return null
+  if (VERB_PREFIXES.test(symbol) || (symbol.includes('_') && !/^[A-Z_]+$/.test(symbol))) {
+    return {
+      warning: 'likely_wrong_tool',
+      suggestion: `"${symbol}" looks like a function/method name. For function impact analysis, use impact_analysis(symbol="${symbol}"). For line-level callers, use call_chain(line=N).`
+    }
+  }
+  return null
+}
+
 export async function handle(args, context) {
   const { codeIndexService, getWorkspaceDir } = context
   const workspaceDir = args?.workspace_dir
@@ -32,6 +45,8 @@ export async function handle(args, context) {
 
   if (!symbol) return { error: 'missing_parameter', message: 'symbol is required', suggestion: 'Provide a symbol name to trace (e.g. "MAX_RETRY_COUNT")' }
   if (!file) return { error: 'missing_parameter', message: 'file is required', suggestion: 'Provide a file path relative to workspace_dir where the symbol is defined' }
+
+  const misuseWarning = detectMisuse(symbol)
 
   const absFilePath = join(workspaceDir, file)
   let fileMtime = 0
@@ -93,6 +108,10 @@ export async function handle(args, context) {
       result.suggestion = `File "${file}" was modified after last index. References may be incomplete. Call reindex to refresh.`
     }
   } catch {}
+
+  if (misuseWarning) {
+    result.misuse_warning = misuseWarning
+  }
 
   _traceCache.set(cacheKey, result)
   if (_traceCache.size > _traceCacheMax) {

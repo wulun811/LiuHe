@@ -3,6 +3,17 @@
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 
+function detectMisuse(symbol) {
+  if (!symbol) return null
+  if (/^[A-Z][A-Z0-9_]*$/.test(symbol) && symbol.length > 2) {
+    return {
+      warning: 'likely_wrong_tool',
+      suggestion: `"${symbol}" looks like a constant. For tracing its value and finding hardcoded copies, use trace_symbol(symbol="${symbol}").`
+    }
+  }
+  return null
+}
+
 export async function handle(args, context) {
   const { codeIndexService, getWorkspaceDir } = context
   const workspaceDir = args?.workspace_dir
@@ -33,6 +44,13 @@ export async function handle(args, context) {
     return { error: 'missing_parameter', message: 'symbol is required', suggestion: 'Provide a symbol name / call target to find references for' }
   }
 
+  const misuseWarning = detectMisuse(symbol)
   const results = await codeIndexService.getReferences(symbol, args?.file)
-  return { symbol, results, count: results.length, workspace_dir: workspaceDir }
+  const result = { symbol, results, count: results.length, workspace_dir: workspaceDir }
+  
+  if (misuseWarning) {
+    result.misuse_warning = misuseWarning
+  }
+  
+  return result
 }
