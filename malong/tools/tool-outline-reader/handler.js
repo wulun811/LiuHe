@@ -15,7 +15,7 @@ export async function handle(args, context) {
   }
 
   if (!codeIndexService) {
-    return { error: 'service_unavailable', message: 'codeIndex service not available' }
+    return { error: 'service_unavailable', message: 'codeIndex service not available', suggestion: 'Check MCP server configuration and ensure code-index.js is loaded' }
   }
 
   codeIndexService.initWorkspace(workspaceDir)
@@ -26,10 +26,10 @@ export async function handle(args, context) {
   }
 
   const opts = {}
-  if (args?.depth !== undefined) { const d = parseInt(args.depth); opts.depth = Number.isNaN(d) ? 1 : Math.max(0, d) }
+  if (args?.depth !== undefined) { const d = parseInt(args.depth); opts.depth = Number.isNaN(d) ? 1 : Math.max(0, Math.min(d, 10)) }
   if (args?.include_refs) opts.includeRefs = true
   if (args?.include_test_refs) opts.includeTestRefs = true
-  if (args?.max_items) opts.maxItems = parseInt(args.max_items)
+  if (args?.max_items) { const m = parseInt(args.max_items); opts.maxItems = Number.isNaN(m) ? 50 : Math.max(1, m) }
 
   return await codeIndexService.getFileOutline(file, opts)
 }

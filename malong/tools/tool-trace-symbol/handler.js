@@ -2,14 +2,16 @@ import { join } from 'node:path'
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 
 const SOURCE_EXTS = new Set(['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.mts', '.cts', '.py', '.go', '.rs', '.java', '.rb', '.php'])
-const BUILTIN_KEYWORDS = new Set(['true', 'false', 'null', 'undefined', 'None', 'True', 'False', 'self', 'cls', 'this'])
+
+const _traceCache = new Map()
+const _traceCacheMax = 200
 
 export async function handle(args, context) {
   const { codeIndexService, getWorkspaceDir } = context
   const workspaceDir = args?.workspace_dir
 
   if (!workspaceDir) {
-    return { error: 'missing_parameter', message: 'workspace_dir is required' }
+    return { error: 'missing_parameter', message: 'workspace_dir is required', suggestion: 'Provide the absolute path to the project root directory. Call reindex first.' }
   }
 
   const dbPath = join(getWorkspaceDir(workspaceDir), 'code-index.db')
@@ -18,7 +20,7 @@ export async function handle(args, context) {
   }
 
   if (!codeIndexService) {
-    return { error: 'service_unavailable', message: 'codeIndex service not available' }
+    return { error: 'service_unavailable', message: 'codeIndex service not available', suggestion: 'Check MCP server configuration and ensure code-index.js is loaded' }
   }
 
   codeIndexService.initWorkspace(workspaceDir)
@@ -28,8 +30,14 @@ export async function handle(args, context) {
   const includeLiterals = !!args?.include_literals
   const maxResults = parseInt(args?.max_results) || 30
 
-  if (!symbol) return { error: 'missing_parameter', message: 'symbol is required' }
-  if (!file) return { error: 'missing_parameter', message: 'file is required' }
+  if (!symbol) return { error: 'missing_parameter', message: 'symbol is required', suggestion: 'Provide a symbol name to trace (e.g. "MAX_RETRY_COUNT")' }
+  if (!file) return { error: 'missing_parameter', message: 'file is required', suggestion: 'Provide a file path relative to workspace_dir where the symbol is defined' }
+
+  const absFilePath = join(workspaceDir, file)
+  let fileMtime = 0
+  try { fileMtime = statSync(absFilePath).mtimeMs } catch {}
+  const cacheKey = `${workspaceDir}\0${symbol}\0${file}\0${includeLiterals}\0${maxResults}\0${fileMtime}`
+  if (_traceCache.has(cacheKey)) return _traceCache.get(cacheKey)
 
   const result = {
     symbol,
@@ -43,7 +51,7 @@ export async function handle(args, context) {
     suggestion: null
   }
 
-  const valueInfo = extractSymbolValue(join(workspaceDir, file), symbol)
+  const valueInfo = extractSymbolValue(absFilePath, symbol)
   if (valueInfo) {
     result.value = valueInfo.value
     result.value_line = valueInfo.line
@@ -57,7 +65,7 @@ export async function handle(args, context) {
   result.direct_references = (refs || []).slice(0, maxResults).map(r => ({
     file: r.source_file || r.file || r.caller_file,
     line: r.line || 0,
-    context: r.context || ''
+    context: r.context || null
   }))
   result.truncated = (refs || []).length > maxResults
 
@@ -75,6 +83,12 @@ export async function handle(args, context) {
       symbol,
       count: result.suspected_literals.length
     }
+  }
+
+  _traceCache.set(cacheKey, result)
+  if (_traceCache.size > _traceCacheMax) {
+    const oldest = _traceCache.keys().next().value
+    _traceCache.delete(oldest)
   }
 
   return result

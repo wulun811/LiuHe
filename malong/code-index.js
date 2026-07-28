@@ -128,7 +128,9 @@ class CodeIndex {
     this._watcherTimer = null
     this._impactCache = new Map()
     this._contextCache = new Map()
+    this._outlineCache = new Map()
     this._impactCacheMax = 500
+    this._outlineCacheMax = 200
   }
 
   _resolveRepoDir(filePath) {
@@ -173,8 +175,9 @@ class CodeIndex {
       const r = this._db.prepare('INSERT OR IGNORE INTO files (path, repo, size, mtime) VALUES (?, ?, ?, ?)').run(relPath, '', sourceLength, mtime)
       fileId = r.lastInsertRowid
     }
-    this._impactCache?.clear()
-    this._contextCache?.clear()
+      this._impactCache?.clear()
+      this._contextCache?.clear()
+      this._outlineCache?.clear()
 
     if (symbols.length > 0) {
       const ph = symbols.map(() => '(?,?,?,?,?)').join(',')
@@ -254,7 +257,7 @@ class CodeIndex {
   }
 
   _extractContext(filePath, line, window = 1) {
-    if (!line || line <= 0) return ''
+    if (!line || line <= 0) return null
     let absPath = filePath
     if (!absPath.startsWith('/')) absPath = join(this._currentWorkspace || '', filePath)
     try {
@@ -264,9 +267,10 @@ class CodeIndex {
       const lines = this._contextCache.get(absPath)
       const start = Math.max(0, line - 1 - window)
       const end = Math.min(lines.length, line + window)
-      return lines.slice(start, end).join('\n')
+      const ctx = lines.slice(start, end).join('\n')
+      return ctx || null
     } catch {
-      return ''
+      return null
     }
   }
 
@@ -286,7 +290,7 @@ class CodeIndex {
   }
 
   _extractDocstrings(filePath, symbols) {
-    const absPath = join(this._currentWorkspace ? this._core.getWorkspaceDir(this._currentWorkspace) : '', filePath)
+    const absPath = this._currentWorkspace ? join(this._currentWorkspace, filePath) : filePath
     if (!existsSync(absPath)) return {}
     try {
       const content = readFileSync(absPath, 'utf-8')
@@ -304,6 +308,36 @@ class CodeIndex {
             if (doc) result[sym.start_line] = doc
           }
           break
+        }
+      }
+      return result
+    } catch {
+      return {}
+    }
+  }
+
+  _extractDecorators(filePath, symbols) {
+    const absPath = this._currentWorkspace ? join(this._currentWorkspace, filePath) : filePath
+    if (!existsSync(absPath)) return {}
+    try {
+      const content = readFileSync(absPath, 'utf-8')
+      const lines = content.split('\n')
+      const result = {}
+      for (const sym of symbols) {
+        if (sym.type !== 'function' && sym.type !== 'method' && sym.type !== 'class') continue
+        const defLine = sym.start_line - 1
+        const decorators = []
+        for (let i = defLine - 1; i >= Math.max(0, defLine - 10); i--) {
+          const t = lines[i].trim()
+          if (!t) continue
+          if (t.startsWith('@')) {
+            decorators.unshift(t.slice(1).split('(')[0])
+          } else {
+            break
+          }
+        }
+        if (decorators.length > 0) {
+          result[sym.start_line] = decorators
         }
       }
       return result
@@ -863,12 +897,18 @@ class CodeIndex {
       },
 
       async getFileOutline(filePath, { depth = 1, includeRefs = false, includeTestRefs = false, maxItems = 50 } = {}) {
+        const cacheKey = `${self._currentWorkspace || ''}\0${filePath}\0${depth}\0${includeRefs}\0${includeTestRefs}\0${maxItems}`
+        if (self._outlineCache.has(cacheKey)) {
+          return self._outlineCache.get(cacheKey)
+        }
+
         const f = self._db.prepare('SELECT id, size FROM files WHERE path = ?').get(filePath)
         if (!f) return { error: 'file_not_found', message: `File not indexed: ${filePath}`, suggestion: `Call reindex(workspace_dir=...) to index the project first` }
 
         const symbols = self._db.prepare('SELECT id, name, type, signature, start_line, end_line FROM symbols WHERE file_id = ? ORDER BY start_line').all(f.id)
 
         const docstrings = self._extractDocstrings(filePath, symbols)
+        const decorators = self._extractDecorators(filePath, symbols)
 
         const rootSymbols = symbols.filter(s => !symbols.some(c => c.start_line <= s.start_line && c.end_line >= s.end_line && c.id !== s.id))
         const truncated = rootSymbols.length > maxItems
@@ -876,7 +916,7 @@ class CodeIndex {
 
         const outline = await Promise.all(slice.map(s => buildOutlineNode(s, symbols, depth - 1, includeRefs, includeTestRefs)))
 
-        return {
+        const result = {
           file: filePath,
           lines: symbols.length > 0 ? Math.max(...symbols.map(s => s.end_line)) : 0,
           tokens_estimate: f.size ? Math.ceil(f.size / 3) : 0,
@@ -884,12 +924,21 @@ class CodeIndex {
           outline
         }
 
+        self._outlineCache.set(cacheKey, result)
+        if (self._outlineCache.size > self._outlineCacheMax) {
+          const oldest = self._outlineCache.keys().next().value
+          self._outlineCache.delete(oldest)
+        }
+
+        return result
+
         async function buildOutlineNode(sym, allSyms, remainingDepth, countRefs, countTestRefs) {
           const children = allSyms.filter(c => c.id !== sym.id && c.start_line >= sym.start_line && c.end_line <= sym.end_line && !allSyms.some(g => g.id !== sym.id && g.id !== c.id && g.start_line <= c.start_line && g.end_line >= c.end_line))
           const node = { type: sym.type, name: sym.name, line: sym.start_line, end_line: sym.end_line }
           if (sym.signature) node.signature = sym.signature
           if (sym.name.startsWith('_') && !sym.name.startsWith('__')) node.private = true
           if (docstrings[sym.start_line]) node.docstring = docstrings[sym.start_line]
+          if (decorators[sym.start_line]) node.decorators = decorators[sym.start_line]
           if (children.length > 0 && remainingDepth >= 0) {
             node.children = await Promise.all(children.map(c => buildOutlineNode(c, allSyms, remainingDepth - 1, countRefs, countTestRefs)))
           }

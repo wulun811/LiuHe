@@ -16,7 +16,7 @@ export async function handle(args, context) {
   }
 
   if (!codeIndexService) {
-    return { error: 'service_unavailable', message: 'codeIndex service not available' }
+    return { error: 'service_unavailable', message: 'codeIndex service not available', suggestion: 'Check MCP server configuration and ensure code-index.js is loaded' }
   }
 
   codeIndexService.initWorkspace(workspaceDir)
@@ -27,7 +27,8 @@ export async function handle(args, context) {
   }
 
   const line = parseInt(args?.line) || 0
-  const depth = Math.min(parseInt(args?.depth) || 2, 10)
+  const depthRaw = parseInt(args?.depth)
+  const depth = Number.isNaN(depthRaw) ? 2 : Math.max(0, Math.min(depthRaw, 10))
   const maxCallers = parseInt(args?.max_callers) || 20
   const maxCallees = parseInt(args?.max_callees) || 20
 
@@ -51,8 +52,7 @@ export async function handle(args, context) {
   const impact = await codeIndexService.getImpactAnalysis(file, {
     symbol,
     depth,
-    maxCallers,
-    maxCallees
+    maxCallers: Math.max(maxCallers, maxCallees)
   })
 
   const result = {
@@ -96,8 +96,8 @@ function formatCallers(impact, key) {
 function formatCallees(impact) {
   const callees = impact.callees || []
   return callees.map(c => ({
-    file: c.file || c.callee_file,
-    line: c.line || c.callee_line,
+    file: c.callee_file || c.file,
+    line: c.callee_line || c.line,
     name: c.function || c.name,
     distance: 1,
     call_expr: c.call_expr || undefined

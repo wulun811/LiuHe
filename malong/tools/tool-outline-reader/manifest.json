@@ -1,7 +1,7 @@
 {
   "name": "read_outline",
-  "version": "1.0.0",
-  "description": "Read a structured outline of a source file: hierarchical function/class/method signatures, line numbers, reference counts. Uses the pre-indexed symbols table (call reindex first). Returns truncated=true if max_items exceeded. Token estimate based on file size. Design reference: Impact Lens _extractContext for signature extraction.",
+  "version": "1.1.0",
+  "description": "Read a structured outline of a source file: hierarchical function/class/method signatures, line numbers, reference counts. Uses the pre-indexed symbols table (call reindex first). Returns truncated=true if max_items exceeded. Token estimate based on file size. Note: depth here means hierarchy nesting depth (0=top-level only, 1=class+methods), NOT call chain depth. For call chain depth, use call_chain or impact_analysis.",
   "inputSchema": {
     "type": "object",
     "properties": {

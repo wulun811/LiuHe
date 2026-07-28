@@ -21,9 +21,9 @@ export async function handle(args, context) {
       const txnId = args?.txn_id
       const file = args?.file
       const edits = args?.edits
-      if (!txnId) return { error: 'missing_parameter', message: 'txn_id is required' }
-      if (!file) return { error: 'missing_parameter', message: 'file is required' }
-      if (!edits || !Array.isArray(edits)) return { error: 'missing_parameter', message: 'edits array is required' }
+      if (!txnId) return { error: 'missing_parameter', message: 'txn_id is required', suggestion: 'Provide the transaction ID returned by begin()' }
+      if (!file) return { error: 'missing_parameter', message: 'file is required', suggestion: 'Provide a file path relative to workspace_dir' }
+      if (!edits || !Array.isArray(edits)) return { error: 'missing_parameter', message: 'edits array is required', suggestion: 'Provide an array of edits: [{"old_string": "...", "new_string": "..."}]' }
 
       const backupResult = store.backupFile(txnId, file)
       if (backupResult?.error) return backupResult
@@ -42,9 +42,9 @@ export async function handle(args, context) {
       const files = args?.files
       const edits = args?.edits
       const atomic = args?.atomic !== false
-      if (!txnId) return { error: 'missing_parameter', message: 'txn_id is required' }
-      if (!files || !Array.isArray(files)) return { error: 'missing_parameter', message: 'files array is required' }
-      if (!edits || !Array.isArray(edits)) return { error: 'missing_parameter', message: 'edits array is required' }
+      if (!txnId) return { error: 'missing_parameter', message: 'txn_id is required', suggestion: 'Provide the transaction ID returned by begin()' }
+      if (!files || !Array.isArray(files)) return { error: 'missing_parameter', message: 'files array is required', suggestion: 'Provide an array of file paths relative to workspace_dir' }
+      if (!edits || !Array.isArray(edits)) return { error: 'missing_parameter', message: 'edits array is required', suggestion: 'Provide an array of edits: [{"old_string": "...", "new_string": "..."}]' }
 
       const results = []
       let hasError = false
@@ -87,13 +87,13 @@ export async function handle(args, context) {
 
     case 'commit': {
       const txnId = args?.txn_id
-      if (!txnId) return { error: 'missing_parameter', message: 'txn_id is required' }
+      if (!txnId) return { error: 'missing_parameter', message: 'txn_id is required', suggestion: 'Provide the transaction ID to commit' }
       return store.commit(txnId)
     }
 
     case 'rollback': {
       const txnId = args?.txn_id
-      if (!txnId) return { error: 'missing_parameter', message: 'txn_id is required' }
+      if (!txnId) return { error: 'missing_parameter', message: 'txn_id is required', suggestion: 'Provide the transaction ID to rollback' }
       return store.rollback(txnId)
     }
 
