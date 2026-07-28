@@ -817,21 +817,22 @@ class CodeIndex {
         const transitive = []
         if (depth > 1) {
           const visited = new Set([filePath])
-          let queue = imports.map(i => i.module).filter(Boolean)
+          let queue = imports.map(i => i.module).filter(m => m && !m.startsWith('node:'))
           for (let d = 1; d < depth && queue.length; d++) {
             const next = []
             for (const mod of queue) {
               if (visited.has(mod)) continue
               visited.add(mod)
-              let mf = self._db.prepare("SELECT id, path FROM files WHERE path LIKE ?").get(`%${mod}%`)
-              if (!mf && mod.includes('.')) {
-                const slashed = mod.replace(/\./g, '/')
+              const cleanMod = mod.replace(/^\.\.?\//, '')
+              let mf = self._db.prepare("SELECT id, path FROM files WHERE path LIKE ?").get(`%${cleanMod}%`)
+              if (!mf && cleanMod.includes('.')) {
+                const slashed = cleanMod.replace(/\./g, '/')
                 mf = self._db.prepare("SELECT id, path FROM files WHERE path LIKE ?").get(`%${slashed}%`)
               }
               if (!mf) continue
               const sub = self._db.prepare("SELECT r.target_name AS module FROM refs r WHERE r.source_file_id = ? AND r.kind = 'import'").all(mf.id)
               for (const s of sub) {
-                if (!visited.has(s.module)) {
+                if (!visited.has(s.module) && !s.module.startsWith('node:')) {
                   transitive.push({ depth: d, from: mf.path, module: s.module })
                   next.push(s.module)
                 }

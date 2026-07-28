@@ -1,7 +1,7 @@
 // 六合工具集 — references handler
 
 import { join } from 'node:path'
-import { existsSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { isConstantName } from '../misuse-helpers.js'
 
 function detectMisuse(symbol) {
@@ -46,12 +46,61 @@ export async function handle(args, context) {
   }
 
   const misuseWarning = detectMisuse(symbol)
-  const results = await codeIndexService.getReferences(symbol, args?.file)
+  let results = await codeIndexService.getReferences(symbol, args?.file)
   const result = { symbol, results, count: results.length, workspace_dir: workspaceDir }
+
+  if (results.length === 0) {
+    const textRefs = findSymbolTextRefs(workspaceDir, symbol, args?.file, 30)
+    if (textRefs.length > 0) {
+      result.results = textRefs
+      result.count = textRefs.length
+      result.search_method = 'text_fallback'
+    }
+  }
   
   if (misuseWarning) {
     result.misuse_warning = misuseWarning
   }
   
   return result
+}
+
+const SOURCE_EXTS = new Set(['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.mts', '.cts', '.py', '.go', '.rs', '.java', '.rb', '.php'])
+
+function findSymbolTextRefs(workspaceDir, symbol, excludeFile, maxResults) {
+  const results = []
+  const re = new RegExp(`\\b${symbol.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`)
+  const scanned = { files: 0 }
+  walkRefs(workspaceDir, workspaceDir, re, excludeFile, results, scanned, 300, maxResults)
+  return results
+}
+
+function walkRefs(baseDir, currentDir, re, excludeFile, results, scanned, maxFiles, maxResults) {
+  if (scanned.files >= maxFiles || results.length >= maxResults) return
+  let entries
+  try { entries = readdirSync(currentDir, { withFileTypes: true }) } catch { return }
+  for (const entry of entries) {
+    if (scanned.files >= maxFiles || results.length >= maxResults) break
+    if (entry.name.startsWith('.') || entry.name === 'node_modules') continue
+    const fullPath = join(currentDir, entry.name)
+    if (entry.isDirectory()) {
+      walkRefs(baseDir, fullPath, re, excludeFile, results, scanned, maxFiles, maxResults)
+    } else if (entry.isFile()) {
+      const ext = fullPath.slice(fullPath.lastIndexOf('.'))
+      if (!SOURCE_EXTS.has(ext)) continue
+      scanned.files++
+      const relPath = fullPath.startsWith(baseDir + '/') ? fullPath.slice(baseDir.length + 1) : fullPath
+      if (relPath === excludeFile) continue
+      try {
+        const content = readFileSync(fullPath, 'utf-8')
+        const lines = content.split('\n')
+        for (let i = 0; i < lines.length; i++) {
+          if (re.test(lines[i])) {
+            results.push({ path: relPath, kind: 'reference', target_name: re.source.replace(/\\b/g, ''), line: i + 1 })
+            if (results.length >= maxResults) break
+          }
+        }
+      } catch {}
+    }
+  }
 }

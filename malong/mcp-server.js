@@ -64,6 +64,7 @@ function buildContext() {
     getWorkspaceDir,
     codeIndexService: core.getService('codeIndex'),
     repoMapService: core.getService('repoMap'),
+    langParserService: core.getService('langParser'),
   }
 }
 

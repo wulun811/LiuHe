@@ -128,13 +128,22 @@ function formatCallers(impact, key) {
 
 function formatCallees(impact) {
   const callees = impact.callees || []
-  return callees.map(c => ({
-    file: c.callee_file || c.file,
-    line: c.callee_line || c.line,
-    name: c.function || c.name,
-    distance: 1,
-    call_expr: c.call_expr || undefined
-  }))
+  const seen = new Set()
+  const result = []
+  for (const c of callees) {
+    const entry = {
+      file: c.callee_file || c.file,
+      line: c.callee_line || c.line,
+      name: c.function || c.name,
+      distance: 1,
+      call_expr: c.call_expr || undefined
+    }
+    const key = `${entry.file}:${entry.line}:${entry.name}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    result.push(entry)
+  }
+  return result
 }
 
 function formatTestRefs(impact) {

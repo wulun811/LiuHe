@@ -115,7 +115,7 @@ export async function handle(args, context) {
   }
 
   // 开始异步索引
-  const estimatedTimeSeconds = Math.ceil(totalFiles / 3)
+  const estimatedTimeSeconds = Math.ceil(totalFiles / 30)
 
   codeIndexService.indexing = true
   codeIndexService.indexProgress = { workspaceDir, total: totalFiles, indexed: 0, startTime: Date.now() }

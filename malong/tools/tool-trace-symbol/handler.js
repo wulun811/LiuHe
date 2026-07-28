@@ -84,6 +84,14 @@ export async function handle(args, context) {
   }))
   result.truncated = (refs || []).length > maxResults
 
+  if (result.direct_references.length === 0) {
+    const textRefs = findSymbolNameRefs(workspaceDir, symbol, file, maxResults)
+    if (textRefs.length > 0) {
+      result.direct_references = textRefs
+      result.search_method = 'text_fallback'
+    }
+  }
+
   if (includeLiterals && valueInfo) {
     const value = valueInfo.value
     if (value !== null && value !== undefined) {
@@ -235,4 +243,42 @@ function hasBoundaryMatch(line, value) {
     return re.test(line)
   }
   return line.includes(value)
+}
+
+function findSymbolNameRefs(workspaceDir, symbol, excludeFile, maxResults) {
+  const results = []
+  const re = new RegExp(`\\b${escapeRegex(symbol)}\\b`)
+  const scanned = { files: 0 }
+  walkDirForSymbol(workspaceDir, workspaceDir, re, excludeFile, results, scanned, 300, maxResults)
+  return results
+}
+
+function walkDirForSymbol(baseDir, currentDir, re, excludeFile, results, scanned, maxFiles, maxResults) {
+  if (scanned.files >= maxFiles || results.length >= maxResults) return
+  let entries
+  try { entries = readdirSync(currentDir, { withFileTypes: true }) } catch { return }
+  for (const entry of entries) {
+    if (scanned.files >= maxFiles || results.length >= maxResults) break
+    if (entry.name.startsWith('.') || entry.name === 'node_modules') continue
+    const fullPath = join(currentDir, entry.name)
+    if (entry.isDirectory()) {
+      walkDirForSymbol(baseDir, fullPath, re, excludeFile, results, scanned, maxFiles, maxResults)
+    } else if (entry.isFile()) {
+      const ext = fullPath.slice(fullPath.lastIndexOf('.'))
+      if (!SOURCE_EXTS.has(ext)) continue
+      scanned.files++
+      const relPath = fullPath.startsWith(baseDir + '/') ? fullPath.slice(baseDir.length + 1) : fullPath
+      if (relPath === excludeFile) continue
+      try {
+        const content = readFileSync(fullPath, 'utf-8')
+        const lines = content.split('\n')
+        for (let i = 0; i < lines.length; i++) {
+          if (re.test(lines[i])) {
+            results.push({ file: relPath, line: i + 1, context: lines[i].trim() })
+            if (results.length >= maxResults) break
+          }
+        }
+      } catch {}
+    }
+  }
 }
