@@ -104,7 +104,7 @@ function _calcComplexity(sym) {
 
 function initDb(dir) {
   const dbPath = join(dir, 'code-index.db')
-  const db = new Database(dbPath)
+  const db = openHealthy(dbPath)
   db.pragma('journal_mode=WAL')
   db.pragma('synchronous=NORMAL')
   db.pragma('cache_size=-65536')
@@ -114,6 +114,25 @@ function initDb(dir) {
   try { db.exec('ALTER TABLE refs ADD COLUMN line INTEGER DEFAULT 0') } catch (e) { if (!e.message?.includes('duplicate column')) console.error('[code-index] migration error:', e.message) }
   try { db.exec("ALTER TABLE refs ADD COLUMN call_expr TEXT DEFAULT ''") } catch (e) { if (!e.message?.includes('duplicate column')) console.error('[code-index] migration error:', e.message) }
   return db
+}
+
+function openHealthy(dbPath) {
+  const attempt = () => {
+    const db = new Database(dbPath)
+    const r = db.pragma('integrity_check')
+    const ok = Array.isArray(r) && r.length === 1 && r[0]?.integrity_check === 'ok'
+    if (!ok) { db.close(); throw new Error('integrity_check failed') }
+    return db
+  }
+  try {
+    return attempt()
+  } catch (e) {
+    console.error(`[code-index] DB corrupt (${e.message}) — rebuilding: ${dbPath}`)
+    for (const suffix of ['', '-wal', '-shm']) {
+      try { unlinkSync(dbPath + suffix) } catch {}
+    }
+    return new Database(dbPath)
+  }
 }
 
 class CodeIndex {
