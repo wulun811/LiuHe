@@ -76,7 +76,7 @@ export async function handle(args, context) {
     }
   }
 
-  const refs = await codeIndexService.getReferences(symbol, file)
+  const refs = await codeIndexService.getReferences(symbol)
   result.direct_references = (refs || []).slice(0, maxResults).map(r => ({
     file: r.source_file || r.file || r.caller_file,
     line: r.line || 0,

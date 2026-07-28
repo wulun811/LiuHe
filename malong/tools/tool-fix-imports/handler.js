@@ -1,7 +1,7 @@
 import { join } from 'node:path'
 import { existsSync, readFileSync, writeFileSync, statSync } from 'node:fs'
 
-const BUILTINS_PY = new Set(['abs', 'all', 'any', 'bin', 'bool', 'bytearray', 'bytes', 'callable', 'chr', 'classmethod', 'compile', 'complex', 'delattr', 'dict', 'dir', 'divmod', 'enumerate', 'eval', 'exec', 'filter', 'float', 'format', 'frozenset', 'getattr', 'globals', 'hasattr', 'hash', 'hex', 'id', 'input', 'int', 'isinstance', 'issubclass', 'iter', 'len', 'list', 'locals', 'map', 'max', 'memoryview', 'min', 'next', 'object', 'oct', 'open', 'ord', 'pow', 'print', 'property', 'range', 'repr', 'reversed', 'round', 'set', 'setattr', 'slice', 'sorted', 'staticmethod', 'str', 'sum', 'super', 'tuple', 'type', 'vars', 'zip', '__import__', 'Exception', 'BaseException', 'ValueError', 'TypeError', 'KeyError', 'IndexError', 'RuntimeError', 'StopIteration', 'ArithmeticError', 'AttributeError', 'EOFError', 'ImportError', 'LookupError', 'NameError', 'OSError', 'SyntaxError', 'SystemError', 'UnboundLocalError', 'ZeroDivisionError'])
+const BUILTINS_PY = new Set(['abs', 'all', 'any', 'bin', 'bool', 'bytearray', 'bytes', 'callable', 'chr', 'classmethod', 'compile', 'complex', 'delattr', 'dict', 'dir', 'divmod', 'enumerate', 'eval', 'exec', 'filter', 'float', 'format', 'frozenset', 'getattr', 'globals', 'hasattr', 'hash', 'hex', 'id', 'input', 'int', 'isinstance', 'issubclass', 'iter', 'len', 'list', 'locals', 'map', 'max', 'memoryview', 'min', 'next', 'object', 'oct', 'open', 'ord', 'pow', 'print', 'property', 'range', 'repr', 'reversed', 'round', 'set', 'setattr', 'slice', 'sorted', 'staticmethod', 'str', 'sum', 'super', 'tuple', 'type', 'vars', 'zip', '__import__', 'Exception', 'BaseException', 'ValueError', 'TypeError', 'KeyError', 'IndexError', 'RuntimeError', 'StopIteration', 'ArithmeticError', 'AttributeError', 'EOFError', 'ImportError', 'LookupError', 'NameError', 'OSError', 'SyntaxError', 'SystemError', 'UnboundLocalError', 'ZeroDivisionError', 'self', 'cls', 'None', 'True', 'False', 'NotImplemented', 'Ellipsis'])
 
 const BUILTINS_JS = new Set(['Array', 'Boolean', 'Date', 'Error', 'Function', 'JSON', 'Map', 'Math', 'Number', 'Object', 'Promise', 'Proxy', 'RegExp', 'Set', 'String', 'Symbol', 'WeakMap', 'WeakSet', 'console', 'document', 'window', 'global', 'process', 'require', 'module', 'exports', 'setTimeout', 'setInterval', 'clearTimeout', 'clearInterval', 'parseInt', 'parseFloat', 'isNaN', 'isFinite', 'undefined', 'NaN', 'Infinity', 'Buffer', 'URL', 'URLSearchParams', 'TextEncoder', 'TextDecoder', 'AbortController', 'fetch', 'Response', 'Request', 'Headers'])
 
@@ -15,7 +15,7 @@ const BUILTINS_MAP = { python: BUILTINS_PY, javascript: BUILTINS_JS, typescript:
 
 const SOURCE_EXTS = new Set(['.js', '.mjs', '.cjs', '.mts', '.cts', '.py', '.go', '.rs'])
 
-const KEYWORDS = new Set(['if', 'else', 'for', 'while', 'return', 'import', 'from', 'class', 'def', 'function', 'const', 'let', 'var', 'async', 'await', 'export', 'default', 'extends', 'implements', 'new', 'throw', 'try', 'catch', 'finally', 'switch', 'case', 'break', 'continue', 'typeof', 'instanceof', 'void', 'delete', 'in', 'of', 'this', 'super', 'yield'])
+const KEYWORDS = new Set(['if', 'else', 'for', 'while', 'return', 'import', 'from', 'class', 'def', 'function', 'const', 'let', 'var', 'async', 'await', 'export', 'default', 'extends', 'implements', 'new', 'throw', 'try', 'catch', 'finally', 'switch', 'case', 'break', 'continue', 'typeof', 'instanceof', 'void', 'delete', 'in', 'of', 'this', 'super', 'yield', 'except', 'as', 'with', 'lambda', 'pass', 'raise', 'global', 'nonlocal', 'assert', 'elif', 'not', 'and', 'or', 'is', 'del'])
 
 const SPECIAL = new Set(['__name__', '__file__', '__init__', '__str__', '__repr__'])
 
@@ -248,24 +248,71 @@ function analyzeFile(content, lang, currentFile = '') {
     const strippedDef = trimmed.replace(/^(?:export|async)\s+/, '')
     if (strippedDef.startsWith('def ') || strippedDef.startsWith('function ') || strippedDef.startsWith('class ')) {
       const parts = strippedDef.split(/[\s(]/)
-      const name = parts[1]
+      const name = parts[1]?.replace(/[:{(].*$/, '')
       if (name && !name.startsWith('(')) { definedSymbols.add(name); symbolLines[name] = i + 1 }
+    }
+
+    if (lang === 'python') {
+      const assignMatch = trimmed.match(/^(\w+)\s*(?::\s*[\w\[\], |]+)?\s*=[^=]/)
+      if (assignMatch && !KEYWORDS.has(assignMatch[1])) { definedSymbols.add(assignMatch[1]); symbolLines[assignMatch[1]] = i + 1 }
+
+      const paramMatch = trimmed.match(/def\s+\w+\s*\(([^)]*)\)/)
+      if (paramMatch) {
+        for (const p of paramMatch[1].split(',')) {
+          const pname = p.trim().split(/[\s:=]/)[0]
+          if (pname && /^[a-zA-Z_]\w*$/.test(pname)) definedSymbols.add(pname)
+        }
+      }
+
+      const exceptMatch = trimmed.match(/except\s+[\w.]+\s+as\s+(\w+)/)
+      if (exceptMatch) definedSymbols.add(exceptMatch[1])
+
+      const forMatch = trimmed.match(/for\s+(\w+)\s+in\s/)
+      if (forMatch) definedSymbols.add(forMatch[1])
+
+      const withMatch = trimmed.match(/with\s+.+\s+as\s+(\w+)/)
+      if (withMatch) definedSymbols.add(withMatch[1])
+    } else {
+      const jsParamMatch = trimmed.match(/(?:function\s+\w+|(?:const|let|var)\s+\w+\s*=\s*(?:async\s+)?function)\s*\(([^)]*)\)/)
+      if (jsParamMatch) {
+        for (const p of jsParamMatch[1].split(',')) {
+          const pname = p.trim().split(/[\s=]/)[0]
+          if (pname && /^[a-zA-Z_]\w*$/.test(pname)) definedSymbols.add(pname)
+        }
+      }
+      const arrowMatch = trimmed.match(/(?:const|let|var)\s+\w+\s*=\s*(?:async\s+)?\(([^)]*)\)\s*=>/)
+      if (arrowMatch) {
+        for (const p of arrowMatch[1].split(',')) {
+          const pname = p.trim().split(/[\s=]/)[0]
+          if (pname && /^[a-zA-Z_]\w*$/.test(pname)) definedSymbols.add(pname)
+        }
+      }
+      const catchMatch = trimmed.match(/catch\s*\(\s*(\w+)/)
+      if (catchMatch) definedSymbols.add(catchMatch[1])
     }
   }
 
   const builtins = BUILTINS_MAP[lang] || BUILTINS_PY
 
+  const cleaned = stripCommentsAndStrings(content, lang)
+  const cleanedLines = cleaned.split('\n')
   const idRe = /(?<!\.)\b([a-zA-Z_]\w*)/g
-  let match
-  while ((match = idRe.exec(content)) !== null) {
-    const name = match[1]
-    if (!builtins.has(name) && name !== name.toUpperCase()) {
-      usedSymbols.add(name)
+  for (let li = 0; li < cleanedLines.length; li++) {
+    const cl = cleanedLines[li].trim()
+    if (!cl || importRe.test(cl)) continue
+    for (const m of cl.matchAll(idRe)) {
+      const name = m[1]
+      const after = cl.slice(m.index + name.length).trimStart()
+      if (after.startsWith('=') && !after.startsWith('==')) continue
+      if (!builtins.has(name)) {
+        usedSymbols.add(name)
+      }
     }
   }
 
   if (lang === 'python') {
-    const stringAnnotationRe = /:\s*["']([A-Za-z_]\w*(?:\s*\|\s*[A-Za-z_]\w*)*)["']/g
+    const stringAnnotationRe = /(?<=\w)\s*:\s*["']([A-Za-z_]\w*(?:\s*\|\s*[A-Za-z_]\w*)*)["']/g
+    let match
     while ((match = stringAnnotationRe.exec(content)) !== null) {
       const types = match[1].split(/\s*\|\s*/)
       for (const t of types) {
@@ -281,12 +328,31 @@ function analyzeFile(content, lang, currentFile = '') {
 
   for (const sym of usedSymbols) {
     if (KEYWORDS.has(sym) || SPECIAL.has(sym) || builtins.has(sym) || sym.startsWith('__')) continue
+    if (sym === sym.toUpperCase() && sym.length > 2) continue
     if (!definedSymbols.has(sym)) {
       undefinedSymbols.push(sym)
     }
   }
 
   return { definedSymbols, usedSymbols, imports, undefinedSymbols: [...new Set(undefinedSymbols)], symbolLines, relativeImports }
+}
+
+function stripCommentsAndStrings(content, lang) {
+  let s = content
+  if (lang === 'python') {
+    s = s.replace(/"""[\s\S]*?"""/g, ' ')
+    s = s.replace(/'''[\s\S]*?'''/g, ' ')
+    s = s.replace(/#.*$/gm, ' ')
+    s = s.replace(/"(?:[^"\\]|\\.)*"/g, ' ')
+    s = s.replace(/'(?:[^'\\]|\\.)*'/g, ' ')
+  } else {
+    s = s.replace(/\/\*[\s\S]*?\*\//g, ' ')
+    s = s.replace(/\/\/.*$/gm, ' ')
+    s = s.replace(/`(?:[^`\\]|\\.)*`/g, ' ')
+    s = s.replace(/"(?:[^"\\]|\\.)*"/g, ' ')
+    s = s.replace(/'(?:[^'\\]|\\.)*'/g, ' ')
+  }
+  return s
 }
 
 function resolveRelativeImport(relativeModule, currentFile) {

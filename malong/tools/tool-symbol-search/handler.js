@@ -36,5 +36,10 @@ export async function handle(args, context) {
   }
 
   const results = await codeIndexService.searchSymbols(query, { limit })
-  return { results, count: results.length, query, workspace_dir: workspaceDir }
+  const res = { results, count: results.length, query, workspace_dir: workspaceDir }
+  if (query.length === 1) {
+    res.warning = 'single_char_query'
+    res.suggestion = `Single-character query "${query}" is very broad. Use a longer substring for more targeted results.`
+  }
+  return res
 }

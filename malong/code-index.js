@@ -823,7 +823,11 @@ class CodeIndex {
             for (const mod of queue) {
               if (visited.has(mod)) continue
               visited.add(mod)
-              const mf = self._db.prepare("SELECT id, path FROM files WHERE path LIKE ?").get(`%${mod}%`)
+              let mf = self._db.prepare("SELECT id, path FROM files WHERE path LIKE ?").get(`%${mod}%`)
+              if (!mf && mod.includes('.')) {
+                const slashed = mod.replace(/\./g, '/')
+                mf = self._db.prepare("SELECT id, path FROM files WHERE path LIKE ?").get(`%${slashed}%`)
+              }
               if (!mf) continue
               const sub = self._db.prepare("SELECT r.target_name AS module FROM refs r WHERE r.source_file_id = ? AND r.kind = 'import'").all(mf.id)
               for (const s of sub) {

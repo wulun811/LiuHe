@@ -34,7 +34,10 @@ export async function handle(args, context) {
         return { status: 'rolled_back', error: editResult.error, file, message: editResult.message }
       }
 
-      return { status: 'staged', file, edits_applied: editResult.edits_applied }
+      const res = { status: 'staged', file, edits_applied: editResult.edits_applied }
+      if (editResult.validation_warnings?.length) res.validation_warnings = editResult.validation_warnings
+      if (editResult.failed_edits?.length) res.failed_edits = editResult.failed_edits
+      return res
     }
 
     case 'edit_multi': {
@@ -64,7 +67,10 @@ export async function handle(args, context) {
           hasError = true
           if (atomic) break
         } else {
-          results.push({ file, status: 'success', edits_applied: editResult.edits_applied })
+          const r = { file, status: 'success', edits_applied: editResult.edits_applied }
+          if (editResult.validation_warnings?.length) r.validation_warnings = editResult.validation_warnings
+          if (editResult.failed_edits?.length) r.failed_edits = editResult.failed_edits
+          results.push(r)
         }
       }
 
