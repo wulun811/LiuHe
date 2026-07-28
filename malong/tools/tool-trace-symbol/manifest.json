@@ -1,7 +1,7 @@
 {
   "name": "trace_symbol",
   "version": "1.1.0",
-  "description": "Trace constant values and find hardcoded literal copies. For function impact, use impact_analysis.",
+  "description": "Inspect constant values and find hardcoded copies. Read-only analysis, not for editing. For function impact, use impact_analysis.",
   "inputSchema": {
     "type": "object",
     "properties": {
