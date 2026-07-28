@@ -352,7 +352,7 @@ function analyzeFileAST(content, lang, currentFile, langParser) {
       return
     }
 
-    if (type === 'identifier') {
+    if (type === 'identifier' || type === 'type_identifier') {
       const name = text(node)
       if (isDefPosition(node)) {
         definedSymbols.add(name)
@@ -365,7 +365,7 @@ function analyzeFileAST(content, lang, currentFile, langParser) {
       return
     }
 
-    if (type === 'property_identifier' || type === 'private_property_identifier' || type === 'type_identifier') return
+    if (type === 'property_identifier' || type === 'private_property_identifier') return
     if (type === 'shorthand_property_identifier') { usedSymbols.add(text(node)); return }
     if (type === 'shorthand_property_identifier_pattern') { definedSymbols.add(text(node)); return }
     if (type === 'method_definition') {
@@ -384,6 +384,15 @@ function analyzeFileAST(content, lang, currentFile, langParser) {
   function isDefPosition(node) {
     const p = node.parent
     if (!p) return false
+    if (node.type === 'type_identifier') {
+      switch (p.type) {
+        case 'interface_declaration': case 'type_alias_declaration':
+        case 'class_declaration': case 'class_expression':
+        case 'enum_declaration': case 'abstract_class_declaration':
+          return p.childForFieldName('name') === node
+        default: return false
+      }
+    }
     switch (p.type) {
       case 'variable_declarator': return p.childForFieldName('name') === node
       case 'function_declaration': case 'function_expression':
