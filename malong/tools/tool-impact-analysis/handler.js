@@ -1,7 +1,7 @@
 // 六合工具集 - impact_analysis handler
 
 import { join } from 'node:path'
-import { existsSync } from 'node:fs'
+import { existsSync, statSync } from 'node:fs'
 
 export async function handle(args, context) {
   const { codeIndexService, getWorkspaceDir } = context
@@ -43,5 +43,17 @@ export async function handle(args, context) {
     opts.depth = (d > 0 && d <= 10) ? d : 2
   }
 
-  return await codeIndexService.getImpactAnalysis(file, opts)
+  const result = await codeIndexService.getImpactAnalysis(file, opts)
+
+  const absPath = join(workspaceDir, file)
+  try {
+    const diskMtime = statSync(absPath).mtimeMs
+    const indexedMtime = codeIndexService.getFileMtime(file)
+    if (diskMtime > indexedMtime) {
+      result.warning = 'index_stale'
+      result.suggestion = `File "${file}" was modified after last index. Call reindex to refresh, or results may be outdated.`
+    }
+  } catch {}
+
+  return result
 }

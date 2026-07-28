@@ -55,6 +55,14 @@ export async function handle(args, context) {
     maxCallers: Math.max(maxCallers, maxCallees)
   })
 
+  let indexStale = false
+  const absPath = join(workspaceDir, file)
+  try {
+    const diskMtime = statSync(absPath).mtimeMs
+    const indexedMtime = codeIndexService.getFileMtime(file)
+    if (diskMtime > indexedMtime) indexStale = true
+  } catch {}
+
   const result = {
     target: {
       file,
@@ -71,11 +79,18 @@ export async function handle(args, context) {
     recently_modified: checkRecentModifications(workspaceDir, impact),
     metadata: {
       parse_time_ms: Date.now() - startTime,
+      cache_hit: !!impact._fromCache,
+      ...(indexStale ? { index_stale: true } : {}),
       ...(impact.summary ? {
         total_callers: impact.summary.direct_callers + impact.summary.indirect_callers,
         total_callees: impact.summary.total_callees || 0
       } : {})
     }
+  }
+
+  if (indexStale) {
+    result.warning = 'index_stale'
+    result.suggestion = `File "${file}" was modified after last index. Call reindex to refresh.`
   }
 
   return result

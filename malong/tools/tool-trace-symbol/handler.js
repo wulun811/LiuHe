@@ -37,7 +37,8 @@ export async function handle(args, context) {
   let fileMtime = 0
   try { fileMtime = statSync(absFilePath).mtimeMs } catch {}
   const cacheKey = `${workspaceDir}\0${symbol}\0${file}\0${includeLiterals}\0${maxResults}\0${fileMtime}`
-  if (_traceCache.has(cacheKey)) return _traceCache.get(cacheKey)
+  const wasCached = _traceCache.has(cacheKey)
+  if (wasCached) return _traceCache.get(cacheKey)
 
   const result = {
     symbol,
@@ -84,6 +85,14 @@ export async function handle(args, context) {
       count: result.suspected_literals.length
     }
   }
+
+  try {
+    const indexedMtime = codeIndexService.getFileMtime(file)
+    if (fileMtime > indexedMtime) {
+      result.warning = 'index_stale'
+      result.suggestion = `File "${file}" was modified after last index. References may be incomplete. Call reindex to refresh.`
+    }
+  } catch {}
 
   _traceCache.set(cacheKey, result)
   if (_traceCache.size > _traceCacheMax) {

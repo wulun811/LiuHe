@@ -136,7 +136,38 @@ export async function handle(args, context) {
     writeFileSync(absPath, newLines.join('\n'), 'utf-8')
   }
 
+  const transactionReady = []
+  if (!autoFix) {
+    const undefinedIssues = issues.filter(i => i.type === 'undefined_symbol' && i.candidates.length > 0)
+    if (undefinedIssues.length > 0) {
+      const seenModules = new Set()
+      const stmts = undefinedIssues.map(i => {
+        const c = i.candidates[0]
+        if (seenModules.has(c.module)) return null
+        seenModules.add(c.module)
+        return `from ${c.module} import ${i.symbol}`
+      }).filter(Boolean)
+      if (stmts.length > 0) {
+        const insertLine = findImportInsertLine(lines) || 0
+        const oldText = lines.slice(0, insertLine).join('\n') + (insertLine > 0 ? '\n' : '')
+        const newText = oldText + stmts.join('\n') + '\n'
+        transactionReady.push({ file, old_string: oldText, new_string: newText })
+      }
+    }
+
+    const unusedIssues = issues.filter(i => i.type === 'unused_import')
+    for (const issue of unusedIssues) {
+      const idx = issue.line - 1
+      if (idx >= 0 && idx < lines.length) {
+        transactionReady.push({ file, old_string: lines[idx], new_string: '' })
+      }
+    }
+  }
+
   const result = { file, issues, fixes_applied: fixesApplied }
+  if (!autoFix && transactionReady.length > 0) {
+    result.transaction_ready = transactionReady
+  }
 
   if (!autoFix) {
     _fixImportsCache.set(cacheKey, result)

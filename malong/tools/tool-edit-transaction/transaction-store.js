@@ -93,11 +93,16 @@ export class TransactionStore {
       return { error: 'no_match', file: fileRel, message: 'No edits matched in file', failed_edits: failedEdits }
     }
 
+    const validationWarnings = checkBracketBalance(result)
+
     writeFileSync(absPath, result, 'utf-8')
     const res = { status: 'staged', file: fileRel, edits_applied: applied }
     if (failedEdits.length > 0) {
       res.failed_edits = failedEdits
       res.warning = `${failedEdits.length} edit(s) did not match`
+    }
+    if (validationWarnings.length > 0) {
+      res.validation_warnings = validationWarnings
     }
     return res
   }
@@ -189,4 +194,57 @@ export class TransactionStore {
     }
     return hash
   }
+}
+
+function checkBracketBalance(content) {
+  const warnings = []
+  const pairs = { ')': '(', ']': '[', '}': '{' }
+  const opens = new Set(['(', '[', '{'])
+  const stack = []
+  let inString = null
+  let inLineComment = false
+  let inBlockComment = false
+
+  for (let i = 0; i < content.length; i++) {
+    const ch = content[i]
+    const next = content[i + 1]
+
+    if (inLineComment) {
+      if (ch === '\n') inLineComment = false
+      continue
+    }
+    if (inBlockComment) {
+      if (ch === '*' && next === '/') { inBlockComment = false; i++ }
+      continue
+    }
+    if (inString) {
+      if (ch === '\\') { i++; continue }
+      if (ch === inString) inString = null
+      continue
+    }
+
+    if (ch === '/' && next === '/') { inLineComment = true; continue }
+    if (ch === '/' && next === '*') { inBlockComment = true; i++; continue }
+    if (ch === '"' || ch === "'" || ch === '`') { inString = ch; continue }
+    if (ch === '#') { inLineComment = true; continue }
+
+    if (opens.has(ch)) {
+      stack.push({ char: ch, line: content.slice(0, i).split('\n').length })
+    } else if (pairs[ch]) {
+      if (stack.length === 0) {
+        warnings.push({ type: 'bracket_imbalance', bracket: ch, detail: `extra closing "${ch}"` })
+      } else {
+        const top = stack.pop()
+        if (top.char !== pairs[ch]) {
+          warnings.push({ type: 'bracket_mismatch', detail: `"${top.char}" at line ${top.line} closed by "${ch}"` })
+        }
+      }
+    }
+  }
+
+  for (const unclosed of stack) {
+    warnings.push({ type: 'bracket_imbalance', bracket: unclosed.char, detail: `unclosed "${unclosed.char}" opened at line ${unclosed.line}` })
+  }
+
+  return warnings
 }

@@ -695,7 +695,9 @@ class CodeIndex {
       async getImpactAnalysis(filePath, { symbol, changeType = 'modify', maxCallers = 20, depth = 2 } = {}) {
         const cacheKey = `${self._currentWorkspace || ''}\0${filePath}\0${symbol || ''}\0${changeType}\0${maxCallers}\0${depth}`
         if (self._impactCache.has(cacheKey)) {
-          return self._impactCache.get(cacheKey)
+          const cached = self._impactCache.get(cacheKey)
+          cached._fromCache = true
+          return cached
         }
 
         const f = self._db.prepare('SELECT id FROM files WHERE path = ?').get(filePath)
@@ -894,6 +896,11 @@ class CodeIndex {
         const dbPath = self._currentWorkspace ? join(self._core.getWorkspaceDir(self._currentWorkspace), 'code-index.db') : null
         const fileSize = dbPath && existsSync(dbPath) ? readFileSync(dbPath).length : 0
         return { files, symbols, refs, dbSize: fileSize, indexing: self._indexing }
+      },
+
+      getFileMtime(filePath) {
+        const f = self._db.prepare('SELECT mtime FROM files WHERE path = ?').get(filePath)
+        return f ? f.mtime : 0
       },
 
       async getFileOutline(filePath, { depth = 1, includeRefs = false, includeTestRefs = false, maxItems = 50 } = {}) {
