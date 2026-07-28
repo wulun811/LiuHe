@@ -154,13 +154,13 @@ function walkDir(baseDir, currentDir, literalValue, excludeSymbol, results, scan
         const lines = content.split('\n')
         for (let i = 0; i < lines.length; i++) {
           const line = lines[i]
-          if (line.includes(literalValue) && !line.includes(excludeSymbol)) {
-            if (isInCommentOrString(line, literalValue)) continue
-            const confidence = calcConfidence(line, literalValue)
-            if (confidence >= 0.5) {
-              const relPath = fullPath.startsWith(baseDir + '/') ? fullPath.slice(baseDir.length + 1) : fullPath
-              results.push({ file: relPath, line: i + 1, context: line.trim(), confidence: Math.round(confidence * 100) / 100, level: confidence >= 0.8 ? 'high' : 'medium' })
-            }
+          if (!line.includes(literalValue) || line.includes(excludeSymbol)) continue
+          if (!hasBoundaryMatch(line, literalValue)) continue
+          if (isInCommentOrString(line, literalValue)) continue
+          const confidence = calcConfidence(line, literalValue)
+          if (confidence >= 0.5) {
+            const relPath = fullPath.startsWith(baseDir + '/') ? fullPath.slice(baseDir.length + 1) : fullPath
+            results.push({ file: relPath, line: i + 1, context: line.trim(), confidence: Math.round(confidence * 100) / 100, level: confidence >= 0.8 ? 'high' : 'medium' })
           }
         }
       } catch {}
@@ -200,4 +200,12 @@ function calcConfidence(line, value) {
 
 function escapeRegex(str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function hasBoundaryMatch(line, value) {
+  if (/^\w+$/.test(value)) {
+    const re = new RegExp(`\\b${escapeRegex(value)}\\b`)
+    return re.test(line)
+  }
+  return line.includes(value)
 }

@@ -62,30 +62,44 @@ export class TransactionStore {
     const content = readFileSync(absPath, 'utf-8')
     let result = content
     let applied = 0
+    const failedEdits = []
 
-    for (const edit of edits) {
+    for (let i = 0; i < edits.length; i++) {
+      const edit = edits[i]
       const oldStr = edit.old_string
       const newStr = edit.new_string ?? ''
       if (!oldStr) continue
 
       if (edit.replace_all) {
         const replaced = result.replaceAll(oldStr, newStr)
-        if (replaced !== result) applied++
-        result = replaced
+        if (replaced !== result) {
+          applied++
+          result = replaced
+        } else {
+          failedEdits.push({ index: i, old_string: oldStr, reason: 'not_found' })
+        }
       } else {
         const idx = result.indexOf(oldStr)
-        if (idx === -1) continue
+        if (idx === -1) {
+          failedEdits.push({ index: i, old_string: oldStr, reason: 'not_found' })
+          continue
+        }
         result = result.slice(0, idx) + newStr + result.slice(idx + oldStr.length)
         applied++
       }
     }
 
-    if (applied === 0) {
-      return { error: 'no_match', file: fileRel, message: 'No edits matched in file' }
+    if (applied === 0 && failedEdits.length > 0) {
+      return { error: 'no_match', file: fileRel, message: 'No edits matched in file', failed_edits: failedEdits }
     }
 
     writeFileSync(absPath, result, 'utf-8')
-    return { status: 'staged', file: fileRel, edits_applied: applied }
+    const res = { status: 'staged', file: fileRel, edits_applied: applied }
+    if (failedEdits.length > 0) {
+      res.failed_edits = failedEdits
+      res.warning = `${failedEdits.length} edit(s) did not match`
+    }
+    return res
   }
 
   commit(txnId) {

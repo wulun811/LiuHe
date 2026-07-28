@@ -220,7 +220,7 @@ function analyzeFile(content, lang, currentFile = '') {
 
   const builtins = BUILTINS_MAP[lang] || BUILTINS_PY
 
-  const idRe = /([a-zA-Z_]\w*)/g
+  const idRe = /(?<!\.)\b([a-zA-Z_]\w*)/g
   let match
   while ((match = idRe.exec(content)) !== null) {
     const name = match[1]
