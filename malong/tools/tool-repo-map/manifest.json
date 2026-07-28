@@ -1,7 +1,7 @@
 {
   "name": "repo_map",
   "version": "1.0.0",
-  "description": "Structured code map. Use focused=true + relevantEntities for token-efficient queries.",
+  "description": "Project-wide code map for large codebases (100+ files). For single-symbol search, use symbol_search.",
   "inputSchema": {
     "type": "object",
     "properties": {

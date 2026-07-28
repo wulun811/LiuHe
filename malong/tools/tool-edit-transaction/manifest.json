@@ -1,7 +1,7 @@
 {
   "name": "edit_transaction",
   "version": "1.1.0",
-  "description": "Transactional file editing: begin→edit→commit/rollback. For simple batch edits, use edit_batch.",
+  "description": "Transactional file editing with rollback safety. Use when you're unsure about changes or need to preview before committing. For simple batch edits, use edit_batch.",
   "inputSchema": {
     "type": "object",
     "properties": {
