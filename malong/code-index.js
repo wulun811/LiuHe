@@ -285,6 +285,33 @@ class CodeIndex {
     return 'low'
   }
 
+  _extractDocstrings(filePath, symbols) {
+    const absPath = join(this._currentWorkspace ? this._core.getWorkspaceDir(this._currentWorkspace) : '', filePath)
+    if (!existsSync(absPath)) return {}
+    try {
+      const content = readFileSync(absPath, 'utf-8')
+      const lines = content.split('\n')
+      const result = {}
+      for (const sym of symbols) {
+        if (sym.type !== 'function' && sym.type !== 'method' && sym.type !== 'class') continue
+        const defLine = sym.start_line - 1
+        for (let i = defLine + 1; i < Math.min(defLine + 5, lines.length); i++) {
+          const t = lines[i].trim()
+          if (!t) continue
+          const m = t.match(/^(?:"""([\s\S]*?)"""|'''([\s\S]*?)'''|\/\*\*([\s\S]*?)\*\/)/)
+          if (m) {
+            const doc = (m[1] || m[2] || m[3] || '').trim().split('\n')[0].trim()
+            if (doc) result[sym.start_line] = doc
+          }
+          break
+        }
+      }
+      return result
+    } catch {
+      return {}
+    }
+  }
+
   _resolveRefDetail(sourceSymbolId) {
     if (!sourceSymbolId) return { line: 0, func: null }
     const row = this._db.prepare('SELECT name, type, start_line FROM symbols WHERE id = ?').get(sourceSymbolId)
@@ -625,6 +652,12 @@ class CodeIndex {
         return self._db.prepare("SELECT r.target_name, r.kind, f.path AS source_file, f2.path AS target_file FROM symbols s JOIN refs r ON r.source_file_id = s.file_id JOIN files f ON s.file_id = f.id LEFT JOIN files f2 ON r.target_file_id = f2.id WHERE s.name = ? AND r.kind IN ('call','import')").all(symbolName)
       },
 
+      getSymbolsAtLine(filePath, line) {
+        const f = self._db.prepare('SELECT id FROM files WHERE path = ?').get(filePath)
+        if (!f) return []
+        return self._db.prepare("SELECT id, name, type, start_line, end_line FROM symbols WHERE file_id = ? AND ? BETWEEN start_line AND end_line ORDER BY end_line - start_line ASC").all(f.id, line)
+      },
+
       async getImpactAnalysis(filePath, { symbol, changeType = 'modify', maxCallers = 20, depth = 2 } = {}) {
         const cacheKey = `${self._currentWorkspace || ''}\0${filePath}\0${symbol || ''}\0${changeType}\0${maxCallers}\0${depth}`
         if (self._impactCache.has(cacheKey)) {
@@ -827,6 +860,48 @@ class CodeIndex {
         const dbPath = self._currentWorkspace ? join(self._core.getWorkspaceDir(self._currentWorkspace), 'code-index.db') : null
         const fileSize = dbPath && existsSync(dbPath) ? readFileSync(dbPath).length : 0
         return { files, symbols, refs, dbSize: fileSize, indexing: self._indexing }
+      },
+
+      async getFileOutline(filePath, { depth = 1, includeRefs = false, includeTestRefs = false, maxItems = 50 } = {}) {
+        const f = self._db.prepare('SELECT id, size FROM files WHERE path = ?').get(filePath)
+        if (!f) return { error: 'file_not_found', message: `File not indexed: ${filePath}`, suggestion: `Call reindex(workspace_dir=...) to index the project first` }
+
+        const symbols = self._db.prepare('SELECT id, name, type, signature, start_line, end_line FROM symbols WHERE file_id = ? ORDER BY start_line').all(f.id)
+
+        const docstrings = self._extractDocstrings(filePath, symbols)
+
+        const rootSymbols = symbols.filter(s => !symbols.some(c => c.start_line <= s.start_line && c.end_line >= s.end_line && c.id !== s.id))
+        const truncated = rootSymbols.length > maxItems
+        const slice = truncated ? rootSymbols.slice(0, maxItems) : rootSymbols
+
+        const outline = await Promise.all(slice.map(s => buildOutlineNode(s, symbols, depth - 1, includeRefs, includeTestRefs)))
+
+        return {
+          file: filePath,
+          lines: symbols.length > 0 ? Math.max(...symbols.map(s => s.end_line)) : 0,
+          tokens_estimate: f.size ? Math.ceil(f.size / 3) : 0,
+          truncated,
+          outline
+        }
+
+        async function buildOutlineNode(sym, allSyms, remainingDepth, countRefs, countTestRefs) {
+          const children = allSyms.filter(c => c.id !== sym.id && c.start_line >= sym.start_line && c.end_line <= sym.end_line && !allSyms.some(g => g.id !== sym.id && g.id !== c.id && g.start_line <= c.start_line && g.end_line >= c.end_line))
+          const node = { type: sym.type, name: sym.name, line: sym.start_line, end_line: sym.end_line }
+          if (sym.signature) node.signature = sym.signature
+          if (sym.name.startsWith('_') && !sym.name.startsWith('__')) node.private = true
+          if (docstrings[sym.start_line]) node.docstring = docstrings[sym.start_line]
+          if (children.length > 0 && remainingDepth >= 0) {
+            node.children = await Promise.all(children.map(c => buildOutlineNode(c, allSyms, remainingDepth - 1, countRefs, countTestRefs)))
+          }
+          if (countRefs) {
+            const refCount = self._db.prepare('SELECT COUNT(*) as cnt FROM refs WHERE target_name = ? AND (source_file_id != ? OR kind != \'import\')').get(sym.name, f.id)
+            node.refs = refCount.cnt
+          }
+          if (countTestRefs && !self._isTestFile(filePath)) {
+            node.test_refs = self._db.prepare("SELECT COUNT(*) as cnt FROM refs r JOIN files f2 ON r.source_file_id = f2.id WHERE r.target_name = ? AND f2.path LIKE '%test%'").get(sym.name).cnt
+          }
+          return node
+        }
       },
 
       watchDirectory(dir) {

@@ -1,0 +1,20 @@
+{
+  "name": "trace_symbol",
+  "version": "1.0.0",
+  "description": "Trace a symbol's value and find all references including suspected hardcoded literal copies. Uses code-index refs table for direct references, then scans files for literal values to detect hardcoded duplicates. The literals search is text-based with a confidence heuristic (comment/string filtering). Useful before modifying constants or refactoring variable names.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "workspace_dir": { "type": "string", "description": "REQUIRED: Absolute path to the project root directory. Call reindex first." },
+      "symbol": { "type": "string", "description": "Symbol name to trace (e.g. \"MAX_RETRY_COUNT\")" },
+      "file": { "type": "string", "description": "File path relative to workspace_dir where the symbol is defined (e.g. \"src/config.py\")" },
+      "include_literals": { "type": "boolean", "description": "Search for hardcoded literal values across the project (default: false, slower)" },
+      "max_results": { "type": "number", "description": "Max results per section (default: 30)" }
+    },
+    "required": ["workspace_dir", "symbol", "file"]
+  },
+  "handler": "./handler.js",
+  "protocol_version": "1.0",
+  "tags": ["trace", "references", "literals"],
+  "dependencies": ["reindex"]
+}

@@ -1,0 +1,21 @@
+{
+  "name": "read_outline",
+  "version": "1.0.0",
+  "description": "Read a structured outline of a source file: hierarchical function/class/method signatures, line numbers, reference counts. Uses the pre-indexed symbols table (call reindex first). Returns truncated=true if max_items exceeded. Token estimate based on file size. Design reference: Impact Lens _extractContext for signature extraction.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "workspace_dir": { "type": "string", "description": "REQUIRED: Absolute path to the project root directory. Call reindex first." },
+      "file": { "type": "string", "description": "File path relative to workspace_dir (e.g. \"src/auth.py\")" },
+      "depth": { "type": "number", "description": "Hierarchy depth: 0=top-level only, 1=class+methods, 2=full recursive (default: 1)" },
+      "include_refs": { "type": "boolean", "description": "Include reference counts per symbol (default: false)" },
+      "include_test_refs": { "type": "boolean", "description": "Include test reference counts (default: false)" },
+      "max_items": { "type": "number", "description": "Max top-level items to return (default: 50)" }
+    },
+    "required": ["workspace_dir", "file"]
+  },
+  "handler": "./handler.js",
+  "protocol_version": "1.0",
+  "tags": ["outline", "structure", "symbols"],
+  "dependencies": ["reindex"]
+}

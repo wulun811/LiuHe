@@ -1,0 +1,19 @@
+{
+  "name": "fix_imports",
+  "version": "1.0.0",
+  "description": "Analyze and fix import-related issues in a file: undefined symbols, circular imports, unused imports. Uses the code-index symbols/refs tables for symbol lookup and import graph. Can provide auto-fix suggestions for missing imports and unused import removal. For circular imports, recommends structural changes (extract shared types).",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "workspace_dir": { "type": "string", "description": "REQUIRED: Absolute path to the project root directory. Call reindex first." },
+      "file": { "type": "string", "description": "File path relative to workspace_dir (e.g. \"src/new_feature.py\")" },
+      "auto_fix": { "type": "boolean", "description": "Auto-fix issues when possible (default: false)" },
+      "max_candidates": { "type": "number", "description": "Max candidate symbols per undefined symbol (default: 10)" }
+    },
+    "required": ["workspace_dir", "file"]
+  },
+  "handler": "./handler.js",
+  "protocol_version": "1.0",
+  "tags": ["import", "fix", "circular", "unused"],
+  "dependencies": ["reindex"]
+}

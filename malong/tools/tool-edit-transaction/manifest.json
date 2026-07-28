@@ -1,0 +1,23 @@
+{
+  "name": "edit_transaction",
+  "version": "1.0.0",
+  "description": "Transaction-based file editing with atomic commit/rollback. Supports begin/edit/edit_multi/commit/rollback via action field. edit_multi supports atomic=true (all-or-nothing) and atomic=false (partial success). Uses file backup approach (no git dependency). Backups stored in .ai-transactions/.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "workspace_dir": { "type": "string", "description": "REQUIRED: Absolute path to the project root directory." },
+      "action": { "type": "string", "enum": ["begin", "edit", "edit_multi", "commit", "rollback", "info"], "description": "Transaction action to perform." },
+      "name": { "type": "string", "description": "Transaction name (required for action=begin)." },
+      "txn_id": { "type": "string", "description": "Transaction ID (required for edit, edit_multi, commit, rollback, info)." },
+      "file": { "type": "string", "description": "Single file path relative to workspace_dir (required for action=edit)." },
+      "files": { "type": "array", "items": { "type": "string" }, "description": "Multiple file paths relative to workspace_dir (required for action=edit_multi)." },
+      "edits": { "type": "array", "items": { "type": "object", "properties": { "old_string": { "type": "string" }, "new_string": { "type": "string" }, "replace_all": { "type": "boolean" } }, "required": ["old_string"] }, "description": "Array of edits (required for edit, edit_multi)." },
+      "atomic": { "type": "boolean", "description": "For edit_multi: all-or-nothing (default: true)." }
+    },
+    "required": ["workspace_dir", "action"]
+  },
+  "handler": "./handler.js",
+  "protocol_version": "1.0",
+  "tags": ["transaction", "edit", "atomic", "backup"],
+  "dependencies": []
+}

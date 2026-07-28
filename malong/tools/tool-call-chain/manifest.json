@@ -1,0 +1,22 @@
+{
+  "name": "call_chain",
+  "version": "1.0.0",
+  "description": "Local call chain snapshot: find callers, callees, test references, and recently modified files for a function at a given file+line. Wraps getImpactAnalysis() with mtime check. Use this for lightweight, on-demand call chain analysis without separate indexing overhead. REQUIRED: Call reindex first.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "workspace_dir": { "type": "string", "description": "REQUIRED: Absolute path to the project root directory. Call reindex first." },
+      "file": { "type": "string", "description": "File path relative to workspace_dir (e.g. \"src/auth.py\")" },
+      "line": { "type": "number", "description": "Line number of the function to analyze (optional if symbol is provided)" },
+      "symbol": { "type": "string", "description": "Symbol name override (optional; auto-resolved from file+line if omitted)" },
+      "depth": { "type": "number", "description": "Call chain depth (default: 2, max: 10)" },
+      "max_callers": { "type": "number", "description": "Max callers to return (default: 20)" },
+      "max_callees": { "type": "number", "description": "Max callees to return (default: 20)" }
+    },
+    "required": ["workspace_dir", "file"]
+  },
+  "handler": "./handler.js",
+  "protocol_version": "1.0",
+  "tags": ["call", "chain", "callers", "callees"],
+  "dependencies": ["reindex"]
+}
