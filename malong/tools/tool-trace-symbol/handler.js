@@ -1,16 +1,15 @@
 import { join } from 'node:path'
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { isFunctionName } from '../misuse-helpers.js'
 
 const SOURCE_EXTS = new Set(['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.mts', '.cts', '.py', '.go', '.rs', '.java', '.rb', '.php'])
 
 const _traceCache = new Map()
 const _traceCacheMax = 200
 
-const VERB_PREFIXES = /^(get|set|handle|process|create|delete|update|find|check|validate|login|logout|register|send|fetch|load|save|init|start|stop|run|execute|parse|format|convert|transform|filter|sort|map|reduce|count|verify|authenticate|authorize|encrypt|decrypt|encode|decode|read|write|open|close|connect|disconnect|subscribe|unsubscribe|emit|on|off|add|remove|insert|append|push|pop|shift|unshift)/
-
 function detectMisuse(symbol) {
   if (!symbol) return null
-  if (VERB_PREFIXES.test(symbol) || (symbol.includes('_') && !/^[A-Z_]+$/.test(symbol))) {
+  if (isFunctionName(symbol)) {
     return {
       warning: 'likely_wrong_tool',
       suggestion: `"${symbol}" looks like a function/method name. For function impact analysis, use impact_analysis(symbol="${symbol}"). For line-level callers, use call_chain(line=N).`

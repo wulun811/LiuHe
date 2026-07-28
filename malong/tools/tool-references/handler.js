@@ -2,10 +2,11 @@
 
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
+import { isConstantName } from '../misuse-helpers.js'
 
 function detectMisuse(symbol) {
   if (!symbol) return null
-  if (/^[A-Z][A-Z0-9_]*$/.test(symbol) && symbol.length > 2) {
+  if (isConstantName(symbol)) {
     return {
       warning: 'likely_wrong_tool',
       suggestion: `"${symbol}" looks like a constant. For tracing its value and finding hardcoded copies, use trace_symbol(symbol="${symbol}").`
