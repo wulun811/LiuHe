@@ -149,6 +149,9 @@ class CodeIndex {
 
   indexFile(filePath, repo) {
     if (!CACHED_EXT.has(extname(filePath))) return null
+    let size = 0
+    try { size = statSync(filePath).size } catch { return null }
+    if (size > 1024 * 1024) return null
     const source = readFileSync(filePath, 'utf-8')
     const ext = extname(filePath)
     const tree = this._langParser.parse(source, ext)
@@ -488,8 +491,9 @@ class CodeIndex {
         const batches = [changedFiles.slice(0, mid), changedFiles.slice(mid)].filter(b => b.length > 0)
         const runWorker = (files) => new Promise((res, rej) => {
           const w = new Worker(workerUrl)
-          w.on('message', (msg) => { res(msg.results); w.terminate() })
-          w.on('error', rej)
+          const timer = setTimeout(() => { w.terminate(); rej(new Error('parse worker timeout')) }, 180000)
+          w.on('message', (msg) => { clearTimeout(timer); res(msg.results); w.terminate() })
+          w.on('error', (e) => { clearTimeout(timer); rej(e) })
           w.postMessage({ files, repo })
         })
         const workerResults = await Promise.all(batches.map(b => runWorker(b)))
