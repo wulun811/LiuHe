@@ -1,7 +1,7 @@
 {
   "name": "call_chain",
   "version": "1.1.0",
-  "description": "Find all callers and callees of a function at a specific line. Use this when you need line-level precision (e.g., 'which function calls line 42?'). For file-level or symbol-level impact analysis, use impact_analysis instead. Also includes recently modified files (within 5 minutes) to highlight active development areas. REQUIRED: Call reindex first.",
+  "description": "Callers/callees at a specific line. Use when you know line but not symbol name. For symbol-level, use impact_analysis.",
   "inputSchema": {
     "type": "object",
     "properties": {

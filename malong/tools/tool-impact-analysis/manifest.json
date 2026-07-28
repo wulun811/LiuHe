@@ -1,7 +1,7 @@
 {
   "name": "impact_analysis",
   "version": "2.1.0",
-  "description": "Analyze the impact scope of changing a symbol or file. Returns direct callers, indirect callers (BFS), test references, importers, and callees (downward impact - what this function calls) with code context snippets, risk level, and caller counts. Use this for file-level or symbol-level impact analysis. For line-level precision (e.g., 'which function calls line 42?'), use call_chain instead. REQUIRED: Call reindex first if this is a new workspace.",
+  "description": "Analyze callers/callees of a symbol or file. Includes risk level and test references. For line-level, use call_chain.",
   "inputSchema": {
     "type": "object",
     "properties": {

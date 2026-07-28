@@ -1,7 +1,7 @@
 {
   "name": "trace_symbol",
   "version": "1.1.0",
-  "description": "Trace a constant or variable's value and find all references including suspected hardcoded literal copies. Use this for constant/variable value tracing (e.g., 'where is MAX_RETRY_COUNT used?'). For function/class impact analysis, use impact_analysis instead. The literals search is text-based with a confidence heuristic. REQUIRED: Call reindex first.",
+  "description": "Trace constant values and find hardcoded literal copies. For function impact, use impact_analysis.",
   "inputSchema": {
     "type": "object",
     "properties": {

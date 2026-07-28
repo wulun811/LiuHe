@@ -1,7 +1,7 @@
 {
   "name": "reindex",
   "version": "0.0.3",
-  "description": "Index a project for symbol search, references, and impact analysis. If called without workspace_dir, returns current indexing status. If project has >2000 files, returns needs_review with top directories so you can exclude non-essential dirs via skipDirs. FIRST-TIME USAGE: call reindex(workspace_dir=\"...\") to start. Indexing runs in background — you can continue other tasks while it runs.",
+  "description": "Index project for symbol search and impact analysis. Call first for new workspaces. Background indexing.",
   "inputSchema": {
     "type": "object",
     "properties": {

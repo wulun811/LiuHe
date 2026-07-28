@@ -1,7 +1,7 @@
 {
   "name": "symbol_search",
   "version": "1.0.0",
-  "description": "Search for symbols (functions, classes, methods, variables) by name across the entire project. Returns file path, line number, and symbol type. Substring match — e.g. query \"spawnFix\" finds both \"spawnFixer\" and \"_handleSpawnFixer\". REQUIRED: Call reindex first if this is a new workspace.",
+  "description": "Search symbols by name across project. Substring match.",
   "inputSchema": {
     "type": "object",
     "properties": {

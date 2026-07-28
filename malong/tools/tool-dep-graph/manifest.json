@@ -1,7 +1,7 @@
 {
   "name": "dep_graph",
   "version": "1.0.0",
-  "description": "Show the import dependency graph for a file — what modules it imports (directImports) and transitive dependencies up to N levels deep. Use this to understand module coupling before refactoring. REQUIRED: Call reindex first if this is a new workspace.",
+  "description": "Import dependency graph for a file, transitive up to N levels.",
   "inputSchema": {
     "type": "object",
     "properties": {

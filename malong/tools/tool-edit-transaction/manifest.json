@@ -1,7 +1,7 @@
 {
   "name": "edit_transaction",
   "version": "1.1.0",
-  "description": "Transaction-based file editing with atomic commit/rollback. Typical workflow: 1) action='begin' to start transaction (returns txnId), 2) action='edit' or 'edit_multi' to stage changes, 3) action='commit' to apply or 'rollback' to discard. Supports atomic=true (all-or-nothing) for edit_multi. Uses file backup approach (no git dependency). Backups stored in .ai-transactions/.",
+  "description": "Transactional file editing: begin→edit→commit/rollback. For simple batch edits, use edit_batch.",
   "inputSchema": {
     "type": "object",
     "properties": {

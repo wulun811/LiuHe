@@ -1,7 +1,7 @@
 {
   "name": "fix_imports",
   "version": "1.1.0",
-  "description": "Analyze and fix import-related issues in a file: undefined symbols, circular imports, unused imports, relative imports. Uses the code-index symbols/refs tables for symbol lookup and import graph. WARNING: auto_fix=true writes directly to file without transaction protection. For safer editing, use fix_imports without auto_fix to get suggestions, then apply them via edit_transaction. For circular imports, recommends structural changes (extract shared types).",
+  "description": "Detect undefined symbols, unused imports, circular deps. Returns transaction_ready edits for edit_transaction.",
   "inputSchema": {
     "type": "object",
     "properties": {

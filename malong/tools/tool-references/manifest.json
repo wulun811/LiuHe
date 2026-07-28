@@ -1,7 +1,7 @@
 {
   "name": "references",
   "version": "1.0.0",
-  "description": "Find all cross-file references to a symbol (call targets, imports, extends). NOTE: searches by target_name stored in refs table — for member expressions like spawn.spawnFixer, search \"spawn.spawnFixer\" not just \"spawnFixer\". For best results, first use symbol_search to confirm the exact symbol name, then search references. REQUIRED: Call reindex first if this is a new workspace.",
+  "description": "Cross-file references to a symbol. Search full member path (e.g. 'obj.method', not 'method').",
   "inputSchema": {
     "type": "object",
     "properties": {

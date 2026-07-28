@@ -1,7 +1,7 @@
 {
   "name": "edit_batch",
   "version": "1.0.0",
-  "description": "Batch edit: apply multiple text replacements to a single file atomically. Saves tokens vs multiple edit calls. Whitespace-tolerant: trailing spaces normalized during matching. Each old_string must uniquely match in original file (unless replace_all=true). Does NOT support chained replacement (A→B→C); merge as single edit (A→C). Returns error_summary with all errors aggregated. Includes usage stats (cumulative_stats).",
+  "description": "Apply multiple text replacements to one file atomically. For rollback support, use edit_transaction.",
   "inputSchema": {
     "type": "object",
     "properties": {
