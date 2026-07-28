@@ -1,7 +1,14 @@
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { join, relative, extname } from 'node:path'
 
-export const DEFAULT_IGNORE_DIRS = new Set(['node_modules', '.git', 'dist', 'build', 'coverage', '__pycache__', '.venv', '.tusunsun', 'vendor', 'third_party', 'third-party', 'runtime', 'external', 'deps', 'lib', 'bin', 'obj'])
+export const DEFAULT_IGNORE_DIRS = new Set([
+  'node_modules', '.git', '.hg', '.svn',
+  'dist', 'build', 'out', 'target', 'coverage', 'obj', 'bin',
+  '__pycache__', '.venv', 'venv', '.env', 'site-packages', '.tox', '.mypy_cache', '.pytest_cache', '.ruff_cache',
+  '.next', '.nuxt', '.cache', '.parcel-cache', '.turbo', '.svelte-kit', '.output',
+  '.gradle', '.idea', '.vscode',
+  '.tusunsun', 'vendor', 'third_party', 'third-party', 'runtime', 'external', 'deps', 'lib',
+])
 const DEFAULT_CACHED_EXT = new Set(['.js', '.mjs', '.cjs', '.ts', '.tsx', '.py', '.go', '.rs'])
 const MAX_RULES = 100
 

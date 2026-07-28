@@ -489,11 +489,15 @@ class CodeIndex {
         const workerUrl = new URL('./parse-worker.js', import.meta.url)
         const mid = Math.ceil(changedFiles.length / 2)
         const batches = [changedFiles.slice(0, mid), changedFiles.slice(mid)].filter(b => b.length > 0)
-        const runWorker = (files) => new Promise((res, rej) => {
+        const runWorker = (files) => new Promise((res) => {
           const w = new Worker(workerUrl)
-          const timer = setTimeout(() => { w.terminate(); rej(new Error('parse worker timeout')) }, 180000)
+          const timer = setTimeout(() => {
+            console.error(`[code-index] parse worker timeout (${files.length} files) — skipping batch`)
+            try { w.terminate() } catch {}
+            res([])
+          }, 300000)
           w.on('message', (msg) => { clearTimeout(timer); res(msg.results); w.terminate() })
-          w.on('error', (e) => { clearTimeout(timer); rej(e) })
+          w.on('error', (e) => { clearTimeout(timer); console.error(`[code-index] parse worker error: ${e.message}`); res([]) })
           w.postMessage({ files, repo })
         })
         const workerResults = await Promise.all(batches.map(b => runWorker(b)))
