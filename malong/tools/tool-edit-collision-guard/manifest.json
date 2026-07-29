@@ -1,7 +1,7 @@
 {
   "name": "edit_collision_guard",
   "version": "1.1.0",
-  "description": "Before editing: record_read then check file staleness. Returns modified_by. Pairs with edit_transaction.",
+  "description": "Two-step guard: 1) record_read after reading a file 2) check before editing. Detects external modifications. Pairs with edit_transaction.",
   "inputSchema": {
     "type": "object",
     "properties": {

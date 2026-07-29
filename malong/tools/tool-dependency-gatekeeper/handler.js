@@ -285,6 +285,7 @@ function enrichFromLock(dir, deps) {
     { name: 'package-lock.json', parse: (c) => { try { const l = JSON.parse(c); for (const [k, v] of Object.entries(l.packages || l.dependencies || {})) { if (deps[k.replace(/^node_modules\//, '')]) deps[k.replace(/^node_modules\//, '')].locked = v.version } } catch {} } },
     { name: 'poetry.lock', parse: (c) => { for (const m of c.matchAll(/\[\[package\]\]\s*\nname\s*=\s*"([^"]+)"\s*\nversion\s*=\s*"([^"]+)"/g)) { if (deps[m[1]]) deps[m[1]].locked = m[2] } } },
     { name: 'go.sum', parse: (c) => { for (const line of c.split('\n')) { const m = line.match(/^(\S+)\s+(\S+)/); if (m && deps[m[1]]) deps[m[1]].locked = m[2].replace('/go.mod', '') } } },
+    { name: 'Cargo.lock', parse: (c) => { for (const m of c.matchAll(/\[\[package\]\]\s*\nname\s*=\s*"([^"]+)"\s*\nversion\s*=\s*"([^"]+)"/g)) { if (deps[m[1]]) deps[m[1]].locked = m[2] } } },
   ]
   for (const lf of lockFiles) {
     const p = join(dir, lf.name)
@@ -299,17 +300,33 @@ function extractImports(file, content, langParser) {
     return { imports: [], warnings: [{ file, reason: `parse_failed: ${e.message}` }] }
   }
   if (!tree) return { imports: [], warnings: [{ file, reason: 'unsupported_language' }] }
-  const refs = langParser.extractReferences(tree, content)
+  const refs = langParser.extractReferences(tree, content, ext)
   const imports = refs.filter(r => r.type === 'import').map(r => {
     let mod = r.module
+    if (mod.startsWith('.')) return { module: mod, raw: r.module, line: r.line, isRelative: true }
+    if (ext === '.go' || ext === '.rs') {
+      return { module: mod, raw: r.module, line: r.line, isRelative: false }
+    }
     if (mod.startsWith('@')) {
       const parts = mod.split('/')
       mod = parts.length >= 2 ? parts[0] + '/' + parts[1] : parts[0]
     } else {
       mod = mod.split('/')[0].split('.')[0]
     }
-    return { module: mod, raw: r.module, line: r.line, isRelative: r.module.startsWith('.') }
+    return { module: mod, raw: r.module, line: r.line, isRelative: false }
   })
+  if (['.js', '.mjs', '.cjs', '.ts', '.tsx'].includes(ext)) {
+    const lines = content.split('\n')
+    for (let i = 0; i < lines.length; i++) {
+      for (const m of lines[i].matchAll(/require\(\s*['"]([^'"]+)['"]\s*\)/g)) {
+        const raw = m[1]
+        if (imports.some(imp => imp.raw === raw)) continue
+        if (raw.startsWith('.')) { imports.push({ module: raw, raw, line: i + 1, isRelative: true }); continue }
+        const mod = raw.startsWith('@') ? raw.split('/').slice(0, 2).join('/') : raw.split('/')[0]
+        imports.push({ module: mod, raw, line: i + 1, isRelative: false })
+      }
+    }
+  }
   return { imports, warnings: [] }
 }
 
@@ -361,7 +378,7 @@ export async function handle(args, context) {
 
   for (const imp of imports) {
     if (imp.isRelative) continue
-    if (stdlib.has(imp.module)) continue
+    if (stdlib.has(imp.module) || stdlib.has(imp.module.split('/')[0])) continue
 
     const { pkg, confident } = resolvePackage(imp.module, ext)
 

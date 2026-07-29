@@ -62,8 +62,9 @@ function checkRules(file, content, rules, langParser) {
   const warnings = []
   let refs, symbols
   try {
-    refs = langParser.extractReferences(tree, content)
-    symbols = langParser.extractSymbols(tree, content)
+    refs = langParser.extractReferences(tree, content, ext)
+    const symResult = langParser.extractSymbols(tree, content, ext)
+    symbols = Array.isArray(symResult) ? symResult : (symResult?.symbols || [])
   } catch (e) {
     return { violations: [], warnings: [{ file, reason: `extract_failed: ${e.message}` }] }
   }
@@ -84,7 +85,7 @@ function checkRules(file, content, rules, langParser) {
         case 'call_banned': {
           if (!rule.banned?.length) break
           for (const call of refs.filter(r => r.type === 'call')) {
-            if (rule.banned.includes(call.name)) {
+            if (rule.banned.includes(call.name) || rule.banned.some(b => b.endsWith('.' + call.name))) {
               violations.push(mkViolation(rule, { line: call.line }))
             }
           }
@@ -96,7 +97,11 @@ function checkRules(file, content, rules, langParser) {
           for (let i = 0; i < lines.length; i++) {
             const trimmed = lines[i].trim()
             if (trimmed.startsWith('#')) continue
-            if (trimmed.startsWith('"""') || trimmed.startsWith("'''")) { inString = !inString; continue }
+            if (trimmed.startsWith('"""') || trimmed.startsWith("'''")) {
+              const delim = trimmed.slice(0, 3)
+              if (trimmed.indexOf(delim, 3) === -1) inString = !inString
+              continue
+            }
             if (inString) continue
             if (/^\s*except\s*:/.test(lines[i])) {
               violations.push(mkViolation(rule, { line: i + 1 }))
@@ -154,9 +159,9 @@ export async function handle(args, context) {
   } catch (e) {
     return makeError(ErrorCodes.FILE_NOT_FOUND, `Cannot read file: ${e.message}`, { file })
   }
-  const activeBuiltins = BUILTIN_RULES
   const { rules: projectRules, warnings: ruleWarnings } = loadProjectRules(workspaceDir, args?.ruleset)
-  const allRules = [...activeBuiltins, ...projectRules]
+  const projectIds = new Set(projectRules.map(r => r.id))
+  const allRules = [...BUILTIN_RULES.filter(r => !projectIds.has(r.id)), ...projectRules]
 
   const { violations, warnings: checkWarnings } = checkRules(file, content, allRules, langParser)
   const allWarnings = [...ruleWarnings, ...checkWarnings]

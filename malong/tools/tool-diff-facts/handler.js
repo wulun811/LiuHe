@@ -100,7 +100,11 @@ function extractSymbols(content, ext, langParser) {
   if (langParser) {
     try {
       const tree = langParser.parse(content, ext)
-      if (tree) return langParser.extractSymbols(tree, content)
+      if (tree) {
+        const result = langParser.extractSymbols(tree, content, ext)
+        const syms = Array.isArray(result) ? result : (result?.symbols || [])
+        if (syms.length) return syms
+      }
     } catch {}
   }
   return extractSymbolsRegex(content)
@@ -129,8 +133,8 @@ function extractChanges(change, langParser) {
 }
 
 async function checkCallerSync(symbolsChanged, filesInChange, codeIndexService, workspaceDir) {
-  if (!codeIndexService) return 'skipped'
-  try { codeIndexService.initWorkspace(workspaceDir) } catch { return 'skipped' }
+  if (!codeIndexService) return { status: 'skipped', reason: 'code-index service not available (requires MCP context)' }
+  try { codeIndexService.initWorkspace(workspaceDir) } catch { return { status: 'skipped', reason: 'workspace not indexed' } }
   const result = []
   for (const sym of symbolsChanged.filter(s => s.change === 'signature_changed')) {
     try {
