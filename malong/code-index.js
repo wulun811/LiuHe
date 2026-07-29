@@ -178,7 +178,6 @@ class CodeIndex {
     const tree = this._langParser.parse(source, ext)
     if (!tree) return null
     const { symbols, refs } = this._langParser.extractAll(tree, source, ext)
-    tree.delete()
     const relPath = repo ? relative(repo, filePath) : filePath
     let mtime = Date.now()
     try { mtime = statSync(filePath).mtimeMs } catch {}

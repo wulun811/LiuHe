@@ -523,7 +523,6 @@ function analyzeFileAST(content, lang, currentFile, langParser) {
   }
 
   const result = { definedSymbols, usedSymbols, imports, undefinedSymbols: [...new Set(undefinedSymbols)], symbolLines, relativeImports }
-  tree.delete()
   return result
 }
 

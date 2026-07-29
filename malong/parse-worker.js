@@ -39,7 +39,6 @@ parentPort.on('message', ({ files, repo }) => {
       if (!handler || !handler.extractAll) continue
       const { symbols, refs } = handler.extractAll(tree, source)
       results.push({ relPath, sourceLength: source.length, symbols, refs })
-      tree.delete()
     } catch { continue }
   }
   parentPort.postMessage({ results })

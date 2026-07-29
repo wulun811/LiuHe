@@ -166,9 +166,7 @@ export async function init(core) {
         dims.paradigmFit.value * 0.15
       ) * 100) / 100
 
-      const result = { dimensions: dims, overall }
-      tree.delete()
-      return result
+      return { dimensions: dims, overall }
     },
 
     async scoreFile(filePath) {

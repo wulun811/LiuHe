@@ -12,17 +12,13 @@ function extractSymbolTable(source) {
   if (!tree) return { symbols: [], hasErrors: false }
   const { symbols } = _langParser.extractSymbols(tree, source, '.js')
   const exported = symbols.filter(s => s.type !== 'import')
-  const hasErrors = _langParser.hasErrors(tree)
-  tree.delete()
-  return { symbols: exported, hasErrors }
+  return { symbols: exported, hasErrors: _langParser.hasErrors(tree) }
 }
 
 function extractReferences(source) {
   const tree = _langParser.parse(source, '.js')
   if (!tree) return []
-  const refs = _langParser.extractReferences(tree, source, '.js')
-  tree.delete()
-  return refs
+  return _langParser.extractReferences(tree, source, '.js')
 }
 
 function extractCallGraph(source, filePath) {

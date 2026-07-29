@@ -21,9 +21,7 @@ function register(core) {
       const tree = _langParser.parse(source, ext)
       if (!tree) return { ast: null, hasErrors: true, childCount: 0 }
       const ast = _langParser.simplifyAST(tree.rootNode, source, ext)
-      const result = { ast, hasErrors: hasErrorNode(tree.rootNode), childCount: tree.rootNode.childCount }
-      tree.delete()
-      return result
+      return { ast, hasErrors: hasErrorNode(tree.rootNode), childCount: tree.rootNode.childCount }
     },
 
     parseFile(source) {
