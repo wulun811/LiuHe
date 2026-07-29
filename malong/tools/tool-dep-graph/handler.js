@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
-import { checkFileStaleness, attachStalenessWarning, ensureIndexed } from '../../staleness.js'
+import { checkFileStaleness, attachStalenessWarning } from '../../staleness.js'
 
 export async function handle(args, context) {
   const { codeIndexService, getWorkspaceDir } = context
@@ -31,10 +31,6 @@ export async function handle(args, context) {
   }
 
   const staleness = checkFileStaleness(codeIndexService, workspaceDir, file)
-  let result = await codeIndexService.getModuleDependencies(file, { depth: args?.depth || 3 })
-  if (result?.error === 'file_not_found' && ensureIndexed(codeIndexService, workspaceDir, file)) {
-    result = await codeIndexService.getModuleDependencies(file, { depth: args?.depth || 3 })
-    if (result && !result.error) result.auto_indexed = true
-  }
+  const result = await codeIndexService.getModuleDependencies(file, { depth: args?.depth || 3 })
   return attachStalenessWarning(result, staleness)
 }

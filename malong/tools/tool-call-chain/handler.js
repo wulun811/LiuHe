@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 import { existsSync, statSync } from 'node:fs'
-import { checkFileStaleness, attachStalenessWarning, ensureIndexed } from '../../staleness.js'
+import { checkFileStaleness, attachStalenessWarning } from '../../staleness.js'
 
 function detectMisuse(args) {
   const line = parseInt(args?.line) || 0
@@ -65,20 +65,11 @@ export async function handle(args, context) {
   }
 
   const staleness = checkFileStaleness(codeIndexService, workspaceDir, file)
-  let impact = await codeIndexService.getImpactAnalysis(file, {
+  const impact = await codeIndexService.getImpactAnalysis(file, {
     symbol,
     depth,
     maxCallers: Math.max(maxCallers, maxCallees)
   })
-
-  if (impact?.error === 'file_not_found' && ensureIndexed(codeIndexService, workspaceDir, file)) {
-    impact = await codeIndexService.getImpactAnalysis(file, {
-      symbol,
-      depth,
-      maxCallers: Math.max(maxCallers, maxCallees)
-    })
-    if (impact && !impact.error) impact.auto_indexed = true
-  }
 
   const result = {
     target: {

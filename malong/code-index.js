@@ -589,40 +589,44 @@ class CodeIndex {
       writeFileSync(metadataPath, JSON.stringify(metadata, null, 2))
     }
 
+    // 启动文件监听器（增量索引）
+    function startWatcher(dir) {
+      self._watchedDir = dir
+      if (!existsSync(dir)) return
+      const pendingChanges = new Set()
+      try {
+        self._watcher = watch(dir, { recursive: true }, (eventType, filename) => {
+          if (!filename) return
+          const ext = extname(filename)
+          if (!CACHED_EXT.has(ext)) return
+          const parts = filename.split(/[\\/]/)
+          if (parts.some(p => DEFAULT_IGNORE_DIRS.has(p))) return
+          pendingChanges.add(filename)
+          if (self._watcherTimer) clearTimeout(self._watcherTimer)
+          self._watcherTimer = setTimeout(() => {
+            const files = Array.from(pendingChanges)
+            pendingChanges.clear()
+            for (const f of files) {
+              const fullPath = join(dir, f)
+              if (existsSync(fullPath)) {
+                self.syncFileChange(fullPath)
+              }
+            }
+          }, WATCHER_DEBOUNCE)
+        })
+        self._core.log('info', `[code-index] watching ${dir}`)
+      } catch (e) {
+        self._core.log('warn', `[code-index] watch failed: ${e.message}`)
+      }
+    }
+
     core.registerService('codeIndex', {
       // 初始化 workspace（供 handler 调用）
       initWorkspace(workspaceDir) {
         initWorkspaceDb(workspaceDir)
         if (!self._watcher || self._watchedDir !== resolve(workspaceDir)) {
           if (self._watcher) { self._watcher.close(); self._watcher = null }
-          self._watchedDir = resolve(workspaceDir)
-          if (existsSync(self._watchedDir)) {
-            const pendingChanges = new Set()
-            try {
-              self._watcher = watch(self._watchedDir, { recursive: true }, (eventType, filename) => {
-                if (!filename) return
-                const ext = extname(filename)
-                if (!CACHED_EXT.has(ext)) return
-                const parts = filename.split(/[\\/]/)
-                if (parts.some(p => DEFAULT_IGNORE_DIRS.has(p))) return
-                pendingChanges.add(filename)
-                if (self._watcherTimer) clearTimeout(self._watcherTimer)
-                self._watcherTimer = setTimeout(() => {
-                  const files = Array.from(pendingChanges)
-                  pendingChanges.clear()
-                  for (const f of files) {
-                    const fullPath = join(self._watchedDir, f)
-                    if (existsSync(fullPath)) {
-                      self.syncFileChange(fullPath)
-                    }
-                  }
-                }, WATCHER_DEBOUNCE)
-              })
-              self._core.log('info', `[code-index] watching ${self._watchedDir}`)
-            } catch (e) {
-              self._core.log('warn', `[code-index] watch failed: ${e.message}`)
-            }
-          }
+          startWatcher(resolve(workspaceDir))
         }
         return { workspace_dir: workspaceDir, db_path: join(core.getWorkspaceDir(workspaceDir), 'code-index.db') }
       },
@@ -1051,34 +1055,13 @@ class CodeIndex {
 
       watchDirectory(dir) {
         if (self._watcher) { self._watcher.close(); self._watcher = null }
-        self._watchedDir = resolve(dir)
-        if (!existsSync(self._watchedDir)) return { status: 'not_found', dir }
-        const pendingChanges = new Set()
-        try {
-          self._watcher = watch(self._watchedDir, { recursive: true }, (eventType, filename) => {
-            if (!filename) return
-            const ext = extname(filename)
-            if (!CACHED_EXT.has(ext)) return
-            const parts = filename.split(/[\\/]/)
-            if (parts.some(p => DEFAULT_IGNORE_DIRS.has(p))) return
-            pendingChanges.add(filename)
-            if (self._watcherTimer) clearTimeout(self._watcherTimer)
-            self._watcherTimer = setTimeout(() => {
-              const files = Array.from(pendingChanges)
-              pendingChanges.clear()
-              for (const f of files) {
-                const fullPath = join(self._watchedDir, f)
-                if (existsSync(fullPath)) {
-                  self.syncFileChange(fullPath)
-                }
-              }
-            }, WATCHER_DEBOUNCE)
-          })
-          self._core.log('info', `[code-index] watching ${self._watchedDir}`)
-          return { status: 'watching', dir: self._watchedDir }
-        } catch (e) {
-          self._core.log('warn', `[code-index] watch failed: ${e.message}`)
-          return { status: 'error', message: e.message }
+        const resolvedDir = resolve(dir)
+        if (!existsSync(resolvedDir)) return { status: 'not_found', dir }
+        startWatcher(resolvedDir)
+        if (self._watcher) {
+          return { status: 'watching', dir: resolvedDir }
+        } else {
+          return { status: 'error', message: 'Failed to start watcher' }
         }
       },
 
