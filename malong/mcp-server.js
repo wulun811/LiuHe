@@ -8,8 +8,24 @@ import crypto from 'node:crypto'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
+const REQUEST_TIMEOUT_MS = 120_000
+
+function parseArgs() {
+  const args = process.argv.slice(2)
+  const opts = {}
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--workspace' && args[i + 1]) {
+      opts.workspace = args[++i]
+    }
+  }
+  return opts
+}
+
+const cliOpts = parseArgs()
+const baseDir = cliOpts.workspace || process.cwd()
+
 const services = {}
-const stateDir = join(process.cwd(), 'data', 'malong-mcp')
+const stateDir = join(baseDir, 'data', 'malong-mcp')
 const workspacesDir = join(stateDir, 'workspaces')
 if (!existsSync(stateDir)) mkdirSync(stateDir, { recursive: true })
 if (!existsSync(workspacesDir)) mkdirSync(workspacesDir, { recursive: true })
@@ -127,7 +143,11 @@ function handleRequest(req) {
 
       const callTool = async () => {
         const context = buildContext()
-        const result = await registry.callTool(name, toolArgs, context)
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error(`Request timeout after ${REQUEST_TIMEOUT_MS}ms`)), REQUEST_TIMEOUT_MS)
+        })
+        const toolPromise = registry.callTool(name, toolArgs, context)
+        const result = await Promise.race([toolPromise, timeoutPromise])
         respond(id, {
           content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
         })
@@ -153,6 +173,21 @@ process.on('unhandledRejection', (reason) => {
   process.stderr.write(`[mcp] unhandled rejection: ${reason}\n`)
 })
 
+process.on('SIGPIPE', () => {
+  process.stderr.write('[mcp] SIGPIPE received, exiting\n')
+  process.exit(0)
+})
+
+process.on('SIGTERM', () => {
+  process.stderr.write('[mcp] SIGTERM received, shutting down\n')
+  process.exit(0)
+})
+
+process.on('SIGINT', () => {
+  process.stderr.write('[mcp] SIGINT received, shutting down\n')
+  process.exit(0)
+})
+
 let buffer = ''
 process.stdin.setEncoding('utf-8')
 process.stdin.on('data', chunk => {
@@ -169,6 +204,16 @@ process.stdin.on('data', chunk => {
       }
     }
   }
+})
+
+process.stdin.on('end', () => {
+  process.stderr.write('[mcp] stdin closed, exiting\n')
+  process.exit(0)
+})
+
+process.stdin.on('close', () => {
+  process.stderr.write('[mcp] stdin closed, exiting\n')
+  process.exit(0)
 })
 
 initModules().then(() => {
