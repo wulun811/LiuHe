@@ -131,7 +131,7 @@ export async function handle(args, context) {
     modified_by: modifiedBy,
     recommendation: 're-read file before editing',
     warning: modifiedBy === 'external'
-      ? `文件自读取后已被外部修改，old_string 可能基于过时版本`
-      : `文件在本事务内已被修改，通常安全（自己改的）`
+      ? 'file modified externally since last read, old_string may be based on stale version'
+      : 'file modified within this transaction, usually safe (self-modified)'
   }
 }

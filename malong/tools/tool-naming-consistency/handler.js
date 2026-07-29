@@ -144,23 +144,45 @@ export async function handle(args, context) {
       const style = classifyStyle(sym)
       if (style === 'CONSTANT_CASE') continue
       if (style === 'PascalCase' && projectStyle.dominant === 'snake_case') continue
+
+      let styleIssue = null
       if (style && projectStyle.dominant && style !== projectStyle.dominant && projectStyle[projectStyle.dominant] >= 0.7) {
         const suggestion = style === 'camelCase' && projectStyle.dominant === 'snake_case'
           ? sym.replace(/([A-Z])/g, '_$1').toLowerCase()
           : style === 'snake_case' && projectStyle.dominant === 'camelCase'
             ? sym.replace(/_([a-z])/g, (_, c) => c.toUpperCase())
             : null
-        issues.push({
+        styleIssue = {
           symbol: sym,
           issue: 'style_inconsistency',
           detail: `${lang} project uses ${projectStyle.dominant} (${Math.round(projectStyle[projectStyle.dominant] * 100)}%), but '${sym}' is ${style}`,
           ...(suggestion ? { suggestion } : {}),
           confidence: projectStyle[projectStyle.dominant],
-        })
+        }
       }
 
       const semantic = checkSemantic(sym, verbPrefs)
-      if (semantic) issues.push(semantic)
+
+      if (styleIssue && semantic) {
+        let merged = semantic.suggestion || sym
+        if (projectStyle.dominant === 'snake_case') {
+          merged = merged.replace(/([A-Z])/g, '_$1').toLowerCase()
+        } else if (projectStyle.dominant === 'camelCase') {
+          merged = merged.replace(/_([a-z])/g, (_, c) => c.toUpperCase())
+        }
+        issues.push({
+          symbol: sym,
+          issue: 'style_and_semantic',
+          detail: `${styleIssue.detail}; ${semantic.detail}`,
+          suggestion: merged,
+          confidence: Math.min(styleIssue.confidence, semantic.confidence),
+          evidence: semantic.evidence,
+        })
+      } else if (styleIssue) {
+        issues.push(styleIssue)
+      } else if (semantic) {
+        issues.push(semantic)
+      }
     }
 
     return {

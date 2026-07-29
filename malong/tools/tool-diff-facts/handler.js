@@ -127,10 +127,11 @@ async function checkCallerSync(symbolsChanged, filesInChange, codeIndexService, 
   return result
 }
 
-function checkTestSync(changes) {
+function checkTestSync(changes, workspaceDir) {
   const sourceChanged = changes.filter(c => !c.isTest).map(c => c.file)
   const testChanged = changes.filter(c => c.isTest).map(c => c.file)
   const testsPossiblyStale = []
+  const testsNotFound = []
 
   for (const src of sourceChanged) {
     const base = src.replace(/\.[^.]+$/, '').replace(/^src\//, '')
@@ -149,12 +150,20 @@ function checkTestSync(changes) {
       expectedTests.push(`${name}_test.rs`)
     }
     for (const t of expectedTests) {
-      if (!testChanged.some(tc => tc.includes(t)) && !testsPossiblyStale.includes(t)) {
-        testsPossiblyStale.push(t)
+      if (testChanged.some(tc => tc.includes(t))) continue
+      if (existsSync(join(workspaceDir, t))) {
+        if (!testsPossiblyStale.includes(t)) testsPossiblyStale.push(t)
+      } else {
+        if (!testsNotFound.includes(t)) testsNotFound.push(t)
       }
     }
   }
-  return { source_changed: sourceChanged, test_changed: testChanged, tests_possibly_stale: testsPossiblyStale }
+  return {
+    source_changed: sourceChanged,
+    test_changed: testChanged,
+    tests_possibly_stale: testsPossiblyStale,
+    ...(testsNotFound.length ? { tests_not_found: testsNotFound } : {}),
+  }
 }
 
 export async function handle(args, context) {
@@ -188,7 +197,7 @@ export async function handle(args, context) {
 
   const filesInChange = changes.map(c => c.file)
   const callerSync = await checkCallerSync(symbolsChanged, filesInChange, context?.codeIndexService, workspaceDir)
-  const testSync = checkTestSync(changes)
+  const testSync = checkTestSync(changes, workspaceDir)
 
   return {
     since,
