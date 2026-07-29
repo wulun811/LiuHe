@@ -1,0 +1,21 @@
+{
+  "name": "diff_facts",
+  "version": "1.0.0",
+  "description": "Extract structured diff facts from edit_transaction backups: changed files, symbols, signature changes, caller/test sync status. Zero LLM, zero git dependency.",
+  "handler": "handler.js",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "workspace_dir": {
+        "type": "string",
+        "description": "Project root absolute path"
+      },
+      "since": {
+        "type": "string",
+        "description": "\"last_txn\" (default) or \"txn:<id>\""
+      }
+    },
+    "required": ["workspace_dir"],
+    "additionalProperties": false
+  }
+}
