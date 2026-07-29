@@ -202,9 +202,9 @@ export async function handle(args, context) {
   const txn = findTxn(txnRoot, since)
   if (!txn) {
     if (!existsSync(txnRoot)) {
-      return makeError(ErrorCodes.NO_MATCH, 'no .ai-transactions/ found; run edit_transaction first')
+      return makeError(ErrorCodes.NO_MATCH, 'no .ai-transactions/ found', { suggestion: 'workflow: edit_transaction(begin) → edit_transaction(edit) → edit_transaction(commit) → diff_facts' })
     }
-    return makeError(ErrorCodes.TXN_NOT_FOUND, `transaction not found: ${since}`)
+    return makeError(ErrorCodes.TXN_NOT_FOUND, `transaction not found: ${since}`, { suggestion: 'use edit_transaction(action=begin) to create a new transaction' })
   }
 
   const { changes, warnings, truncated } = collectChanges(workspaceDir, txnRoot, txn)

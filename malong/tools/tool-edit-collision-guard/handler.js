@@ -114,7 +114,7 @@ export async function handle(args, context) {
 
   const snap = snapshots.get(key)
   if (!snap) {
-    return { status: 'never_read', file, recommendation: 'read file before editing' }
+    return { status: 'never_read', file, recommendation: 'call edit_collision_guard(action=record_read) after reading, then check before editing' }
   }
   snapshots.delete(key)
   snapshots.set(key, snap)

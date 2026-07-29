@@ -152,7 +152,7 @@ export async function handle(args, context) {
   if (pathCheck.blocked) return makeError(ErrorCodes.PATH_BLOCKED, pathCheck.detail, { file, reason: pathCheck.reason })
 
   const absPath = join(workspaceDir, file)
-  if (!existsSync(absPath)) return makeError(ErrorCodes.FILE_NOT_FOUND, `File does not exist: ${file}`, { file })
+  if (!existsSync(absPath)) return makeError(ErrorCodes.FILE_NOT_FOUND, `File does not exist: ${file}`, { file, suggestion: 'check the file path, or use glob to locate it' })
 
   const langParser = context?.langParserService
   if (!langParser) return makeError(ErrorCodes.SERVICE_UNAVAILABLE, 'lang-parser service not available', {

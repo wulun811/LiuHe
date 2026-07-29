@@ -145,12 +145,11 @@ function resolvePackage(importName, ext) {
   return { pkg: importName.replace(/_/g, '-'), confident: false }
 }
 
-function installHint(pkg, manifestName) {
-  if (manifestName === 'package.json') return `npm install ${pkg}`
-  if (manifestName === 'pyproject.toml') return `pip install ${pkg}  /  poetry add ${pkg}`
-  if (manifestName === 'requirements.txt') return `pip install ${pkg}`
-  if (manifestName === 'go.mod') return `go get ${pkg}`
-  if (manifestName === 'Cargo.toml') return `cargo add ${pkg}`
+function installHint(pkg, ext) {
+  if (['.js', '.mjs', '.cjs', '.ts', '.tsx', '.mts', '.cts'].includes(ext)) return `npm install ${pkg}`
+  if (ext === '.py') return `pip install ${pkg}`
+  if (ext === '.go') return `go get ${pkg}`
+  if (ext === '.rs') return `cargo add ${pkg}`
   return `install ${pkg}`
 }
 
@@ -357,7 +356,7 @@ export async function handle(args, context) {
   if (pathCheck.blocked) return makeError(ErrorCodes.PATH_BLOCKED, pathCheck.detail, { file, reason: pathCheck.reason })
 
   const absPath = join(workspaceDir, file)
-  if (!existsSync(absPath)) return makeError(ErrorCodes.FILE_NOT_FOUND, `File does not exist: ${file}`, { file })
+  if (!existsSync(absPath)) return makeError(ErrorCodes.FILE_NOT_FOUND, `File does not exist: ${file}`, { file, suggestion: 'check the file path, or use glob to locate it' })
 
   const langParser = context?.langParserService
   if (!langParser) return makeError(ErrorCodes.SERVICE_UNAVAILABLE, 'lang-parser service not available', {
@@ -391,10 +390,11 @@ export async function handle(args, context) {
 
   const issues = []
   const dependenciesFound = {}
+  let stdlibSkipped = 0, relativeSkipped = 0
 
   for (const imp of imports) {
-    if (imp.isRelative) continue
-    if (stdlib.has(imp.module) || stdlib.has(imp.module.split('/')[0])) continue
+    if (imp.isRelative) { relativeSkipped++; continue }
+    if (stdlib.has(imp.module) || stdlib.has(imp.module.split('/')[0])) { stdlibSkipped++; continue }
 
     const { pkg, confident } = resolvePackage(imp.module, ext)
 
@@ -420,7 +420,7 @@ export async function handle(args, context) {
       package: pkg,
       line: imp.line,
       suggestion: `add ${pkg} to dependencies`,
-      install_hint: installHint(pkg, manifestName)
+      install_hint: installHint(pkg, ext)
     })
     dependenciesFound[imp.module] = { in_manifest: false }
   }
@@ -429,6 +429,8 @@ export async function handle(args, context) {
     file,
     manifest: manifestName,
     imports_checked: imports.length,
+    stdlib_skipped: stdlibSkipped,
+    relative_skipped: relativeSkipped,
     declared_deps: Object.keys(deps).length,
     issues,
     dependencies_found: dependenciesFound,

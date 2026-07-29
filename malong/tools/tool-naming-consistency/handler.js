@@ -191,6 +191,8 @@ export async function handle(args, context) {
       project_style: projectStyle,
       new_symbols_checked: newSymbols.length,
       issues,
+      ...(!projectStyle.dominant ? { note: 'insufficient project symbols for this language; style checks skipped' } : {}),
+      ...(newSymbols.length === 0 ? { note: 'no symbols to check' } : {}),
     }
   } finally {
     db.close()
