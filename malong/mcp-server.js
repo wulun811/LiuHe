@@ -9,6 +9,38 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 
 const REQUEST_TIMEOUT_MS = 120_000
 const RECOMMENDED_HEAP_MB = 512
+const DEFAULT_CONCURRENCY = 3
+const HEAVY_TOOLS = new Set(['reindex', 'repo_map'])
+
+class Semaphore {
+  constructor(max) {
+    this.max = max
+    this.current = 0
+    this.queue = []
+  }
+
+  async acquire(weight = 1) {
+    if (this.current + weight <= this.max && this.queue.length === 0) {
+      this.current += weight
+      return
+    }
+    await new Promise(resolve => this.queue.push({ resolve, weight }))
+  }
+
+  release(weight = 1) {
+    this.current -= weight
+    while (this.queue.length > 0) {
+      const next = this.queue[0]
+      if (this.current + next.weight <= this.max) {
+        this.queue.shift()
+        this.current += next.weight
+        next.resolve()
+      } else {
+        break
+      }
+    }
+  }
+}
 
 function checkV8HeapLimit() {
   const maxOldSpace = process.argv.find(a => a.startsWith('--max-old-space-size='))
@@ -29,6 +61,8 @@ function parseArgs() {
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--workspace' && args[i + 1]) {
       opts.workspace = args[++i]
+    } else if (args[i] === '--concurrency' && args[i + 1]) {
+      opts.concurrency = parseInt(args[++i], 10) || DEFAULT_CONCURRENCY
     }
   }
   return opts
@@ -36,6 +70,8 @@ function parseArgs() {
 
 const cliOpts = parseArgs()
 const baseDir = cliOpts.workspace || process.cwd()
+const concurrency = cliOpts.concurrency || DEFAULT_CONCURRENCY
+const semaphore = new Semaphore(concurrency)
 
 const services = {}
 const stateDir = join(baseDir, 'data', 'malong-mcp')
@@ -156,16 +192,24 @@ function handleRequest(req) {
         break
       }
 
+      const weight = HEAVY_TOOLS.has(name) ? concurrency : 1
       const callTool = async () => {
-        const context = buildContext()
-        const timeoutPromise = new Promise((_, reject) => {
-          setTimeout(() => reject(new Error(`Request timeout after ${REQUEST_TIMEOUT_MS}ms`)), REQUEST_TIMEOUT_MS)
-        })
-        const toolPromise = registry.callTool(name, toolArgs, context)
-        const result = await Promise.race([toolPromise, timeoutPromise])
-        respond(id, {
-          content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-        })
+        await semaphore.acquire(weight)
+        let timer
+        try {
+          const context = buildContext()
+          const timeoutPromise = new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error(`Request timeout after ${REQUEST_TIMEOUT_MS}ms`)), REQUEST_TIMEOUT_MS)
+          })
+          const toolPromise = registry.callTool(name, toolArgs, context)
+          const result = await Promise.race([toolPromise, timeoutPromise])
+          respond(id, {
+            content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+          })
+        } finally {
+          clearTimeout(timer)
+          semaphore.release(weight)
+        }
       }
       callTool().catch(e => {
         respondError(id, -32603, e.message)
@@ -186,6 +230,11 @@ function handleRequest(req) {
 
 process.on('unhandledRejection', (reason) => {
   process.stderr.write(`[mcp] unhandled rejection: ${reason}\n`)
+})
+
+process.on('uncaughtException', (err) => {
+  process.stderr.write(`[mcp] FATAL uncaught exception: ${err.stack}\n`)
+  process.exit(1)
 })
 
 process.on('SIGPIPE', () => {
@@ -237,7 +286,7 @@ process.stdin.on('close', () => {
 
 initModules().then(() => {
   const heapMB = checkV8HeapLimit()
-  core.log('info', `[mcp] server ready, V8 heap=${heapMB}MB`)
+  core.log('info', `[mcp] server ready, V8 heap=${heapMB}MB, concurrency=${concurrency}`)
   if (typeof global.gc === 'function') {
     core.log('info', '[mcp] --expose-gc detected, periodic GC enabled')
     setInterval(() => {
