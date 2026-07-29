@@ -37,6 +37,28 @@ const IMPORT_TO_PACKAGE = {
   redis: 'redis', pymongo: 'pymongo',
   pytest: 'pytest', mock: 'mock',
   mypy: 'mypy', black: 'black', ruff: 'ruff',
+  lodash: 'lodash', axios: 'axios', react: 'react', 'react-dom': 'react-dom',
+  vue: 'vue', angular: '@angular/core', svelte: 'svelte',
+  next: 'next', nuxt: 'nuxt', express: 'express', koa: 'koa',
+  webpack: 'webpack', vite: 'vite', rollup: 'rollup', esbuild: 'esbuild',
+  babel: '@babel/core', eslint: 'eslint', prettier: 'prettier',
+  jest: 'jest', mocha: 'mocha', chai: 'chai', vitest: 'vitest',
+  typescript: 'typescript', tsx: 'tsx',
+  moment: 'moment', dayjs: 'dayjs', 'date-fns': 'date-fns',
+  rxjs: 'rxjs', immer: 'immer', zod: 'zod', yup: 'yup',
+  prisma: '@prisma/client', drizzle: 'drizzle-orm',
+  socket: 'socket.io', ws: 'ws',
+  gin: 'github.com/gin-gonic/gin', echo: 'github.com/labstack/echo',
+  fiber: 'github.com/gofiber/fiber', chi: 'github.com/go-chi/chi',
+  gorilla: 'github.com/gorilla/mux', cobra: 'github.com/spf13/cobra',
+  viper: 'github.com/spf13/viper', zap: 'go.uber.org/zap',
+  logrus: 'github.com/sirupsen/logrus', gorm: 'gorm.io/gorm',
+  testify: 'github.com/stretchr/testify',
+  serde: 'serde', serde_json: 'serde_json', tokio: 'tokio',
+  actix: 'actix-web', rocket: 'rocket', warp: 'warp',
+  clap: 'clap', anyhow: 'anyhow', thiserror: 'thiserror',
+  reqwest: 'reqwest', hyper: 'hyper', tonic: 'tonic',
+  diesel: 'diesel', sqlx: 'sqlx', rusqlite: 'rusqlite',
 }
 
 const STDLIB_PY = new Set([
@@ -112,8 +134,10 @@ function getStdlib(ext) {
   return new Set()
 }
 
-function resolvePackage(importName) {
+function resolvePackage(importName, ext) {
   if (IMPORT_TO_PACKAGE[importName]) return { pkg: IMPORT_TO_PACKAGE[importName], confident: true }
+  if (ext === '.go') return { pkg: importName, confident: false }
+  if (ext === '.rs') return { pkg: importName, confident: false }
   return { pkg: importName.replace(/_/g, '-'), confident: false }
 }
 
@@ -130,15 +154,17 @@ function findManifest(workspaceDir, fileRel) {
   let dir = dirname(join(workspaceDir, fileRel))
   const root = workspaceDir.endsWith('/') ? workspaceDir : workspaceDir + '/'
   while (dir.startsWith(root) || dir === workspaceDir) {
+    const found = []
     for (const m of MANIFEST_NAMES) {
       const p = join(dir, m)
-      if (existsSync(p)) return p
+      if (existsSync(p)) found.push(p)
     }
+    if (found.length > 0) return { path: found[0], multiple: found.length > 1 ? found.map(f => basename(f)) : undefined }
     const parent = dirname(dir)
     if (parent === dir) break
     dir = parent
   }
-  return null
+  return { path: null }
 }
 
 function parsePyprojectToml(path, deps) {
@@ -309,7 +335,7 @@ export async function handle(args, context) {
 
   const { imports, warnings: importWarnings } = extractImports(file, content, langParser)
 
-  const manifestPath = findManifest(workspaceDir, file)
+  const { path: manifestPath, multiple: multipleManifests } = findManifest(workspaceDir, file)
   if (!manifestPath) {
     return {
       file,
@@ -324,6 +350,9 @@ export async function handle(args, context) {
 
   const { deps, warnings: manifestWarnings } = parseManifest(manifestPath)
   const manifestName = basename(manifestPath)
+  if (multipleManifests) {
+    manifestWarnings.push({ reason: 'multiple_manifests', found: multipleManifests, used: manifestName, hint: `multiple manifests in same directory; used ${manifestName} (first in priority order)` })
+  }
 
   const issues = []
   const dependenciesFound = {}
@@ -332,7 +361,7 @@ export async function handle(args, context) {
     if (imp.isRelative) continue
     if (stdlib.has(imp.module)) continue
 
-    const { pkg, confident } = resolvePackage(imp.module)
+    const { pkg, confident } = resolvePackage(imp.module, ext)
 
     if (deps[pkg]) {
       dependenciesFound[imp.module] = { in_manifest: true, ...(deps[pkg].locked ? { locked: deps[pkg].locked } : {}) }

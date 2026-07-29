@@ -22,6 +22,7 @@ const FRAMEWORK_IDIOMS = new Set([
 ])
 
 function classifyStyle(name) {
+  if (/^[A-Z][A-Z0-9]*(_[A-Z0-9]+)+$/.test(name)) return 'CONSTANT_CASE'
   if (/^[a-z]+(_[a-z0-9]+)+$/.test(name)) return 'snake_case'
   if (/^[a-z][a-zA-Z0-9]*$/.test(name) && /[A-Z]/.test(name)) return 'camelCase'
   if (/^[A-Z][a-zA-Z0-9]*$/.test(name)) return 'PascalCase'
@@ -74,19 +75,21 @@ function checkSemantic(symbol, verbPrefs) {
   const verb = extractVerb(symbol)
   for (const [, synonyms] of Object.entries(SEMANTIC_GROUPS)) {
     if (!synonyms.includes(verb)) continue
-    const groupCounts = Object.fromEntries(synonyms.map(s => [s, (verbPrefs[s] ?? []).length]))
-    const total = Object.values(groupCounts).reduce((a, b) => a + b, 0)
-    if (!total) continue
-    const sorted = Object.entries(groupCounts).sort((a, b) => b[1] - a[1])
-    const [dominantVerb, dominantCount] = sorted[0]
-    if (dominantVerb !== verb && dominantCount >= 3 && dominantCount / total >= 0.7) {
+    const candidates = synonyms
+      .filter(s => s !== verb && (verbPrefs[s] ?? []).length >= 3)
+      .map(s => ({ verb: s, count: (verbPrefs[s] ?? []).length }))
+      .sort((a, b) => b.count - a.count)
+    if (!candidates.length) continue
+    const best = candidates[0]
+    const myCount = (verbPrefs[verb] ?? []).length
+    if (best.count >= 2 * Math.max(myCount, 1)) {
       return {
         symbol,
         issue: 'semantic_inconsistency',
-        detail: `project uses '${dominantVerb}' in ${dominantCount} functions`,
-        suggestion: symbol.replace(verb, dominantVerb),
-        confidence: Math.round(dominantCount / total * 100) / 100,
-        evidence: (verbPrefs[dominantVerb] ?? []).slice(0, 4),
+        detail: `project uses '${best.verb}' in ${best.count} functions, '${verb}' only ${myCount}`,
+        suggestion: symbol.replace(verb, best.verb),
+        confidence: Math.round(best.count / (best.count + myCount) * 100) / 100,
+        evidence: (verbPrefs[best.verb] ?? []).slice(0, 4),
       }
     }
   }
@@ -139,6 +142,8 @@ export async function handle(args, context) {
       if (FRAMEWORK_IDIOMS.has(sym)) continue
 
       const style = classifyStyle(sym)
+      if (style === 'CONSTANT_CASE') continue
+      if (style === 'PascalCase' && projectStyle.dominant === 'snake_case') continue
       if (style && projectStyle.dominant && style !== projectStyle.dominant && projectStyle[projectStyle.dominant] >= 0.7) {
         const suggestion = style === 'camelCase' && projectStyle.dominant === 'snake_case'
           ? sym.replace(/([A-Z])/g, '_$1').toLowerCase()

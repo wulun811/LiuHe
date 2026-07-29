@@ -8,6 +8,7 @@ const LARGE_FILE_BYTES = 1024 * 1024
 const CHUNK_SIZE = 4096
 
 const snapshots = new Map()
+let logicalClock = 0
 
 function contentHash(content) {
   let hash = 0
@@ -99,7 +100,7 @@ export async function handle(args, context) {
       hash = contentHashFast(absPath)
     }
     snapshots.delete(key)
-    snapshots.set(key, { hash, lines, readAt: Date.now(), size: stat.size })
+    snapshots.set(key, { hash, lines, seq: ++logicalClock, size: stat.size })
     evictIfNeeded()
     return { status: 'recorded', file, hash }
   }
@@ -126,7 +127,7 @@ export async function handle(args, context) {
     file,
     read_hash: snap.hash,
     current_hash: currentHash,
-    read_at: new Date(snap.readAt).toISOString(),
+    read_seq: snap.seq,
     modified_by: modifiedBy,
     recommendation: 're-read file before editing',
     warning: modifiedBy === 'external'

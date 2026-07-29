@@ -1,7 +1,7 @@
 {
-  "name": "guard_patterns",
+  "name": "dependency_gatekeeper",
   "version": "1.1.0",
-  "description": "AST rules: no-bare-except/debugger/eval built-in. Custom via .ai-patterns.json.",
+  "description": "Imports vs manifests: undeclared deps + install hints. Py/JS/Go/Rust.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -11,11 +11,7 @@
       },
       "file": {
         "type": "string",
-        "description": "File to check (relative to workspace_dir)"
-      },
-      "ruleset": {
-        "type": "string",
-        "description": "Optional ruleset path relative to workspace_dir (default: .ai-patterns.json + built-in)"
+        "description": "Source file to check (relative to workspace_dir)"
       }
     },
     "required": ["workspace_dir", "file"],
@@ -23,6 +19,6 @@
   },
   "handler": "./handler.js",
   "protocol_version": "1.0",
-  "tags": ["lint", "rules", "ast", "guard"],
+  "tags": ["dependency", "import", "manifest"],
   "dependencies": []
 }

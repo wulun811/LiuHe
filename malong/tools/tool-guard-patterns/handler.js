@@ -9,7 +9,7 @@ const BUILTIN_RULES = [
 ]
 
 function loadProjectRules(workspaceDir, rulesetPath) {
-  const path = rulesetPath || join(workspaceDir, '.ai-patterns.json')
+  const path = rulesetPath ? join(workspaceDir, rulesetPath) : join(workspaceDir, '.ai-patterns.json')
   if (rulesetPath) {
     const pathCheck = validateFilePath(rulesetPath)
     if (pathCheck.blocked) return { rules: [], warnings: [{ reason: 'path_blocked', detail: pathCheck.detail }] }
@@ -92,7 +92,12 @@ function checkRules(file, content, rules, langParser) {
         }
         case 'except_bare': {
           const lines = content.split('\n')
+          let inString = false
           for (let i = 0; i < lines.length; i++) {
+            const trimmed = lines[i].trim()
+            if (trimmed.startsWith('#')) continue
+            if (trimmed.startsWith('"""') || trimmed.startsWith("'''")) { inString = !inString; continue }
+            if (inString) continue
             if (/^\s*except\s*:/.test(lines[i])) {
               violations.push(mkViolation(rule, { line: i + 1 }))
             }
@@ -101,10 +106,17 @@ function checkRules(file, content, rules, langParser) {
         }
         case 'call_required_wrapper': {
           if (!rule.banned?.length) break
+          const wrapper = rule.wrapper
           for (const call of refs.filter(r => r.type === 'call')) {
-            if (rule.banned.includes(call.name)) {
-              violations.push(mkViolation(rule, { line: call.line }))
+            if (!rule.banned.includes(call.name)) continue
+            if (wrapper) {
+              const enclosing = symbols.find(s =>
+                ['function', 'method'].includes(s.type) &&
+                s.startLine <= call.line && s.endLine >= call.line
+              )
+              if (enclosing && (enclosing.name === wrapper || enclosing.name.endsWith(`_${wrapper}`) || enclosing.name.endsWith(wrapper))) continue
             }
+            violations.push(mkViolation(rule, { line: call.line, ...(wrapper ? { required_wrapper: wrapper } : {}) }))
           }
           break
         }

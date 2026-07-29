@@ -1,0 +1,33 @@
+{
+  "name": "edit_collision_guard",
+  "version": "1.1.0",
+  "description": "Before editing: record_read then check file staleness. Returns modified_by. Pairs with edit_transaction.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "workspace_dir": {
+        "type": "string",
+        "description": "REQUIRED: Absolute path to the project root directory."
+      },
+      "file": {
+        "type": "string",
+        "description": "File path relative to workspace_dir"
+      },
+      "action": {
+        "type": "string",
+        "enum": ["record_read", "check"],
+        "description": "record_read: snapshot after reading; check: verify before editing"
+      },
+      "session_id": {
+        "type": "string",
+        "description": "Optional session ID for multi-agent isolation (default: \"default\")"
+      }
+    },
+    "required": ["workspace_dir", "file", "action"],
+    "additionalProperties": false
+  },
+  "handler": "./handler.js",
+  "protocol_version": "1.0",
+  "tags": ["collision", "staleness", "safety"],
+  "dependencies": ["edit_transaction"]
+}
