@@ -1,0 +1,25 @@
+{
+  "name": "guard_patterns",
+  "version": "1.0.0",
+  "description": "Check code against configurable AST rules: required decorators, banned calls, bare except. Built-in rules + .ai-patterns.json. Zero LLM.",
+  "handler": "handler.js",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "workspace_dir": {
+        "type": "string",
+        "description": "Project root absolute path"
+      },
+      "file": {
+        "type": "string",
+        "description": "File to check (relative to workspace_dir)"
+      },
+      "ruleset": {
+        "type": "string",
+        "description": "Optional ruleset path (default: .ai-patterns.json + built-in)"
+      }
+    },
+    "required": ["workspace_dir", "file"],
+    "additionalProperties": false
+  }
+}
