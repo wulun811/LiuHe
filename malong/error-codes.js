@@ -17,32 +17,29 @@ export function makeError(code, message, extra = {}) {
 }
 
 const DENY_PATTERNS = [
-  /^\.git(\/|$)/,
-  /^\.env(\.|$)/,
-  /\.pem$/i,
-  /\.key$/i,
-  /^node_modules\//,
-  /^venv\//,
-  /^\.venv\//,
-  /^__pycache__\//,
-  /^dist\//,
-  /^build\//,
-  /^\.ai-transactions\//,
+  { pattern: /(^|[\/\\])\.git([\/\\]|$)/, name: '.git' },
+  { pattern: /(^|[\/\\])\.env(\.|$)/, name: '.env' },
+  { pattern: /\.pem$/i, name: '.pem' },
+  { pattern: /\.key$/i, name: '.key' },
+  { pattern: /(^|[\/\\])node_modules([\/\\]|$)/, name: 'node_modules' },
+  { pattern: /(^|[\/\\])(\.?venv)([\/\\]|$)/, name: 'venv' },
+  { pattern: /(^|[\/\\])__pycache__([\/\\]|$)/, name: '__pycache__' },
+  { pattern: /(^|[\/\\])\.ai-transactions([\/\\]|$)/, name: '.ai-transactions' },
 ]
 
-export function validateFilePath(fileRel) {
-  if (!fileRel || typeof fileRel !== 'string') {
+export function validateFilePath(filePath) {
+  if (!filePath || typeof filePath !== 'string') {
     return { blocked: true, reason: 'invalid_path', detail: 'file path is empty or not a string' }
   }
-  if (fileRel.includes('..')) {
-    return { blocked: true, reason: 'path_traversal', detail: `file path contains "..": ${fileRel}` }
+  const isAbsolute = filePath.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(filePath)
+
+  if (!isAbsolute && filePath.includes('..')) {
+    return { blocked: true, reason: 'path_traversal', detail: `file path contains "..": ${filePath}` }
   }
-  if (fileRel.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(fileRel)) {
-    return { blocked: true, reason: 'absolute_path', detail: `file path must be relative to workspace_dir: ${fileRel}` }
-  }
-  for (const pattern of DENY_PATTERNS) {
-    if (pattern.test(fileRel)) {
-      return { blocked: true, reason: 'protected_path', detail: `file path matches deny pattern: ${fileRel}` }
+
+  for (const { pattern, name } of DENY_PATTERNS) {
+    if (pattern.test(filePath)) {
+      return { blocked: true, reason: 'protected_path', detail: `file path contains protected segment "${name}": ${filePath}` }
     }
   }
   return { ok: true }

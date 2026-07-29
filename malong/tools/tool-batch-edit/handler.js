@@ -6,6 +6,7 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { writeFileSync, unlinkSync, statSync, appendFileSync, readFileSync, existsSync } from 'node:fs'
 import { homedir } from 'node:os'
+import { validateFilePath, ErrorCodes, makeError } from '../../error-codes.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const STATS_FILE = join(homedir(), '.config', 'opencode', 'edit-batch-stats.jsonl')
@@ -46,6 +47,11 @@ export async function handle(args, context) {
 
   if (!filePath) return { error: 'missing_parameter', message: 'file_path is required', suggestion: 'Provide the absolute path to the file to edit' }
   if (!editsRaw) return { error: 'missing_parameter', message: 'edits is required', suggestion: 'Provide a JSON array of edits: [{"old_string": "...", "new_string": "..."}]' }
+
+  const pathCheck = validateFilePath(filePath)
+  if (pathCheck.blocked) {
+    return makeError(ErrorCodes.PATH_BLOCKED, pathCheck.detail, { file: filePath, reason: pathCheck.reason })
+  }
 
   const pythonScript = join(__dirname, 'batch_edit_mvp.py')
   const tmpFile = join(__dirname, `.edit_batch_tmp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.json`)
