@@ -1,10 +1,15 @@
 {
   "name": "health",
   "version": "1.0.0",
-  "description": "System health check: DB integrity, tool manifests, schema version, disk state. Use when server starts or errors occur.",
+  "description": "System health check: DB integrity, tool manifests, schema version, disk state. Use when server starts or errors occur. Set stats=true for usage statistics and value metrics.",
   "inputSchema": {
     "type": "object",
-    "properties": {},
+    "properties": {
+      "stats": {
+        "type": "boolean",
+        "description": "Include usage statistics: per-tool call counts, success rate, tokens saved, issues caught"
+      }
+    },
     "required": []
   },
   "handler": "./handler.js",

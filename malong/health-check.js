@@ -1,9 +1,54 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync, accessSync, constants, unlinkSync, statSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { homedir } from 'node:os'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const SCHEMA_VERSION = 1
+
+export function readUsageStats() {
+  const usagePath = join(homedir(), '.config', 'opencode', 'malong-usage.jsonl')
+  if (!existsSync(usagePath)) return null
+  try {
+    const lines = readFileSync(usagePath, 'utf-8').trim().split('\n').filter(Boolean)
+    const byTool = {}
+    let totalCalls = 0, totalOk = 0, totalDuration = 0
+    const value = { tokens_saved: 0, tokens_served: 0, reads_saved: 0, searches_saved: 0, issues_caught: 0, collisions_detected: 0, rollbacks: 0 }
+    let firstTs = null, lastTs = null
+    for (const line of lines) {
+      try {
+        const r = JSON.parse(line)
+        totalCalls++
+        if (r.success) totalOk++
+        totalDuration += r.duration_ms || 0
+        if (!firstTs) firstTs = r.ts
+        lastTs = r.ts
+        if (!byTool[r.tool]) byTool[r.tool] = { calls: 0, ok: 0, fail: 0, total_ms: 0 }
+        const t = byTool[r.tool]
+        t.calls++
+        if (r.success) t.ok++; else t.fail++
+        t.total_ms += r.duration_ms || 0
+        if (r.metrics) {
+          for (const [k, v] of Object.entries(r.metrics)) {
+            if (k in value) value[k] += v
+          }
+        }
+      } catch {}
+    }
+    for (const t of Object.values(byTool)) {
+      t.avg_ms = Math.round(t.total_ms / t.calls)
+      delete t.total_ms
+    }
+    return {
+      total_calls: totalCalls,
+      success_rate: Math.round(totalOk / totalCalls * 100) / 100,
+      total_duration_ms: totalDuration,
+      period: firstTs && lastTs ? `${firstTs.slice(0, 10)} ~ ${lastTs.slice(0, 10)}` : null,
+      value,
+      by_tool: byTool,
+    }
+  } catch { return null }
+}
 
 export async function runHealthCheck({ stateDir, toolsDir, workspacesDir, registry, log }) {
   const checks = []

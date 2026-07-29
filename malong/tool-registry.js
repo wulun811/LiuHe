@@ -9,6 +9,47 @@ import { homedir } from 'node:os'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
+function extractMetrics(name, result) {
+  if (!result || result.error) return undefined
+  const m = {}
+  switch (name) {
+    case 'read_outline':
+      if (result.lines && result.tokens_estimate) m.tokens_saved = Math.max(0, result.lines * 12 - result.tokens_estimate)
+      break
+    case 'repo_map':
+      if (result.tokens) m.tokens_served = result.tokens
+      break
+    case 'impact_analysis':
+      if (result.caller_count) m.reads_saved = (result.caller_count.direct || 0) + (result.caller_count.indirect || 0)
+      break
+    case 'call_chain':
+      m.reads_saved = (result.callers?.length || 0) + (result.callees?.length || 0)
+      break
+    case 'trace_symbol':
+      m.searches_saved = result.direct_references?.length || 0
+      break
+    case 'fix_imports':
+      m.issues_caught = result.issues?.length || 0
+      break
+    case 'guard_patterns':
+      m.issues_caught = result.violations?.length || 0
+      break
+    case 'naming_consistency':
+      m.issues_caught = result.issues?.length || 0
+      break
+    case 'dependency_gatekeeper':
+      m.issues_caught = result.issues?.length || 0
+      break
+    case 'edit_collision_guard':
+      if (result.status === 'modified_since_read') m.collisions_detected = 1
+      break
+    case 'edit_transaction':
+      if (result.status === 'rolled_back') m.rollbacks = 1
+      break
+  }
+  return Object.keys(m).length > 0 ? m : undefined
+}
+
 function getUsagePath() {
   const dir = join(homedir(), '.config', 'opencode')
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
@@ -112,8 +153,9 @@ class ToolRegistry {
     const t0 = Date.now()
     let success = true
     let errorCode = ''
+    let result
     try {
-      const result = await tool.handler(args, context)
+      result = await tool.handler(args, context)
       if (result?.error) { success = false; errorCode = result.error_code || result.error || '' }
       return result
     } catch (e) {
@@ -129,6 +171,10 @@ class ToolRegistry {
           success,
           error_code: errorCode,
           duration_ms: Date.now() - t0,
+        }
+        if (success) {
+          const metrics = extractMetrics(name, result)
+          if (metrics) entry.metrics = metrics
         }
         appendFileSync(this._usagePath, JSON.stringify(entry) + '\n')
       } catch {}
