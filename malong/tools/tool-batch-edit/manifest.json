@@ -25,6 +25,10 @@
       "dry_run": {
         "type": "boolean",
         "description": "Preview changes as unified diff, do not apply"
+      },
+      "partial": {
+        "type": "boolean",
+        "description": "Apply successful edits even if some fail. Returns applied_indices, failed_indices, and retry_edits for fixing"
       }
     },
     "required": ["file_path", "edits"]

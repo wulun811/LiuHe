@@ -61,6 +61,7 @@ export async function handle(args, context) {
 
     const cmdArgs = [pythonScript, filePath, '--edits-file', tmpFile]
     if (dryRun) cmdArgs.push('--dry-run')
+    if (args?.partial) cmdArgs.push('--partial')
 
     const stdout = execFileSync('python3', cmdArgs, {
       encoding: 'utf-8',

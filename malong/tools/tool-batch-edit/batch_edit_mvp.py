@@ -345,7 +345,7 @@ def serialize_result(result: Dict) -> Dict:
             serialized[k] = v
     return serialized
 
-def batch_edit(file_path: str, edits_data: List[Dict], dry_run: bool = False, backup: bool = False) -> Dict:
+def batch_edit(file_path: str, edits_data: List[Dict], dry_run: bool = False, backup: bool = False, partial: bool = False) -> Dict:
     """
     批量编辑主函数
     
@@ -464,6 +464,42 @@ def batch_edit(file_path: str, edits_data: List[Dict], dry_run: bool = False, ba
     
     # 如果有错误，一次性返回全部（错误聚合）
     if errors:
+        if partial and matches:
+            # partial 模式：成功的写入，失败的返回让 LLM 修
+            conflict = check_conflicts(matches)
+            if conflict:
+                skip = {conflict['idx1'], conflict['idx2']}
+                matches = [m for m in matches if m.edit.index not in skip]
+                errors.append(EditResult(
+                    edit_index=-1, status="conflict",
+                    message=f"Edit {conflict['idx1']} and {conflict['idx2']} overlap, both skipped in partial mode"
+                ))
+            if matches:
+                final_content = apply_edits(original_content, matches)
+                diff = generate_diff(original_content, final_content, file_path)
+                if not dry_run:
+                    if backup:
+                        import shutil
+                        shutil.copy2(file_path, file_path + '.bak')
+                    with open(file_path, 'w', encoding='utf-8', newline='') as f:
+                        f.write(final_content)
+                applied_indices = sorted(set(m.edit.index for m in matches))
+                failed_indices = sorted(e.edit_index for e in errors if e.edit_index >= 0)
+                retry_edits = [edits_data[i] for i in failed_indices if i < len(edits_data)]
+                for r in results:
+                    if r.status == 'matched':
+                        r.status = 'success'
+                return {
+                    "success": True,
+                    "partial": True,
+                    "edits_applied": len(matches),
+                    "edits_failed": len([e for e in errors if e.edit_index >= 0]),
+                    "applied_indices": applied_indices,
+                    "failed_indices": failed_indices,
+                    "retry_edits": retry_edits,
+                    "diff": diff,
+                    "results": results + errors,
+                }
         error_types = set(e.status for e in errors)
         return {
             "success": False,
@@ -573,6 +609,8 @@ def main():
                         help="Preview changes as unified diff, don't apply")
     parser.add_argument("--backup", action="store_true",
                         help="Create .bak backup before writing")
+    parser.add_argument("--partial", action="store_true",
+                        help="Apply successful edits even if some fail")
     
     args = parser.parse_args()
     
@@ -594,7 +632,7 @@ def main():
         parser.print_help()
         sys.exit(1)
     
-    result = batch_edit(args.file, edits_data, dry_run=args.dry_run, backup=args.backup)
+    result = batch_edit(args.file, edits_data, dry_run=args.dry_run, backup=args.backup, partial=args.partial)
     
     # 输出：JSON 到 stdout，状态到 stderr
     print(json.dumps(result, indent=2, ensure_ascii=False, cls=EditResultEncoder))

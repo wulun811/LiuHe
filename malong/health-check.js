@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, writeFileSync, accessSync, constants, unlinkSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, writeFileSync, accessSync, constants, unlinkSync, statSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -26,6 +26,8 @@ export async function runHealthCheck({ stateDir, toolsDir, workspacesDir, regist
       const entries = readdirSync(workspacesDir, { withFileTypes: true })
       let dbCount = 0
       let badCount = 0
+      let totalSizeMB = 0
+      const databases = []
       let Database
       try { Database = (await import('better-sqlite3')).default } catch {}
       for (const e of entries) {
@@ -33,6 +35,17 @@ export async function runHealthCheck({ stateDir, toolsDir, workspacesDir, regist
         const dbPath = join(workspacesDir, e.name, 'code-index.db')
         if (existsSync(dbPath)) {
           dbCount++
+          let sizeMB = 0, lastAccess = null
+          try {
+            const st = statSync(dbPath)
+            sizeMB = Math.round(st.size / 1024 / 1024 * 10) / 10
+            totalSizeMB += sizeMB
+            const ageMs = Date.now() - st.mtimeMs
+            lastAccess = ageMs < 3600000 ? `${Math.round(ageMs / 60000)}min ago`
+              : ageMs < 86400000 ? `${Math.round(ageMs / 3600000)}h ago`
+              : `${Math.round(ageMs / 86400000)}d ago`
+          } catch {}
+          databases.push({ workspace: e.name, size_mb: sizeMB, last_access: lastAccess })
           if (Database) {
             try {
               const db = new Database(dbPath)
@@ -45,9 +58,12 @@ export async function runHealthCheck({ stateDir, toolsDir, workspacesDir, regist
         }
       }
       if (Database) {
-        add('DB integrity', badCount === 0 ? 'PASS' : 'WARN', `${dbCount} workspace(s), ${badCount} corrupted`)
+        add('DB integrity', badCount === 0 ? 'PASS' : 'WARN', `${dbCount} workspace(s), ${badCount} corrupted, total ${Math.round(totalSizeMB)}MB`)
       } else {
-        add('DB integrity', 'PASS', `${dbCount} workspace(s) — sqlite3 not available for integrity check`)
+        add('DB integrity', 'PASS', `${dbCount} workspace(s), total ${Math.round(totalSizeMB)}MB — sqlite3 not available for integrity check`)
+      }
+      if (databases.length > 0) {
+        checks.push({ name: 'Workspace databases', status: 'INFO', detail: `${databases.length} database(s)`, databases })
       }
     } catch (e) {
       add('DB integrity', 'WARN', `cannot scan: ${e.message}`)

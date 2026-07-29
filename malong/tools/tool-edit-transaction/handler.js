@@ -42,6 +42,36 @@ export async function handle(args, context) {
       const res = { status: 'staged', file, edits_applied: editResult.edits_applied }
       if (editResult.validation_warnings?.length) res.validation_warnings = editResult.validation_warnings
       if (editResult.failed_edits?.length) res.failed_edits = editResult.failed_edits
+
+      const codeIndex = context?.codeIndexService
+      if (codeIndex && edits.length > 0) {
+        try {
+          const syms = (await codeIndex.getSymbols(file)) || []
+          const fnSyms = syms.filter(s => ['function', 'method'].includes(s.type))
+          const affected = []
+          for (const e of edits) {
+            for (const sym of fnSyms) {
+              if (e.old_string && e.old_string.includes(sym.name) &&
+                  /(?:def |function |func |fn |async )\s/.test(e.old_string)) {
+                const callers = (await codeIndex.getCallers(sym.name)) || []
+                if (callers.length > 0) {
+                  affected.push({
+                    function: sym.name,
+                    caller_count: callers.length,
+                    callers: callers.slice(0, 5).map(c => ({ file: c.caller_file })),
+                  })
+                }
+              }
+            }
+          }
+          if (affected.length > 0) {
+            res.affected_callers = affected
+            const total = affected.reduce((s, a) => s + a.caller_count, 0)
+            res.hint = `you modified ${affected.map(a => `'${a.function}'`).join(', ')} — ${total} caller(s) may need updating`
+          }
+        } catch {}
+      }
+
       return res
     }
 
