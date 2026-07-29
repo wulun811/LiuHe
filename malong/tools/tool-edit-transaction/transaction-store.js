@@ -130,8 +130,9 @@ export class TransactionStore {
       return makeError(ErrorCodes.TXN_NOT_FOUND, `Transaction not found: ${txnId}`, { txnId })
     }
     const manifest = this._readManifest(txnId)
+    const filesChanged = Object.keys(manifest.files)
     rmSync(txnPath, { recursive: true, force: true })
-    return { status: 'committed', files_changed: Object.keys(manifest.files).length }
+    return { status: 'committed', files_changed: filesChanged.length, files: filesChanged }
   }
 
   rollback(txnId) {

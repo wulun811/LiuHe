@@ -8,6 +8,7 @@ export function checkFileStaleness(codeIndexService, workspaceDir, filePath) {
     const diskMtime = statSync(absPath).mtimeMs
     const indexedMtime = codeIndexService.getFileMtime(filePath)
     if (diskMtime > indexedMtime) {
+      codeIndexService.clearCachesForFile(filePath)
       return {
         warning: 'index_stale',
         file: filePath,

@@ -45,6 +45,29 @@ export async function handle(args, context) {
   }
 
   const opts = {}
+  const symbols = args?.symbols
+  if (Array.isArray(symbols) && symbols.length > 0 && !args?.symbol) {
+    const results = []
+    for (const sym of symbols) {
+      const symOpts = { symbol: sym, changeType: opts.changeType || 'modify', maxCallers: opts.maxCallers || 20, depth: opts.depth || 2 }
+      if (args?.change_type) {
+        const VALID_CHANGE_TYPES = ['modify', 'delete', 'rename']
+        symOpts.changeType = VALID_CHANGE_TYPES.includes(args.change_type) ? args.change_type : 'modify'
+      }
+      if (args?.max_callers) symOpts.maxCallers = args.max_callers
+      if (args?.depth) {
+        const d = parseInt(args.depth)
+        symOpts.depth = (d > 0 && d <= 10) ? d : 2
+      }
+      const misuseWarning = detectMisuse(sym)
+      const result = await codeIndexService.getImpactAnalysis(file, symOpts)
+      attachStalenessWarning(result, checkFileStaleness(codeIndexService, workspaceDir, file))
+      if (misuseWarning) result.misuse_warning = misuseWarning
+      results.push(result)
+    }
+    return { symbols: results, file, batch: true }
+  }
+
   if (args?.symbol) opts.symbol = args.symbol
   if (args?.change_type) {
     const VALID_CHANGE_TYPES = ['modify', 'delete', 'rename']

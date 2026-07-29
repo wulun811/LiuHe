@@ -948,13 +948,24 @@ class CodeIndex {
         return f ? f.mtime : 0
       },
 
+      clearCachesForFile(filePath) {
+        const absPath = self._currentWorkspace ? join(self._currentWorkspace, filePath) : filePath
+        self._contextCache.delete(absPath)
+        for (const key of self._outlineCache.keys()) {
+          if (key.includes(`\0${filePath}\0`)) self._outlineCache.delete(key)
+        }
+        for (const key of self._impactCache.keys()) {
+          if (key.includes(`\0${filePath}\0`)) self._impactCache.delete(key)
+        }
+      },
+
       async getFileOutline(filePath, { depth = 1, includeRefs = false, includeTestRefs = false, maxItems = 50 } = {}) {
         const cacheKey = `${self._currentWorkspace || ''}\0${filePath}\0${depth}\0${includeRefs}\0${includeTestRefs}\0${maxItems}`
         if (self._outlineCache.has(cacheKey)) {
           return self._outlineCache.get(cacheKey)
         }
 
-        const f = self._db.prepare('SELECT id, size FROM files WHERE path = ?').get(filePath)
+        const f = self._db.prepare('SELECT id, size, mtime FROM files WHERE path = ?').get(filePath)
         if (!f) return { error: 'file_not_found', message: `File not indexed: ${filePath}`, suggestion: `Call reindex(workspace_dir=...) to index the project first` }
 
         const symbols = self._db.prepare('SELECT id, name, type, signature, start_line, end_line FROM symbols WHERE file_id = ? ORDER BY start_line').all(f.id)
@@ -972,6 +983,7 @@ class CodeIndex {
           file: filePath,
           lines: symbols.length > 0 ? Math.max(...symbols.map(s => s.end_line)) : 0,
           tokens_estimate: f.size ? Math.ceil(f.size / 3) : 0,
+          mtime: f.mtime || 0,
           truncated,
           outline
         }
