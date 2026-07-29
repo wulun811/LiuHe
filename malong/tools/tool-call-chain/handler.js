@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 import { existsSync, statSync } from 'node:fs'
-import { checkFileStaleness } from '../../staleness.js'
+import { checkFileStaleness, attachStalenessWarning, ensureIndexed } from '../../staleness.js'
 
 function detectMisuse(args) {
   const line = parseInt(args?.line) || 0
@@ -64,14 +64,21 @@ export async function handle(args, context) {
     return { error: 'missing_parameter', message: 'Could not determine symbol from file+line. Provide symbol explicitly.', suggestion: 'Provide a symbol name, or ensure the file is indexed and line falls within a function/class definition.' }
   }
 
-  const impact = await codeIndexService.getImpactAnalysis(file, {
+  const staleness = checkFileStaleness(codeIndexService, workspaceDir, file)
+  let impact = await codeIndexService.getImpactAnalysis(file, {
     symbol,
     depth,
     maxCallers: Math.max(maxCallers, maxCallees)
   })
 
-  const staleness = checkFileStaleness(codeIndexService, workspaceDir, file)
-  let indexStale = !!staleness
+  if (impact?.error === 'file_not_found' && ensureIndexed(codeIndexService, workspaceDir, file)) {
+    impact = await codeIndexService.getImpactAnalysis(file, {
+      symbol,
+      depth,
+      maxCallers: Math.max(maxCallers, maxCallees)
+    })
+    if (impact && !impact.error) impact.auto_indexed = true
+  }
 
   const result = {
     target: {
@@ -90,7 +97,6 @@ export async function handle(args, context) {
     metadata: {
       parse_time_ms: Date.now() - startTime,
       cache_hit: !!impact._fromCache,
-      ...(indexStale ? { index_stale: true } : {}),
       ...(impact.summary ? {
         total_callers: impact.summary.direct_callers + impact.summary.indirect_callers,
         total_callees: impact.summary.total_callees || 0
@@ -98,10 +104,7 @@ export async function handle(args, context) {
     }
   }
 
-  if (indexStale) {
-    result.warning = 'index_stale'
-    result.suggestion = staleness.suggestion
-  }
+  attachStalenessWarning(result, staleness)
 
   if (misuseWarning) {
     result.misuse_warning = misuseWarning

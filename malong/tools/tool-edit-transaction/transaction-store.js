@@ -131,8 +131,47 @@ export class TransactionStore {
     }
     const manifest = this._readManifest(txnId)
     const filesChanged = Object.keys(manifest.files)
-    rmSync(txnPath, { recursive: true, force: true })
+    const recentDir = join(this.txnRoot, 'recent')
+    if (!existsSync(recentDir)) {
+      mkdirSync(recentDir, { recursive: true })
+    }
+    const recentPath = join(recentDir, txnId)
+    renameSync(txnPath, recentPath)
+    this._cleanRecent(3)
     return { status: 'committed', files_changed: filesChanged.length, files: filesChanged }
+  }
+
+  undoCommit(txnId) {
+    const recentPath = join(this.txnRoot, 'recent', txnId)
+    if (!existsSync(recentPath)) {
+      return makeError(ErrorCodes.TXN_NOT_FOUND, `Recent transaction not found: ${txnId}`, { txnId, suggestion: 'Only the last 3 committed transactions can be undone' })
+    }
+    const manifest = JSON.parse(readFileSync(join(recentPath, 'manifest.json'), 'utf-8'))
+    const backupDir = join(recentPath, 'backup')
+    let filesRestored = 0
+    for (const [fileRel, meta] of Object.entries(manifest.files)) {
+      if (meta.skipped) continue
+      const backupPath = join(backupDir, meta.backupName)
+      const destPath = join(this.projectRoot, fileRel)
+      if (existsSync(backupPath)) {
+        copyFileSync(backupPath, destPath)
+        filesRestored++
+      }
+    }
+    rmSync(recentPath, { recursive: true, force: true })
+    return { status: 'undone', files_restored: filesRestored, files: Object.keys(manifest.files) }
+  }
+
+  _cleanRecent(maxKeep) {
+    const recentDir = join(this.txnRoot, 'recent')
+    if (!existsSync(recentDir)) return
+    const entries = readdirSync(recentDir, { withFileTypes: true })
+      .filter(d => d.isDirectory())
+      .map(d => ({ name: d.name, mtime: statSync(join(recentDir, d.name)).mtimeMs }))
+      .sort((a, b) => b.mtime - a.mtime)
+    for (let i = maxKeep; i < entries.length; i++) {
+      rmSync(join(recentDir, entries[i].name), { recursive: true, force: true })
+    }
   }
 
   rollback(txnId) {

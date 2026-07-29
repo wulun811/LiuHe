@@ -57,6 +57,8 @@ export async function handle(args, context) {
   const absPath = join(workspaceDir, file)
   if (!existsSync(absPath)) return { error: 'file_not_found', file, suggestion: `Check that the file exists at ${absPath}` }
 
+  const staleness = checkFileStaleness(codeIndexService, workspaceDir, file)
+
   let fileMtime = 0
   try { fileMtime = statSync(absPath).mtimeMs } catch {}
   const cacheKey = `${workspaceDir}\0${file}\0${autoFix}\0${maxCandidates}\0${fileMtime}`
@@ -169,7 +171,7 @@ export async function handle(args, context) {
     result.hint = 'No import issues found. If you recently changed function signatures, use impact_analysis to check for broken callers.'
   }
 
-  attachStalenessWarning(result, checkFileStaleness(codeIndexService, workspaceDir, file))
+  attachStalenessWarning(result, staleness)
 
   if (!autoFix) {
     _fixImportsCache.set(cacheKey, result)

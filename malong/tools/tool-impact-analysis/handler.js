@@ -45,6 +45,7 @@ export async function handle(args, context) {
   }
 
   const opts = {}
+  const staleness = checkFileStaleness(codeIndexService, workspaceDir, file)
   const symbols = args?.symbols
   if (Array.isArray(symbols) && symbols.length > 0 && !args?.symbol) {
     const results = []
@@ -61,7 +62,7 @@ export async function handle(args, context) {
       }
       const misuseWarning = detectMisuse(sym)
       const result = await codeIndexService.getImpactAnalysis(file, symOpts)
-      attachStalenessWarning(result, checkFileStaleness(codeIndexService, workspaceDir, file))
+      attachStalenessWarning(result, staleness)
       if (misuseWarning) result.misuse_warning = misuseWarning
       results.push(result)
     }
@@ -82,7 +83,7 @@ export async function handle(args, context) {
   const misuseWarning = detectMisuse(args?.symbol)
   const result = await codeIndexService.getImpactAnalysis(file, opts)
 
-  attachStalenessWarning(result, checkFileStaleness(codeIndexService, workspaceDir, file))
+  attachStalenessWarning(result, staleness)
 
   if (misuseWarning) {
     result.misuse_warning = misuseWarning

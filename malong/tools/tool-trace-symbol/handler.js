@@ -51,6 +51,12 @@ export async function handle(args, context) {
   const absFilePath = join(workspaceDir, file)
   let fileMtime = 0
   try { fileMtime = statSync(absFilePath).mtimeMs } catch {}
+
+  const staleness = checkFileStaleness(codeIndexService, workspaceDir, file)
+  if (staleness?.auto_indexed) {
+    try { fileMtime = statSync(absFilePath).mtimeMs } catch {}
+  }
+
   const cacheKey = `${workspaceDir}\0${symbol}\0${file}\0${includeLiterals}\0${maxResults}\0${fileMtime}`
   const wasCached = _traceCache.has(cacheKey)
   if (wasCached) return _traceCache.get(cacheKey)
@@ -109,7 +115,7 @@ export async function handle(args, context) {
     }
   }
 
-  attachStalenessWarning(result, checkFileStaleness(codeIndexService, workspaceDir, file))
+  attachStalenessWarning(result, staleness)
 
   if (misuseWarning) {
     result.misuse_warning = misuseWarning

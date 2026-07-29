@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import { statSync } from 'node:fs'
+import { statSync, existsSync } from 'node:fs'
 
 export function checkFileStaleness(codeIndexService, workspaceDir, filePath) {
   if (!codeIndexService || !workspaceDir || !filePath) return null
@@ -9,18 +9,37 @@ export function checkFileStaleness(codeIndexService, workspaceDir, filePath) {
     const indexedMtime = codeIndexService.getFileMtime(filePath)
     if (diskMtime > indexedMtime) {
       codeIndexService.clearCachesForFile(filePath)
-      return {
-        warning: 'index_stale',
-        file: filePath,
-        suggestion: `File "${filePath}" was modified after last index. Call reindex to refresh.`
+      const result = codeIndexService.indexFile(absPath, workspaceDir)
+      if (result) {
+        return { auto_indexed: true, file: filePath }
+      } else {
+        return {
+          warning: 'index_stale',
+          file: filePath,
+          suggestion: `File "${filePath}" was modified after last index. Call reindex to refresh.`
+        }
       }
     }
   } catch {}
   return null
 }
 
+export function ensureIndexed(codeIndexService, workspaceDir, filePath) {
+  if (!codeIndexService || !workspaceDir || !filePath) return false
+  const absPath = join(workspaceDir, filePath)
+  if (!existsSync(absPath)) return false
+  const indexedMtime = codeIndexService.getFileMtime(filePath)
+  if (indexedMtime > 0) return true
+  const result = codeIndexService.indexFile(absPath, workspaceDir)
+  return !!result
+}
+
 export function attachStalenessWarning(result, staleness) {
   if (!staleness) return result
+  if (staleness.auto_indexed) {
+    result.auto_indexed = true
+    return result
+  }
   result.warning = staleness.warning
   result.stale_file = staleness.file
   result.suggestion = staleness.suggestion

@@ -1,8 +1,6 @@
-// 六合工具集 — dep_graph handler
-
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
-import { checkFileStaleness, attachStalenessWarning } from '../../staleness.js'
+import { checkFileStaleness, attachStalenessWarning, ensureIndexed } from '../../staleness.js'
 
 export async function handle(args, context) {
   const { codeIndexService, getWorkspaceDir } = context
@@ -12,7 +10,6 @@ export async function handle(args, context) {
     return { error: 'missing_parameter', message: 'workspace_dir is required', suggestion: 'Provide the absolute path to the project root directory. Call reindex first if this is a new workspace.' }
   }
 
-  // 检查 workspace 是否已索引
   const dbPath = join(getWorkspaceDir(workspaceDir), 'code-index.db')
   if (!existsSync(dbPath)) {
     return { 
@@ -26,7 +23,6 @@ export async function handle(args, context) {
     return { error: 'service_unavailable', message: 'codeIndex service not available', suggestion: 'Check MCP server configuration and ensure code-index.js is loaded' }
   }
 
-  // 初始化 workspace 数据库
   codeIndexService.initWorkspace(workspaceDir)
 
   const file = args?.file || ''
@@ -34,6 +30,11 @@ export async function handle(args, context) {
     return { error: 'missing_parameter', message: 'file is required', suggestion: 'Provide a file path relative to workspace_dir (e.g. "scripts/lib/tools/spawn.mjs")' }
   }
 
-  const result = await codeIndexService.getModuleDependencies(file, { depth: args?.depth || 3 })
-  return attachStalenessWarning(result, checkFileStaleness(codeIndexService, workspaceDir, file))
+  const staleness = checkFileStaleness(codeIndexService, workspaceDir, file)
+  let result = await codeIndexService.getModuleDependencies(file, { depth: args?.depth || 3 })
+  if (result?.error === 'file_not_found' && ensureIndexed(codeIndexService, workspaceDir, file)) {
+    result = await codeIndexService.getModuleDependencies(file, { depth: args?.depth || 3 })
+    if (result && !result.error) result.auto_indexed = true
+  }
+  return attachStalenessWarning(result, staleness)
 }

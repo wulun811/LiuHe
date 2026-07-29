@@ -121,6 +121,12 @@ export async function handle(args, context) {
       return store.commit(txnId)
     }
 
+    case 'undo_commit': {
+      const txnId = args?.txn_id
+      if (!txnId) return makeError(ErrorCodes.INVALID_INPUT, 'txn_id is required', { suggestion: 'Provide the transaction ID to undo' })
+      return store.undoCommit(txnId)
+    }
+
     case 'rollback': {
       const txnId = args?.txn_id
       if (!txnId) return makeError(ErrorCodes.INVALID_INPUT, 'txn_id is required', { suggestion: 'Provide the transaction ID to rollback' })
@@ -138,6 +144,6 @@ export async function handle(args, context) {
     }
 
     default:
-      return makeError(ErrorCodes.INVALID_ACTION, 'action must be: begin, edit, edit_multi, commit, rollback, info', { suggestion: 'See docs/P0/02-edit-transaction.md for details' })
+      return makeError(ErrorCodes.INVALID_ACTION, 'action must be: begin, edit, edit_multi, commit, undo_commit, rollback, info', { suggestion: 'See docs/P0/02-edit-transaction.md for details' })
   }
 }

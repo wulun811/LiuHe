@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
-import { checkFileStaleness, attachStalenessWarning } from '../../staleness.js'
+import { checkFileStaleness, attachStalenessWarning, ensureIndexed } from '../../staleness.js'
 
 export async function handle(args, context) {
   const { codeIndexService, getWorkspaceDir } = context
@@ -32,6 +32,11 @@ export async function handle(args, context) {
   if (args?.include_test_refs) opts.includeTestRefs = true
   if (args?.max_items) { const m = parseInt(args.max_items); opts.maxItems = Number.isNaN(m) ? 50 : Math.max(1, m) }
 
-  const result = await codeIndexService.getFileOutline(file, opts)
-  return attachStalenessWarning(result, checkFileStaleness(codeIndexService, workspaceDir, file))
+  const staleness = checkFileStaleness(codeIndexService, workspaceDir, file)
+  let result = await codeIndexService.getFileOutline(file, opts)
+  if (result?.error === 'file_not_found' && ensureIndexed(codeIndexService, workspaceDir, file)) {
+    result = await codeIndexService.getFileOutline(file, opts)
+    if (result && !result.error) result.auto_indexed = true
+  }
+  return attachStalenessWarning(result, staleness)
 }

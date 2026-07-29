@@ -7,6 +7,7 @@ import { join, relative, extname, resolve } from 'node:path'
 import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, watch, chmodSync, statSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { Worker } from 'node:worker_threads'
+import { DEFAULT_IGNORE_DIRS } from './file-collector.js'
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS files (
@@ -592,6 +593,37 @@ class CodeIndex {
       // 初始化 workspace（供 handler 调用）
       initWorkspace(workspaceDir) {
         initWorkspaceDb(workspaceDir)
+        if (!self._watcher || self._watchedDir !== resolve(workspaceDir)) {
+          if (self._watcher) { self._watcher.close(); self._watcher = null }
+          self._watchedDir = resolve(workspaceDir)
+          if (existsSync(self._watchedDir)) {
+            const pendingChanges = new Set()
+            try {
+              self._watcher = watch(self._watchedDir, { recursive: true }, (eventType, filename) => {
+                if (!filename) return
+                const ext = extname(filename)
+                if (!CACHED_EXT.has(ext)) return
+                const parts = filename.split(/[\\/]/)
+                if (parts.some(p => DEFAULT_IGNORE_DIRS.has(p))) return
+                pendingChanges.add(filename)
+                if (self._watcherTimer) clearTimeout(self._watcherTimer)
+                self._watcherTimer = setTimeout(() => {
+                  const files = Array.from(pendingChanges)
+                  pendingChanges.clear()
+                  for (const f of files) {
+                    const fullPath = join(self._watchedDir, f)
+                    if (existsSync(fullPath)) {
+                      self.syncFileChange(fullPath)
+                    }
+                  }
+                }, WATCHER_DEBOUNCE)
+              })
+              self._core.log('info', `[code-index] watching ${self._watchedDir}`)
+            } catch (e) {
+              self._core.log('warn', `[code-index] watch failed: ${e.message}`)
+            }
+          }
+        }
         return { workspace_dir: workspaceDir, db_path: join(core.getWorkspaceDir(workspaceDir), 'code-index.db') }
       },
 
@@ -1021,16 +1053,25 @@ class CodeIndex {
         if (self._watcher) { self._watcher.close(); self._watcher = null }
         self._watchedDir = resolve(dir)
         if (!existsSync(self._watchedDir)) return { status: 'not_found', dir }
+        const pendingChanges = new Set()
         try {
           self._watcher = watch(self._watchedDir, { recursive: true }, (eventType, filename) => {
             if (!filename) return
             const ext = extname(filename)
             if (!CACHED_EXT.has(ext)) return
+            const parts = filename.split(/[\\/]/)
+            if (parts.some(p => DEFAULT_IGNORE_DIRS.has(p))) return
+            pendingChanges.add(filename)
             if (self._watcherTimer) clearTimeout(self._watcherTimer)
             self._watcherTimer = setTimeout(() => {
-              const fullPath = join(self._watchedDir, filename)
-              if (!existsSync(fullPath)) return
-              self.syncFileChange(fullPath)
+              const files = Array.from(pendingChanges)
+              pendingChanges.clear()
+              for (const f of files) {
+                const fullPath = join(self._watchedDir, f)
+                if (existsSync(fullPath)) {
+                  self.syncFileChange(fullPath)
+                }
+              }
             }, WATCHER_DEBOUNCE)
           })
           self._core.log('info', `[code-index] watching ${self._watchedDir}`)
