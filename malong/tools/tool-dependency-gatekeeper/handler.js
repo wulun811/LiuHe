@@ -38,6 +38,10 @@ const IMPORT_TO_PACKAGE = {
   pytest: 'pytest', mock: 'mock',
   mypy: 'mypy', black: 'black', ruff: 'ruff',
   lodash: 'lodash', axios: 'axios', react: 'react', 'react-dom': 'react-dom',
+  'tree-sitter': 'tree-sitter', 'tree-sitter-javascript': 'tree-sitter-javascript',
+  'tree-sitter-python': 'tree-sitter-python', 'tree-sitter-go': 'tree-sitter-go',
+  'tree-sitter-rust': 'tree-sitter-rust', 'tree-sitter-typescript': 'tree-sitter-typescript',
+  'better-sqlite3': 'better-sqlite3',
   vue: 'vue', angular: '@angular/core', svelte: 'svelte',
   next: 'next', nuxt: 'nuxt', express: 'express', koa: 'koa',
   webpack: 'webpack', vite: 'vite', rollup: 'rollup', esbuild: 'esbuild',
@@ -152,6 +156,8 @@ function installHint(pkg, manifestName) {
 
 const EXT_MANIFEST_PREF = {
   '.py': ['pyproject.toml', 'requirements.txt'],
+  '.js': ['package.json'], '.mjs': ['package.json'], '.cjs': ['package.json'],
+  '.ts': ['package.json'], '.tsx': ['package.json'],
   '.go': ['go.mod'],
   '.rs': ['Cargo.toml'],
 }
