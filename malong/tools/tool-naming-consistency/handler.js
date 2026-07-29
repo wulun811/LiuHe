@@ -62,7 +62,7 @@ function learnVerbs(db, ext) {
     SELECT s.name FROM symbols s JOIN files f ON s.file_id = f.id
     WHERE f.path LIKE ? AND s.type IN ('function', 'method')
   `).all(`%${ext}`)
-  const verbs = {}
+  const verbs = Object.create(null)
   for (const r of rows) {
     const v = extractVerb(r.name)
     ;(verbs[v] ??= []).push(r.name)
