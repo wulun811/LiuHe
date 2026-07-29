@@ -327,7 +327,9 @@ export async function handle(args, context) {
   if (!existsSync(absPath)) return makeError(ErrorCodes.FILE_NOT_FOUND, `File does not exist: ${file}`, { file })
 
   const langParser = context?.langParserService
-  if (!langParser) return makeError(ErrorCodes.SERVICE_UNAVAILABLE, 'lang-parser service not available')
+  if (!langParser) return makeError(ErrorCodes.SERVICE_UNAVAILABLE, 'lang-parser service not available', {
+    suggestion: 'This tool requires the MCP server context. Ensure malong MCP server is running.'
+  })
 
   const content = readFileSync(absPath, 'utf-8')
   const ext = extname(file)

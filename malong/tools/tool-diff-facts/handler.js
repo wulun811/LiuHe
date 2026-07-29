@@ -75,20 +75,42 @@ function diffLines(before, after) {
   return { added, removed }
 }
 
+const SYMBOL_PATTERNS = [
+  { re: /^\s*def\s+(\w+)\s*\(/, type: 'function' },
+  { re: /^\s*class\s+(\w+)/, type: 'class' },
+  { re: /^\s*(?:async\s+)?function\s+(\w+)\s*\(/, type: 'function' },
+  { re: /^\s*(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?(?:\([^)]*\)|[^=])\s*=>/, type: 'function' },
+  { re: /^\s*func\s+(?:\([^)]*\)\s*)?(\w+)\s*\(/, type: 'function' },
+  { re: /^\s*(?:pub\s+)?fn\s+(\w+)\s*[<(]/, type: 'function' },
+  { re: /^\s*(?:pub\s+)?(?:struct|enum|trait|impl)\s+(\w+)/, type: 'class' },
+]
+
+function extractSymbolsRegex(content) {
+  const syms = []
+  for (const line of content.split('\n')) {
+    for (const { re, type } of SYMBOL_PATTERNS) {
+      const m = line.match(re)
+      if (m) { syms.push({ name: m[1], type, signature: line.trim() }); break }
+    }
+  }
+  return syms
+}
+
 function extractSymbols(content, ext, langParser) {
-  if (!langParser) return null
-  try {
-    const tree = langParser.parse(content, ext)
-    if (!tree) return null
-    return langParser.extractSymbols(tree, content)
-  } catch { return null }
+  if (langParser) {
+    try {
+      const tree = langParser.parse(content, ext)
+      if (tree) return langParser.extractSymbols(tree, content)
+    } catch {}
+  }
+  return extractSymbolsRegex(content)
 }
 
 function extractChanges(change, langParser) {
   const ext = extname(change.file)
   const beforeSyms = extractSymbols(change.before, ext, langParser)
   const afterSyms = extractSymbols(change.after, ext, langParser)
-  if (!beforeSyms || !afterSyms) return []
+  if (!beforeSyms.length && !afterSyms.length) return []
 
   const out = []
   for (const sym of afterSyms) {
@@ -154,7 +176,7 @@ function checkTestSync(changes, workspaceDir) {
       if (existsSync(join(workspaceDir, t))) {
         if (!testsPossiblyStale.includes(t)) testsPossiblyStale.push(t)
       } else {
-        if (!testsNotFound.includes(t)) testsNotFound.push(t)
+        if (!testsNotFound.includes(t) && testsNotFound.length < 2) testsNotFound.push(t)
       }
     }
   }

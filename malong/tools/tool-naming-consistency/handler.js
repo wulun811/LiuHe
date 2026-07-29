@@ -88,7 +88,7 @@ function checkSemantic(symbol, verbPrefs) {
         issue: 'semantic_inconsistency',
         detail: `project uses '${best.verb}' in ${best.count} functions, '${verb}' only ${myCount}`,
         suggestion: symbol.replace(verb, best.verb),
-        confidence: Math.round(best.count / (best.count + myCount) * 100) / 100,
+        strength: Math.round(best.count / (best.count + myCount) * 100) / 100,
         evidence: (verbPrefs[best.verb] ?? []).slice(0, 4),
       }
     }
@@ -157,7 +157,7 @@ export async function handle(args, context) {
           issue: 'style_inconsistency',
           detail: `${lang} project uses ${projectStyle.dominant} (${Math.round(projectStyle[projectStyle.dominant] * 100)}%), but '${sym}' is ${style}`,
           ...(suggestion ? { suggestion } : {}),
-          confidence: projectStyle[projectStyle.dominant],
+          strength: projectStyle[projectStyle.dominant],
         }
       }
 
@@ -175,7 +175,7 @@ export async function handle(args, context) {
           issue: 'style_and_semantic',
           detail: `${styleIssue.detail}; ${semantic.detail}`,
           suggestion: merged,
-          confidence: Math.min(styleIssue.confidence, semantic.confidence),
+          strength: Math.min(styleIssue.strength, semantic.strength),
           evidence: semantic.evidence,
         })
       } else if (styleIssue) {

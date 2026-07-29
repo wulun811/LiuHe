@@ -49,13 +49,16 @@ function evictIfNeeded() {
   }
 }
 
-function classifyModification(workspaceDir, file) {
+function classifyModification(workspaceDir, file, readHash) {
   try {
     const store = new TransactionStore(workspaceDir)
     for (const txn of store.listTransactions()) {
-      if (txn.files?.[file] && !txn.files[file].skipped) {
-        return 'this_txn'
-      }
+      const meta = txn.files?.[file]
+      if (!meta || meta.skipped) continue
+      const backupName = meta.backupName || file.replace(/[/\\]/g, '__')
+      const backupPath = join(workspaceDir, '.ai-transactions', txn.txnId, 'backup', backupName)
+      if (!existsSync(backupPath)) continue
+      if (contentHashFast(backupPath) === readHash) return 'this_txn'
     }
   } catch {}
   return 'external'
@@ -121,7 +124,7 @@ export async function handle(args, context) {
     return { status: 'up_to_date', file, recommendation: 'safe to edit' }
   }
 
-  const modifiedBy = classifyModification(workspaceDir, file)
+  const modifiedBy = classifyModification(workspaceDir, file, snap.hash)
   return {
     status: 'modified',
     file,
