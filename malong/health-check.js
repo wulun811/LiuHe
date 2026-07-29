@@ -1,0 +1,116 @@
+import { existsSync, readdirSync, readFileSync, writeFileSync, accessSync, constants, unlinkSync } from 'node:fs'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
+const SCHEMA_VERSION = 1
+
+export async function runHealthCheck({ stateDir, toolsDir, workspacesDir, registry, log }) {
+  const checks = []
+  let ok = true
+
+  function add(name, status, detail) {
+    checks.push({ name, status, detail })
+    if (status === 'FAIL') ok = false
+  }
+
+  try {
+    accessSync(stateDir, constants.W_OK)
+    add('stateDir writable', 'PASS', stateDir)
+  } catch {
+    add('stateDir writable', 'FAIL', `${stateDir} is not writable`)
+  }
+
+  if (existsSync(workspacesDir)) {
+    try {
+      const entries = readdirSync(workspacesDir, { withFileTypes: true })
+      let dbCount = 0
+      let badCount = 0
+      let Database
+      try { Database = (await import('better-sqlite3')).default } catch {}
+      for (const e of entries) {
+        if (!e.isDirectory()) continue
+        const dbPath = join(workspacesDir, e.name, 'code-index.db')
+        if (existsSync(dbPath)) {
+          dbCount++
+          if (Database) {
+            try {
+              const db = new Database(dbPath)
+              const r = db.pragma('integrity_check')
+              const integrityOk = Array.isArray(r) && r.length === 1 && r[0]?.integrity_check === 'ok'
+              db.close()
+              if (!integrityOk) badCount++
+            } catch { badCount++ }
+          }
+        }
+      }
+      if (Database) {
+        add('DB integrity', badCount === 0 ? 'PASS' : 'WARN', `${dbCount} workspace(s), ${badCount} corrupted`)
+      } else {
+        add('DB integrity', 'PASS', `${dbCount} workspace(s) — sqlite3 not available for integrity check`)
+      }
+    } catch (e) {
+      add('DB integrity', 'WARN', `cannot scan: ${e.message}`)
+    }
+  } else {
+    add('DB integrity', 'PASS', 'no workspaces yet')
+  }
+
+  if (existsSync(toolsDir)) {
+    const entries = readdirSync(toolsDir, { withFileTypes: true })
+    let total = 0
+    let bad = 0
+    const badNames = []
+    for (const e of entries) {
+      if (!e.isDirectory() || !e.name.startsWith('tool-')) continue
+      total++
+      const mf = join(toolsDir, e.name, 'manifest.json')
+      if (!existsSync(mf)) { bad++; badNames.push(`${e.name}/manifest.json`); continue }
+      try {
+        const m = JSON.parse(readFileSync(mf, 'utf-8'))
+        if (!m.name || !m.handler) { bad++; badNames.push(`${e.name}/bad manifest`); continue }
+        const hp = join(toolsDir, e.name, m.handler)
+        if (!existsSync(hp)) { bad++; badNames.push(`${e.name}/handler missing`); continue }
+      } catch { bad++; badNames.push(`${e.name}/invalid JSON`) }
+    }
+    add('Tool manifests', bad === 0 ? 'PASS' : 'WARN', `${total} tools, ${bad} issues: ${badNames.join(', ')}`)
+  } else {
+    add('Tool manifests', 'FAIL', `tools dir not found: ${toolsDir}`)
+  }
+
+  const schemaPath = join(stateDir, 'schema-version')
+  if (existsSync(schemaPath)) {
+    try {
+      const stored = parseInt(readFileSync(schemaPath, 'utf-8').trim())
+      if (stored === SCHEMA_VERSION) {
+        add('Schema version', 'PASS', `v${stored}`)
+      } else {
+        add('Schema version', 'WARN', `stored v${stored}, expected v${SCHEMA_VERSION}`)
+      }
+    } catch {
+      add('Schema version', 'WARN', 'cannot read schema-version file')
+    }
+  } else {
+    try {
+      writeFileSync(schemaPath, String(SCHEMA_VERSION))
+      add('Schema version', 'PASS', `initialized v${SCHEMA_VERSION}`)
+    } catch {
+      add('Schema version', 'WARN', 'cannot write schema-version file')
+    }
+  }
+
+  const sockPath = join(stateDir, '..', 'code-index.sock')
+  if (existsSync(sockPath)) {
+    try { unlinkSync(sockPath); add('Stale socket', 'CLEANED', sockPath) }
+    catch (e) { add('Stale socket', 'WARN', `cannot remove: ${e.message}`) }
+  } else {
+    add('Stale socket', 'PASS')
+  }
+
+  if (registry) {
+    const count = registry.getToolCount()
+    add('Tool registry', count > 0 ? 'PASS' : 'WARN', `${count} tools loaded`)
+  }
+
+  return { status: ok ? 'ok' : 'warn', checks, timestamp: Date.now() }
+}

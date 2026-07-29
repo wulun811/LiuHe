@@ -2,17 +2,25 @@
 // 自动发现 tools/*/manifest.json，动态加载 handler
 // 详见：PROTOCOL.md §工具注册协议
 
-import { readdirSync, readFileSync, existsSync } from 'node:fs'
+import { readdirSync, readFileSync, existsSync, appendFileSync, mkdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { homedir } from 'node:os'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
+
+function getUsagePath() {
+  const dir = join(homedir(), '.config', 'opencode')
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+  return join(dir, 'malong-usage.jsonl')
+}
 
 class ToolRegistry {
   constructor(toolsDir, options = {}) {
     this.toolsDir = toolsDir || join(__dirname, 'tools')
-    this.tools = new Map()  // name -> { manifest, handler, dir }
+    this.tools = new Map()
     this.log = options.log || ((level, msg) => process.stderr.write(`[registry] [${level}] ${msg}\n`))
+    this._usagePath = null
   }
 
   async loadAll() {
@@ -101,7 +109,30 @@ class ToolRegistry {
     if (!tool) {
       throw new Error(`Tool not found: ${name}`)
     }
-    return await tool.handler(args, context)
+    const t0 = Date.now()
+    let success = true
+    let errorCode = ''
+    try {
+      const result = await tool.handler(args, context)
+      if (result?.error) { success = false; errorCode = result.error_code || result.error || '' }
+      return result
+    } catch (e) {
+      success = false
+      errorCode = e.message?.slice(0, 80) || 'unknown'
+      throw e
+    } finally {
+      try {
+        if (!this._usagePath) this._usagePath = getUsagePath()
+        const entry = {
+          ts: new Date().toISOString(),
+          tool: name,
+          success,
+          error_code: errorCode,
+          duration_ms: Date.now() - t0,
+        }
+        appendFileSync(this._usagePath, JSON.stringify(entry) + '\n')
+      } catch {}
+    }
   }
 
   getToolNames() {

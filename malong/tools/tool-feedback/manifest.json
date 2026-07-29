@@ -1,0 +1,18 @@
+{
+  "name": "feedback",
+  "version": "1.0.0",
+  "description": "Submit feedback about malong tools: unexpected errors, unclear messages, or improvement ideas. Collected locally for analysis.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "tool": { "type": "string", "description": "Tool name that triggered the feedback" },
+      "issue": { "type": "string", "description": "What went wrong or could be improved" },
+      "note": { "type": "string", "description": "Additional context or suggestion" },
+      "error_code": { "type": "string", "description": "Error code encountered, if any" }
+    },
+    "required": ["tool", "issue"]
+  },
+  "handler": "./handler.js",
+  "protocol_version": "1.0",
+  "tags": ["system", "feedback"]
+}

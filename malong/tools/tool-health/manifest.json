@@ -1,0 +1,13 @@
+{
+  "name": "health",
+  "version": "1.0.0",
+  "description": "System health check: DB integrity, tool manifests, schema version, disk state. Use when server starts or errors occur.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {},
+    "required": []
+  },
+  "handler": "./handler.js",
+  "protocol_version": "1.0",
+  "tags": ["system", "health"]
+}

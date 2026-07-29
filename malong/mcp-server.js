@@ -3,6 +3,7 @@ import { join, resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { homedir } from 'node:os'
 import ToolRegistry from './tool-registry.js'
+import { runHealthCheck } from './health-check.js'
 import crypto from 'node:crypto'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -53,6 +54,16 @@ async function initModules() {
 
   _ready = true
   core.log('info', `[mcp] modules initialized, stateDir=${stateDir}, tools=${registry.getToolCount()}`)
+
+  const health = await runHealthCheck({
+    stateDir, toolsDir, workspacesDir, registry, log: core.log
+  })
+  for (const c of health.checks) {
+    core.log('info', `[health] ${c.status === 'PASS' ? '✓' : c.status === 'CLEANED' ? '♻' : '✗'} ${c.name}: ${c.detail}`)
+  }
+  if (health.status !== 'ok') {
+    core.log('warn', `[health] ${health.checks.filter(c => c.status === 'FAIL').length} failure(s) detected`)
+  }
 }
 
 function buildContext() {
@@ -65,6 +76,9 @@ function buildContext() {
     codeIndexService: core.getService('codeIndex'),
     repoMapService: core.getService('repoMap'),
     langParserService: core.getService('langParser'),
+    runHealthCheck: () => runHealthCheck({
+      stateDir, toolsDir: join(__dirname, 'tools'), workspacesDir, registry, log: core.log
+    }),
   }
 }
 
