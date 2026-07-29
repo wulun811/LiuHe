@@ -560,6 +560,7 @@ class CodeIndex {
         if (i + CHUNK < parsed.length) await new Promise(r => setImmediate(r))
       }
       console.error(`[code-index] insert: ${parsed.length} files in ${((Date.now() - t0) / 1000).toFixed(1)}s`)
+      if (typeof global.gc === 'function') global.gc()
       const resolved = this._resolveCrossFileRefs()
       console.error(`[code-index] resolve: ${resolved} refs in ${((Date.now() - t0) / 1000).toFixed(1)}s`)
       return results

@@ -7,6 +7,7 @@ import { LANG_MAP, LANG_HANDLERS } from './lang-parser.js'
 const MAX_FILE_SIZE = 1024 * 1024
 
 const parserCache = {}
+let _parseCount = 0
 
 function getParser(ext) {
   if (!parserCache[ext]) {
@@ -19,7 +20,7 @@ function getParser(ext) {
   return parserCache[ext]
 }
 
-parentPort.on('message', ({ files, repo }) => {
+parentPort.on('message', async ({ files, repo }) => {
   const results = []
   for (const fp of files) {
     const ext = extname(fp)
@@ -39,6 +40,12 @@ parentPort.on('message', ({ files, repo }) => {
       if (!handler || !handler.extractAll) continue
       const { symbols, refs } = handler.extractAll(tree, source)
       results.push({ relPath, sourceLength: source.length, symbols, refs })
+      _parseCount++
+      if (_parseCount >= 50 && typeof global.gc === 'function') {
+        _parseCount = 0
+        global.gc()
+        await new Promise(r => setImmediate(r))
+      }
     } catch { continue }
   }
   parentPort.postMessage({ results })

@@ -25,13 +25,14 @@ function estimateTokens(text) {
   return Math.ceil(text.length / CHARS_PER_TOKEN)
 }
 
-function buildTree(files, rootDir, relevantFiles, relevantEntities) {
+async function buildTree(files, rootDir, relevantFiles, relevantEntities) {
   const useFilter = relevantFiles && relevantFiles.length > 0
   const filterSet = useFilter ? new Set(relevantFiles.map(f => f.startsWith('/') ? f : join(rootDir, f))) : null
   const entitySet = relevantEntities && relevantEntities.length > 0 ? new Set(relevantEntities) : null
 
   // Build tree structure
   const tree = { name: basename(rootDir), type: 'dir', children: [], depth: 0 }
+  let parseCount = 0
 
   for (const file of files) {
     if (filterSet && !filterSet.has(file.path)) continue
@@ -55,6 +56,11 @@ function buildTree(files, rootDir, relevantFiles, relevantEntities) {
         }
         current = dir
       }
+    }
+    parseCount++
+    if (parseCount % 50 === 0 && typeof global.gc === 'function') {
+      global.gc()
+      await new Promise(r => setImmediate(r))
     }
   }
 
@@ -84,9 +90,10 @@ function renderTree(node, indent = '', isLast = true) {
   return result
 }
 
-function getFilesByEntities(files, rootDir, entities) {
+async function getFilesByEntities(files, rootDir, entities) {
   const result = []
   const entitySet = new Set(entities)
+  let parseCount = 0
   for (const f of files) {
     if (!f.isCode) continue
     const source = readFileSync(f.path, 'utf-8')
@@ -94,6 +101,11 @@ function getFilesByEntities(files, rootDir, entities) {
     const syms = extractTopSymbols(source, extname(f.path))
     if (syms.some(s => entitySet.has(s.name))) {
       result.push(f)
+    }
+    parseCount++
+    if (parseCount % 50 === 0 && typeof global.gc === 'function') {
+      global.gc()
+      await new Promise(r => setImmediate(r))
     }
   }
   return result
@@ -116,7 +128,7 @@ export async function init(core) {
     async generate(rootDir, opts = {}) {
       const { ignoreRules, relevantFiles, relevantEntities } = opts
       const files = collectFiles(rootDir, { ignoreRules: ignoreRules || [] })
-      const tree = buildTree(files, rootDir)
+      const tree = await buildTree(files, rootDir)
       const map = renderTree(tree)
       _cache = { map, files: files.length, timestamp: Date.now() }
       _cacheTime = Date.now()
@@ -129,9 +141,9 @@ export async function init(core) {
       const { relevantFiles, relevantEntities, ignoreRules } = opts
       let files = collectFiles(rootDir, { ignoreRules: ignoreRules || [] })
       if (relevantEntities && relevantEntities.length > 0) {
-        files = getFilesByEntities(files, rootDir, relevantEntities)
+        files = await getFilesByEntities(files, rootDir, relevantEntities)
       }
-      const tree = buildTree(files, rootDir, relevantFiles || null, relevantEntities || null)
+      const tree = await buildTree(files, rootDir, relevantFiles || null, relevantEntities || null)
       let map = renderTree(tree)
       const tokens = estimateTokens(map)
 
