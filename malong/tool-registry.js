@@ -73,6 +73,9 @@ function extractMetrics(name, result) {
     case 'mock_sync':
       m.issues_caught = result.summary?.mismatches_found || 0
       break
+    case 'test_bridge':
+      if (result.action === 'run' && result.summary) m.tests_verified = result.summary.total || 0
+      break
   }
   return Object.keys(m).length > 0 ? m : undefined
 }

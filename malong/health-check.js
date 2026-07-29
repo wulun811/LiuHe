@@ -13,7 +13,7 @@ export function readUsageStats() {
     const lines = readFileSync(usagePath, 'utf-8').trim().split('\n').filter(Boolean)
     const byTool = {}
     let totalCalls = 0, totalOk = 0, totalDuration = 0
-    const value = { tokens_saved: 0, tokens_served: 0, reads_saved: 0, searches_saved: 0, issues_caught: 0, collisions_detected: 0, rollbacks: 0, edits_automated: 0 }
+    const value = { tokens_saved: 0, tokens_served: 0, reads_saved: 0, searches_saved: 0, issues_caught: 0, collisions_detected: 0, rollbacks: 0, edits_automated: 0, tests_verified: 0 }
     let firstTs = null, lastTs = null
     for (const line of lines) {
       try {

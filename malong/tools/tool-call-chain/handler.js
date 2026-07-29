@@ -137,11 +137,11 @@ function formatCallees(impact) {
 }
 
 function formatTestRefs(impact) {
-  const refs = (impact.test_references || impact.test_refs || [])
+  const refs = (impact.callers || []).filter(c => c.type === 'test')
   return refs.map(r => ({
     file: r.file,
     line: r.line,
-    test: r.test || r.function || 'unknown'
+    test: r.function || r.test || 'unknown'
   }))
 }
 
