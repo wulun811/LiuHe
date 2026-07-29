@@ -4,7 +4,7 @@ import { execSync } from 'node:child_process'
 import { parseOutput } from './parsers.js'
 
 const SKIP_DIRS = new Set(['node_modules', '.git', '__pycache__', '.venv', 'venv', 'dist', 'build', '.next'])
-const SAFE_SCOPE_RE = /^[\w\/.\-:]+(?:\s+[\w\/.\-:]+)*$/
+const SAFE_SCOPE_RE = /^[\w\/\.\-:\[\]]+(?:\s+[\w\/\.\-:\[\]]+)*$/
 
 function sanitizeScope(scope) {
   if (!SAFE_SCOPE_RE.test(scope)) return null
@@ -48,7 +48,7 @@ function findPython(workspaceDir) {
 function buildCommand(framework, scope, workspaceDir) {
   const python = findPython(workspaceDir)
   switch (framework) {
-    case 'pytest': return `${python} -m pytest ${scope} -v --tb=short -q`
+    case 'pytest': return `${python} -m pytest ${scope} -v --tb=short`
     case 'jest': return `npx jest ${scope} --json --no-coverage 2>&1`
     case 'vitest': return `npx vitest run ${scope} --reporter=json 2>&1`
     case 'go_test': return `go test ${scope === '.' ? './...' : scope} -v -count=1 2>&1`
@@ -138,6 +138,9 @@ function extractTestNames(filePath, workspaceDir) {
 
 async function handleRun(args, context) {
   const workspaceDir = args.workspace_dir
+  if (!existsSync(workspaceDir)) {
+    return { error: 'workspace_not_found', message: `Workspace directory does not exist: ${workspaceDir}` }
+  }
   const scope = args.scope || '.'
   const safeScope = sanitizeScope(scope)
   if (!safeScope) {

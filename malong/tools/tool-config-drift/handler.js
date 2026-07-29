@@ -9,7 +9,10 @@ const ENV_PATTERNS = [
 ]
 
 const DB_PATTERNS = [
-  /(?:SELECT|INSERT|UPDATE|DELETE)\s+(?:FROM|INTO|TABLE)\s+[`"]?(\w+)[`"]?/gi,
+  /\bFROM\s+[`"]?(\w+)[`"]?/gi,
+  /\bINTO\s+[`"]?(\w+)[`"]?/gi,
+  /\bUPDATE\s+[`"]?(\w+)[`"]?/gi,
+  /\bJOIN\s+[`"]?(\w+)[`"]?/gi,
 ]
 
 const SERVICE_PATTERNS = [
@@ -41,7 +44,7 @@ function extractRefs(content, file) {
       let m
       while ((m = pat.exec(line)) !== null) {
         const name = m[1]
-        if (!/^(?:SELECT|INSERT|UPDATE|DELETE|FROM|INTO|TABLE|WHERE|SET|VALUES|AND|OR)$/i.test(name)) {
+        if (!/^(?:SELECT|INSERT|UPDATE|DELETE|FROM|INTO|TABLE|WHERE|SET|VALUES|AND|OR|JOIN|LEFT|RIGHT|INNER|OUTER|ON|AS|GROUP|ORDER|BY|HAVING|LIMIT|OFFSET|UNION|ALL|DISTINCT|CASE|WHEN|THEN|ELSE|END|NULL|NOT|IN|EXISTS|BETWEEN|LIKE|IS|CREATE|DROP|ALTER|INDEX|VIEW|TRIGGER|PROCEDURE|FUNCTION|DATABASE|SCHEMA|GRANT|REVOKE|COMMIT|ROLLBACK|BEGIN|TRANSACTION|PRIMARY|KEY|FOREIGN|REFERENCES|CONSTRAINT|DEFAULT|CHECK|UNIQUE|AUTO_INCREMENT|INT|INTEGER|VARCHAR|TEXT|BOOLEAN|DATE|TIMESTAMP|FLOAT|DOUBLE|DECIMAL|BLOB|CHAR|BIGINT|SMALLINT|TINYINT|SERIAL)$/i.test(name)) {
           refs.push({ type: 'db_table', name, line: i + 1, context: line.trim() })
         }
       }
@@ -68,7 +71,7 @@ function parseEnvFiles(workspaceDir) {
       for (const line of readFileSync(path, 'utf-8').split('\n')) {
         const trimmed = line.trim()
         if (trimmed.startsWith('#') || !trimmed) continue
-        const m = /^(\w+)\s*=/.exec(trimmed)
+        const m = /^(?:export\s+)?(\w+)\s*=/.exec(trimmed)
         if (m) vars.add(m[1])
       }
     } catch {}

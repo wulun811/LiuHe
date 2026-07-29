@@ -46,7 +46,8 @@ function findUnusedImports(content, ext) {
         const raw = m[1].replace(/[()]/g, '')
         const names = raw.split(',').map(s => {
           const parts = s.trim().split(/\s+as\s+/)
-          return (parts[1] || parts[0]).trim()
+          const name = (parts[1] || parts[0]).trim()
+          return name.includes('.') ? name.split('.')[0] : name
         })
         for (const n of names) {
           if (n && !n.startsWith('#') && !n.startsWith('\\')) imports.set(n, i + 1)

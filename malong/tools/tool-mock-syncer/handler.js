@@ -32,21 +32,41 @@ function extractSignature(content, functionName, ext) {
   for (let i = 0; i < lines.length; i++) {
     let m
     if (ext === '.py') {
-      m = new RegExp(`^\\s*(?:async\\s+)?def\\s+${functionName}\\s*\\(([^)]*)\\)(?:\\s*->\\s*(.+?))?\\s*:`).exec(lines[i])
+      m = new RegExp(`^\\s*(?:async\\s+)?def\\s+${functionName}\\s*\\(`).exec(lines[i])
+      if (m) {
+        let sigLine = lines[i]
+        let j = i
+        while (!sigLine.includes(')') && j < lines.length - 1) {
+          j++
+          sigLine += ' ' + lines[j].trim()
+        }
+        const pm = new RegExp(`def\\s+${functionName}\\s*\\(([^)]*)\\)(?:\\s*->\\s*(.+?))?\\s*:`).exec(sigLine)
+        if (pm) {
+          const params = pm[1]
+            ? pm[1].split(',').map(p => {
+                const trimmed = p.trim()
+                const name = trimmed.split(/[:\s=]/)[0].trim()
+                const hasDefault = trimmed.includes('=')
+                return { name, has_default: hasDefault, raw: trimmed }
+              }).filter(p => p.name && p.name !== 'self' && p.name !== 'cls')
+            : []
+          const returnType = pm[2] ? pm[2].trim() : null
+          return { name: functionName, params, return_type: returnType, line: i + 1 }
+        }
+      }
     } else {
       m = new RegExp(`(?:function\\s+${functionName}|(?:const|let|var)\\s+${functionName}\\s*=\\s*(?:async\\s+)?(?:function)?\\s*)\\(([^)]*)\\)`).exec(lines[i])
-    }
-    if (m) {
-      const params = m[1]
-        ? m[1].split(',').map(p => {
-            const trimmed = p.trim()
-            const name = trimmed.split(/[:\s=]/)[0].trim()
-            const hasDefault = trimmed.includes('=')
-            return { name, has_default: hasDefault, raw: trimmed }
-          }).filter(p => p.name && p.name !== 'self' && p.name !== 'cls')
-        : []
-      const returnType = ext === '.py' && m[2] ? m[2].trim() : null
-      return { name: functionName, params, return_type: returnType, line: i + 1 }
+      if (m) {
+        const params = m[1]
+          ? m[1].split(',').map(p => {
+              const trimmed = p.trim()
+              const name = trimmed.split(/[:\s=]/)[0].trim()
+              const hasDefault = trimmed.includes('=')
+              return { name, has_default: hasDefault, raw: trimmed }
+            }).filter(p => p.name && p.name !== 'self' && p.name !== 'cls')
+          : []
+        return { name: functionName, params, return_type: null, line: i + 1 }
+      }
     }
   }
   return null

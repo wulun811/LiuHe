@@ -29,7 +29,11 @@ export async function handle(args, context) {
   }
 
   const scope = args?.scope || '.'
-  const currentFiles = new Set(args?.current_files || [])
+  const currentFiles = new Set((args?.current_files || []).map(f => {
+    if (f.startsWith(workspaceDir + '/')) return f.slice(workspaceDir.length + 1)
+    if (f.startsWith('./')) return f.slice(2)
+    return f
+  }))
   const scanDir = scope === '.' ? workspaceDir : join(workspaceDir, scope)
 
   const files = []

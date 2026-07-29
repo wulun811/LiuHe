@@ -44,13 +44,22 @@ function checkRaises(content, ext) {
     let m
 
     if (isPython) {
-      m = /^\s*raise\s+(\w+)(?:\s*\(\s*["'](.+?)["']\s*\))?/.exec(line)
+      m = /^\s*raise\s+(\w+)/.exec(line)
+      if (m) {
+        let fullLine = line
+        let j = i
+        while (!fullLine.includes(')') && fullLine.includes('(') && j < lines.length - 1) {
+          j++
+          fullLine += ' ' + lines[j].trim()
+        }
+        const msgM = /\(\s*["'](.+?)["']\s*\)/.exec(fullLine)
+        raises.push({ line: i + 1, exception: m[1], message: msgM ? msgM[1] : null, raw: line.trim() })
+      }
     } else if (isJS) {
       m = /throw\s+new\s+(\w+)(?:\s*\(\s*["'`](.+?)["'`]\s*\))?/.exec(line)
-    }
-
-    if (m) {
-      raises.push({ line: i + 1, exception: m[1], message: m[2] || null, raw: line.trim() })
+      if (m) {
+        raises.push({ line: i + 1, exception: m[1], message: m[2] || null, raw: line.trim() })
+      }
     }
   }
   return raises

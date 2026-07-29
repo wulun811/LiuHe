@@ -25,14 +25,28 @@ export function parsePytest(output) {
   }
 
   if (results.length === 0) {
-    const shortMatch = raw.match(/(\d+) passed/)
-    const failMatch = raw.match(/(\d+) failed/)
-    if (shortMatch || failMatch) {
-      return { results: [], failures: [], summary: { total: 0, passed: 0, failed: 0 }, raw_hint: raw.slice(0, 500) }
+    const shortFailRe = /^FAILED\s+(.+?)::(.+?)(?:\s+-\s+(.+))?$/gm
+    let fm
+    while ((fm = shortFailRe.exec(raw)) !== null) {
+      const entry = { file: fm[1].trim(), test: fm[2].trim(), status: 'failed' }
+      results.push(entry)
+      failures.push({ ...entry, error: fm[3] || '', error_type: extractPytestErrorType(fm[3] || ''), file: fm[1].trim(), line: 0, traceback: '' })
+    }
+
+    const dotLine = raw.match(/^([.FsxXE]+)\s*$/m)
+    if (dotLine && results.length === 0) {
+      const dots = dotLine[1]
+      const summary = parsePytestSummary(raw)
+      return { results: [], failures, summary, raw_hint: raw.slice(0, 500) }
     }
   }
 
   return { results, failures, summary: parsePytestSummary(raw) }
+}
+
+function extractPytestErrorType(msg) {
+  const m = /(\w+(?:\.\w+)*(?:Error|Exception))/.exec(msg || '')
+  return m ? m[1] : 'AssertionError'
 }
 
 function extractPytestTraceback(lines, startIdx) {
