@@ -22,7 +22,7 @@ const KEYWORDS = new Set(['if', 'else', 'for', 'while', 'return', 'import', 'fro
 const SPECIAL = new Set(['__name__', '__file__', '__init__', '__str__', '__repr__'])
 
 const _fixImportsCache = new Map()
-const _fixImportsCacheMax = 200
+const _fixImportsCacheMax = 100
 
 export async function handle(args, context) {
   const { codeIndexService, getWorkspaceDir, langParserService } = context
@@ -522,7 +522,9 @@ function analyzeFileAST(content, lang, currentFile, langParser) {
     if (!definedSymbols.has(sym)) undefinedSymbols.push(sym)
   }
 
-  return { definedSymbols, usedSymbols, imports, undefinedSymbols: [...new Set(undefinedSymbols)], symbolLines, relativeImports }
+  const result = { definedSymbols, usedSymbols, imports, undefinedSymbols: [...new Set(undefinedSymbols)], symbolLines, relativeImports }
+  tree.delete()
+  return result
 }
 
 function detectLanguage(filePath) {

@@ -821,7 +821,9 @@ export async function init(core) {
       for (let i = 0; i < tree.rootNode.childCount; i++) {
         if (hasCode.includes(tree.rootNode.child(i).type)) codeScore++
       }
-      return { hasCode: codeScore > 0, codeRatio: Math.min(1, codeScore / Math.max(1, total * 0.3)), primaryType: codeScore > 0 ? 'code' : 'text', nodeCount: tree.rootNode.childCount }
+      const result = { hasCode: codeScore > 0, codeRatio: Math.min(1, codeScore / Math.max(1, total * 0.3)), primaryType: codeScore > 0 ? 'code' : 'text', nodeCount: tree.rootNode.childCount }
+      tree.delete()
+      return result
     },
   })
   core.log('info', `[lang-parser] loaded languages: ${Object.values(LANG_MAP).map(l => l.name).join(', ')}`)

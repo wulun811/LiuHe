@@ -8,6 +8,17 @@ import crypto from 'node:crypto'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
 const REQUEST_TIMEOUT_MS = 120_000
+const RECOMMENDED_HEAP_MB = 512
+
+function checkV8HeapLimit() {
+  const v8 = process.binding('v8')
+  const heapLimit = v8.getHeapStatistics().heap_size_limit
+  const heapLimitMB = Math.round(heapLimit / 1024 / 1024)
+  if (heapLimitMB > RECOMMENDED_HEAP_MB * 2) {
+    process.stderr.write(`[mcp] WARNING: V8 heap limit is ${heapLimitMB}MB. Consider starting with --max-old-space-size=${RECOMMENDED_HEAP_MB} to reduce memory usage.\n`)
+  }
+  return heapLimitMB
+}
 
 function parseArgs() {
   const args = process.argv.slice(2)
@@ -216,7 +227,8 @@ process.stdin.on('close', () => {
 })
 
 initModules().then(() => {
-  core.log('info', '[mcp] server ready')
+  const heapMB = checkV8HeapLimit()
+  core.log('info', `[mcp] server ready, V8 heap=${heapMB}MB`)
   if (typeof global.gc === 'function') {
     core.log('info', '[mcp] --expose-gc detected, periodic GC enabled')
     setInterval(() => {

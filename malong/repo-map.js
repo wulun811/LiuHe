@@ -18,7 +18,9 @@ let _core, _langParser, _cache = null, _cacheTime = 0
 function extractTopSymbols(source, ext) {
   const tree = _langParser.parse(source, ext)
   if (!tree) return []
-  return _langParser.extractTopLevel(tree, source, ext)
+  const symbols = _langParser.extractTopLevel(tree, source, ext)
+  tree.delete()
+  return symbols
 }
 
 function estimateTokens(text) {
