@@ -1,7 +1,6 @@
 import { existsSync, mkdirSync } from 'node:fs'
 import { join, resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { homedir } from 'node:os'
 import ToolRegistry from './tool-registry.js'
 import { runHealthCheck } from './health-check.js'
 import crypto from 'node:crypto'

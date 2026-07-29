@@ -203,8 +203,13 @@ class CodeIndex {
       this._outlineCache?.clear()
 
     if (symbols.length > 0) {
-      const ph = symbols.map(() => '(?,?,?,?,?)').join(',')
-      this._db.prepare(`INSERT INTO symbols (file_id, name, type, start_line, end_line) VALUES ${ph}`).run(...symbols.flatMap(s => [fileId, s.name, s.type, s.startLine, s.endLine]))
+      const SYM_BATCH = 180
+      const symRows = symbols.flatMap(s => [fileId, s.name, s.type, s.startLine, s.endLine])
+      for (let i = 0; i < symRows.length; i += SYM_BATCH * 5) {
+        const batch = symRows.slice(i, i + SYM_BATCH * 5)
+        const ph = Array(batch.length / 5).fill('(?,?,?,?,?)').join(',')
+        this._db.prepare(`INSERT INTO symbols (file_id, name, type, start_line, end_line) VALUES ${ph}`).run(...batch)
+      }
     }
     const insertedSyms = this._db.prepare('SELECT id, name, type, start_line, end_line FROM symbols WHERE file_id = ?').all(fileId)
     const symIdMap = new Map(insertedSyms.map(s => [s.name, s.id]))
@@ -234,8 +239,12 @@ class CodeIndex {
       }
     }
     if (refRows.length > 0) {
-      const ph = refRows.map(() => '(?,?,?,?,?,?)').join(',')
-      this._db.prepare(`INSERT INTO refs (source_file_id, source_symbol_id, target_name, kind, line, call_expr) VALUES ${ph}`).run(...refRows.flat())
+      const BATCH_SIZE = 150
+      for (let i = 0; i < refRows.length; i += BATCH_SIZE) {
+        const batch = refRows.slice(i, i + BATCH_SIZE)
+        const ph = batch.map(() => '(?,?,?,?,?,?)').join(',')
+        this._db.prepare(`INSERT INTO refs (source_file_id, source_symbol_id, target_name, kind, line, call_expr) VALUES ${ph}`).run(...batch.flat())
+      }
     }
 
     const updateRef = this._db.prepare('UPDATE refs SET target_symbol_id = ? WHERE id = ?')
