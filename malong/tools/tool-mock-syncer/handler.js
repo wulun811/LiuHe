@@ -3,6 +3,10 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs'
 
 const SKIP_DIRS = new Set(['node_modules', '.git', '__pycache__', '.venv', 'venv', 'dist', 'build'])
 
+function escapeRegex(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
 function isTestFile(path) {
   return /(?:^|\/)(?:tests?|__tests__)\/|\.test\.|\.spec\.|_test\./.test(path)
 }
@@ -51,31 +55,32 @@ function extractSignature(content, functionName, ext) {
 function findMockUsage(content, functionName, testFile) {
   const mocks = []
   const lines = content.split('\n')
+  const fnEscaped = escapeRegex(functionName)
   const fnLower = functionName.toLowerCase()
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
 
     let m
-    m = new RegExp(`(?:mock|patch|spy|stub).*${functionName}.*\\.return_value\\s*=\\s*(.+)`, 'i').exec(line)
+    m = new RegExp(`(?:mock|patch|spy|stub).*${fnEscaped}.*\\.return_value\\s*=\\s*(.+)`, 'i').exec(line)
     if (m) {
       mocks.push({ file: testFile, line: i + 1, mock_type: 'return_value', value: m[1].trim(), context: line.trim() })
       continue
     }
 
-    m = new RegExp(`@(?:patch|mock).*${functionName}`, 'i').exec(line)
+    m = new RegExp(`@(?:patch|mock).*${fnEscaped}`, 'i').exec(line)
     if (m) {
       mocks.push({ file: testFile, line: i + 1, mock_type: 'patch', value: line.trim(), context: line.trim() })
       continue
     }
 
-    m = new RegExp(`(?:jest\\.(?:fn|spyOn)|sinon\\.(?:stub|spy)).*${functionName}`, 'i').exec(line)
+    m = new RegExp(`(?:jest\\.(?:fn|spyOn)|sinon\\.(?:stub|spy)).*${fnEscaped}`, 'i').exec(line)
     if (m) {
       mocks.push({ file: testFile, line: i + 1, mock_type: 'spy', value: line.trim(), context: line.trim() })
       continue
     }
 
-    m = new RegExp(`mock_${fnLower}\\s*\\(([^)]*)\\)`, 'i').exec(line)
+    m = new RegExp(`mock_${escapeRegex(fnLower)}\\s*\\(([^)]*)\\)`, 'i').exec(line)
     if (m) {
       const argCount = m[1].trim() ? m[1].split(',').length : 0
       mocks.push({ file: testFile, line: i + 1, mock_type: 'call', arguments: m[1].trim(), arg_count: argCount, context: line.trim() })
@@ -120,7 +125,6 @@ function detectMismatches(signature, mocks) {
 }
 
 export async function handle(args, context) {
-  const { codeIndexService } = context
   const workspaceDir = args?.workspace_dir
 
   if (!workspaceDir) {
@@ -134,11 +138,10 @@ export async function handle(args, context) {
   }
 
   const absPath = join(workspaceDir, file)
-  if (!existsSync(absPath)) {
-    return { error: 'file_not_found', message: `File not found: ${file}` }
+  let content
+  try { content = readFileSync(absPath, 'utf-8') } catch {
+    return { error: 'file_not_found', message: `Cannot read file: ${file}` }
   }
-
-  const content = readFileSync(absPath, 'utf-8')
   const ext = extname(file)
   const signature = extractSignature(content, functionName, ext)
 

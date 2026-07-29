@@ -125,10 +125,10 @@ export async function handle(args, context) {
 
   if (file) {
     const absPath = join(workspaceDir, file)
-    if (!existsSync(absPath)) {
-      return { error: 'file_not_found', message: `File not found: ${file}` }
+    let content
+    try { content = readFileSync(absPath, 'utf-8') } catch {
+      return { error: 'file_not_found', message: `Cannot read file: ${file}` }
     }
-    const content = readFileSync(absPath, 'utf-8')
     allRefs = extractRefs(content, file).map(r => ({ ...r, file }))
   } else {
     const files = []

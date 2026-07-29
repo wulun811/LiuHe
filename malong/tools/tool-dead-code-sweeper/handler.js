@@ -43,12 +43,13 @@ function findUnusedImports(content, ext) {
     if (ext === '.py') {
       m = /^(?:from\s+\S+\s+)?import\s+(.+)/.exec(line)
       if (m) {
-        const names = m[1].split(',').map(s => {
+        const raw = m[1].replace(/[()]/g, '')
+        const names = raw.split(',').map(s => {
           const parts = s.trim().split(/\s+as\s+/)
           return (parts[1] || parts[0]).trim()
         })
         for (const n of names) {
-          if (n && !n.startsWith('#')) imports.set(n, i + 1)
+          if (n && !n.startsWith('#') && !n.startsWith('\\')) imports.set(n, i + 1)
         }
         continue
       }

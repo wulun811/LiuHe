@@ -1,5 +1,5 @@
 import { join, extname } from 'node:path'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 
 const BUILTIN_EXCEPTIONS = new Set([
   'Exception', 'BaseException', 'ValueError', 'TypeError', 'KeyError', 'IndexError',
@@ -30,21 +30,6 @@ function classifyMessage(message) {
     if (patterns.some(p => lower.includes(p))) return category
   }
   return 'unknown'
-}
-
-function extractExceptionHierarchy(codeIndexService) {
-  if (!codeIndexService) return {}
-  try {
-    const errorSyms = codeIndexService.searchSymbolsSync?.('Error') || []
-    const excSyms = codeIndexService.searchSymbolsSync?.('Exception') || []
-    const hierarchy = {}
-    for (const s of [...errorSyms, ...excSyms]) {
-      if (s.type === 'class') {
-        hierarchy[s.name] = { base: 'Exception', module: s.file, file: s.file, line: s.start_line }
-      }
-    }
-    return hierarchy
-  } catch { return {} }
 }
 
 function checkRaises(content, ext) {
@@ -107,6 +92,30 @@ export async function handle(args, context) {
         }
       } catch {}
     }
+  }
+
+  if (Object.keys(hierarchy).length === 0) {
+    try {
+      const srcDir = join(workspaceDir, 'src')
+      const dirs = [workspaceDir, srcDir]
+      for (const dir of dirs) {
+        let entries
+        try { entries = readdirSync(dir, { withFileTypes: true }) } catch { continue }
+        for (const entry of entries) {
+          if (!entry.isFile() || !entry.name.endsWith('.py')) continue
+          try {
+            const c = readFileSync(join(dir, entry.name), 'utf-8')
+            const classRe = /^class\s+(\w+)\s*\((\w+)\)/gm
+            let cm
+            while ((cm = classRe.exec(c)) !== null) {
+              if (/Error|Exception/.test(cm[2])) {
+                hierarchy[cm[1]] = { base: cm[2], module: entry.name, file: entry.name, line: c.slice(0, cm.index).split('\n').length }
+              }
+            }
+          } catch {}
+        }
+      }
+    } catch {}
   }
 
   const raises = checkRaises(content, ext)

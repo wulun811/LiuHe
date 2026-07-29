@@ -52,11 +52,6 @@ export async function handle(args, context) {
     return { error: 'missing_parameter', message: 'workspace_dir is required' }
   }
 
-  const dbPath = join(getWorkspaceDir(workspaceDir), 'code-index.db')
-  if (!existsSync(dbPath)) {
-    return { error: 'workspace_not_indexed', message: `Workspace not indexed: ${workspaceDir}`, suggestion: `Call reindex(workspace_dir="${workspaceDir}") first` }
-  }
-
   const symbol = args?.symbol
   const newName = args?.new_name
   const file = args?.file

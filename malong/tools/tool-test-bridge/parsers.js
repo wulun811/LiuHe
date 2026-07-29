@@ -17,7 +17,7 @@ export function parsePytest(output) {
       const status = m[3].toLowerCase()
       const entry = { file: m[1].trim(), test: m[2].trim(), status: status === 'xfail' ? 'skipped' : status === 'xpass' ? 'passed' : status }
       results.push(entry)
-      if (status === 'FAILED' || status === 'ERROR') {
+      if (status === 'failed' || status === 'error') {
         const tb = extractPytestTraceback(lines, i)
         failures.push({ ...entry, ...tb })
       }

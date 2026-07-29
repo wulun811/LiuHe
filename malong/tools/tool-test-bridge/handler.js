@@ -4,6 +4,12 @@ import { execSync } from 'node:child_process'
 import { parseOutput } from './parsers.js'
 
 const SKIP_DIRS = new Set(['node_modules', '.git', '__pycache__', '.venv', 'venv', 'dist', 'build', '.next'])
+const SAFE_SCOPE_RE = /^[\w\/.\-:]+(?:\s+[\w\/.\-:]+)*$/
+
+function sanitizeScope(scope) {
+  if (!SAFE_SCOPE_RE.test(scope)) return null
+  return scope
+}
 
 function detectFramework(workspaceDir) {
   if (existsSync(join(workspaceDir, 'pytest.ini')) ||
@@ -55,7 +61,7 @@ function buildCommand(framework, scope, workspaceDir) {
 
 function suggestRootCause(failure) {
   const msg = failure.error || ''
-  if (/AssertionError|AssertionError|assert/.test(msg)) return '断言失败：预期值与实际值不匹配，检查函数返回值是否变更'
+  if (/AssertionError|assert/.test(msg)) return '断言失败：预期值与实际值不匹配，检查函数返回值是否变更'
   if (/ImportError|ModuleNotFoundError|Cannot find module/.test(msg)) return '导入失败：检查是否新增了依赖或重命名了模块'
   if (/TypeError|AttributeError|is not a function|has no attribute/.test(msg)) return '类型/属性错误：检查函数签名是否变更'
   if (/NameError|is not defined/.test(msg)) return '名称错误：检查是否重命名了变量或函数'
@@ -133,7 +139,11 @@ function extractTestNames(filePath, workspaceDir) {
 async function handleRun(args, context) {
   const workspaceDir = args.workspace_dir
   const scope = args.scope || '.'
-  const timeout = (args.timeout || 60) * 1000
+  const safeScope = sanitizeScope(scope)
+  if (!safeScope) {
+    return { error: 'invalid_input', message: `Unsafe scope: "${scope}". Only alphanumeric, /, ., -, :, spaces allowed.` }
+  }
+  const timeout = (args.timeout ?? 60) * 1000
   const framework = args.framework || detectFramework(workspaceDir)
 
   if (framework === 'unknown') {
@@ -145,7 +155,7 @@ async function handleRun(args, context) {
     }
   }
 
-  const command = buildCommand(framework, scope, workspaceDir)
+  const command = buildCommand(framework, safeScope, workspaceDir)
   if (!command) {
     return { error: 'unsupported_framework', message: `Framework "${framework}" is not supported for running` }
   }
@@ -268,7 +278,7 @@ async function handleSuggest(args, context) {
   const testFiles = [...new Set(affectedTests.map(t => t.file))]
   let suggestedCommand = null
   if (testFiles.length > 0 && framework !== 'unknown') {
-    suggestedCommand = buildCommand(framework, testFiles.join(' '), workspaceDir)
+    suggestedCommand = buildCommand(framework, testFiles.map(f => `"${f}"`).join(' '), workspaceDir)
   }
 
   return {

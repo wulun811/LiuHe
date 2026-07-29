@@ -32,7 +32,7 @@ export async function handle(args, context) {
     return { error: 'invalid_input', message: 'at least one section required (include_outline, include_refs, or include_chain)' }
   }
 
-  codeIndexService.initWorkspace(workspaceDir)
+  try { codeIndexService.initWorkspace(workspaceDir) } catch {}
   const t0 = Date.now()
 
   const [outline, refs, chain] = await Promise.all([

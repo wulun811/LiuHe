@@ -14,5 +14,5 @@
   "handler": "./handler.js",
   "protocol_version": "1.0",
   "tags": ["quality", "mock", "test"],
-  "dependencies": ["reindex"]
+  "dependencies": []
 }

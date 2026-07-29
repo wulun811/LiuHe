@@ -1,0 +1,239 @@
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
+const FIXTURES = join(__dirname, 'fixtures')
+const TOOLS = join(__dirname, '..', 'tools')
+
+let passed = 0, failed = 0, errors = []
+function assert(cond, msg) {
+  if (cond) { passed++; console.log(`  ✓ ${msg}`) }
+  else { failed++; errors.push(msg); console.error(`  ✗ ${msg}`) }
+}
+
+const mockContext = {
+  codeIndexService: null,
+  getWorkspaceDir: () => '/tmp/malong-test-ws',
+}
+
+async function loadTool(name) {
+  return (await import(join(TOOLS, name, 'handler.js'))).handle
+}
+
+// ═══════════════════════════════════════════
+console.log('\n═══ T1: active_todos ═══')
+{
+  const handle = await loadTool('tool-active-todos')
+  const r = await handle({ workspace_dir: FIXTURES, scope: '.' }, mockContext)
+  assert(r.total_todos >= 2, `T1: found ${r.total_todos} TODOs (expect >=2: TODO + FIXME)`)
+  assert(r.todos.some(t => t.type === 'TODO'), 'T1: has TODO type')
+  assert(r.todos.some(t => t.type === 'FIXME'), 'T1: has FIXME type')
+  assert(r.summary.high + r.summary.medium + r.summary.low === r.total_todos, 'T1: summary counts match')
+  assert(r.scanned_files > 0, `T1: scanned ${r.scanned_files} files`)
+
+  const r2 = await handle({ workspace_dir: FIXTURES, scope: '.', current_files: ['src/auth.py'] }, mockContext)
+  const highTodos = r2.todos.filter(t => t.priority === 'high')
+  assert(highTodos.length > 0, 'T1: current_files boosts priority to high')
+}
+
+// ═══════════════════════════════════════════
+console.log('\n═══ T2: exception_guard ═══')
+{
+  const handle = await loadTool('tool-exception-guard')
+  const r = await handle({ workspace_dir: FIXTURES, file: 'src/auth.py' }, mockContext)
+  assert(r.issues.length >= 2, `T2: found ${r.issues.length} issues (expect >=2: ValueError + Exception)`)
+  assert(r.issues.some(i => i.raised === 'ValueError'), 'T2: catches ValueError')
+  assert(r.issues.some(i => i.raised === 'Exception'), 'T2: catches bare Exception')
+  assert(r.summary.raises_checked >= 2, `T2: checked ${r.summary.raises_checked} raises`)
+
+  const r2 = await handle({ workspace_dir: FIXTURES, file: 'nonexist.py' }, mockContext)
+  assert(r2.error === 'file_not_found', 'T2: missing file returns error')
+}
+
+// ═══════════════════════════════════════════
+console.log('\n═══ T3: config_drift ═══')
+{
+  const handle = await loadTool('tool-config-drift')
+  const r = await handle({ workspace_dir: FIXTURES, file: 'src/auth.py' }, mockContext)
+  assert(r.config_references.length >= 2, `T3: found ${r.config_references.length} config refs`)
+  assert(r.config_references.some(c => c.name === 'REDIS_URL'), 'T3: detects REDIS_URL')
+  assert(r.config_references.some(c => c.name === 'CACHE_TTL'), 'T3: detects CACHE_TTL')
+  const redisDrift = r.drifts.find(d => d.name === 'REDIS_URL')
+  assert(!redisDrift, 'T3: REDIS_URL in .env.example → no drift')
+  const cacheDrift = r.drifts.find(d => d.name === 'CACHE_TTL')
+  assert(!!cacheDrift, 'T3: CACHE_TTL not in .env.example → drift detected')
+
+  const r2 = await handle({ workspace_dir: FIXTURES, file: 'nonexist.py' }, mockContext)
+  assert(r2.error === 'file_not_found', 'T3: missing file returns error')
+}
+
+// ═══════════════════════════════════════════
+console.log('\n═══ T4: find_tests ═══')
+{
+  const handle = await loadTool('tool-find-tests')
+  const r = await handle({ workspace_dir: FIXTURES, file: 'src/auth.py' }, mockContext)
+  assert(r.by_convention.length > 0, 'T4: has convention candidates')
+  const existing = r.by_convention.filter(c => c.exists)
+  assert(existing.length > 0, `T4: found ${existing.length} existing test file(s)`)
+  assert(existing.some(c => c.path.includes('test_auth')), 'T4: finds test_auth.py')
+  assert(r.coverage_hint.length > 0, 'T4: has coverage hint')
+
+  const r2 = await handle({ workspace_dir: FIXTURES, file: 'src/auth.py', symbol: 'login' }, mockContext)
+  assert(r2.test_symbols && r2.test_symbols.length > 0, `T4: found ${r2.test_symbols?.length} test symbols for login`)
+}
+
+// ═══════════════════════════════════════════
+console.log('\n═══ T5: sandbox_validate ═══')
+{
+  const handle = await loadTool('tool-edit-sandbox')
+  const goodContent = 'def foo():\n    return 42\n'
+  const r1 = await handle({ workspace_dir: FIXTURES, file: 'src/auth.py', new_content: goodContent }, mockContext)
+  assert(r1.valid === true, 'T5: valid content passes')
+  assert(r1.checks.syntax.status === 'pass', 'T5: syntax check passes')
+
+  const badContent = 'def foo(:\n    return 42\n'
+  const r2 = await handle({ workspace_dir: FIXTURES, file: 'src/auth.py', new_content: badContent }, mockContext)
+  assert(r2.checks.syntax.status === 'fail', 'T5: unclosed paren detected')
+
+  const mixedIndent = 'def foo():\n  return 42\n    x = 1\n'
+  const r3 = await handle({ workspace_dir: FIXTURES, file: 'src/auth.py', new_content: mixedIndent }, mockContext)
+  assert(r3.checks.indentation.status !== 'pass' || r3.checks.indentation.errors?.length > 0, 'T5: inconsistent indent detected')
+}
+
+// ═══════════════════════════════════════════
+console.log('\n═══ T6: mock_sync ═══')
+{
+  const handle = await loadTool('tool-mock-syncer')
+  const r = await handle({ workspace_dir: FIXTURES, file: 'src/auth.py', function: 'login' }, mockContext)
+  assert(r.target.function === 'login', 'T6: target is login')
+  assert(r.target.signature.includes('credentials'), 'T6: signature has credentials param')
+  assert(r.summary.total_mocks_checked >= 1, `T6: checked ${r.summary.total_mocks_checked} mocks`)
+  const retMismatch = r.mock_mismatches.find(m => m.mock_type === 'return_value')
+  assert(!!retMismatch, 'T6: detects return_value mismatch (string vs dict)')
+
+  const r2 = await handle({ workspace_dir: FIXTURES, file: 'src/auth.py', function: 'nonexist' }, mockContext)
+  assert(r2.error === 'symbol_not_found', 'T6: missing function returns error')
+}
+
+// ═══════════════════════════════════════════
+console.log('\n═══ T7: sweep_dead_code ═══')
+{
+  const handle = await loadTool('tool-dead-code-sweeper')
+  const r = await handle({ workspace_dir: FIXTURES, scope: '.' }, mockContext)
+  assert(r.scanned_files > 0, `T7: scanned ${r.scanned_files} files`)
+  const unusedImports = r.dead_code.filter(d => d.type === 'unused_import')
+  assert(unusedImports.some(d => d.symbol === 'hashlib'), 'T7: detects unused import hashlib')
+  assert(r.summary.unused_imports >= 1, `T7: ${r.summary.unused_imports} unused imports`)
+}
+
+// ═══════════════════════════════════════════
+console.log('\n═══ T8: test_bridge parsers ═══')
+{
+  const { parsePytest, parseJest, parseGoTest } = await import(join(TOOLS, 'tool-test-bridge', 'parsers.js'))
+
+  const pytestOut = `tests/test_auth.py::test_login_success PASSED
+tests/test_auth.py::test_login_mfa FAILED
+===== FAILURES =====
+_____ test_login_mfa _____
+    assert result["status"] == 200
+E   AssertionError: expected 200, got 401
+tests/test_auth.py:12: AssertionError
+===== short test summary info =====
+FAILED tests/test_auth.py::test_login_mfa
+===== 1 passed, 1 failed in 0.46s =====`
+
+  const pr = parsePytest(pytestOut)
+  assert(pr.results.length === 2, `T8: pytest parsed ${pr.results.length} results`)
+  assert(pr.results[0].status === 'passed', 'T8: first test passed')
+  assert(pr.results[1].status === 'failed', 'T8: second test failed')
+  assert(pr.failures.length === 1, `T8: ${pr.failures.length} failure extracted`)
+  assert(pr.failures[0].error_type === 'AssertionError', `T8: error type is ${pr.failures[0].error_type}`)
+  assert(pr.summary.passed === 1, 'T8: summary 1 passed')
+  assert(pr.summary.failed === 1, 'T8: summary 1 failed')
+
+  const jestOut = JSON.stringify({
+    numTotalTests: 2, numPassedTests: 1, numFailedTests: 1,
+    testResults: [{ testFilePath: '/tests/auth.test.js', testResults: [
+      { fullName: 'login works', status: 'passed', duration: 50 },
+      { fullName: 'mfa works', status: 'failed', duration: 80, failureMessages: ['Error: expected 200\n    at Object.<anonymous>'] },
+    ]}]
+  })
+  const jr = parseJest(jestOut)
+  assert(jr.results.length === 2, 'T8: jest parsed 2 results')
+  assert(jr.failures.length === 1, 'T8: jest 1 failure')
+  assert(jr.summary.passed === 1, 'T8: jest summary 1 passed')
+
+  const goOut = `=== RUN   TestLogin
+--- PASS: TestLogin (0.00s)
+=== RUN   TestMFA
+    auth_test.go:89: expected 200, got 401
+--- FAIL: TestMFA (0.01s)
+FAIL`
+  const gr = parseGoTest(goOut)
+  assert(gr.results.length === 2, 'T8: go parsed 2 results')
+  assert(gr.failures.length === 1, 'T8: go 1 failure')
+  assert(gr.failures[0].line === 89, `T8: go failure at line ${gr.failures[0].line}`)
+}
+
+// ═══════════════════════════════════════════
+console.log('\n═══ T9: test_bridge handler ═══')
+{
+  const handle = await loadTool('tool-test-bridge')
+
+  const r1 = await handle({ action: 'discover', workspace_dir: FIXTURES, file: 'src/auth.py' }, mockContext)
+  assert(r1.action === 'discover', 'T9: discover action works')
+  assert(r1.framework === 'pytest', `T9: detected framework ${r1.framework}`)
+  assert(r1.tests.length >= 4, `T9: found ${r1.tests.length} tests`)
+  assert(r1.tests.some(t => t.name === 'test_login_success'), 'T9: finds test_login_success')
+
+  const r2 = await handle({ action: 'suggest', workspace_dir: FIXTURES, file: 'src/auth.py' }, mockContext)
+  assert(r2.action === 'suggest', 'T9: suggest action works')
+  assert(r2.affected_tests.length > 0, `T9: ${r2.affected_tests.length} affected tests`)
+
+  const r3 = await handle({ action: 'invalid', workspace_dir: FIXTURES }, mockContext)
+  assert(r3.error === 'invalid_action', 'T9: invalid action returns error')
+
+  const r4 = await handle({ action: 'run', workspace_dir: FIXTURES, scope: '; rm -rf /' }, mockContext)
+  assert(r4.error === 'invalid_input', 'T9: command injection blocked')
+
+  const r5 = await handle({ workspace_dir: FIXTURES }, mockContext)
+  assert(r5.error === 'invalid_action', 'T9: missing action returns error')
+}
+
+// ═══════════════════════════════════════════
+console.log('\n═══ T10: inspect (no index) ═══')
+{
+  const handle = await loadTool('tool-inspect')
+  const r = await handle({ workspace_dir: FIXTURES, symbol: 'login', file: 'src/auth.py' }, mockContext)
+  assert(r.error === 'workspace_not_indexed' || r.symbol === 'login', 'T10: inspect handles no-index gracefully')
+}
+
+// ═══════════════════════════════════════════
+console.log('\n═══ T11: rename_symbol (dry_run) ═══')
+{
+  const handle = await loadTool('tool-rename-symbol')
+  const r = await handle({ workspace_dir: FIXTURES, symbol: 'login', new_name: 'authenticate', file: 'src/auth.py', dry_run: true }, mockContext)
+  assert(r.files_changed >= 1, `T11: ${r.files_changed} files would change`)
+  assert(r.total_edits >= 1, `T11: ${r.total_edits} edits`)
+  assert(r.dry_run === true, 'T11: dry_run mode')
+
+  const r2 = await handle({ workspace_dir: FIXTURES, symbol: 'login', new_name: 'login', file: 'src/auth.py' }, mockContext)
+  assert(r2.error === 'invalid_input', 'T11: same name rejected')
+}
+
+// ═══════════════════════════════════════════
+console.log('\n═══ T12: edit_sandbox edge cases ═══')
+{
+  const handle = await loadTool('tool-edit-sandbox')
+  const r = await handle({ workspace_dir: FIXTURES, file: 'src/auth.py' }, mockContext)
+  assert(r.error === 'missing_parameter', 'T12: missing new_content returns error')
+}
+
+// ═══════════════════════════════════════════
+console.log(`\n${'═'.repeat(50)}`)
+console.log(`总计: ${passed} passed, ${failed} failed`)
+if (errors.length > 0) {
+  console.log('\n失败列表:')
+  errors.forEach(e => console.log(`  ✗ ${e}`))
+}
+process.exit(failed > 0 ? 1 : 0)

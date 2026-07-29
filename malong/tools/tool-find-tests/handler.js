@@ -1,5 +1,5 @@
 import { join, dirname, basename, extname } from 'node:path'
-import { existsSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 
 const CONVENTIONS = {
   '.py': (base, dir) => [
