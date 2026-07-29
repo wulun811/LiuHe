@@ -89,14 +89,17 @@ export async function handle(args, context) {
     if (!existsSync(absPath)) {
       return { status: 'file_not_found', file }
     }
-    const hash = contentHashFast(absPath)
     const stat = statSync(absPath)
-    snapshots.set(key, {
-      hash,
-      lines: stat.size <= LARGE_FILE_BYTES ? readFileSync(absPath, 'utf-8').split('\n').length : null,
-      readAt: Date.now(),
-      size: stat.size
-    })
+    let hash, lines = null
+    if (stat.size <= LARGE_FILE_BYTES) {
+      const content = readFileSync(absPath, 'utf-8')
+      hash = contentHash(content)
+      lines = content.split('\n').length
+    } else {
+      hash = contentHashFast(absPath)
+    }
+    snapshots.delete(key)
+    snapshots.set(key, { hash, lines, readAt: Date.now(), size: stat.size })
     evictIfNeeded()
     return { status: 'recorded', file, hash }
   }
@@ -109,6 +112,8 @@ export async function handle(args, context) {
   if (!snap) {
     return { status: 'never_read', file, recommendation: 'read file before editing' }
   }
+  snapshots.delete(key)
+  snapshots.set(key, snap)
 
   const currentHash = contentHashFast(absPath)
   if (currentHash === snap.hash) {

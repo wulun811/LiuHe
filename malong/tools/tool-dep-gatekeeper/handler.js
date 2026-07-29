@@ -89,11 +89,26 @@ const STDLIB_JS = new Set([
   'node:vm', 'node:wasi', 'node:worker_threads', 'node:zlib',
 ])
 
+const STDLIB_GO = new Set([
+  'archive', 'bufio', 'builtin', 'bytes', 'compress', 'container', 'context',
+  'crypto', 'database', 'debug', 'embed', 'encoding', 'errors', 'expvar',
+  'flag', 'fmt', 'go', 'hash', 'html', 'image', 'index', 'io', 'log',
+  'maps', 'math', 'mime', 'net', 'os', 'path', 'plugin', 'reflect',
+  'regexp', 'runtime', 'slices', 'sort', 'strconv', 'strings', 'sync',
+  'syscall', 'testing', 'text', 'time', 'unicode', 'unsafe',
+])
+
+const STDLIB_RS = new Set([
+  'std', 'core', 'alloc', 'proc_macro', 'test',
+])
+
 const MANIFEST_NAMES = ['pyproject.toml', 'package.json', 'requirements.txt', 'go.mod', 'Cargo.toml']
 
 function getStdlib(ext) {
   if (ext === '.py') return STDLIB_PY
   if (['.js', '.mjs', '.cjs', '.ts', '.tsx', '.mts', '.cts'].includes(ext)) return STDLIB_JS
+  if (ext === '.go') return STDLIB_GO
+  if (ext === '.rs') return STDLIB_RS
   return new Set()
 }
 
@@ -259,12 +274,16 @@ function extractImports(file, content, langParser) {
   }
   if (!tree) return { imports: [], warnings: [{ file, reason: 'unsupported_language' }] }
   const refs = langParser.extractReferences(tree, content)
-  const imports = refs.filter(r => r.type === 'import').map(r => ({
-    module: r.module.split('/')[0].split('.')[0],
-    raw: r.module,
-    line: r.line,
-    isRelative: r.module.startsWith('.')
-  }))
+  const imports = refs.filter(r => r.type === 'import').map(r => {
+    let mod = r.module
+    if (mod.startsWith('@')) {
+      const parts = mod.split('/')
+      mod = parts.length >= 2 ? parts[0] + '/' + parts[1] : parts[0]
+    } else {
+      mod = mod.split('/')[0].split('.')[0]
+    }
+    return { module: mod, raw: r.module, line: r.line, isRelative: r.module.startsWith('.') }
+  })
   return { imports, warnings: [] }
 }
 

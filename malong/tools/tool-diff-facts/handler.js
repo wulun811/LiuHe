@@ -108,10 +108,10 @@ function extractChanges(change, langParser) {
 
 async function checkCallerSync(symbolsChanged, filesInChange, codeIndexService, workspaceDir) {
   if (!codeIndexService) return 'skipped'
+  try { codeIndexService.initWorkspace(workspaceDir) } catch { return 'skipped' }
   const result = []
   for (const sym of symbolsChanged.filter(s => s.change === 'signature_changed')) {
     try {
-      codeIndexService.initWorkspace(workspaceDir)
       const { callers } = await codeIndexService.getImpactAnalysis(sym.file, { symbol: sym.symbol })
       const notUpdated = callers.filter(c => !filesInChange.includes(c.file)).map(c => c.file)
       result.push({
@@ -134,11 +134,20 @@ function checkTestSync(changes) {
 
   for (const src of sourceChanged) {
     const base = src.replace(/\.[^.]+$/, '').replace(/^src\//, '')
-    const expectedTests = [
-      `test_${base.split('/').pop()}.py`,
-      `${base.split('/').pop()}_test.py`,
-      `tests/test_${base.split('/').pop()}.py`,
-    ]
+    const name = base.split('/').pop()
+    const ext = extname(src)
+    const expectedTests = []
+    if (ext === '.py') {
+      expectedTests.push(`test_${name}.py`, `${name}_test.py`, `tests/test_${name}.py`)
+    } else if (['.js', '.mjs', '.cjs'].includes(ext)) {
+      expectedTests.push(`${name}.test.js`, `${name}.spec.js`, `__tests__/${name}.test.js`)
+    } else if (['.ts', '.tsx', '.mts', '.cts'].includes(ext)) {
+      expectedTests.push(`${name}.test.ts`, `${name}.spec.ts`, `__tests__/${name}.test.ts`)
+    } else if (ext === '.go') {
+      expectedTests.push(`${name}_test.go`)
+    } else if (ext === '.rs') {
+      expectedTests.push(`${name}_test.rs`)
+    }
     for (const t of expectedTests) {
       if (!testChanged.some(tc => tc.includes(t)) && !testsPossiblyStale.includes(t)) {
         testsPossiblyStale.push(t)

@@ -4,15 +4,16 @@ import { ErrorCodes, makeError, validateFilePath } from '../../error-codes.js'
 
 const BUILTIN_RULES = [
   { id: 'no-bare-except', type: 'except_bare', severity: 'warning', message: 'bare except: catches all exceptions including SystemExit/KeyboardInterrupt', suggestion: 'use except AppException: or except (TypeError, ValueError):' },
-  { id: 'no-print-debug', type: 'call_banned', severity: 'warning', banned: ['print', 'console.log', 'console.debug'], message: 'debug print statement left in code', suggestion: 'use logging module or remove' },
   { id: 'no-debugger', type: 'call_banned', severity: 'error', banned: ['debugger', 'pdb.set_trace', 'breakpoint'], message: 'debugger breakpoint left in code', suggestion: 'remove before committing' },
-  { id: 'no-todo-without-issue', type: 'call_banned', severity: 'warning', banned: [], message: '', _comment: 'placeholder, not active' },
   { id: 'no-eval', type: 'call_banned', severity: 'error', banned: ['eval', 'exec'], message: 'eval/exec is a security risk', suggestion: 'use ast.literal_eval or a safe parser' },
-  { id: 'no-wildcard-import', type: 'call_banned', severity: 'warning', banned: [], message: '', _comment: 'placeholder' },
 ]
 
 function loadProjectRules(workspaceDir, rulesetPath) {
   const path = rulesetPath || join(workspaceDir, '.ai-patterns.json')
+  if (rulesetPath) {
+    const pathCheck = validateFilePath(rulesetPath)
+    if (pathCheck.blocked) return { rules: [], warnings: [{ reason: 'path_blocked', detail: pathCheck.detail }] }
+  }
   if (!existsSync(path)) return { rules: [], warnings: [] }
   try {
     const data = JSON.parse(readFileSync(path, 'utf-8'))
@@ -133,8 +134,13 @@ export async function handle(args, context) {
   const langParser = context?.langParserService
   if (!langParser) return makeError(ErrorCodes.SERVICE_UNAVAILABLE, 'lang-parser service not available')
 
-  const content = readFileSync(absPath, 'utf-8')
-  const activeBuiltins = BUILTIN_RULES.filter(r => !r._comment)
+  let content
+  try {
+    content = readFileSync(absPath, 'utf-8')
+  } catch (e) {
+    return makeError(ErrorCodes.FILE_NOT_FOUND, `Cannot read file: ${e.message}`, { file })
+  }
+  const activeBuiltins = BUILTIN_RULES
   const { rules: projectRules, warnings: ruleWarnings } = loadProjectRules(workspaceDir, args?.ruleset)
   const allRules = [...activeBuiltins, ...projectRules]
 
