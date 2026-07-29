@@ -1,0 +1,10 @@
+{
+  "name": "gc",
+  "description": "Trigger manual garbage collection. Requires --expose-gc flag. Use when memory usage is high.",
+  "handler": "handler.js",
+  "inputSchema": {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false
+  }
+}

@@ -217,6 +217,12 @@ process.stdin.on('close', () => {
 
 initModules().then(() => {
   core.log('info', '[mcp] server ready')
+  if (typeof global.gc === 'function') {
+    core.log('info', '[mcp] --expose-gc detected, periodic GC enabled')
+    setInterval(() => {
+      try { global.gc() } catch {}
+    }, 60_000)
+  }
 }).catch(e => {
   process.stderr.write(`[mcp] init failed: ${e.stack}\n`)
   process.exit(1)

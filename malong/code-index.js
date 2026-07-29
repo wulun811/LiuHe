@@ -108,9 +108,9 @@ function initDb(dir) {
   const db = openHealthy(dbPath)
   db.pragma('journal_mode=WAL')
   db.pragma('synchronous=NORMAL')
-  db.pragma('cache_size=-65536')
-  db.pragma('mmap_size=268435456')
-  db.pragma('temp_store=MEMORY')
+  db.pragma('cache_size=-16384')
+  db.pragma('mmap_size=67108864')
+  db.pragma('temp_store=FILE')
   db.exec(SCHEMA)
   try { db.exec('ALTER TABLE refs ADD COLUMN line INTEGER DEFAULT 0') } catch (e) { if (!e.message?.includes('duplicate column')) console.error('[code-index] migration error:', e.message) }
   try { db.exec("ALTER TABLE refs ADD COLUMN call_expr TEXT DEFAULT ''") } catch (e) { if (!e.message?.includes('duplicate column')) console.error('[code-index] migration error:', e.message) }
@@ -149,8 +149,9 @@ class CodeIndex {
     this._impactCache = new Map()
     this._contextCache = new Map()
     this._outlineCache = new Map()
-    this._impactCacheMax = 500
-    this._outlineCacheMax = 200
+    this._impactCacheMax = 200
+    this._outlineCacheMax = 100
+    this._contextCacheMax = 50
   }
 
   _resolveRepoDir(filePath) {
@@ -294,6 +295,10 @@ class CodeIndex {
     if (!absPath.startsWith('/')) absPath = join(this._currentWorkspace || '', filePath)
     try {
       if (!this._contextCache.has(absPath)) {
+        if (this._contextCache.size >= this._contextCacheMax) {
+          const oldest = this._contextCache.keys().next().value
+          this._contextCache.delete(oldest)
+        }
         this._contextCache.set(absPath, readFileSync(absPath, 'utf-8').split('\n'))
       }
       const lines = this._contextCache.get(absPath)
