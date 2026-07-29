@@ -108,6 +108,7 @@ function initDb(dir) {
   const db = openHealthy(dbPath)
   db.pragma('journal_mode=WAL')
   db.pragma('synchronous=NORMAL')
+  db.pragma('busy_timeout=5000')
   db.pragma('cache_size=-16384')
   db.pragma('mmap_size=67108864')
   db.pragma('temp_store=FILE')
