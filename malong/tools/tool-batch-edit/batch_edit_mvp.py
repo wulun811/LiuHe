@@ -261,6 +261,7 @@ def detect_unicode_mismatch(content: str, old_string: str) -> Optional[Dict]:
         return None
 
     mismatches = []
+    has_confusable = False
     sm = difflib.SequenceMatcher(None, old_string, best_content)
 
     for tag, i1, i2, j1, j2 in sm.get_opcodes():
@@ -281,12 +282,13 @@ def detect_unicode_mismatch(content: str, old_string: str) -> Optional[Dict]:
                 fc_info = UNICODE_CONFUSABLES.get(fc)
                 if oc_info and oc_info[0] == fc:
                     mismatches.append(f"pos {i1+k}: your '{oc}' is {oc_info[1]}, should be plain '{fc}' U+{ord(fc):04X}")
+                    has_confusable = True
                 elif fc_info and fc_info[0] == oc:
                     mismatches.append(f"pos {i1+k}: file has '{fc}' ({fc_info[1]}), your old_string uses plain '{oc}'")
+                    has_confusable = True
                 elif oc_info and fc_info and oc_info[0] == fc_info[0]:
                     mismatches.append(f"pos {i1+k}: your '{oc}' ({oc_info[1]}) vs file '{fc}' ({fc_info[1]})")
-                else:
-                    mismatches.append(f"pos {i1+k}: your '{oc}' U+{ord(oc):04X} vs file '{fc}' U+{ord(fc):04X}")
+                    has_confusable = True
             if len(old_part) > len(file_part):
                 extra = old_part[min_len:]
                 mismatches.append(f"pos {i1+min_len}: your extra '{extra}' not in file")
@@ -298,7 +300,7 @@ def detect_unicode_mismatch(content: str, old_string: str) -> Optional[Dict]:
         elif tag == 'delete':
             mismatches.append(f"pos {i1}: your '{old_part[:20]}' not in file")
 
-    if not mismatches:
+    if not mismatches or not has_confusable:
         return None
 
     return {
