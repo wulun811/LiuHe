@@ -1,11 +1,12 @@
 {
   "name": "reindex",
-  "version": "0.0.3",
-  "description": "Index project for symbol search and impact analysis. Call first for new workspaces. Background indexing.",
+  "version": "0.0.4",
+  "description": "Index project for symbol search and impact analysis. Call first for new workspaces. Pass blocking=true to wait for completion. All responses include done: true|false.",
   "inputSchema": {
     "type": "object",
     "properties": {
       "workspace_dir": { "type": "string", "description": "Absolute path to the project root directory. Omit this to check current indexing status / progress." },
+      "blocking": { "type": "boolean", "description": "If true, wait for indexing to complete before returning (default false = async)." },
       "maxFiles": { "type": "number", "description": "Max files to index (default 5000, 0=unlimited). Increase if project has many files." },
       "skipDirs": { "type": "array", "items": { "type": "string" }, "description": "Skip specific directories by relative path, e.g. [\"runtime1\", \"0通天/eval-cases\"]. Useful when pre-check says too many files." },
       "ignoreDirs": { "type": "array", "items": { "type": "string" }, "description": "Additional directory names to skip globally (e.g. [\"deps\", \"archive\"]). Combined with built-in defaults." },

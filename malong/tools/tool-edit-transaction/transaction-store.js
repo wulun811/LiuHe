@@ -1,6 +1,7 @@
 import { join } from 'node:path'
 import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync, rmSync, statSync, readdirSync, renameSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
+import { ErrorCodes, makeError, validateFilePath, findClosestMatch } from '../../error-codes.js'
 
 const LARGE_FILE_BYTES = 100 * 1024 * 1024
 
@@ -30,12 +31,17 @@ export class TransactionStore {
   }
 
   backupFile(txnId, fileRel) {
+    const pathCheck = validateFilePath(fileRel)
+    if (pathCheck.blocked) {
+      return makeError(ErrorCodes.PATH_BLOCKED, pathCheck.detail, { file: fileRel, reason: pathCheck.reason })
+    }
+
     const manifest = this._readManifest(txnId)
     if (manifest.files[fileRel]) return
 
     const srcPath = join(this.projectRoot, fileRel)
     if (!existsSync(srcPath)) {
-      return { error: 'file_not_found', file: fileRel }
+      return makeError(ErrorCodes.FILE_NOT_FOUND, `File does not exist: ${fileRel}`, { file: fileRel })
     }
 
     const stat = statSync(srcPath)
@@ -54,9 +60,14 @@ export class TransactionStore {
   }
 
   applyEdits(txnId, fileRel, edits) {
+    const pathCheck = validateFilePath(fileRel)
+    if (pathCheck.blocked) {
+      return makeError(ErrorCodes.PATH_BLOCKED, pathCheck.detail, { file: fileRel, reason: pathCheck.reason })
+    }
+
     const absPath = join(this.projectRoot, fileRel)
     if (!existsSync(absPath)) {
-      return { error: 'file_not_found', file: fileRel, message: `File does not exist: ${fileRel}` }
+      return makeError(ErrorCodes.FILE_NOT_FOUND, `File does not exist: ${fileRel}`, { file: fileRel })
     }
 
     const content = readFileSync(absPath, 'utf-8')
@@ -76,12 +87,18 @@ export class TransactionStore {
           applied++
           result = replaced
         } else {
-          failedEdits.push({ index: i, old_string: oldStr, reason: 'not_found' })
+          const failed = { index: i, old_string: oldStr, reason: 'not_found', error_code: ErrorCodes.OLD_STRING_NOT_FOUND }
+          const closest = findClosestMatch(result, oldStr)
+          if (closest) failed.closest_match = closest
+          failedEdits.push(failed)
         }
       } else {
         const idx = result.indexOf(oldStr)
         if (idx === -1) {
-          failedEdits.push({ index: i, old_string: oldStr, reason: 'not_found' })
+          const failed = { index: i, old_string: oldStr, reason: 'not_found', error_code: ErrorCodes.OLD_STRING_NOT_FOUND }
+          const closest = findClosestMatch(result, oldStr)
+          if (closest) failed.closest_match = closest
+          failedEdits.push(failed)
           continue
         }
         result = result.slice(0, idx) + newStr + result.slice(idx + oldStr.length)
@@ -90,7 +107,7 @@ export class TransactionStore {
     }
 
     if (applied === 0 && failedEdits.length > 0) {
-      return { error: 'no_match', file: fileRel, message: 'No edits matched in file', failed_edits: failedEdits }
+      return makeError(ErrorCodes.NO_MATCH, 'No edits matched in file', { file: fileRel, failed_edits: failedEdits })
     }
 
     const validationWarnings = checkBracketBalance(result)
@@ -110,7 +127,7 @@ export class TransactionStore {
   commit(txnId) {
     const txnPath = this._txnPath(txnId)
     if (!existsSync(txnPath)) {
-      return { error: 'transaction_not_found', txnId }
+      return makeError(ErrorCodes.TXN_NOT_FOUND, `Transaction not found: ${txnId}`, { txnId })
     }
     const manifest = this._readManifest(txnId)
     rmSync(txnPath, { recursive: true, force: true })
@@ -120,7 +137,7 @@ export class TransactionStore {
   rollback(txnId) {
     const txnPath = this._txnPath(txnId)
     if (!existsSync(txnPath)) {
-      return { error: 'transaction_not_found', txnId }
+      return makeError(ErrorCodes.TXN_NOT_FOUND, `Transaction not found: ${txnId}`, { txnId })
     }
     const manifest = this._readManifest(txnId)
     const backupDir = join(txnPath, 'backup')

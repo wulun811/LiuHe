@@ -2,6 +2,7 @@ import { setImmediate } from 'node:timers'
 import { DEFAULT_IGNORE_DIRS, collectFilesWithDirStats, parseMalongignore } from '../../file-collector.js'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
+import { ErrorCodes, makeError } from '../../error-codes.js'
 
 const DEFAULT_THRESHOLD = 2000
 
@@ -10,26 +11,28 @@ export async function handle(args, context) {
   const workspaceDir = args?.workspace_dir
 
   if (!workspaceDir) {
-    // 不带参数：查询索引状态
     if (!codeIndexService) {
-      return { error: 'service_unavailable', message: 'codeIndex service not available' }
+      return makeError(ErrorCodes.SERVICE_UNAVAILABLE, 'codeIndex service not available')
     }
     if (codeIndexService.indexing && codeIndexService.indexProgress) {
       const p = codeIndexService.indexProgress
       const pct = p.total > 0 ? Math.round((p.indexed / p.total) * 100) : 0
       return {
         status: 'indexing',
+        done: false,
         workspace_dir: p.workspaceDir,
         files_indexed: p.indexed,
         total_files: p.total,
         progress_pct: pct,
         elapsed_seconds: Math.round((Date.now() - p.startTime) / 1000),
+        next_action: 'Call reindex() again to check progress',
       }
     }
     const last = codeIndexService.lastIndexed
     if (last) {
       return {
         status: 'completed',
+        done: true,
         workspace_dir: last.workspace_dir,
         files_indexed: last.files,
         symbols: last.symbols,
@@ -38,31 +41,32 @@ export async function handle(args, context) {
         suggestion: 'Call reindex(workspace_dir="...") to index a different workspace',
       }
     }
-    return { status: 'not_started', suggestion: 'Call reindex(workspace_dir="...") to start indexing' }
+    return { status: 'not_started', done: false, suggestion: 'Call reindex(workspace_dir="...") to start indexing' }
   }
 
   if (!existsSync(workspaceDir)) {
-    return { error: 'invalid_workspace', message: `workspace_dir not found: ${workspaceDir}` }
+    return makeError(ErrorCodes.INVALID_INPUT, `workspace_dir not found: ${workspaceDir}`)
   }
 
   if (!codeIndexService) {
-    return { error: 'service_unavailable', message: 'codeIndex service not available', suggestion: 'Check MCP server configuration' }
+    return makeError(ErrorCodes.SERVICE_UNAVAILABLE, 'codeIndex service not available', { suggestion: 'Check MCP server configuration' })
   }
 
   codeIndexService.initWorkspace(workspaceDir)
 
-  // 正在索引中：返回进度
   if (codeIndexService.indexing && codeIndexService.indexProgress) {
     const p = codeIndexService.indexProgress
     const pct = p.total > 0 ? Math.round((p.indexed / p.total) * 100) : 0
     return {
       status: 'indexing',
+      done: false,
       workspace_dir: workspaceDir,
       files_indexed: p.indexed,
       total_files: p.total,
       progress_pct: pct,
       elapsed_seconds: Math.round((Date.now() - p.startTime) / 1000),
       estimated_remaining_seconds: p.indexed > 0 ? Math.round((Date.now() - p.startTime) / p.indexed * (p.total - p.indexed) / 1000) : null,
+      next_action: 'Call reindex() again to check progress',
     }
   }
 
@@ -74,11 +78,9 @@ export async function handle(args, context) {
   const userIgnoreDirs = args?.ignoreDirs ?? []
   const threshold = args?.threshold ?? DEFAULT_THRESHOLD
 
-  // 合并默认忽略目录与用户自定义
   const mergedIgnoreDirs = new Set(DEFAULT_IGNORE_DIRS)
   for (const d of userIgnoreDirs) mergedIgnoreDirs.add(d)
 
-  // 预检：收集文件并统计目录分布
   const { files, dirStats } = collectFilesWithDirStats(workspaceDir, {
     ignoreRules,
     skipDirs: userSkipDirs,
@@ -88,7 +90,6 @@ export async function handle(args, context) {
 
   const totalFiles = files.length
 
-  // 超过阈值，返回 needs_review
   if (totalFiles > threshold) {
     const topDirs = Object.entries(dirStats)
       .sort((a, b) => b[1] - a[1])
@@ -101,6 +102,7 @@ export async function handle(args, context) {
 
     return {
       status: 'needs_review',
+      done: false,
       workspace_dir: workspaceDir,
       total_files: totalFiles,
       threshold,
@@ -114,20 +116,49 @@ export async function handle(args, context) {
     }
   }
 
-  // 开始异步索引
   const estimatedTimeSeconds = Math.ceil(totalFiles / 30)
+  const filePaths = files.map(f => f.path)
+  const startTime = Date.now()
 
   codeIndexService.indexing = true
-  codeIndexService.indexProgress = { workspaceDir, total: totalFiles, indexed: 0, startTime: Date.now() }
+  codeIndexService.indexProgress = { workspaceDir, total: totalFiles, indexed: 0, startTime }
 
-  setImmediate(async () => {
+  const blocking = args?.blocking === true
+
+  if (blocking) {
     try {
-      const filePaths = files.map(f => f.path)
       await codeIndexService.indexBatch(filePaths, workspaceDir, (indexed, total) => {
         codeIndexService.indexProgress = { ...codeIndexService.indexProgress, indexed, total }
       })
       codeIndexService.indexing = false
-      log('info', `[reindex] done: ${files.length} files, ${Date.now() - codeIndexService.indexProgress.startTime}ms`)
+      const durationMs = Date.now() - startTime
+      const finalProgress = codeIndexService.indexProgress
+      log('info', `[reindex] blocking done: ${totalFiles} files, ${durationMs}ms`)
+      const last = codeIndexService.lastIndexed || {}
+      return {
+        status: 'completed',
+        done: true,
+        workspace_dir: workspaceDir,
+        total_files: totalFiles,
+        files_indexed: finalProgress.indexed,
+        symbols: last.symbols,
+        refs: last.refs,
+        duration_seconds: Math.round(durationMs / 1000),
+      }
+    } catch (e) {
+      codeIndexService.indexing = false
+      log('error', `[reindex] blocking failed: ${e.message}`)
+      return makeError(ErrorCodes.SERVICE_UNAVAILABLE, `Indexing failed: ${e.message}`)
+    }
+  }
+
+  setImmediate(async () => {
+    try {
+      await codeIndexService.indexBatch(filePaths, workspaceDir, (indexed, total) => {
+        codeIndexService.indexProgress = { ...codeIndexService.indexProgress, indexed, total }
+      })
+      codeIndexService.indexing = false
+      log('info', `[reindex] done: ${files.length} files, ${Date.now() - startTime}ms`)
     } catch (e) {
       log('error', `[reindex] failed: ${e.message}`)
       codeIndexService.indexing = false
@@ -136,9 +167,11 @@ export async function handle(args, context) {
 
   return {
     status: 'started',
+    done: false,
     workspace_dir: workspaceDir,
     total_files: totalFiles,
     estimated_time_seconds: estimatedTimeSeconds,
-    note: `Indexing ${totalFiles} files in background. You can continue with other tasks. Call reindex() to check progress.`,
+    next_action: 'Call reindex() to check progress, or pass blocking=true to wait for completion',
+    note: `Indexing ${totalFiles} files in background. You can continue with other tasks.`,
   }
 }
