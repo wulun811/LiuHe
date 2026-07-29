@@ -1,7 +1,7 @@
 {
   "name": "impact_analysis",
   "version": "2.1.0",
-  "description": "Analyze callers/callees of a symbol or file. Includes risk level and test references. For line-level, use call_chain.",
+  "description": "BEFORE modifying a function/class: see all callers (blast radius), callees, risk level. For line-level, use call_chain.",
   "inputSchema": {
     "type": "object",
     "properties": {

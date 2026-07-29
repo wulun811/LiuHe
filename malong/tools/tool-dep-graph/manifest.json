@@ -1,7 +1,7 @@
 {
   "name": "dep_graph",
   "version": "1.0.0",
-  "description": "Import dependency graph for a file, transitive up to N levels.",
+  "description": "Trace import dependencies up to N levels deep. No built-in equivalent.",
   "inputSchema": {
     "type": "object",
     "properties": {

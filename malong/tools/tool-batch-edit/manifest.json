@@ -1,7 +1,7 @@
 {
   "name": "edit_batch",
   "version": "1.0.0",
-  "description": "Apply multiple text replacements to one file atomically. For rollback support, use edit_transaction.",
+  "description": "Apply multiple edits to one file atomically. dry_run previews diff. Prefer over repeated edit calls.",
   "inputSchema": {
     "type": "object",
     "properties": {

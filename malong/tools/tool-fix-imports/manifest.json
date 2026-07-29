@@ -1,7 +1,7 @@
 {
   "name": "fix_imports",
   "version": "1.1.0",
-  "description": "Detect undefined symbols, unused imports, circular deps. Returns transaction_ready edits for edit_transaction.",
+  "description": "Detect unused imports, undefined symbols, circular deps. auto_fix=true applies fixes. No built-in equivalent.",
   "inputSchema": {
     "type": "object",
     "properties": {

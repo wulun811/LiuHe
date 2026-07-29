@@ -1,6 +1,7 @@
 import { join } from 'node:path'
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { isFunctionName } from '../misuse-helpers.js'
+import { checkFileStaleness, attachStalenessWarning } from '../../staleness.js'
 
 const SOURCE_EXTS = new Set(['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.mts', '.cts', '.py', '.go', '.rs', '.java', '.rb', '.php'])
 
@@ -108,13 +109,7 @@ export async function handle(args, context) {
     }
   }
 
-  try {
-    const indexedMtime = codeIndexService.getFileMtime(file)
-    if (fileMtime > indexedMtime) {
-      result.warning = 'index_stale'
-      result.suggestion = `File "${file}" was modified after last index. References may be incomplete. Call reindex to refresh.`
-    }
-  } catch {}
+  attachStalenessWarning(result, checkFileStaleness(codeIndexService, workspaceDir, file))
 
   if (misuseWarning) {
     result.misuse_warning = misuseWarning

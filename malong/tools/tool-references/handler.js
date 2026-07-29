@@ -55,6 +55,8 @@ export async function handle(args, context) {
       result.results = textRefs
       result.count = textRefs.length
       result.search_method = 'text_fallback'
+    } else {
+      result.suggestion = `No references found. If files were recently added, call reindex(workspace_dir="${workspaceDir}") to update the index.`
     }
   }
   

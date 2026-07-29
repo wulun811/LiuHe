@@ -2,6 +2,7 @@
 
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
+import { checkFileStaleness, attachStalenessWarning } from '../../staleness.js'
 
 export async function handle(args, context) {
   const { codeIndexService, getWorkspaceDir } = context
@@ -33,5 +34,6 @@ export async function handle(args, context) {
     return { error: 'missing_parameter', message: 'file is required', suggestion: 'Provide a file path relative to workspace_dir (e.g. "scripts/lib/tools/spawn.mjs")' }
   }
 
-  return await codeIndexService.getModuleDependencies(file, { depth: args?.depth || 3 })
+  const result = await codeIndexService.getModuleDependencies(file, { depth: args?.depth || 3 })
+  return attachStalenessWarning(result, checkFileStaleness(codeIndexService, workspaceDir, file))
 }

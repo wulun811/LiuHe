@@ -41,5 +41,8 @@ export async function handle(args, context) {
     res.warning = 'single_char_query'
     res.suggestion = `Single-character query "${query}" is very broad. Use a longer substring for more targeted results.`
   }
+  if (results.length === 0) {
+    res.suggestion = `No symbols found. If files were recently added, call reindex(workspace_dir="${workspaceDir}") to update the index.`
+  }
   return res
 }

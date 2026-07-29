@@ -1,7 +1,7 @@
 {
   "name": "repo_map",
   "version": "1.0.0",
-  "description": "Project-wide code map. Find related files and understand structure in large codebases (100+ files). For single-symbol search, use symbol_search.",
+  "description": "Project code map: file relationships and symbols. For large codebases (100+ files). Better than glob for understanding structure.",
   "inputSchema": {
     "type": "object",
     "properties": {

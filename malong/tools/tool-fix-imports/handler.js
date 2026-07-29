@@ -1,6 +1,7 @@
 import { join } from 'node:path'
 import { existsSync, readFileSync, writeFileSync, statSync } from 'node:fs'
 import { validateFilePath, ErrorCodes, makeError } from '../../error-codes.js'
+import { checkFileStaleness, attachStalenessWarning } from '../../staleness.js'
 
 const BUILTINS_PY = new Set(['abs', 'all', 'any', 'bin', 'bool', 'bytearray', 'bytes', 'callable', 'chr', 'classmethod', 'compile', 'complex', 'delattr', 'dict', 'dir', 'divmod', 'enumerate', 'eval', 'exec', 'filter', 'float', 'format', 'frozenset', 'getattr', 'globals', 'hasattr', 'hash', 'hex', 'id', 'input', 'int', 'isinstance', 'issubclass', 'iter', 'len', 'list', 'locals', 'map', 'max', 'memoryview', 'min', 'next', 'object', 'oct', 'open', 'ord', 'pow', 'print', 'property', 'range', 'repr', 'reversed', 'round', 'set', 'setattr', 'slice', 'sorted', 'staticmethod', 'str', 'sum', 'super', 'tuple', 'type', 'vars', 'zip', '__import__', 'Exception', 'BaseException', 'ValueError', 'TypeError', 'KeyError', 'IndexError', 'RuntimeError', 'StopIteration', 'ArithmeticError', 'AttributeError', 'EOFError', 'ImportError', 'LookupError', 'NameError', 'OSError', 'SyntaxError', 'SystemError', 'UnboundLocalError', 'ZeroDivisionError', 'self', 'cls', 'None', 'True', 'False', 'NotImplemented', 'Ellipsis'])
 
@@ -167,6 +168,8 @@ export async function handle(args, context) {
   if (issues.length === 0) {
     result.hint = 'No import issues found. If you recently changed function signatures, use impact_analysis to check for broken callers.'
   }
+
+  attachStalenessWarning(result, checkFileStaleness(codeIndexService, workspaceDir, file))
 
   if (!autoFix) {
     _fixImportsCache.set(cacheKey, result)

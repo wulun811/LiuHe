@@ -1,7 +1,7 @@
 {
   "name": "edit_transaction",
-  "version": "1.1.0",
-  "description": "Transactional file editing with rollback safety. Use when you're unsure about changes or need to preview before committing. For simple batch edits, use edit_batch.",
+  "version": "1.2.0",
+  "description": "Multi-file edits with rollback and preview. Different edits per file supported. Prefer over edit for multi-file or risky changes. Single-file: use edit_batch.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -10,8 +10,9 @@
       "name": { "type": "string", "description": "Transaction name (required for action=begin)." },
       "txn_id": { "type": "string", "description": "Transaction ID (required for edit, edit_multi, commit, rollback, info)." },
       "file": { "type": "string", "description": "Single file path relative to workspace_dir (required for action=edit)." },
-      "files": { "type": "array", "items": { "type": "string" }, "description": "Multiple file paths relative to workspace_dir (required for action=edit_multi)." },
-      "edits": { "type": "array", "items": { "type": "object", "properties": { "old_string": { "type": "string" }, "new_string": { "type": "string" }, "replace_all": { "type": "boolean" } }, "required": ["old_string"] }, "description": "Array of edits (required for edit, edit_multi)." },
+      "files": { "type": "array", "items": { "type": "string" }, "description": "Multiple file paths relative to workspace_dir. Same edits applied to all (broadcast mode)." },
+      "edits": { "type": "array", "items": { "type": "object", "properties": { "old_string": { "type": "string" }, "new_string": { "type": "string" }, "replace_all": { "type": "boolean" } }, "required": ["old_string"] }, "description": "Array of edits. Required for edit. For edit_multi: required with files (broadcast), or use file_edits for per-file edits." },
+      "file_edits": { "type": "array", "items": { "type": "object", "properties": { "file": { "type": "string", "description": "File path relative to workspace_dir" }, "edits": { "type": "array", "items": { "type": "object", "properties": { "old_string": { "type": "string" }, "new_string": { "type": "string" }, "replace_all": { "type": "boolean" } }, "required": ["old_string"] }, "description": "Array of edits for this file" } }, "required": ["file", "edits"] }, "description": "Per-file edits for edit_multi. Each item: {file, edits}. When provided, overrides files+edits. Use when different files need different edits." },
       "atomic": { "type": "boolean", "description": "For edit_multi: all-or-nothing (default: true)." }
     },
     "required": ["workspace_dir", "action"]

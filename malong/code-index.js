@@ -490,8 +490,14 @@ class CodeIndex {
       return []
     }
 
+    const totalChanges = changedFiles.length + deletedIds.length
+    const rebuildIndexes = totalChanges > 20
+    console.error(`[code-index] incremental: ${changedFiles.length} changed, ${deletedIds.length} deleted, ${validFiles.length - changedFiles.length} unchanged skipped, rebuildIndexes=${rebuildIndexes}`)
+
     this._db.pragma('synchronous=OFF')
-    this._db.exec('DROP INDEX IF EXISTS idx_sym_name; DROP INDEX IF EXISTS idx_sym_file; DROP INDEX IF EXISTS idx_sym_type; DROP INDEX IF EXISTS idx_sym_parent; DROP INDEX IF EXISTS idx_ref_source; DROP INDEX IF EXISTS idx_ref_target; DROP INDEX IF EXISTS idx_ref_file; DROP INDEX IF EXISTS idx_ref_name')
+    if (rebuildIndexes) {
+      this._db.exec('DROP INDEX IF EXISTS idx_sym_name; DROP INDEX IF EXISTS idx_sym_file; DROP INDEX IF EXISTS idx_sym_type; DROP INDEX IF EXISTS idx_sym_parent; DROP INDEX IF EXISTS idx_ref_source; DROP INDEX IF EXISTS idx_ref_target; DROP INDEX IF EXISTS idx_ref_file; DROP INDEX IF EXISTS idx_ref_name')
+    }
     const t0 = Date.now()
     try {
       if (deletedIds.length) {
@@ -543,9 +549,11 @@ class CodeIndex {
       console.error(`[code-index] resolve: ${resolved} refs in ${((Date.now() - t0) / 1000).toFixed(1)}s`)
       return results
     } finally {
-      this._db.exec('CREATE INDEX IF NOT EXISTS idx_sym_name ON symbols(name); CREATE INDEX IF NOT EXISTS idx_sym_file ON symbols(file_id); CREATE INDEX IF NOT EXISTS idx_sym_type ON symbols(type); CREATE INDEX IF NOT EXISTS idx_sym_parent ON symbols(parent_id); CREATE INDEX IF NOT EXISTS idx_ref_source ON refs(source_symbol_id); CREATE INDEX IF NOT EXISTS idx_ref_target ON refs(target_symbol_id); CREATE INDEX IF NOT EXISTS idx_ref_file ON refs(source_file_id); CREATE INDEX IF NOT EXISTS idx_ref_name ON refs(target_name)')
+      if (rebuildIndexes) {
+        this._db.exec('CREATE INDEX IF NOT EXISTS idx_sym_name ON symbols(name); CREATE INDEX IF NOT EXISTS idx_sym_file ON symbols(file_id); CREATE INDEX IF NOT EXISTS idx_sym_type ON symbols(type); CREATE INDEX IF NOT EXISTS idx_sym_parent ON symbols(parent_id); CREATE INDEX IF NOT EXISTS idx_ref_source ON refs(source_symbol_id); CREATE INDEX IF NOT EXISTS idx_ref_target ON refs(target_symbol_id); CREATE INDEX IF NOT EXISTS idx_ref_file ON refs(source_file_id); CREATE INDEX IF NOT EXISTS idx_ref_name ON refs(target_name)')
+      }
       this._db.pragma('synchronous=NORMAL')
-      console.error(`[code-index] indexes built, total ${((Date.now() - t0) / 1000).toFixed(1)}s`)
+      console.error(`[code-index] ${rebuildIndexes ? 'indexes rebuilt' : 'indexes kept'}, total ${((Date.now() - t0) / 1000).toFixed(1)}s`)
     }
   }
 

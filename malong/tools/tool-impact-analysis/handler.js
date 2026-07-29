@@ -3,6 +3,7 @@
 import { join } from 'node:path'
 import { existsSync, statSync } from 'node:fs'
 import { isConstantName } from '../misuse-helpers.js'
+import { checkFileStaleness, attachStalenessWarning } from '../../staleness.js'
 
 function detectMisuse(symbol) {
   if (!symbol) return null
@@ -58,15 +59,7 @@ export async function handle(args, context) {
   const misuseWarning = detectMisuse(args?.symbol)
   const result = await codeIndexService.getImpactAnalysis(file, opts)
 
-  const absPath = join(workspaceDir, file)
-  try {
-    const diskMtime = statSync(absPath).mtimeMs
-    const indexedMtime = codeIndexService.getFileMtime(file)
-    if (diskMtime > indexedMtime) {
-      result.warning = 'index_stale'
-      result.suggestion = `File "${file}" was modified after last index. Call reindex to refresh, or results may be outdated.`
-    }
-  } catch {}
+  attachStalenessWarning(result, checkFileStaleness(codeIndexService, workspaceDir, file))
 
   if (misuseWarning) {
     result.misuse_warning = misuseWarning

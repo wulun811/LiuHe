@@ -1,4 +1,3 @@
-import { join } from 'node:path'
 import { TransactionStore } from './transaction-store.js'
 import { ErrorCodes, makeError, validateFilePath } from '../../error-codes.js'
 
@@ -48,17 +47,28 @@ export async function handle(args, context) {
 
     case 'edit_multi': {
       const txnId = args?.txn_id
+      const fileEdits = args?.file_edits
       const files = args?.files
       const edits = args?.edits
       const atomic = args?.atomic !== false
       if (!txnId) return makeError(ErrorCodes.INVALID_INPUT, 'txn_id is required', { suggestion: 'Provide the transaction ID returned by begin()' })
-      if (!files || !Array.isArray(files)) return makeError(ErrorCodes.INVALID_INPUT, 'files array is required', { suggestion: 'Provide an array of file paths relative to workspace_dir' })
-      if (!edits || !Array.isArray(edits)) return makeError(ErrorCodes.INVALID_INPUT, 'edits array is required', { suggestion: 'Provide an array of edits: [{"old_string": "...", "new_string": "..."}]' })
+
+      let workItems
+      if (fileEdits && Array.isArray(fileEdits) && fileEdits.length > 0) {
+        if (!fileEdits.every(fe => fe.file && Array.isArray(fe.edits))) {
+          return makeError(ErrorCodes.INVALID_INPUT, 'file_edits must be array of {file, edits}', { suggestion: 'Each item needs file (string) and edits (array)' })
+        }
+        workItems = fileEdits.map(fe => ({ file: fe.file, edits: fe.edits }))
+      } else if (files && Array.isArray(files) && edits && Array.isArray(edits)) {
+        workItems = files.map(f => ({ file: f, edits }))
+      } else {
+        return makeError(ErrorCodes.INVALID_INPUT, 'Provide either file_edits (per-file) or files+edits (broadcast)', { suggestion: 'file_edits: [{file, edits}] for different edits per file; files+edits for same edits across files' })
+      }
 
       const results = []
       let hasError = false
 
-      for (const file of files) {
+      for (const { file, edits: fe } of workItems) {
         const pathCheck = validateFilePath(file)
         if (pathCheck.blocked) {
           results.push({ file, status: 'error', error_code: ErrorCodes.PATH_BLOCKED, message: pathCheck.detail })
@@ -75,7 +85,7 @@ export async function handle(args, context) {
           continue
         }
 
-        const editResult = store.applyEdits(txnId, file, edits)
+        const editResult = store.applyEdits(txnId, file, fe)
         if (editResult.error_code) {
           results.push({ file, status: 'error', error_code: editResult.error_code, message: editResult.message, failed_edits: editResult.failed_edits })
           hasError = true
@@ -94,14 +104,14 @@ export async function handle(args, context) {
           status: 'rolled_back',
           reason: 'atomic edit failed',
           files: results,
-          summary: { total: files.length, success: results.filter(r => r.status === 'success').length, failed: results.filter(r => r.status === 'error').length }
+          summary: { total: workItems.length, success: results.filter(r => r.status === 'success').length, failed: results.filter(r => r.status === 'error').length }
         }
       }
 
       return {
         status: 'staged',
         files: results,
-        summary: { total: files.length, success: results.filter(r => r.status === 'success').length, failed: results.filter(r => r.status === 'error').length }
+        summary: { total: workItems.length, success: results.filter(r => r.status === 'success').length, failed: results.filter(r => r.status === 'error').length }
       }
     }
 

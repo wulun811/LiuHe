@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 import { existsSync, statSync } from 'node:fs'
+import { checkFileStaleness } from '../../staleness.js'
 
 function detectMisuse(args) {
   const line = parseInt(args?.line) || 0
@@ -69,13 +70,8 @@ export async function handle(args, context) {
     maxCallers: Math.max(maxCallers, maxCallees)
   })
 
-  let indexStale = false
-  const absPath = join(workspaceDir, file)
-  try {
-    const diskMtime = statSync(absPath).mtimeMs
-    const indexedMtime = codeIndexService.getFileMtime(file)
-    if (diskMtime > indexedMtime) indexStale = true
-  } catch {}
+  const staleness = checkFileStaleness(codeIndexService, workspaceDir, file)
+  let indexStale = !!staleness
 
   const result = {
     target: {
@@ -104,7 +100,7 @@ export async function handle(args, context) {
 
   if (indexStale) {
     result.warning = 'index_stale'
-    result.suggestion = `File "${file}" was modified after last index. Call reindex to refresh.`
+    result.suggestion = staleness.suggestion
   }
 
   if (misuseWarning) {

@@ -1,7 +1,7 @@
 {
   "name": "symbol_search",
   "version": "1.0.0",
-  "description": "Search symbols by name across project. Substring match.",
+  "description": "Find function/class/method definitions by name. Prefer over grep for symbol lookup. For finding usages, use references.",
   "inputSchema": {
     "type": "object",
     "properties": {

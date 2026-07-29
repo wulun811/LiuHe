@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
+import { checkFileStaleness, attachStalenessWarning } from '../../staleness.js'
 
 export async function handle(args, context) {
   const { codeIndexService, getWorkspaceDir } = context
@@ -31,5 +32,6 @@ export async function handle(args, context) {
   if (args?.include_test_refs) opts.includeTestRefs = true
   if (args?.max_items) { const m = parseInt(args.max_items); opts.maxItems = Number.isNaN(m) ? 50 : Math.max(1, m) }
 
-  return await codeIndexService.getFileOutline(file, opts)
+  const result = await codeIndexService.getFileOutline(file, opts)
+  return attachStalenessWarning(result, checkFileStaleness(codeIndexService, workspaceDir, file))
 }

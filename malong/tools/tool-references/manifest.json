@@ -1,7 +1,7 @@
 {
   "name": "references",
   "version": "1.0.0",
-  "description": "Cross-file references to a symbol. Search full member path (e.g. 'obj.method', not 'method').",
+  "description": "Find cross-file usages of a symbol. Prefer over grep: semantic match, supports member paths like obj.method.",
   "inputSchema": {
     "type": "object",
     "properties": {

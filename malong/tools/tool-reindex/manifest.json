@@ -1,7 +1,7 @@
 {
   "name": "reindex",
   "version": "0.0.4",
-  "description": "Index project for symbol search and impact analysis. Call first for new workspaces. Pass blocking=true to wait for completion. All responses include done: true|false.",
+  "description": "Index workspace for all malong analysis tools. MUST call first for new workspaces. blocking=true waits. Responses include done:true|false.",
   "inputSchema": {
     "type": "object",
     "properties": {

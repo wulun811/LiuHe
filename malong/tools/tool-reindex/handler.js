@@ -81,14 +81,15 @@ export async function handle(args, context) {
   const mergedIgnoreDirs = new Set(DEFAULT_IGNORE_DIRS)
   for (const d of userIgnoreDirs) mergedIgnoreDirs.add(d)
 
-  const { files, dirStats } = collectFilesWithDirStats(workspaceDir, {
+  // 第一次统计：获取真实文件总数（不限制 maxFiles）
+  const { files: allFiles, dirStats } = collectFilesWithDirStats(workspaceDir, {
     ignoreRules,
     skipDirs: userSkipDirs,
-    maxFiles: userMaxFiles,
+    maxFiles: 0,  // 不限制，获取真实总数
     ignoreDirs: mergedIgnoreDirs,
   })
 
-  const totalFiles = files.length
+  const totalFiles = allFiles.length
 
   if (totalFiles > threshold) {
     const topDirs = Object.entries(dirStats)
@@ -104,7 +105,7 @@ export async function handle(args, context) {
       status: 'needs_review',
       done: false,
       workspace_dir: workspaceDir,
-      total_files: totalFiles,
+      total_files: totalFiles,  // 真实总数
       threshold,
       maxFiles: userMaxFiles,
       top_directories: topDirs,
@@ -116,8 +117,9 @@ export async function handle(args, context) {
     }
   }
 
+  // 文件数在阈值内，直接使用已收集的文件
   const estimatedTimeSeconds = Math.ceil(totalFiles / 30)
-  const filePaths = files.map(f => f.path)
+  const filePaths = allFiles.map(f => f.path)
   const startTime = Date.now()
 
   codeIndexService.indexing = true
@@ -132,7 +134,6 @@ export async function handle(args, context) {
       })
       codeIndexService.indexing = false
       const durationMs = Date.now() - startTime
-      const finalProgress = codeIndexService.indexProgress
       log('info', `[reindex] blocking done: ${totalFiles} files, ${durationMs}ms`)
       const last = codeIndexService.lastIndexed || {}
       return {
@@ -140,7 +141,7 @@ export async function handle(args, context) {
         done: true,
         workspace_dir: workspaceDir,
         total_files: totalFiles,
-        files_indexed: finalProgress.indexed,
+        files_indexed: totalFiles,
         symbols: last.symbols,
         refs: last.refs,
         duration_seconds: Math.round(durationMs / 1000),
@@ -158,7 +159,7 @@ export async function handle(args, context) {
         codeIndexService.indexProgress = { ...codeIndexService.indexProgress, indexed, total }
       })
       codeIndexService.indexing = false
-      log('info', `[reindex] done: ${files.length} files, ${Date.now() - startTime}ms`)
+      log('info', `[reindex] done: ${allFiles.length} files, ${Date.now() - startTime}ms`)
     } catch (e) {
       log('error', `[reindex] failed: ${e.message}`)
       codeIndexService.indexing = false
