@@ -89,6 +89,12 @@ function checkRules(file, content, rules, langParser) {
               violations.push(mkViolation(rule, { line: call.line }))
             }
           }
+          if (rule.banned.includes('debugger') && ['.js', '.mjs', '.cjs', '.ts', '.tsx'].includes(ext)) {
+            const lines = content.split('\n')
+            for (let i = 0; i < lines.length; i++) {
+              if (/^\s*debugger\s*;?\s*$/.test(lines[i])) violations.push(mkViolation(rule, { line: i + 1 }))
+            }
+          }
           break
         }
         case 'except_bare': {

@@ -150,16 +150,26 @@ function installHint(pkg, manifestName) {
   return `install ${pkg}`
 }
 
-function findManifest(workspaceDir, fileRel) {
+const EXT_MANIFEST_PREF = {
+  '.py': ['pyproject.toml', 'requirements.txt'],
+  '.go': ['go.mod'],
+  '.rs': ['Cargo.toml'],
+}
+
+function findManifest(workspaceDir, fileRel, ext) {
   let dir = dirname(join(workspaceDir, fileRel))
   const root = workspaceDir.endsWith('/') ? workspaceDir : workspaceDir + '/'
+  const preferred = EXT_MANIFEST_PREF[ext] || []
   while (dir.startsWith(root) || dir === workspaceDir) {
     const found = []
     for (const m of MANIFEST_NAMES) {
       const p = join(dir, m)
       if (existsSync(p)) found.push(p)
     }
-    if (found.length > 0) return { path: found[0], multiple: found.length > 1 ? found.map(f => basename(f)) : undefined }
+    if (found.length > 0) {
+      const pref = preferred.length ? found.find(f => preferred.includes(basename(f))) : null
+      return { path: pref || found[0], multiple: found.length > 1 ? found.map(f => basename(f)) : undefined }
+    }
     const parent = dirname(dir)
     if (parent === dir) break
     dir = parent
@@ -354,7 +364,7 @@ export async function handle(args, context) {
 
   const { imports, warnings: importWarnings } = extractImports(file, content, langParser)
 
-  const { path: manifestPath, multiple: multipleManifests } = findManifest(workspaceDir, file)
+  const { path: manifestPath, multiple: multipleManifests } = findManifest(workspaceDir, file, ext)
   if (!manifestPath) {
     return {
       file,
