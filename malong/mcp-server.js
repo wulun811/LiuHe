@@ -11,13 +11,16 @@ const REQUEST_TIMEOUT_MS = 120_000
 const RECOMMENDED_HEAP_MB = 512
 
 function checkV8HeapLimit() {
-  const v8 = process.binding('v8')
-  const heapLimit = v8.getHeapStatistics().heap_size_limit
-  const heapLimitMB = Math.round(heapLimit / 1024 / 1024)
-  if (heapLimitMB > RECOMMENDED_HEAP_MB * 2) {
-    process.stderr.write(`[mcp] WARNING: V8 heap limit is ${heapLimitMB}MB. Consider starting with --max-old-space-size=${RECOMMENDED_HEAP_MB} to reduce memory usage.\n`)
+  const maxOldSpace = process.argv.find(a => a.startsWith('--max-old-space-size='))
+  if (!maxOldSpace) {
+    process.stderr.write(`[mcp] WARNING: V8 heap limit is unlimited. Start with --max-old-space-size=${RECOMMENDED_HEAP_MB} to reduce memory usage.\n`)
+    return 0
   }
-  return heapLimitMB
+  const heapMB = parseInt(maxOldSpace.split('=')[1], 10)
+  if (heapMB > RECOMMENDED_HEAP_MB * 2) {
+    process.stderr.write(`[mcp] WARNING: V8 heap limit is ${heapMB}MB. Consider --max-old-space-size=${RECOMMENDED_HEAP_MB}.\n`)
+  }
+  return heapMB
 }
 
 function parseArgs() {
@@ -63,6 +66,7 @@ const core = {
 
 let langParserMod, codeIndexMod, repoMapMod
 let _ready = false
+let _initialized = false
 let registry
 
 async function initModules() {
@@ -124,6 +128,7 @@ function handleRequest(req) {
 
   switch (method) {
     case 'initialize':
+      _initialized = true
       respond(id, {
         protocolVersion: '2024-11-05',
         capabilities: { tools: {} },
@@ -217,13 +222,17 @@ process.stdin.on('data', chunk => {
 })
 
 process.stdin.on('end', () => {
-  process.stderr.write('[mcp] stdin closed, exiting\n')
-  process.exit(0)
+  if (_initialized) {
+    process.stderr.write('[mcp] stdin closed after init, exiting\n')
+    process.exit(0)
+  }
 })
 
 process.stdin.on('close', () => {
-  process.stderr.write('[mcp] stdin closed, exiting\n')
-  process.exit(0)
+  if (_initialized) {
+    process.stderr.write('[mcp] stdin closed after init, exiting\n')
+    process.exit(0)
+  }
 })
 
 initModules().then(() => {
