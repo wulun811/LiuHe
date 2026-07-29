@@ -1,0 +1,16 @@
+{
+  "name": "config_drift",
+  "version": "1.0.0",
+  "description": "Detect config drift: env vars / DB tables / services used in code but missing from .env.example, docker-compose.yml, CI configs.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "workspace_dir": { "type": "string", "description": "REQUIRED: Absolute path to the project root directory." },
+      "file": { "type": "string", "description": "File to check (relative to workspace_dir). Omit to scan all source files." }
+    },
+    "required": ["workspace_dir"]
+  },
+  "handler": "./handler.js",
+  "protocol_version": "1.0",
+  "tags": ["quality", "config"]
+}

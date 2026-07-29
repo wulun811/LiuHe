@@ -1,0 +1,17 @@
+{
+  "name": "active_todos",
+  "version": "1.0.0",
+  "description": "Scan TODO/FIXME/XXX/HACK comments, prioritize by current work context. Pure regex, zero token.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "workspace_dir": { "type": "string", "description": "REQUIRED: Absolute path to the project root directory." },
+      "scope": { "type": "string", "description": "Scan scope: directory or file path relative to workspace_dir (default: \".\")" },
+      "current_files": { "type": "array", "items": { "type": "string" }, "description": "Files currently being edited (boosts priority)" }
+    },
+    "required": ["workspace_dir"]
+  },
+  "handler": "./handler.js",
+  "protocol_version": "1.0",
+  "tags": ["quality", "todo"]
+}

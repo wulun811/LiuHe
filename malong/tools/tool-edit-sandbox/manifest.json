@@ -1,0 +1,17 @@
+{
+  "name": "sandbox_validate",
+  "version": "1.0.0",
+  "description": "Pre-validate edits before writing: syntax check (tree-sitter), indentation consistency, undefined symbol detection. Zero-cost trial.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "workspace_dir": { "type": "string", "description": "REQUIRED: Absolute path to the project root directory." },
+      "file": { "type": "string", "description": "Target file path (relative to workspace_dir)" },
+      "new_content": { "type": "string", "description": "Full file content after edits (or the edited section)" }
+    },
+    "required": ["workspace_dir", "file", "new_content"]
+  },
+  "handler": "./handler.js",
+  "protocol_version": "1.0",
+  "tags": ["quality", "validation"]
+}

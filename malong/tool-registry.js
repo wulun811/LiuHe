@@ -46,6 +46,33 @@ function extractMetrics(name, result) {
     case 'edit_transaction':
       if (result.status === 'rolled_back') m.rollbacks = 1
       break
+    case 'inspect':
+      m.reads_saved = 2
+      break
+    case 'rename_symbol':
+      if (result.total_edits) m.edits_automated = result.total_edits
+      break
+    case 'find_tests':
+      m.searches_saved = (result.by_convention?.length || 0) + (result.by_import?.length || 0)
+      break
+    case 'active_todos':
+      m.issues_caught = result.total_todos || 0
+      break
+    case 'exception_guard':
+      m.issues_caught = result.summary?.issues_found || 0
+      break
+    case 'config_drift':
+      m.issues_caught = result.summary?.drifts_found || 0
+      break
+    case 'sweep_dead_code':
+      m.issues_caught = (result.summary?.unused_imports || 0) + (result.summary?.unused_functions || 0) + (result.summary?.orphan_files || 0)
+      break
+    case 'sandbox_validate':
+      if (!result.valid) m.issues_caught = result.summary?.errors || 0
+      break
+    case 'mock_sync':
+      m.issues_caught = result.summary?.mismatches_found || 0
+      break
   }
   return Object.keys(m).length > 0 ? m : undefined
 }

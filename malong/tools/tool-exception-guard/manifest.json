@@ -1,0 +1,17 @@
+{
+  "name": "exception_guard",
+  "version": "1.0.0",
+  "description": "Check if raise/throw statements use project custom exceptions instead of builtins. Builds exception hierarchy from index.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "workspace_dir": { "type": "string", "description": "REQUIRED: Absolute path to the project root directory. Call reindex first." },
+      "file": { "type": "string", "description": "File to check (relative to workspace_dir)" }
+    },
+    "required": ["workspace_dir", "file"]
+  },
+  "handler": "./handler.js",
+  "protocol_version": "1.0",
+  "tags": ["quality", "exceptions"],
+  "dependencies": ["reindex"]
+}

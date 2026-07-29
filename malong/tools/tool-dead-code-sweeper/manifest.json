@@ -1,0 +1,18 @@
+{
+  "name": "sweep_dead_code",
+  "version": "1.0.0",
+  "description": "Detect dead code: unused imports, unused functions, orphan files. Uses code-index detectDeadCode + AST import analysis.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "workspace_dir": { "type": "string", "description": "REQUIRED: Absolute path to the project root directory. Call reindex first." },
+      "scope": { "type": "string", "description": "Scan scope: directory relative to workspace_dir (default: \".\")" },
+      "include_files": { "type": "boolean", "description": "Also detect orphan files (default: false)" }
+    },
+    "required": ["workspace_dir"]
+  },
+  "handler": "./handler.js",
+  "protocol_version": "1.0",
+  "tags": ["quality", "dead-code"],
+  "dependencies": ["reindex"]
+}

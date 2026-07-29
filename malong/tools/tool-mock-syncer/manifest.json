@@ -1,0 +1,18 @@
+{
+  "name": "mock_sync",
+  "version": "1.0.0",
+  "description": "Detect mock/patch mismatches after signature changes. Compares function signature vs test mock usage.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "workspace_dir": { "type": "string", "description": "REQUIRED: Absolute path to the project root directory. Call reindex first." },
+      "file": { "type": "string", "description": "Source file path (relative to workspace_dir)" },
+      "function": { "type": "string", "description": "Function name to check mocks for" }
+    },
+    "required": ["workspace_dir", "file", "function"]
+  },
+  "handler": "./handler.js",
+  "protocol_version": "1.0",
+  "tags": ["quality", "mock", "test"],
+  "dependencies": ["reindex"]
+}

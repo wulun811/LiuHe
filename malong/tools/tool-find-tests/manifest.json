@@ -1,0 +1,18 @@
+{
+  "name": "find_tests",
+  "version": "1.0.0",
+  "description": "Find test files for a source file: naming conventions + import graph reverse lookup + optional symbol-level test search.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "workspace_dir": { "type": "string", "description": "REQUIRED: Absolute path to the project root directory. Call reindex first." },
+      "file": { "type": "string", "description": "Source file path relative to workspace_dir (e.g. \"src/auth.py\")" },
+      "symbol": { "type": "string", "description": "Optional: narrow to tests referencing a specific symbol" }
+    },
+    "required": ["workspace_dir", "file"]
+  },
+  "handler": "./handler.js",
+  "protocol_version": "1.0",
+  "tags": ["test", "discovery"],
+  "dependencies": ["reindex"]
+}
