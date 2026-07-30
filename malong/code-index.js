@@ -51,6 +51,72 @@ CREATE INDEX IF NOT EXISTS idx_ref_name ON refs(target_name);
 const CACHED_EXT = new Set(['.js', '.mjs', '.cjs', '.py', '.go', '.rs'])
 const WATCHER_DEBOUNCE = 300
 
+// Rust stdlib/prelude/方法链噪声 callee（与 malong-parse rust_lang.rs 的 NOISE_CALLEES 对齐）。
+// 提取器已在源头过滤；这里是安全网，兼容旧索引数据 + 查询期兜底。
+const RUST_NOISE_CALLEES = new Set([
+  'Ok', 'Err', 'Some', 'None',
+  'map', 'map_err', 'map_or', 'map_or_else', 'and_then', 'or', 'or_else', 'or_default',
+  'unwrap', 'unwrap_or', 'unwrap_or_else', 'unwrap_or_default', 'unwrap_unchecked',
+  'expect', 'ok_or', 'ok_or_else', 'filter', 'filter_map', 'flat_map', 'flatten',
+  'fold', 'collect', 'copied', 'cloned', 'enumerate', 'zip', 'chain', 'rev', 'take',
+  'take_while', 'skip', 'skip_while', 'position', 'rposition', 'find', 'find_map', 'any',
+  'all', 'count', 'sum', 'product', 'min', 'max', 'min_by', 'max_by', 'min_by_key',
+  'max_by_key', 'sort', 'sort_by', 'sort_by_key', 'sort_unstable', 'sort_unstable_by',
+  'dedup', 'dedup_by', 'partition', 'inspect', 'for_each', 'nth', 'next', 'peekable',
+  'fuse', 'by_ref', 'step_by', 'cycle', 'reduce', 'scan', 'is_sorted',
+  'into', 'as_str', 'as_bytes', 'as_mut', 'as_ref', 'as_deref', 'as_deref_mut', 'as_slice',
+  'to_string', 'to_owned', 'to_vec', 'to_lowercase', 'to_uppercase', 'try_into', 'try_from',
+  'into_iter', 'iter', 'iter_mut', 'chars', 'bytes', 'lines', 'from_utf8', 'from_str',
+  'as_os_str', 'as_path', 'to_path_buf', 'to_str',
+  'len', 'is_empty', 'capacity', 'push', 'push_str', 'pop', 'insert', 'remove', 'swap_remove',
+  'contains', 'get', 'get_mut', 'get_key_value', 'first', 'last', 'clear', 'retain', 'drain',
+  'extend', 'extend_from_slice', 'with_capacity', 'entry', 'or_insert', 'or_insert_with',
+  'split', 'split_whitespace', 'split_terminator', 'rsplit', 'splitn', 'matches', 'trim',
+  'trim_start', 'trim_end', 'trim_matches', 'replace', 'replacen', 'starts_with', 'ends_with',
+  'parse', 'is_ascii', 'reserve', 'shrink_to_fit', 'truncate', 'resize', 'fill',
+  'copy_from_slice', 'windows', 'chunks', 'chunks_exact', 'split_first', 'split_last',
+  'split_at', 'join', 'concat', 'repeat', 'strip_prefix', 'strip_suffix', 'get_or_insert',
+  'clone', 'drop', 'forget', 'swap', 'transmute', 'size_of', 'align_of', 'type_name', 'hash',
+  'eq', 'ne', 'cmp', 'partial_cmp', 'is_some', 'is_none', 'is_ok', 'is_err', 'write', 'write_all',
+  'read', 'read_to_string', 'read_exact', 'flush', 'lock', 'stdin', 'stdout', 'stderr',
+])
+
+function langOf(filePath) {
+  const ext = extname(filePath || '').toLowerCase()
+  if (ext === '.rs') return 'rust'
+  if (ext === '.py') return 'python'
+  if (ext === '.go') return 'go'
+  if (ext === '.js' || ext === '.mjs' || ext === '.cjs' || ext === '.jsx') return 'javascript'
+  if (ext === '.ts' || ext === '.tsx' || ext === '.mts' || ext === '.cts') return 'typescript'
+  return 'other'
+}
+
+// JS/TS 视为同族（同生态，跨文件调用真实存在）；其余按自身语言。
+function langFamily(lang) {
+  return (lang === 'javascript' || lang === 'typescript') ? 'js-ts' : lang
+}
+
+function isNoiseCallee(name, lang) {
+  return lang === 'rust' && RUST_NOISE_CALLEES.has(name)
+}
+
+// 多候选同名符号时，按 call_expr 的模块路径前缀对文件路径消歧。
+// crate::hash::token_to_id -> 优先文件路径含 hash 的符号；无法判断则取首个。
+function pickCandidate(candidates, callExpr, filePathMap) {
+  if (candidates.length === 1) return candidates[0]
+  const segs = (callExpr || '').split('::').map(s => s.trim()).filter(Boolean)
+  const moduleSegs = segs.slice(0, -1).filter(s => s !== 'crate' && s !== 'self' && s !== 'super')
+  for (let i = moduleSegs.length - 1; i >= 0; i--) {
+    const seg = moduleSegs[i].toLowerCase()
+    const hit = candidates.find(s => {
+      const p = (filePathMap.get(s.file_id) || '').toLowerCase()
+      return p.includes(`/${seg}.`) || p.includes(`/${seg}/`) || p.includes(`${seg}.rs`) || p.includes(`${seg}.py`) || p.includes(`${seg}.go`)
+    })
+    if (hit) return hit
+  }
+  return candidates[0]
+}
+
 function _calcComplexity(sym) {
   const loc = Math.max(1, (sym.end_line || sym.start_line) - sym.start_line + 1)
   const cyclomatic = Math.min(10, Math.ceil(loc / 10))
@@ -183,8 +249,9 @@ class CodeIndex {
     const refRows = []
     for (const r of refs) {
       if (r.type === 'call') {
-        const callName = r.name.includes('.') ? r.name.split('.').pop() : r.name
-        const callExpr = r.name.includes('.') ? r.name : ''
+        const sep = r.name.includes('::') ? '::' : (r.name.includes('.') ? '.' : null)
+        const callName = sep ? r.name.split(sep).pop().trim() : r.name
+        const callExpr = sep ? r.name : ''
         let sourceSymId = null
         let bestRange = Infinity
         for (const fs of funcSyms) {
@@ -223,7 +290,7 @@ class CodeIndex {
   }
 
   _resolveCrossFileRefs() {
-    const unbound = this._db.prepare("SELECT r.id, r.source_file_id, r.target_name FROM refs r WHERE r.target_symbol_id IS NULL AND r.kind IN ('call','import','extends','implements') AND r.target_name != ''").all()
+    const unbound = this._db.prepare("SELECT r.id, r.source_file_id, r.target_name, r.call_expr FROM refs r WHERE r.target_symbol_id IS NULL AND r.kind IN ('call','import','extends','implements') AND r.target_name != ''").all()
     if (!unbound.length) return 0
     const allSyms = this._db.prepare('SELECT s.id, s.name, s.file_id FROM symbols s').all()
     const symMap = new Map()
@@ -231,14 +298,16 @@ class CodeIndex {
       if (!symMap.has(s.name)) symMap.set(s.name, [])
       symMap.get(s.name).push(s)
     }
+    const filePathMap = new Map(this._db.prepare('SELECT id, path FROM files').all().map(f => [f.id, f.path]))
     const updateRef = this._db.prepare('UPDATE refs SET target_symbol_id = ?, target_file_id = ? WHERE id = ?')
     let resolved = 0
     this._db.transaction(() => {
       for (const r of unbound) {
         const candidates = symMap.get(r.target_name)
         if (!candidates) continue
-        const sym = candidates.find(s => s.file_id !== r.source_file_id)
-        if (!sym) continue
+        const others = candidates.filter(s => s.file_id !== r.source_file_id)
+        if (!others.length) continue
+        const sym = pickCandidate(others, r.call_expr, filePathMap)
         updateRef.run(sym.id, sym.file_id, r.id)
         resolved++
       }
@@ -396,7 +465,9 @@ class CodeIndex {
 
     const callees = []
     const seen = new Set()
+    const calleeLang = langOf(sourceFilePath)
     for (const r of rows) {
+      if (isNoiseCallee(r.target_name, calleeLang)) continue
       const key = `${r.target_name}\0${r.line || 0}`
       if (seen.has(key)) continue
       seen.add(key)
@@ -808,9 +879,11 @@ class CodeIndex {
           ).all(f.id, f.id)
         }
 
+        const defFamily = langFamily(langOf(filePath))
         const directCallers = []
         const testCallers = []
         const importers = []
+        const crossLanguageMatches = []
         const seenKeys = new Set()
 
         for (const r of refs) {
@@ -823,6 +896,8 @@ class CodeIndex {
           const isTest = self._isTestFile(r.source_file_path)
           const key = `${r.source_file_path}\0${callerFunc || ''}`
           seenKeys.add(key)
+          const callerFamily = langFamily(langOf(r.source_file_path))
+          const sameLang = callerFamily === defFamily || defFamily === 'other' || callerFamily === 'other'
           const info = {
             type: isTest ? 'test' : 'direct',
             ref_type: r.kind,
@@ -830,9 +905,11 @@ class CodeIndex {
             line: refLine,
             function: callerFunc,
             call_expr: r.call_expr || '',
+            confidence: sameLang ? 'high' : 'low',
             context: self._extractContext(r.source_file_path, refLine),
           }
-          if (isTest) testCallers.push(info)
+          if (!sameLang) crossLanguageMatches.push(info)
+          else if (isTest) testCallers.push(info)
           else directCallers.push(info)
         }
 
@@ -844,6 +921,8 @@ class CodeIndex {
             if (seenKeys.has(key)) continue
             seenKeys.add(key)
             const isTest = self._isTestFile(entry.file)
+            const callerFamily = langFamily(langOf(entry.file))
+            const sameLang = callerFamily === defFamily || defFamily === 'other' || callerFamily === 'other'
             const info = {
               type: isTest ? 'test' : 'indirect',
               ref_type: 'indirect',
@@ -851,11 +930,13 @@ class CodeIndex {
               line: entry.line || 0,
               function: entry.function,
               call_expr: '',
+              confidence: sameLang ? 'high' : 'low',
               context: self._extractContext(entry.file, entry.line || 0),
               depth: entry.depth,
               via: entry.via,
             }
-            if (isTest) testCallers.push(info)
+            if (!sameLang) crossLanguageMatches.push(info)
+            else if (isTest) testCallers.push(info)
             else indirectCallers.push(info)
           }
         }
@@ -873,6 +954,8 @@ class CodeIndex {
           callers: allCallers.slice(0, maxCallers),
           importers: importers.slice(0, maxCallers),
           callees: callees.slice(0, maxCallers),
+          cross_language_matches: crossLanguageMatches.slice(0, maxCallers),
+          cross_language_count: crossLanguageMatches.length,
           truncated,
           caller_count: {
             direct: directCallers.length,
@@ -881,7 +964,7 @@ class CodeIndex {
             import: importers.length,
           },
           risk_level: self._calculateRisk(directCallers.length, testCallers.length, changeType),
-          limitations: ['dynamic_calls_invisible', 'method_dispatch_by_name'],
+          limitations: ['dynamic_calls_invisible', 'method_dispatch_by_name', 'cross_language_segregated'],
         }
 
         self._impactCache.set(cacheKey, result)
@@ -993,7 +1076,13 @@ class CodeIndex {
         }
 
         const f = self._db.prepare('SELECT id, size, mtime FROM files WHERE path = ?').get(filePath)
-        if (!f) return { error: 'file_not_found', message: `File not indexed: ${filePath}`, suggestion: `Call reindex(workspace_dir=...) to index the project first` }
+        if (!f) {
+          const absPath = self._currentWorkspace ? join(self._currentWorkspace, filePath) : filePath
+          if (existsSync(absPath)) {
+            return { error: 'not_indexed_yet', message: `File exists but is not indexed yet: ${filePath}`, suggestion: `Re-run the tool (auto-indexes on demand) or call reindex(workspace_dir=...)` }
+          }
+          return { error: 'file_not_found', message: `File not found: ${filePath}`, suggestion: `Check the path is relative to workspace_dir and the file exists on disk` }
+        }
 
         const symbols = self._db.prepare('SELECT id, name, type, signature, start_line, end_line FROM symbols WHERE file_id = ? ORDER BY start_line').all(f.id)
 

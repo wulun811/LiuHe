@@ -1,7 +1,7 @@
 import { join } from 'node:path'
 import { statSync, existsSync } from 'node:fs'
 
-export function checkFileStaleness(codeIndexService, workspaceDir, filePath) {
+export async function checkFileStaleness(codeIndexService, workspaceDir, filePath) {
   if (!codeIndexService || !workspaceDir || !filePath) return null
   const absPath = join(workspaceDir, filePath)
   try {
@@ -9,7 +9,7 @@ export function checkFileStaleness(codeIndexService, workspaceDir, filePath) {
     const indexedMtime = codeIndexService.getFileMtime(filePath)
     if (diskMtime > indexedMtime) {
       codeIndexService.clearCachesForFile(filePath)
-      const result = codeIndexService.indexFile(absPath, workspaceDir)
+      const result = await codeIndexService.indexFile(absPath, workspaceDir)
       if (result) {
         return { auto_indexed: true, file: filePath }
       } else {
@@ -24,13 +24,13 @@ export function checkFileStaleness(codeIndexService, workspaceDir, filePath) {
   return null
 }
 
-export function ensureIndexed(codeIndexService, workspaceDir, filePath) {
+export async function ensureIndexed(codeIndexService, workspaceDir, filePath) {
   if (!codeIndexService || !workspaceDir || !filePath) return false
   const absPath = join(workspaceDir, filePath)
   if (!existsSync(absPath)) return false
   const indexedMtime = codeIndexService.getFileMtime(filePath)
   if (indexedMtime > 0) return true
-  const result = codeIndexService.indexFile(absPath, workspaceDir)
+  const result = await codeIndexService.indexFile(absPath, workspaceDir)
   return !!result
 }
 

@@ -64,7 +64,7 @@ export async function handle(args, context) {
     return { error: 'missing_parameter', message: 'Could not determine symbol from file+line. Provide symbol explicitly.', suggestion: 'Provide a symbol name, or ensure the file is indexed and line falls within a function/class definition.' }
   }
 
-  const staleness = checkFileStaleness(codeIndexService, workspaceDir, file)
+  const staleness = await checkFileStaleness(codeIndexService, workspaceDir, file)
   const impact = await codeIndexService.getImpactAnalysis(file, {
     symbol,
     depth,

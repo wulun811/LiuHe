@@ -57,7 +57,7 @@ export async function handle(args, context) {
   const absPath = join(workspaceDir, file)
   if (!existsSync(absPath)) return { error: 'file_not_found', file, suggestion: `Check that the file exists at ${absPath}` }
 
-  const staleness = checkFileStaleness(codeIndexService, workspaceDir, file)
+  const staleness = await checkFileStaleness(codeIndexService, workspaceDir, file)
 
   let fileMtime = 0
   try { fileMtime = statSync(absPath).mtimeMs } catch {}

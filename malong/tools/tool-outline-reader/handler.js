@@ -32,9 +32,9 @@ export async function handle(args, context) {
   if (args?.include_test_refs) opts.includeTestRefs = true
   if (args?.max_items) { const m = parseInt(args.max_items); opts.maxItems = Number.isNaN(m) ? 50 : Math.max(1, m) }
 
-  const staleness = checkFileStaleness(codeIndexService, workspaceDir, file)
+  const staleness = await checkFileStaleness(codeIndexService, workspaceDir, file)
   let result = await codeIndexService.getFileOutline(file, opts)
-  if (result?.error === 'file_not_found' && ensureIndexed(codeIndexService, workspaceDir, file)) {
+  if ((result?.error === 'file_not_found' || result?.error === 'not_indexed_yet') && (await ensureIndexed(codeIndexService, workspaceDir, file))) {
     result = await codeIndexService.getFileOutline(file, opts)
     if (result && !result.error) result.auto_indexed = true
   }

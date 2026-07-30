@@ -52,7 +52,7 @@ export async function handle(args, context) {
   let fileMtime = 0
   try { fileMtime = statSync(absFilePath).mtimeMs } catch {}
 
-  const staleness = checkFileStaleness(codeIndexService, workspaceDir, file)
+  const staleness = await checkFileStaleness(codeIndexService, workspaceDir, file)
   if (staleness?.auto_indexed) {
     try { fileMtime = statSync(absFilePath).mtimeMs } catch {}
   }

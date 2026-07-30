@@ -45,7 +45,7 @@ export async function handle(args, context) {
   }
 
   const opts = {}
-  const staleness = checkFileStaleness(codeIndexService, workspaceDir, file)
+  const staleness = await checkFileStaleness(codeIndexService, workspaceDir, file)
   const symbols = args?.symbols
   if (Array.isArray(symbols) && symbols.length > 0 && !args?.symbol) {
     const results = []

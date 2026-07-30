@@ -30,7 +30,7 @@ export async function handle(args, context) {
     return { error: 'missing_parameter', message: 'file is required', suggestion: 'Provide a file path relative to workspace_dir (e.g. "scripts/lib/tools/spawn.mjs")' }
   }
 
-  const staleness = checkFileStaleness(codeIndexService, workspaceDir, file)
+  const staleness = await checkFileStaleness(codeIndexService, workspaceDir, file)
   const result = await codeIndexService.getModuleDependencies(file, { depth: args?.depth || 3 })
   const hasCircular = result?.circular_dependencies?.length > 0
   result.next_step = hasCircular
