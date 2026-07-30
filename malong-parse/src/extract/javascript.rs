@@ -1,6 +1,36 @@
 use tree_sitter::{Node, Tree};
 use super::{Symbol, Import, Reference, has_error_node};
 
+fn collect_binding_names(node: Node, source: &str, out: &mut Vec<(String, u32, u32)>) {
+    match node.kind() {
+        "identifier" | "shorthand_property_identifier_pattern" => {
+            out.push((
+                source[node.byte_range()].to_string(),
+                node.start_position().row as u32 + 1,
+                node.end_position().row as u32 + 1,
+            ));
+        }
+        "pair_pattern" => {
+            if let Some(v) = node.child_by_field_name("value") {
+                collect_binding_names(v, source, out);
+            }
+        }
+        "object_assignment_pattern" | "assignment_pattern" => {
+            if let Some(l) = node.child_by_field_name("left") {
+                collect_binding_names(l, source, out);
+            }
+        }
+        "object_pattern" | "array_pattern" | "rest_pattern" => {
+            for i in 0..node.child_count() {
+                if let Some(c) = node.child(i) {
+                    collect_binding_names(c, source, out);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
 pub fn extract_all(tree: &Tree, source: &str) -> super::ExtractResult {
     let mut symbols = Vec::with_capacity(256);
     let mut refs = Vec::with_capacity(128);
@@ -40,6 +70,23 @@ pub fn extract_all(tree: &Tree, source: &str) -> super::ExtractResult {
                     });
                 }
             }
+            "interface_declaration" | "type_alias_declaration" | "enum_declaration" | "abstract_class_declaration" => {
+                if let Some(name_node) = node.child_by_field_name("name") {
+                    let kind = match node.kind() {
+                        "interface_declaration" => "interface",
+                        "type_alias_declaration" => "type",
+                        "enum_declaration" => "enum",
+                        _ => "class",
+                    };
+                    symbols.push(Symbol {
+                        name: source[name_node.byte_range()].to_string(),
+                        kind: kind.to_string(),
+                        start_line: node.start_position().row as u32 + 1,
+                        end_line: node.end_position().row as u32 + 1,
+                        impl_for: None,
+                    });
+                }
+            }
             "method_definition" => {
                 if let Some(name_node) = node.child_by_field_name("name") {
                     symbols.push(Symbol {
@@ -57,13 +104,17 @@ pub fn extract_all(tree: &Tree, source: &str) -> super::ExtractResult {
                         if let Some(c) = node.child(i) {
                             if c.kind() == "variable_declarator" {
                                 if let Some(name_node) = c.child_by_field_name("name") {
-                                    symbols.push(Symbol {
-                                        name: source[name_node.byte_range()].to_string(),
-                                        kind: "variable".to_string(),
-                                        start_line: c.start_position().row as u32 + 1,
-                                        end_line: c.end_position().row as u32 + 1,
-                                        impl_for: None,
-                                    });
+                                    let mut names = Vec::new();
+                                    collect_binding_names(name_node, source, &mut names);
+                                    for (bname, bsl, bel) in names {
+                                        symbols.push(Symbol {
+                                            name: bname,
+                                            kind: "variable".to_string(),
+                                            start_line: bsl,
+                                            end_line: bel,
+                                            impl_for: None,
+                                        });
+                                    }
                                 }
                             }
                         }
@@ -154,6 +205,23 @@ pub fn extract_symbols(tree: &Tree, source: &str) -> (Vec<Symbol>, Vec<Import>) 
                     });
                 }
             }
+            "interface_declaration" | "type_alias_declaration" | "enum_declaration" | "abstract_class_declaration" => {
+                if let Some(name_node) = node.child_by_field_name("name") {
+                    let kind = match node.kind() {
+                        "interface_declaration" => "interface",
+                        "type_alias_declaration" => "type",
+                        "enum_declaration" => "enum",
+                        _ => "class",
+                    };
+                    symbols.push(Symbol {
+                        name: source[name_node.byte_range()].to_string(),
+                        kind: kind.to_string(),
+                        start_line: node.start_position().row as u32 + 1,
+                        end_line: node.end_position().row as u32 + 1,
+                        impl_for: None,
+                    });
+                }
+            }
             "method_definition" => {
                 if let Some(name_node) = node.child_by_field_name("name") {
                     symbols.push(Symbol {
@@ -177,13 +245,17 @@ pub fn extract_symbols(tree: &Tree, source: &str) -> (Vec<Symbol>, Vec<Import>) 
                         if let Some(c) = node.child(i) {
                             if c.kind() == "variable_declarator" {
                                 if let Some(name_node) = c.child_by_field_name("name") {
-                                    symbols.push(Symbol {
-                                        name: source[name_node.byte_range()].to_string(),
-                                        kind: "variable".to_string(),
-                                        start_line: c.start_position().row as u32 + 1,
-                                        end_line: c.end_position().row as u32 + 1,
-                                        impl_for: None,
-                                    });
+                                    let mut names = Vec::new();
+                                    collect_binding_names(name_node, source, &mut names);
+                                    for (bname, bsl, bel) in names {
+                                        symbols.push(Symbol {
+                                            name: bname,
+                                            kind: "variable".to_string(),
+                                            start_line: bsl,
+                                            end_line: bel,
+                                            impl_for: None,
+                                        });
+                                    }
                                 }
                             }
                         }
@@ -241,6 +313,23 @@ pub fn extract_top_level(tree: &Tree, source: &str) -> Vec<Symbol> {
                     });
                 }
             }
+            "interface_declaration" | "type_alias_declaration" | "enum_declaration" | "abstract_class_declaration" if depth <= 1 => {
+                if let Some(name_node) = node.child_by_field_name("name") {
+                    let kind = match node.kind() {
+                        "interface_declaration" => "interface",
+                        "type_alias_declaration" => "type",
+                        "enum_declaration" => "enum",
+                        _ => "class",
+                    };
+                    syms.push(Symbol {
+                        name: source[name_node.byte_range()].to_string(),
+                        kind: kind.to_string(),
+                        start_line: node.start_position().row as u32 + 1,
+                        end_line: node.end_position().row as u32 + 1,
+                        impl_for: None,
+                    });
+                }
+            }
             "method_definition" if depth <= 2 => {
                 if let Some(name_node) = node.child_by_field_name("name") {
                     syms.push(Symbol {
@@ -257,13 +346,17 @@ pub fn extract_top_level(tree: &Tree, source: &str) -> Vec<Symbol> {
                     if let Some(c) = node.child(i) {
                         if c.kind() == "variable_declarator" {
                             if let Some(name_node) = c.child_by_field_name("name") {
-                                syms.push(Symbol {
-                                    name: source[name_node.byte_range()].to_string(),
-                                    kind: "const".to_string(),
-                                    start_line: c.start_position().row as u32 + 1,
-                                    end_line: c.end_position().row as u32 + 1,
-                                    impl_for: None,
-                                });
+                                let mut names = Vec::new();
+                                collect_binding_names(name_node, source, &mut names);
+                                for (bname, bsl, bel) in names {
+                                    syms.push(Symbol {
+                                        name: bname,
+                                        kind: "const".to_string(),
+                                        start_line: bsl,
+                                        end_line: bel,
+                                        impl_for: None,
+                                    });
+                                }
                             }
                         }
                     }
