@@ -1,11 +1,12 @@
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
-use tokio::sync::Mutex;
 use tracing::{info, warn, error};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+
+use crate::cache::TreeCache;
 
 use crate::parser_pool::ParserPool;
 use crate::protocol::{Request, Response, encode_frame, decode_frame};
@@ -16,7 +17,8 @@ use crate::classify;
 pub struct ServerState {
     pub parser_pool: ParserPool,
     pub start_time: Instant,
-    pub requests_served: Mutex<u64>,
+    pub requests_served: tokio::sync::Mutex<u64>,
+    pub cache: std::sync::Mutex<TreeCache>,
 }
 
 impl ServerState {
@@ -24,7 +26,8 @@ impl ServerState {
         Self {
             parser_pool: ParserPool::new(),
             start_time: Instant::now(),
-            requests_served: Mutex::new(0),
+            requests_served: tokio::sync::Mutex::new(0),
+            cache: Mutex::new(TreeCache::new()),
         }
     }
 }
@@ -144,17 +147,19 @@ fn dispatch(req: Request, state: &ServerState) -> Response {
         "health" => {
             let uptime = state.start_time.elapsed().as_secs();
             let count = state.requests_served.try_lock().map(|c| *c).unwrap_or(0);
+            let cache_stats = state.cache.lock().unwrap().stats();
             Response::success(req.id, serde_json::json!({
                 "version": env!("CARGO_PKG_VERSION"),
                 "pid": std::process::id(),
                 "uptime": uptime,
                 "parsers_loaded": state.parser_pool.supported_languages(),
                 "requests_served": count,
+                "cache": cache_stats,
             }))
         }
 
         "extract_all" => {
-            let (source, ext, _file_path) = match resolve_source(&params) {
+            let (source, ext, file_path) = match resolve_source(&params) {
                 Ok(v) => v,
                 Err(e) => return Response::error(req.id, "BAD_REQUEST", &e),
             };
@@ -164,9 +169,20 @@ fn dispatch(req: Request, state: &ServerState) -> Response {
                 None => return Response::error(req.id, "UNSUPPORTED_EXT", &format!("unsupported extension: {}", ext)),
             };
 
+            if !file_path.is_empty() {
+                let mut cache_lock = state.cache.lock().unwrap();
+                if let Some((t, s, l)) = cache_lock.get(&file_path) {
+                    let result = extract::extract_all(t, s, l);
+                    return Response::success(req.id, serde_json::to_value(result).unwrap_or(serde_json::Value::Null));
+                }
+            }
+
             match state.parser_pool.parse(&source, language) {
                 Ok(tree) => {
                     let result = extract::extract_all(&tree, &source, language);
+                    if !file_path.is_empty() {
+                        state.cache.lock().unwrap().insert(&file_path, tree, source, language.to_string());
+                    }
                     Response::success(req.id, serde_json::to_value(result).unwrap())
                 }
                 Err(e) => Response::error(req.id, "PARSE_ERROR", &e),
@@ -174,7 +190,7 @@ fn dispatch(req: Request, state: &ServerState) -> Response {
         }
 
         "extract_symbols" => {
-            let (source, ext, _file_path) = match resolve_source(&params) {
+            let (source, ext, file_path) = match resolve_source(&params) {
                 Ok(v) => v,
                 Err(e) => return Response::error(req.id, "BAD_REQUEST", &e),
             };
@@ -184,9 +200,20 @@ fn dispatch(req: Request, state: &ServerState) -> Response {
                 None => return Response::error(req.id, "UNSUPPORTED_EXT", &format!("unsupported extension: {}", ext)),
             };
 
+            if !file_path.is_empty() {
+                let mut cache_lock = state.cache.lock().unwrap();
+                if let Some((t, s, l)) = cache_lock.get(&file_path) {
+                    let result = extract::extract_symbols(t, s, l);
+                    return Response::success(req.id, serde_json::json!({ "symbols": result.0, "imports": result.1 }));
+                }
+            }
+
             match state.parser_pool.parse(&source, language) {
                 Ok(tree) => {
                     let (symbols, imports) = extract::extract_symbols(&tree, &source, language);
+                    if !file_path.is_empty() {
+                        state.cache.lock().unwrap().insert(&file_path, tree, source, language.to_string());
+                    }
                     Response::success(req.id, serde_json::json!({ "symbols": symbols, "imports": imports }))
                 }
                 Err(e) => Response::error(req.id, "PARSE_ERROR", &e),
@@ -194,7 +221,7 @@ fn dispatch(req: Request, state: &ServerState) -> Response {
         }
 
         "extract_top_level" => {
-            let (source, ext, _file_path) = match resolve_source(&params) {
+            let (source, ext, file_path) = match resolve_source(&params) {
                 Ok(v) => v,
                 Err(e) => return Response::error(req.id, "BAD_REQUEST", &e),
             };
@@ -204,9 +231,20 @@ fn dispatch(req: Request, state: &ServerState) -> Response {
                 None => return Response::error(req.id, "UNSUPPORTED_EXT", &format!("unsupported extension: {}", ext)),
             };
 
+            if !file_path.is_empty() {
+                let mut cache_lock = state.cache.lock().unwrap();
+                if let Some((t, s, l)) = cache_lock.get(&file_path) {
+                    let symbols = extract::extract_top_level(t, s, l);
+                    return Response::success(req.id, serde_json::json!({ "symbols": symbols }));
+                }
+            }
+
             match state.parser_pool.parse(&source, language) {
                 Ok(tree) => {
                     let symbols = extract::extract_top_level(&tree, &source, language);
+                    if !file_path.is_empty() {
+                        state.cache.lock().unwrap().insert(&file_path, tree, source, language.to_string());
+                    }
                     Response::success(req.id, serde_json::json!({ "symbols": symbols }))
                 }
                 Err(e) => Response::error(req.id, "PARSE_ERROR", &e),
@@ -214,7 +252,7 @@ fn dispatch(req: Request, state: &ServerState) -> Response {
         }
 
         "extract_references" => {
-            let (source, ext, _file_path) = match resolve_source(&params) {
+            let (source, ext, file_path) = match resolve_source(&params) {
                 Ok(v) => v,
                 Err(e) => return Response::error(req.id, "BAD_REQUEST", &e),
             };
@@ -224,9 +262,20 @@ fn dispatch(req: Request, state: &ServerState) -> Response {
                 None => return Response::error(req.id, "UNSUPPORTED_EXT", &format!("unsupported extension: {}", ext)),
             };
 
+            if !file_path.is_empty() {
+                let mut cache_lock = state.cache.lock().unwrap();
+                if let Some((t, s, l)) = cache_lock.get(&file_path) {
+                    let refs = extract::extract_references(t, s, l);
+                    return Response::success(req.id, serde_json::json!({ "refs": refs }));
+                }
+            }
+
             match state.parser_pool.parse(&source, language) {
                 Ok(tree) => {
                     let refs = extract::extract_references(&tree, &source, language);
+                    if !file_path.is_empty() {
+                        state.cache.lock().unwrap().insert(&file_path, tree, source, language.to_string());
+                    }
                     Response::success(req.id, serde_json::json!({ "refs": refs }))
                 }
                 Err(e) => Response::error(req.id, "PARSE_ERROR", &e),
@@ -234,7 +283,7 @@ fn dispatch(req: Request, state: &ServerState) -> Response {
         }
 
         "has_errors" => {
-            let (source, ext, _file_path) = match resolve_source(&params) {
+            let (source, ext, file_path) = match resolve_source(&params) {
                 Ok(v) => v,
                 Err(e) => return Response::error(req.id, "BAD_REQUEST", &e),
             };
@@ -247,6 +296,9 @@ fn dispatch(req: Request, state: &ServerState) -> Response {
             match state.parser_pool.parse(&source, language) {
                 Ok(tree) => {
                     let has_errors = extract::has_error_node(tree.root_node());
+                    if !file_path.is_empty() {
+                        state.cache.lock().unwrap().insert(&file_path, tree, source, language.to_string());
+                    }
                     Response::success(req.id, serde_json::json!({ "has_errors": has_errors }))
                 }
                 Err(e) => Response::error(req.id, "PARSE_ERROR", &e),
@@ -254,7 +306,7 @@ fn dispatch(req: Request, state: &ServerState) -> Response {
         }
 
         "simplify_ast" => {
-            let (source, ext, _file_path) = match resolve_source(&params) {
+            let (source, ext, file_path) = match resolve_source(&params) {
                 Ok(v) => v,
                 Err(e) => return Response::error(req.id, "BAD_REQUEST", &e),
             };
@@ -268,6 +320,9 @@ fn dispatch(req: Request, state: &ServerState) -> Response {
             match state.parser_pool.parse(&source, language) {
                 Ok(tree) => {
                     let ast = simplify::simplify_ast(tree.root_node(), &source, 0, max_depth);
+                    if !file_path.is_empty() {
+                        state.cache.lock().unwrap().insert(&file_path, tree, source, language.to_string());
+                    }
                     Response::success(req.id, serde_json::to_value(ast).unwrap_or(serde_json::Value::Null))
                 }
                 Err(e) => Response::error(req.id, "PARSE_ERROR", &e),
@@ -282,7 +337,7 @@ fn dispatch(req: Request, state: &ServerState) -> Response {
         }
 
         "compute_metrics" => {
-            let (source, ext, _file_path) = match resolve_source(&params) {
+            let (source, ext, file_path) = match resolve_source(&params) {
                 Ok(v) => v,
                 Err(e) => return Response::error(req.id, "BAD_REQUEST", &e),
             };
@@ -295,6 +350,9 @@ fn dispatch(req: Request, state: &ServerState) -> Response {
             match state.parser_pool.parse(&source, language) {
                 Ok(tree) => {
                     let metrics = extract::metrics::compute_metrics(&tree, &source, language);
+                    if !file_path.is_empty() {
+                        state.cache.lock().unwrap().insert(&file_path, tree, source, language.to_string());
+                    }
                     Response::success(req.id, serde_json::to_value(metrics).unwrap())
                 }
                 Err(e) => Response::error(req.id, "PARSE_ERROR", &e),

@@ -12,6 +12,7 @@ mod server;
 mod extract;
 mod simplify;
 mod classify;
+mod cache;
 
 fn get_socket_path() -> PathBuf {
     let uid = unsafe { libc::getuid() };
