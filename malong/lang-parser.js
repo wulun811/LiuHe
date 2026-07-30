@@ -773,6 +773,33 @@ export async function init(core) {
     }
   }
 
+  // ── Tree-based complexity helpers (sync fallback for computeMetricsAsync) ──
+
+  function calcCyclomaticFromTree(rootNode) {
+    let score = 1
+    function walk(n) {
+      if (['if_statement', 'for_statement', 'while_statement', 'do_statement',
+           'switch_expression', 'catch_clause', 'ternary_expression',
+           'conditional_expression', 'case_expression'].includes(n.type)) score++
+      for (let i = 0; i < n.childCount; i++) { const c = n.child(i); if (c) walk(c) }
+    }
+    walk(rootNode)
+    return score
+  }
+
+  function calcCognitiveFromTree(rootNode) {
+    let score = 0
+    function walk(n, nesting) {
+      const isBranch = ['if_statement', 'else_clause', 'for_statement', 'while_statement',
+                        'do_statement', 'catch_clause', 'ternary_expression',
+                        'conditional_expression'].includes(n.type)
+      if (isBranch) { score += 1 + nesting; nesting++ }
+      for (let i = 0; i < n.childCount; i++) { const c = n.child(i); if (c) walk(c, nesting) }
+    }
+    walk(rootNode, 0)
+    return score
+  }
+
   // ── Shadow mode helpers ──
 
   function _diffAndLog(method, builtin, rust) {
@@ -1007,6 +1034,46 @@ export async function init(core) {
         }
       }
       return this.classifyMessage(content)
+    },
+
+    async computeMetricsAsync(source, ext) {
+      if (_mode === 'shadow') {
+        return _runShadow('computeMetrics', [source, ext], async () => {
+          const tree = this.parse(source, ext)
+          if (!tree) return null
+          const cyc = calcCyclomaticFromTree(tree.rootNode)
+          const cog = calcCognitiveFromTree(tree.rootNode)
+          return {
+            cyclomatic_complexity: cyc,
+            cognitive_complexity: cog,
+            max_nesting_depth: 0,
+            function_count: 0,
+            class_count: 0,
+            loc: source.split('\n').length,
+            comment_ratio: 0,
+          }
+        })
+      }
+      if (_mode === 'rust-service') {
+        try {
+          return await parseClient.computeMetrics(source, ext)
+        } catch (e) {
+          core.log('warn', `[lang-parser] rust-service computeMetrics failed, fallback: ${e.message}`)
+        }
+      }
+      const tree = this.parse(source, ext)
+      if (!tree) return null
+      const cyc = calcCyclomaticFromTree(tree.rootNode)
+      const cog = calcCognitiveFromTree(tree.rootNode)
+      return {
+        cyclomatic_complexity: cyc,
+        cognitive_complexity: cog,
+        max_nesting_depth: 0,
+        function_count: 0,
+        class_count: 0,
+        loc: source.split('\n').length,
+        comment_ratio: 0,
+      }
     },
 
     async batchExtractAsync(files) {

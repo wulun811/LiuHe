@@ -77,6 +77,17 @@ function calcCognitiveTree(node, depth = 0) {
 
 // ── 2. archViolation: 依赖边界违规 ──
 
+function countArchViolations(source) {
+  let violations = 0
+  if (/(^|\b)(process|global|root|eval|Function)\b/.test(source)) violations++
+  const lines = source.split('\n')
+  for (const line of lines) {
+    const depth = (line.match(/\./g) || []).length
+    if (depth > 3 && line.includes('.')) violations++
+  }
+  return violations
+}
+
 function calcArchViolations(tree, source, ext) {
   let violations = 0
   function walk(node) {
@@ -179,24 +190,37 @@ export async function init(core) {
     async scoreSource(source, filePath = '') {
       const ext = extname(filePath) || '.js'
 
-      // async path: try simplifyASTAsync first
+      // async path: try computeMetricsAsync first
       let cyc, cog, arch
       try {
-        const ast = await _langParser.simplifyASTAsync(source, ext, 50)
-        if (ast) {
-          cyc = calcCyclomatic(ast)
-          cog = calcCognitive(ast)
-          arch = calcArchViolations(ast, source, ext)
+        const metrics = await _langParser.computeMetricsAsync(source, ext)
+        if (metrics) {
+          cyc = metrics.cyclomatic_complexity
+          cog = metrics.cognitive_complexity
         }
       } catch {}
 
       if (cyc === undefined) {
-        // fallback to sync parse
+        // fallback to simplifyASTAsync
+        try {
+          const ast = await _langParser.simplifyASTAsync(source, ext, 50)
+          if (ast) {
+            cyc = calcCyclomatic(ast)
+            cog = calcCognitive(ast)
+          }
+        } catch {}
+      }
+
+      if (cyc === undefined) {
+        // final fallback to sync parse
         const tree = _langParser.parse(source, ext)
         if (!tree) return { dimensions: {}, overall: 0, error: 'parse_failed' }
         cyc = calcCyclomaticTree(tree.rootNode)
         cog = calcCognitiveTree(tree.rootNode)
         arch = calcArchViolations(tree, source, ext)
+      } else {
+        // compute arch violations from source (simplified)
+        arch = countArchViolations(source)
       }
 
       const techDebt = Math.min(1, (cyc / 20 + cog / 30) / 2)

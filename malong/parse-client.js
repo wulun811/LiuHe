@@ -229,6 +229,10 @@ export async function classifyMessage(content) {
   return request('classify_message', { content })
 }
 
+export async function computeMetrics(source, ext) {
+  return request('compute_metrics', { source, ext })
+}
+
 export async function batchExtract(files) {
   // files: [{path, source}]
   const result = await request('batch_extract', { files }, 120000)

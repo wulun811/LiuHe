@@ -2,6 +2,7 @@ pub mod javascript;
 pub mod python;
 pub mod go;
 pub mod rust_lang;
+pub mod metrics;
 
 use serde::{Deserialize, Serialize};
 use tree_sitter::Tree;
