@@ -31,22 +31,6 @@
       "endLine": 43
     }
   ],
-  "refs": [
-    {
-      "type": "call",
-      "name": "\"zero\".to_string",
-      "line": 17
-    },
-    {
-      "type": "call",
-      "name": "\"nothing\".to_string",
-      "line": 18
-    },
-    {
-      "type": "call",
-      "name": "\"Quitting\".to_string",
-      "line": 32
-    }
-  ],
+  "refs": [],
   "hasErrors": false
 }

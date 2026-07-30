@@ -47,28 +47,13 @@
     },
     {
       "type": "call",
-      "name": "Err",
-      "line": 22
-    },
-    {
-      "type": "call",
       "name": "AppError::NotFound",
       "line": 22
     },
     {
       "type": "call",
-      "name": "Ok",
-      "line": 24
-    },
-    {
-      "type": "call",
       "name": "find_user",
       "line": 29
-    },
-    {
-      "type": "call",
-      "name": "Ok",
-      "line": 31
     }
   ],
   "hasErrors": false

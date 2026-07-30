@@ -98,11 +98,6 @@
     },
     {
       "type": "call",
-      "name": "l.resize",
-      "line": 55
-    },
-    {
-      "type": "call",
       "name": "print_drawable",
       "line": 56
     }

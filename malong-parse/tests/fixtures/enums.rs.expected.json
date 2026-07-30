@@ -52,21 +52,6 @@
   "refs": [
     {
       "type": "call",
-      "name": "\"Red\".to_string",
-      "line": 30
-    },
-    {
-      "type": "call",
-      "name": "\"Green\".to_string",
-      "line": 31
-    },
-    {
-      "type": "call",
-      "name": "\"Blue\".to_string",
-      "line": 32
-    },
-    {
-      "type": "call",
       "name": "Color::Custom",
       "line": 41
     }

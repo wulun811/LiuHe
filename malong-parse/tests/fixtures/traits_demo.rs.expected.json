@@ -52,21 +52,6 @@
   "refs": [
     {
       "type": "call",
-      "name": "items.iter().map(|item| item.draw()).collect",
-      "line": 26
-    },
-    {
-      "type": "call",
-      "name": "items.iter().map",
-      "line": 26
-    },
-    {
-      "type": "call",
-      "name": "items.iter",
-      "line": 26
-    },
-    {
-      "type": "call",
       "name": "item.draw",
       "line": 26
     }

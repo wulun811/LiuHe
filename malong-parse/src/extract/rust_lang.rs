@@ -1,6 +1,63 @@
 use tree_sitter::{Node, Tree};
 use super::{Symbol, Import, Reference, has_error_node};
 
+// 高频且无歧义的 stdlib / prelude / 方法链噪声调用。
+// 这些作为「被调用目标」在 blast-radius 分析里没有意义，索引时直接丢弃。
+// 注意：不收 new / default / from / build 等常被路径限定的构造器（如 CpfBuilder::new）。
+const NOISE_CALLEES: &[&str] = &[
+    // Option / Result 构造器
+    "Ok", "Err", "Some", "None",
+    // Result / Option / Iterator 组合子
+    "map", "map_err", "map_or", "map_or_else", "and_then", "or", "or_else", "or_default",
+    "unwrap", "unwrap_or", "unwrap_or_else", "unwrap_or_default", "unwrap_unchecked",
+    "expect", "ok_or", "ok_or_else", "filter", "filter_map", "flat_map", "flatten",
+    "fold", "fold_first", "collect", "copied", "cloned", "enumerate", "zip", "chain",
+    "rev", "take", "take_while", "skip", "skip_while", "position", "rposition",
+    "find", "find_map", "any", "all", "count", "sum", "product", "min", "max",
+    "min_by", "max_by", "min_by_key", "max_by_key", "sort", "sort_by", "sort_by_key",
+    "sort_unstable", "sort_unstable_by", "sort_by_cached_key", "dedup", "dedup_by",
+    "partition", "inspect", "for_each", "nth", "nth_back", "next", "next_back",
+    "peekable", "fuse", "by_ref", "step_by", "cycle", "intersperse", "reduce",
+    "scan", "take_last", "is_sorted", "is_sorted_by",
+    // 转换
+    "into", "as_str", "as_bytes", "as_mut", "as_ref", "as_deref", "as_deref_mut",
+    "as_slice", "as_mut_slice", "to_string", "to_owned", "to_vec", "to_ascii_lowercase",
+    "to_ascii_uppercase", "to_lowercase", "to_uppercase", "try_into", "try_from",
+    "into_iter", "iter", "iter_mut", "chars", "bytes", "lines", "from_utf8",
+    "from_utf8_lossy", "from_str", "as_os_str", "as_path", "to_path_buf", "to_str",
+    // 访问器 / 修改器
+    "len", "is_empty", "capacity", "push", "push_str", "pop", "insert", "insert_str",
+    "remove", "swap_remove", "contains", "get", "get_mut", "get_key_value", "first",
+    "last", "clear", "retain", "retain_mut", "drain", "extend", "extend_from_slice",
+    "with_capacity", "entry", "or_insert", "or_insert_with", "or_insert_with_key",
+    "split", "split_whitespace", "split_terminator", "split_ascii_whitespace",
+    "rsplit", "splitn", "rsplitn", "match_indices", "matches", "trim", "trim_start",
+    "trim_end", "trim_matches", "trim_start_matches", "trim_end_matches", "replace",
+    "replacen", "starts_with", "ends_with", "parse", "is_ascii", "reserve",
+    "reserve_exact", "shrink_to_fit", "shrink_to", "truncate", "resize", "resize_with",
+    "fill", "fill_with", "copy_from_slice", "clone_from_slice", "windows", "chunks",
+    "chunks_exact", "chunks_mut", "rchunks", "rchunks_exact", "split_first",
+    "split_last", "split_at", "split_at_mut", "join", "concat", "repeat",
+    "escape_default", "escape_unicode", "strip_prefix", "strip_suffix",
+    "get_or_insert", "get_or_insert_with",
+    // 常见 stdlib 调用
+    "clone", "drop", "forget", "take", "swap", "transmute", "size_of", "align_of",
+    "type_name", "hash", "eq", "ne", "cmp", "partial_cmp", "is_some", "is_none",
+    "is_ok", "is_err", "write", "write_all", "read", "read_to_string", "read_exact",
+    "flush", "lock", "stdin", "stdout", "stderr", "create_dir_all", "remove_file",
+];
+
+#[inline]
+fn is_noise_call(name: &str) -> bool {
+    NOISE_CALLEES.contains(&name)
+}
+
+// 取调用表达式末段标识符：crate::hash::token_to_id -> token_to_id，self.mmap.len -> len
+#[inline]
+fn last_path_segment(full: &str) -> &str {
+    full.rsplit([':', '.']).next().unwrap_or(full).trim()
+}
+
 pub fn extract_all(tree: &Tree, source: &str) -> super::ExtractResult {
     let mut symbols = Vec::new();
     let mut refs = Vec::new();
@@ -70,13 +127,17 @@ pub fn extract_all(tree: &Tree, source: &str) -> super::ExtractResult {
             }
             "call_expression" => {
                 if let Some(fn_node) = node.child_by_field_name("function") {
-                    refs.push(Reference {
-                        kind: "call".to_string(),
-                        name: source[fn_node.byte_range()].to_string(),
-                        line: node.start_position().row as u32 + 1,
-                        module: None,
-                        symbols: None,
-                    });
+                    let full = &source[fn_node.byte_range()];
+                    let last = last_path_segment(full);
+                    if !last.is_empty() && !is_noise_call(last) {
+                        refs.push(Reference {
+                            kind: "call".to_string(),
+                            name: full.to_string(),
+                            line: node.start_position().row as u32 + 1,
+                            module: None,
+                            symbols: None,
+                        });
+                    }
                 }
             }
             "use_declaration" => {
@@ -360,13 +421,17 @@ pub fn extract_references(tree: &Tree, source: &str) -> Vec<Reference> {
     fn walk(node: Node, source: &str, refs: &mut Vec<Reference>) {
         if node.kind() == "call_expression" {
             if let Some(fn_node) = node.child_by_field_name("function") {
-                refs.push(Reference {
-                    kind: "call".to_string(),
-                    name: source[fn_node.byte_range()].to_string(),
-                    line: node.start_position().row as u32 + 1,
-                    module: None,
-                    symbols: None,
-                });
+                let full = &source[fn_node.byte_range()];
+                let last = last_path_segment(full);
+                if !last.is_empty() && !is_noise_call(last) {
+                    refs.push(Reference {
+                        kind: "call".to_string(),
+                        name: full.to_string(),
+                        line: node.start_position().row as u32 + 1,
+                        module: None,
+                        symbols: None,
+                    });
+                }
             }
         } else if node.kind() == "use_declaration" {
             for i in 0..node.child_count() {
@@ -423,4 +488,76 @@ pub fn extract_references(tree: &Tree, source: &str) -> Vec<Reference> {
 
     walk(tree.root_node(), source, &mut refs);
     refs
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse_rust(src: &str) -> Tree {
+        let mut parser = tree_sitter::Parser::new();
+        let lang: tree_sitter::Language = tree_sitter_rust::LANGUAGE.into();
+        parser.set_language(&lang).unwrap();
+        parser.parse(src, None).unwrap()
+    }
+
+    #[test]
+    fn test_last_path_segment() {
+        assert_eq!(last_path_segment("crate::hash::token_to_id"), "token_to_id");
+        assert_eq!(last_path_segment("format::read_block"), "read_block");
+        assert_eq!(last_path_segment("self.mmap.len"), "len");
+        assert_eq!(last_path_segment("Ok"), "Ok");
+        assert_eq!(last_path_segment("CpfBuilder::new"), "new");
+    }
+
+    #[test]
+    fn test_noise_calls_filtered() {
+        let src = r#"
+fn process(items: &[u32]) -> Result<Vec<u32>, String> {
+    let n = items.len();
+    let first = items.get(0).ok_or("empty")?;
+    let mapped: Vec<u32> = items.iter().map(|x| x * 2).collect();
+    if items.is_empty() {
+        return Err("no items".to_string());
+    }
+    Ok(mapped)
+}
+"#;
+        let tree = parse_rust(src);
+        let result = extract_all(&tree, src);
+        assert!(result.symbols.iter().any(|s| s.name == "process"), "should parse fn process");
+        let names: Vec<&str> = result.refs.iter().map(|r| r.name.as_str()).collect();
+        for noise in ["len", "get", "ok_or", "iter", "map", "collect", "is_empty", "to_string", "Ok", "Err"] {
+            assert!(!names.contains(&noise), "noise {:?} should be filtered; refs={:?}", noise, names);
+        }
+    }
+
+    #[test]
+    fn test_real_calls_kept() {
+        let src = r#"
+fn build() -> CpfBuilder {
+    let mut b = CpfBuilder::new("out.cpf");
+    b.add_document(1, 100, &["python"]);
+    helper::compute(42);
+    b
+}
+"#;
+        let tree = parse_rust(src);
+        let result = extract_all(&tree, src);
+        let names: Vec<String> = result.refs.iter().map(|r| r.name.clone()).collect();
+        assert!(names.iter().any(|n| n.ends_with("new")), "CpfBuilder::new kept: {:?}", names);
+        assert!(names.iter().any(|n| n.ends_with("add_document")), "add_document kept: {:?}", names);
+        assert!(names.iter().any(|n| n.ends_with("compute")), "helper::compute kept: {:?}", names);
+    }
+
+    #[test]
+    fn test_extract_references_filters_noise() {
+        let src = "fn f(v: &[u8]) -> usize { v.iter().filter(|x| **x > 0).count() }\n";
+        let tree = parse_rust(src);
+        let refs = extract_references(&tree, src);
+        let names: Vec<&str> = refs.iter().map(|r| r.name.as_str()).collect();
+        for noise in ["iter", "filter", "count"] {
+            assert!(!names.contains(&noise), "noise {:?} filtered in extract_references; refs={:?}", noise, names);
+        }
+    }
 }
