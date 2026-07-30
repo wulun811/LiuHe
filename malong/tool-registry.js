@@ -181,15 +181,15 @@ class ToolRegistry {
       throw new Error(`Tool not found: ${name}`)
     }
     const t0 = Date.now()
-    let success = true
+    let status = 'ok'
     let errorCode = ''
     let result
     try {
       result = await tool.handler(args, context)
-      if (result?.error) { success = false; errorCode = result.error_code || result.error || '' }
+      if (result?.error) { status = 'error'; errorCode = result.error_code || result.error || '' }
       return result
     } catch (e) {
-      success = false
+      status = 'crash'
       errorCode = e.message?.slice(0, 80) || 'unknown'
       throw e
     } finally {
@@ -198,11 +198,12 @@ class ToolRegistry {
         const entry = {
           ts: new Date().toISOString(),
           tool: name,
-          success,
+          success: status !== 'crash',
+          status,
           error_code: errorCode,
           duration_ms: Date.now() - t0,
         }
-        if (success) {
+        if (status === 'ok') {
           const metrics = extractMetrics(name, result)
           if (metrics) entry.metrics = metrics
         }

@@ -12,21 +12,23 @@ export function readUsageStats() {
   try {
     const lines = readFileSync(usagePath, 'utf-8').trim().split('\n').filter(Boolean)
     const byTool = {}
-    let totalCalls = 0, totalOk = 0, totalDuration = 0
+    let totalCalls = 0, totalDuration = 0
+    const breakdown = { ok: 0, error: 0, crash: 0 }
     const value = { tokens_saved: 0, tokens_served: 0, reads_saved: 0, searches_saved: 0, issues_caught: 0, collisions_detected: 0, rollbacks: 0, edits_automated: 0, tests_verified: 0 }
     let firstTs = null, lastTs = null
     for (const line of lines) {
       try {
         const r = JSON.parse(line)
         totalCalls++
-        if (r.success) totalOk++
         totalDuration += r.duration_ms || 0
         if (!firstTs) firstTs = r.ts
         lastTs = r.ts
-        if (!byTool[r.tool]) byTool[r.tool] = { calls: 0, ok: 0, fail: 0, total_ms: 0 }
+        const st = r.status || (r.success ? 'ok' : 'error')
+        breakdown[st] = (breakdown[st] || 0) + 1
+        if (!byTool[r.tool]) byTool[r.tool] = { calls: 0, ok: 0, error: 0, crash: 0, total_ms: 0 }
         const t = byTool[r.tool]
         t.calls++
-        if (r.success) t.ok++; else t.fail++
+        t[st] = (t[st] || 0) + 1
         t.total_ms += r.duration_ms || 0
         if (r.metrics) {
           for (const [k, v] of Object.entries(r.metrics)) {
@@ -39,9 +41,11 @@ export function readUsageStats() {
       t.avg_ms = Math.round(t.total_ms / t.calls)
       delete t.total_ms
     }
+    const crashFree = totalCalls - breakdown.crash
     return {
       total_calls: totalCalls,
-      success_rate: Math.round(totalOk / totalCalls * 100) / 100,
+      success_rate: totalCalls ? Math.round(crashFree / totalCalls * 100) / 100 : 1,
+      status_breakdown: breakdown,
       total_duration_ms: totalDuration,
       period: firstTs && lastTs ? `${firstTs.slice(0, 10)} ~ ${lastTs.slice(0, 10)}` : null,
       value,
