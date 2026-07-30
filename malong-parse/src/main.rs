@@ -1,3 +1,4 @@
+use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::net::UnixListener;
@@ -88,7 +89,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _ = std::fs::remove_file(&socket_path);
 
     let listener = UnixListener::bind(&socket_path)?;
-    info!("listening on {:?}", socket_path);
+    std::fs::set_permissions(&socket_path, std::fs::Permissions::from_mode(0o600))?;
+    info!("listening on {:?} (0600)", socket_path);
 
     write_pid_file()?;
 
