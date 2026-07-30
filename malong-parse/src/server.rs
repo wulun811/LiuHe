@@ -199,6 +199,8 @@ fn resolve_source(params: &serde_json::Value) -> Result<(String, String, String)
             if !canonical_path.starts_with(&canonical_root) {
                 return Err("file path is outside workspace root".to_string());
             }
+        } else {
+            tracing::debug!("file_path mode without workspace_root, skipping path traversal check");
         }
 
         let path = Path::new(file_path);
@@ -498,7 +500,6 @@ fn dispatch(req: Request, state: &ServerState) -> Response {
             }
 
             let files = files.unwrap();
-            let _concurrency = params["concurrency"].as_u64().unwrap_or(4) as usize;
 
             let results: Vec<serde_json::Value> = files.par_iter()
                 .map(|f| {

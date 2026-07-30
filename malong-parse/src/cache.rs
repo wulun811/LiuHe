@@ -85,7 +85,7 @@ impl TreeCache {
             size,
         };
 
-        let entry_size = source.len() as u64 + language.len() as u64 + 1024;
+        let entry_size = (source.len() * 4) as u64 + language.len() as u64;
         if entry_size > MAX_MEMORY_BYTES {
             return;
         }
