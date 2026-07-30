@@ -1,0 +1,75 @@
+{
+  "symbols": [
+    {
+      "name": "Drawable",
+      "type": "type",
+      "startLine": 1,
+      "endLine": 3
+    },
+    {
+      "name": "Circle",
+      "type": "class",
+      "startLine": 5,
+      "endLine": 7
+    },
+    {
+      "name": "Square",
+      "type": "class",
+      "startLine": 9,
+      "endLine": 11
+    },
+    {
+      "name": "Circle",
+      "type": "method",
+      "startLine": 13,
+      "endLine": 17
+    },
+    {
+      "name": "draw",
+      "type": "function",
+      "startLine": 14,
+      "endLine": 16
+    },
+    {
+      "name": "Square",
+      "type": "method",
+      "startLine": 19,
+      "endLine": 23
+    },
+    {
+      "name": "draw",
+      "type": "function",
+      "startLine": 20,
+      "endLine": 22
+    },
+    {
+      "name": "render",
+      "type": "function",
+      "startLine": 25,
+      "endLine": 27
+    }
+  ],
+  "refs": [
+    {
+      "type": "call",
+      "name": "items.iter().map(|item| item.draw()).collect",
+      "line": 26
+    },
+    {
+      "type": "call",
+      "name": "items.iter().map",
+      "line": 26
+    },
+    {
+      "type": "call",
+      "name": "items.iter",
+      "line": 26
+    },
+    {
+      "type": "call",
+      "name": "item.draw",
+      "line": 26
+    }
+  ],
+  "hasErrors": false
+}

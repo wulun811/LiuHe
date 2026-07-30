@@ -1,0 +1,55 @@
+{
+  "symbols": [
+    {
+      "name": "process",
+      "type": "function",
+      "startLine": 6,
+      "endLine": 7
+    },
+    {
+      "name": "unused_func",
+      "type": "function",
+      "startLine": 10,
+      "endLine": 11
+    }
+  ],
+  "refs": [
+    {
+      "type": "import",
+      "name": "",
+      "line": 1,
+      "module": "os.path",
+      "symbols": []
+    },
+    {
+      "type": "import",
+      "name": "",
+      "line": 2,
+      "module": "json",
+      "symbols": []
+    },
+    {
+      "type": "import",
+      "name": "",
+      "line": 3,
+      "module": "hashlib",
+      "symbols": []
+    },
+    {
+      "type": "call",
+      "name": "os.path.join",
+      "line": 7
+    },
+    {
+      "type": "call",
+      "name": "hashlib.md5(b\"x\").hexdigest",
+      "line": 11
+    },
+    {
+      "type": "call",
+      "name": "hashlib.md5",
+      "line": 11
+    }
+  ],
+  "hasErrors": false
+}

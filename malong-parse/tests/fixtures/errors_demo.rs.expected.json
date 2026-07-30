@@ -1,0 +1,75 @@
+{
+  "symbols": [
+    {
+      "name": "AppError",
+      "type": "type",
+      "startLine": 4,
+      "endLine": 8
+    },
+    {
+      "name": "AppError",
+      "type": "method",
+      "startLine": 10,
+      "endLine": 18
+    },
+    {
+      "name": "fmt",
+      "type": "function",
+      "startLine": 11,
+      "endLine": 17
+    },
+    {
+      "name": "find_user",
+      "type": "function",
+      "startLine": 20,
+      "endLine": 26
+    },
+    {
+      "name": "process",
+      "type": "function",
+      "startLine": 28,
+      "endLine": 32
+    },
+    {
+      "name": "user",
+      "type": "variable",
+      "startLine": 29,
+      "endLine": 29
+    }
+  ],
+  "refs": [
+    {
+      "type": "import",
+      "name": "",
+      "line": 1,
+      "module": "std::fmt",
+      "symbols": []
+    },
+    {
+      "type": "call",
+      "name": "Err",
+      "line": 22
+    },
+    {
+      "type": "call",
+      "name": "AppError::NotFound",
+      "line": 22
+    },
+    {
+      "type": "call",
+      "name": "Ok",
+      "line": 24
+    },
+    {
+      "type": "call",
+      "name": "find_user",
+      "line": 29
+    },
+    {
+      "type": "call",
+      "name": "Ok",
+      "line": 31
+    }
+  ],
+  "hasErrors": false
+}

@@ -1,0 +1,106 @@
+{
+  "symbols": [
+    {
+      "name": "Point",
+      "type": "class",
+      "startLine": 5,
+      "endLine": 7
+    },
+    {
+      "name": "x",
+      "type": "variable",
+      "startLine": 6,
+      "endLine": 6
+    },
+    {
+      "name": "y",
+      "type": "variable",
+      "startLine": 7,
+      "endLine": 7
+    },
+    {
+      "name": "Rectangle",
+      "type": "class",
+      "startLine": 10,
+      "endLine": 17
+    },
+    {
+      "name": "top_left",
+      "type": "variable",
+      "startLine": 11,
+      "endLine": 11
+    },
+    {
+      "name": "bottom_right",
+      "type": "variable",
+      "startLine": 12,
+      "endLine": 12
+    },
+    {
+      "name": "area",
+      "type": "function",
+      "startLine": 14,
+      "endLine": 17
+    },
+    {
+      "name": "w",
+      "type": "variable",
+      "startLine": 15,
+      "endLine": 15
+    },
+    {
+      "name": "h",
+      "type": "variable",
+      "startLine": 16,
+      "endLine": 16
+    },
+    {
+      "name": "create_unit_square",
+      "type": "function",
+      "startLine": 19,
+      "endLine": 20
+    }
+  ],
+  "refs": [
+    {
+      "type": "import",
+      "name": "",
+      "line": 1,
+      "module": "dataclasses",
+      "symbols": [
+        "dataclass"
+      ]
+    },
+    {
+      "type": "import",
+      "name": "",
+      "line": 2,
+      "module": "typing",
+      "symbols": [
+        "List",
+        "Optional"
+      ]
+    },
+    {
+      "type": "call",
+      "name": "abs",
+      "line": 17
+    },
+    {
+      "type": "call",
+      "name": "Rectangle",
+      "line": 20
+    },
+    {
+      "type": "call",
+      "name": "Point",
+      "line": 20
+    },
+    {
+      "type": "call",
+      "name": "Point",
+      "line": 20
+    }
+  ],
+  "hasErrors": false
+}

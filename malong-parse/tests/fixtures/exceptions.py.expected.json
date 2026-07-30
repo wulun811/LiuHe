@@ -1,0 +1,40 @@
+{
+  "symbols": [
+    {
+      "name": "ValidationError",
+      "type": "class",
+      "startLine": 1,
+      "endLine": 2
+    },
+    {
+      "name": "validate_age",
+      "type": "function",
+      "startLine": 5,
+      "endLine": 12
+    },
+    {
+      "name": "validate_name",
+      "type": "function",
+      "startLine": 15,
+      "endLine": 18
+    }
+  ],
+  "refs": [
+    {
+      "type": "call",
+      "name": "ValueError",
+      "line": 7
+    },
+    {
+      "type": "call",
+      "name": "ValueError",
+      "line": 11
+    },
+    {
+      "type": "call",
+      "name": "ValidationError",
+      "line": 17
+    }
+  ],
+  "hasErrors": false
+}

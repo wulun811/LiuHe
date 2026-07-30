@@ -1,0 +1,109 @@
+{
+  "symbols": [
+    {
+      "name": "AppError",
+      "type": "class",
+      "startLine": 6,
+      "endLine": 7
+    },
+    {
+      "name": "NotFoundError",
+      "type": "class",
+      "startLine": 10,
+      "endLine": 11
+    },
+    {
+      "name": "AuthError",
+      "type": "class",
+      "startLine": 14,
+      "endLine": 15
+    },
+    {
+      "name": "REDIS_URL",
+      "type": "variable",
+      "startLine": 18,
+      "endLine": 18
+    },
+    {
+      "name": "CACHE_TTL",
+      "type": "variable",
+      "startLine": 19,
+      "endLine": 19
+    },
+    {
+      "name": "login",
+      "type": "function",
+      "startLine": 22,
+      "endLine": 34
+    },
+    {
+      "name": "logout",
+      "type": "function",
+      "startLine": 37,
+      "endLine": 38
+    },
+    {
+      "name": "_unused_helper",
+      "type": "function",
+      "startLine": 41,
+      "endLine": 43
+    },
+    {
+      "name": "get_user",
+      "type": "function",
+      "startLine": 46,
+      "endLine": 48
+    }
+  ],
+  "refs": [
+    {
+      "type": "import",
+      "name": "",
+      "line": 1,
+      "module": "hashlib",
+      "symbols": []
+    },
+    {
+      "type": "import",
+      "name": "",
+      "line": 2,
+      "module": "os",
+      "symbols": []
+    },
+    {
+      "type": "import",
+      "name": "",
+      "line": 3,
+      "module": "typing",
+      "symbols": [
+        "Optional"
+      ]
+    },
+    {
+      "type": "call",
+      "name": "int",
+      "line": 19
+    },
+    {
+      "type": "call",
+      "name": "os.getenv",
+      "line": 19
+    },
+    {
+      "type": "call",
+      "name": "ValueError",
+      "line": 30
+    },
+    {
+      "type": "call",
+      "name": "credentials.get",
+      "line": 31
+    },
+    {
+      "type": "call",
+      "name": "Exception",
+      "line": 32
+    }
+  ],
+  "hasErrors": false
+}

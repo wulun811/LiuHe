@@ -1,0 +1,84 @@
+{
+  "symbols": [
+    {
+      "name": "Stack",
+      "type": "type",
+      "startLine": 5,
+      "endLine": 7
+    },
+    {
+      "name": "Push",
+      "type": "method",
+      "startLine": 9,
+      "endLine": 11
+    },
+    {
+      "name": "Pop",
+      "type": "method",
+      "startLine": 13,
+      "endLine": 21
+    },
+    {
+      "name": "zero",
+      "type": "variable",
+      "startLine": 15,
+      "endLine": 15
+    },
+    {
+      "name": "main",
+      "type": "function",
+      "startLine": 23,
+      "endLine": 29
+    }
+  ],
+  "refs": [
+    {
+      "type": "import",
+      "name": "",
+      "line": 3,
+      "module": "fmt",
+      "symbols": []
+    },
+    {
+      "type": "call",
+      "name": "append",
+      "line": 10
+    },
+    {
+      "type": "call",
+      "name": "len",
+      "line": 14
+    },
+    {
+      "type": "call",
+      "name": "len",
+      "line": 18
+    },
+    {
+      "type": "call",
+      "name": "len",
+      "line": 19
+    },
+    {
+      "type": "call",
+      "name": "intStack.Push",
+      "line": 25
+    },
+    {
+      "type": "call",
+      "name": "intStack.Push",
+      "line": 26
+    },
+    {
+      "type": "call",
+      "name": "intStack.Pop",
+      "line": 27
+    },
+    {
+      "type": "call",
+      "name": "fmt.Println",
+      "line": 28
+    }
+  ],
+  "hasErrors": false
+}

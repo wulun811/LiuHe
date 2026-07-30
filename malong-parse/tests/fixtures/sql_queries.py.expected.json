@@ -1,0 +1,92 @@
+{
+  "symbols": [
+    {
+      "name": "query_users",
+      "type": "function",
+      "startLine": 5,
+      "endLine": 12
+    },
+    {
+      "name": "conn",
+      "type": "variable",
+      "startLine": 6,
+      "endLine": 6
+    },
+    {
+      "name": "cursor",
+      "type": "variable",
+      "startLine": 7,
+      "endLine": 7
+    },
+    {
+      "name": "rows",
+      "type": "variable",
+      "startLine": 8,
+      "endLine": 8
+    },
+    {
+      "name": "DB_HOST",
+      "type": "variable",
+      "startLine": 15,
+      "endLine": 15
+    },
+    {
+      "name": "API_KEY",
+      "type": "variable",
+      "startLine": 16,
+      "endLine": 16
+    }
+  ],
+  "refs": [
+    {
+      "type": "import",
+      "name": "",
+      "line": 1,
+      "module": "os",
+      "symbols": []
+    },
+    {
+      "type": "import",
+      "name": "",
+      "line": 2,
+      "module": "sqlite3",
+      "symbols": []
+    },
+    {
+      "type": "call",
+      "name": "sqlite3.connect",
+      "line": 6
+    },
+    {
+      "type": "call",
+      "name": "conn.execute",
+      "line": 7
+    },
+    {
+      "type": "call",
+      "name": "cursor.fetchall",
+      "line": 8
+    },
+    {
+      "type": "call",
+      "name": "conn.execute",
+      "line": 9
+    },
+    {
+      "type": "call",
+      "name": "conn.execute",
+      "line": 10
+    },
+    {
+      "type": "call",
+      "name": "conn.execute",
+      "line": 11
+    },
+    {
+      "type": "call",
+      "name": "os.getenv",
+      "line": 16
+    }
+  ],
+  "hasErrors": false
+}

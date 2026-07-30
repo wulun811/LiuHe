@@ -1,0 +1,40 @@
+{
+  "symbols": [
+    {
+      "name": "greeting",
+      "type": "variable",
+      "startLine": 1,
+      "endLine": 1
+    },
+    {
+      "name": "nested",
+      "type": "variable",
+      "startLine": 2,
+      "endLine": 2
+    },
+    {
+      "name": "render",
+      "type": "function",
+      "startLine": 4,
+      "endLine": 6
+    }
+  ],
+  "refs": [
+    {
+      "type": "call",
+      "name": "obj.map(x => x.id).join",
+      "line": 2
+    },
+    {
+      "type": "call",
+      "name": "obj.map",
+      "line": 2
+    },
+    {
+      "type": "call",
+      "name": "items.map",
+      "line": 5
+    }
+  ],
+  "hasErrors": false
+}

@@ -1,0 +1,77 @@
+{
+  "symbols": [
+    {
+      "name": "log_call",
+      "type": "function",
+      "startLine": 3,
+      "endLine": 8
+    },
+    {
+      "name": "wrapper",
+      "type": "function",
+      "startLine": 5,
+      "endLine": 7
+    },
+    {
+      "name": "hello",
+      "type": "function",
+      "startLine": 11,
+      "endLine": 12
+    },
+    {
+      "name": "Calculator",
+      "type": "class",
+      "startLine": 14,
+      "endLine": 23
+    },
+    {
+      "name": "__init__",
+      "type": "function",
+      "startLine": 15,
+      "endLine": 16
+    },
+    {
+      "name": "self",
+      "type": "variable",
+      "startLine": 16,
+      "endLine": 16
+    },
+    {
+      "name": "add",
+      "type": "function",
+      "startLine": 18,
+      "endLine": 20
+    },
+    {
+      "name": "result",
+      "type": "function",
+      "startLine": 22,
+      "endLine": 23
+    }
+  ],
+  "refs": [
+    {
+      "type": "import",
+      "name": "",
+      "line": 1,
+      "module": "functools",
+      "symbols": []
+    },
+    {
+      "type": "call",
+      "name": "functools.wraps",
+      "line": 4
+    },
+    {
+      "type": "call",
+      "name": "print",
+      "line": 6
+    },
+    {
+      "type": "call",
+      "name": "func",
+      "line": 7
+    }
+  ],
+  "hasErrors": false
+}

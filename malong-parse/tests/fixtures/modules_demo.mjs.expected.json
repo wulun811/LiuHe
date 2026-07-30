@@ -1,0 +1,117 @@
+{
+  "symbols": [
+    {
+      "name": "__filename",
+      "type": "variable",
+      "startLine": 5,
+      "endLine": 5
+    },
+    {
+      "name": "__dirname",
+      "type": "variable",
+      "startLine": 6,
+      "endLine": 6
+    },
+    {
+      "name": "Config",
+      "type": "class",
+      "startLine": 8,
+      "endLine": 35
+    },
+    {
+      "name": "constructor",
+      "type": "method",
+      "startLine": 9,
+      "endLine": 12
+    },
+    {
+      "name": "load",
+      "type": "method",
+      "startLine": 14,
+      "endLine": 22
+    },
+    {
+      "name": "save",
+      "type": "method",
+      "startLine": 24,
+      "endLine": 26
+    },
+    {
+      "name": "get",
+      "type": "method",
+      "startLine": 28,
+      "endLine": 30
+    },
+    {
+      "name": "set",
+      "type": "method",
+      "startLine": 32,
+      "endLine": 34
+    },
+    {
+      "name": "createConfig",
+      "type": "function",
+      "startLine": 37,
+      "endLine": 39
+    }
+  ],
+  "refs": [
+    {
+      "type": "import",
+      "name": "",
+      "line": 1,
+      "module": "node:fs",
+      "symbols": []
+    },
+    {
+      "type": "import",
+      "name": "",
+      "line": 2,
+      "module": "node:path",
+      "symbols": []
+    },
+    {
+      "type": "import",
+      "name": "",
+      "line": 3,
+      "module": "node:url",
+      "symbols": []
+    },
+    {
+      "type": "call",
+      "name": "fileURLToPath",
+      "line": 5
+    },
+    {
+      "type": "call",
+      "name": "dirname",
+      "line": 6
+    },
+    {
+      "type": "call",
+      "name": "readFileSync",
+      "line": 16
+    },
+    {
+      "type": "call",
+      "name": "JSON.parse",
+      "line": 17
+    },
+    {
+      "type": "call",
+      "name": "writeFileSync",
+      "line": 25
+    },
+    {
+      "type": "call",
+      "name": "JSON.stringify",
+      "line": 25
+    },
+    {
+      "type": "call",
+      "name": "new Config(path).load",
+      "line": 38
+    }
+  ],
+  "hasErrors": false
+}

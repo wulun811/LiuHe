@@ -1,0 +1,70 @@
+{
+  "symbols": [
+    {
+      "name": "Point",
+      "type": "type",
+      "startLine": 5,
+      "endLine": 7
+    },
+    {
+      "name": "Distance",
+      "type": "method",
+      "startLine": 9,
+      "endLine": 11
+    },
+    {
+      "name": "Line",
+      "type": "type",
+      "startLine": 13,
+      "endLine": 15
+    },
+    {
+      "name": "Length",
+      "type": "method",
+      "startLine": 17,
+      "endLine": 21
+    },
+    {
+      "name": "NewPoint",
+      "type": "function",
+      "startLine": 23,
+      "endLine": 25
+    },
+    {
+      "name": "main",
+      "type": "function",
+      "startLine": 27,
+      "endLine": 32
+    }
+  ],
+  "refs": [
+    {
+      "type": "import",
+      "name": "",
+      "line": 3,
+      "module": "fmt",
+      "symbols": []
+    },
+    {
+      "type": "call",
+      "name": "NewPoint",
+      "line": 28
+    },
+    {
+      "type": "call",
+      "name": "NewPoint",
+      "line": 29
+    },
+    {
+      "type": "call",
+      "name": "fmt.Println",
+      "line": 31
+    },
+    {
+      "type": "call",
+      "name": "line.Length",
+      "line": 31
+    }
+  ],
+  "hasErrors": false
+}
