@@ -299,6 +299,12 @@ async function request(method, params, timeoutMs = REQUEST_TIMEOUT_MS, priority 
       reject(new Error(`request timeout after ${timeoutMs}ms`))
     }, timeoutMs)
 
+    if (!_socket) {
+      clearTimeout(timer)
+      _pending.delete(id)
+      return reject(new Error('not connected'))
+    }
+
     _pending.set(id, {
       resolve: (v) => { _circuitRecordSuccess(); resolve(v) },
       reject: (e) => { _circuitRecordFailure(); reject(e) },

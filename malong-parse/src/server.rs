@@ -232,9 +232,11 @@ fn record_hot_file(state: &ServerState, file_path: &str) {
             entry.1 += 1;
         } else {
             hot_files.push((file_path.to_string(), 1));
+            if hot_files.len() > 100 {
+                hot_files.sort_by(|a, b| b.1.cmp(&a.1));
+                hot_files.truncate(100);
+            }
         }
-        hot_files.sort_by(|a, b| b.1.cmp(&a.1));
-        if hot_files.len() > 100 { hot_files.truncate(100); }
     }
 }
 
@@ -249,7 +251,9 @@ fn dispatch(req: Request, state: &ServerState) -> Response {
             let lang_stats = state.lang_stats.lock().unwrap();
             let sym_buckets = state.sym_count_buckets.lock().unwrap();
             let hot_files = state.hot_files.lock().unwrap();
-            let hot_files_json: Vec<serde_json::Value> = hot_files.iter().take(20).map(|(p, c)| {
+            let mut sorted: Vec<_> = hot_files.clone();
+            sorted.sort_by(|a, b| b.1.cmp(&a.1));
+            let hot_files_json: Vec<serde_json::Value> = sorted.iter().take(20).map(|(p, c)| {
                 serde_json::json!({ "path": p, "count": c })
             }).collect();
             Response::success(req.id, serde_json::json!({

@@ -63,22 +63,23 @@ fn setup_crash_log() -> PathBuf {
 
 fn log_crash(msg: &str, context: Option<&str>) {
     let crash_log = setup_crash_log();
-    let timestamp = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ");
-    let pid = std::process::id();
     
-    let json = if let Some(ctx) = context {
-        format!(
-            r#"{{"timestamp":"{}","pid":{},"message":"{}","context":"{}"}}"#,
-            timestamp, pid, msg.replace('"', "\\\""), ctx.replace('"', "\\\"")
-        )
+    let record = if let Some(ctx) = context {
+        serde_json::json!({
+            "timestamp": chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string(),
+            "pid": std::process::id(),
+            "message": msg,
+            "context": ctx,
+        })
     } else {
-        format!(
-            r#"{{"timestamp":"{}","pid":{},"message":"{}"}}"#,
-            timestamp, pid, msg.replace('"', "\\\"")
-        )
+        serde_json::json!({
+            "timestamp": chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string(),
+            "pid": std::process::id(),
+            "message": msg,
+        })
     };
     
-    let line = format!("{}\n", json);
+    let line = format!("{}\n", serde_json::to_string(&record).unwrap_or_default());
     let _ = std::fs::OpenOptions::new()
         .create(true)
         .append(true)

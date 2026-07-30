@@ -114,14 +114,6 @@ pub fn compute_metrics(tree: &Tree, source: &str, language: &str) -> Metrics {
         count
     }
 
-    let comment_chars = if language == "python" {
-        count_py(source)
-    } else if language == "go" || language == "rust" {
-        count_hash(source) + count_cs(source)
-    } else {
-        count_cs(source)
-    };
-
     fn walk_metrics(
         node: Node,
         depth: u32,
