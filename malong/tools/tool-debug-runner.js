@@ -1,7 +1,6 @@
-import { execFile, spawn } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join, extname, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
 
 export const name = 'tool-debug-runner'
 export const version = '0.1.0'

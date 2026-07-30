@@ -3,7 +3,7 @@
 // 详见：通天计划 §六 码龙
 
 import { readFileSync, readdirSync, writeFileSync, existsSync, mkdirSync } from 'node:fs'
-import { join, extname, relative } from 'node:path'
+import { join, extname } from 'node:path'
 
 export const name = 'malong-style-sniffer'
 export const version = '0.2.0'

@@ -1,5 +1,5 @@
 import { readFileSync, existsSync } from 'node:fs'
-import { join, extname, basename } from 'node:path'
+import { join, extname } from 'node:path'
 
 export const name = 'tool-spec-gen'
 export const version = '0.1.0'

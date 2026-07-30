@@ -3,7 +3,7 @@
 // 详见：通天计划 §六 码龙
 
 import { execFile } from 'node:child_process'
-import { existsSync, mkdirSync, realpathSync } from 'node:fs'
+import { mkdirSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
 
 export const name = 'malong-sandbox'

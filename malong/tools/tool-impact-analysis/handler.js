@@ -1,7 +1,7 @@
 // 六合工具集 - impact_analysis handler
 
 import { join } from 'node:path'
-import { existsSync, statSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { isConstantName } from '../misuse-helpers.js'
 import { checkFileStaleness, attachStalenessWarning } from '../../staleness.js'
 

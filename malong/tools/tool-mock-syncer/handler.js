@@ -1,5 +1,5 @@
-import { join, extname, basename } from 'node:path'
-import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { join, extname } from 'node:path'
+import { readFileSync, readdirSync } from 'node:fs'
 
 const SKIP_DIRS = new Set(['node_modules', '.git', '__pycache__', '.venv', 'venv', 'dist', 'build'])
 

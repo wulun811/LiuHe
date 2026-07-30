@@ -4,7 +4,7 @@
 
 import Database from 'better-sqlite3'
 import { join, relative, extname, resolve } from 'node:path'
-import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, watch, chmodSync, statSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, unlinkSync, watch, chmodSync, statSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { Worker } from 'node:worker_threads'
 import { DEFAULT_IGNORE_DIRS } from './file-collector.js'

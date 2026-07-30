@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs'
 import { extname, basename } from 'node:path'
 
 export const name = 'malong-code-review'

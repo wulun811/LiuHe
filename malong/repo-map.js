@@ -2,7 +2,7 @@
 // 多语言 tree-sitter 生成带缩进的文本版代码地图 (~1500 tokens/中型项目)
 // 详见：通天计划 §六 码龙
 
-import { readFileSync, statSync, existsSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { join, relative, extname, basename } from 'node:path'
 import { collectFiles } from './file-collector.js'
 

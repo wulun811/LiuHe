@@ -1,5 +1,5 @@
 import { join, extname, basename } from 'node:path'
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { execSync } from 'node:child_process'
 import { parseOutput } from './parsers.js'
 
