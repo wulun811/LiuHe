@@ -69,7 +69,7 @@ export async function handle(args, context) {
   const lines = content.split('\n')
   const lang = detectLanguage(file)
 
-  let analysis = analyzeFileAST(content, lang, file, langParserService) || analyzeFile(content, lang, file)
+  let analysis = await analyzeFileAST(content, lang, file, langParserService) || analyzeFile(content, lang, file)
 
   for (const sym of analysis.undefinedSymbols) {
     const candidates = findCandidates(codeIndexService, sym, file, maxCandidates)
@@ -273,9 +273,46 @@ function applyRemovals(newLines, removals) {
   return { whole, partial }
 }
 
-function analyzeFileAST(content, lang, currentFile, langParser) {
+async function analyzeFileAST(content, lang, currentFile, langParser) {
   if (!langParser || (lang !== 'javascript' && lang !== 'typescript')) return null
   const ext = lang === 'typescript' ? '.ts' : '.js'
+
+  // async path: try extractAllAsync first
+  try {
+    const asyncResult = await langParser.extractAllAsync(content, ext)
+    if (asyncResult && asyncResult.symbols?.length) {
+      const definedSymbols = new Set()
+      const usedSymbols = new Set()
+      const imports = []
+      const symbolLines = {}
+      const relativeImports = []
+
+      for (const sym of asyncResult.symbols) {
+        definedSymbols.add(sym.name)
+        symbolLines[sym.name] = sym.startLine
+      }
+      for (const ref of asyncResult.refs || []) {
+        if (ref.type === 'call') usedSymbols.add(ref.name)
+        if (ref.type === 'import') {
+          imports.push({ name: ref.symbols?.[0] || ref.module || '', line: ref.line, statement: `import ${ref.module || ''}`, key: `l${ref.line}`, kind: 'named', stmtStart: -1, stmtEnd: -1 })
+          if (ref.module?.startsWith('.')) {
+            relativeImports.push({ module: ref.module, line: ref.line, relative: ref.module, absolute: resolveRelativeImport(ref.module, currentFile) || ref.module })
+          }
+          for (const symName of ref.symbols || []) definedSymbols.add(symName)
+        }
+      }
+
+      const builtins = BUILTINS_MAP[lang] || BUILTINS_JS
+      const undefinedSymbols = []
+      for (const sym of usedSymbols) {
+        if (KEYWORDS.has(sym) || SPECIAL.has(sym) || builtins.has(sym) || sym.startsWith('__')) continue
+        if (sym === sym.toUpperCase() && sym.length > 2) continue
+        if (!definedSymbols.has(sym)) undefinedSymbols.push(sym)
+      }
+      return { definedSymbols, usedSymbols, imports, undefinedSymbols: [...new Set(undefinedSymbols)], symbolLines, relativeImports }
+    }
+  } catch {}
+
   let tree
   try { tree = langParser.parse(content, ext) } catch { return null }
   if (!tree) return null

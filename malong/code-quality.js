@@ -11,9 +11,24 @@ export const version = '0.2.0'
 
 let _core, _langParser, _depGraph
 
-// ── 1. techDebt: 圈复杂度 + 认知复杂度 ──
+// ── 1. techDebt: 圈复杂度 + 认知复杂度 (支持 JSON AST) ──
 
 function calcCyclomatic(node) {
+  let score = 1
+  function walk(n) {
+    if (!n) return
+    if (['if_statement', 'for_statement', 'while_statement', 'do_statement',
+         'switch_expression', 'catch_clause', 'ternary_expression',
+         'conditional_expression', 'case_expression'].includes(n.type)) score++
+    if (n.children && Array.isArray(n.children)) {
+      for (const c of n.children) walk(c)
+    }
+  }
+  walk(node)
+  return score
+}
+
+function calcCyclomaticTree(tree) {
   let score = 1
   function walk(n) {
     if (['if_statement', 'for_statement', 'while_statement', 'do_statement',
@@ -21,11 +36,30 @@ function calcCyclomatic(node) {
          'conditional_expression', 'case_expression'].includes(n.type)) score++
     for (let i = 0; i < n.childCount; i++) walk(n.child(i))
   }
-  walk(node)
+  walk(tree.rootNode)
   return score
 }
 
 function calcCognitive(node, depth = 0) {
+  let score = 0
+  function walk(n, nesting) {
+    if (!n) return
+    const isBranch = ['if_statement', 'else_clause', 'for_statement', 'while_statement',
+                      'do_statement', 'catch_clause', 'ternary_expression',
+                      'conditional_expression'].includes(n.type)
+    if (isBranch) {
+      score += 1 + nesting
+      nesting++
+    }
+    if (n.children && Array.isArray(n.children)) {
+      for (const c of n.children) walk(c, nesting)
+    }
+  }
+  walk(node, 0)
+  return score
+}
+
+function calcCognitiveTree(node, depth = 0) {
   let score = 0
   function walk(n, nesting) {
     const isBranch = ['if_statement', 'else_clause', 'for_statement', 'while_statement',
@@ -46,23 +80,27 @@ function calcCognitive(node, depth = 0) {
 function calcArchViolations(tree, source, ext) {
   let violations = 0
   function walk(node) {
+    if (!node) return
     const t = node.type
     if (t === 'call_expression') {
-      const fn = node.childForFieldName('function')
-      if (fn) {
-        const name = source.slice(fn.startIndex, fn.endIndex)
-        // 检测全局 API 调用模式违规
-        if (/(^|\b)(process|global|root|eval|Function)\b/.test(name)) violations++
-      }
+      const text = source?.slice(node.startIndex, node.endIndex) || node.text || ''
+      const name = node.name || node.text || ''
+      if (/(^|\b)(process|global|root|eval|Function)\b/.test(name)) violations++
     } else if (t === 'member_expression') {
-      // 深层嵌套的成员访问
-      let depth = 0, cur = node
-      while (cur.type === 'member_expression') { depth++; cur = cur.child(0) }
+      let depth = 0
+      // Walk JSON AST (children) or tree AST (child)
+      let cur = node
+      while (cur && cur.type === 'member_expression') { depth++; cur = cur.children?.[0] || cur.child?.(0) }
       if (depth > 3) violations++
     }
-    for (let i = 0; i < node.childCount; i++) walk(node.child(i))
+    if (node.children && Array.isArray(node.children)) {
+      for (const c of node.children) walk(c)
+    } else {
+      for (let i = 0; i < (node.childCount || 0); i++) walk(node.child(i))
+    }
   }
-  walk(tree.rootNode)
+  if (tree.rootNode) walk(tree.rootNode)
+  else walk(tree)
   return violations
 }
 
@@ -140,18 +178,36 @@ export async function init(core) {
   core.registerService('codeQuality', {
     async scoreSource(source, filePath = '') {
       const ext = extname(filePath) || '.js'
-      const tree = _langParser.parse(source, ext)
-      if (!tree) return { dimensions: {}, overall: 0, error: 'parse_failed' }
 
-      const techDebt = Math.min(1, (calcCyclomatic(tree.rootNode) / 20 + calcCognitive(tree.rootNode) / 30) / 2)
-      const archScore = Math.min(1, calcArchViolations(tree, source, ext) / 5)
+      // async path: try simplifyASTAsync first
+      let cyc, cog, arch
+      try {
+        const ast = await _langParser.simplifyASTAsync(source, ext, 50)
+        if (ast) {
+          cyc = calcCyclomatic(ast)
+          cog = calcCognitive(ast)
+          arch = calcArchViolations(ast, source, ext)
+        }
+      } catch {}
+
+      if (cyc === undefined) {
+        // fallback to sync parse
+        const tree = _langParser.parse(source, ext)
+        if (!tree) return { dimensions: {}, overall: 0, error: 'parse_failed' }
+        cyc = calcCyclomaticTree(tree.rootNode)
+        cog = calcCognitiveTree(tree.rootNode)
+        arch = calcArchViolations(tree, source, ext)
+      }
+
+      const techDebt = Math.min(1, (cyc / 20 + cog / 30) / 2)
+      const archScore = Math.min(1, arch / 5)
       const br = calcBlastRadius(source)
       const oe = compareASTSize(source)
       const pf = calcParadigmFit(source, ext)
 
       const dims = {
-        techDebt: { value: Math.round((1 - techDebt) * 100) / 100, rawCyclomatic: calcCyclomatic(tree.rootNode), rawCognitive: calcCognitive(tree.rootNode) },
-        archViolation: { value: Math.round((1 - archScore) * 100) / 100, rawViolations: calcArchViolations(tree, source, ext) },
+        techDebt: { value: Math.round((1 - techDebt) * 100) / 100, rawCyclomatic: cyc, rawCognitive: cog },
+        archViolation: { value: Math.round((1 - archScore) * 100) / 100, rawViolations: arch },
         blastRadius: { value: Math.round((1 - br.score) * 100) / 100, rawDangerousAPIs: br.dangerousCount },
         overEngineering: { value: Math.round((1 - oe) * 100) / 100, rawNestingDepth: estimateNestingDepth(source) },
         paradigmFit: { value: Math.round(pf * 100) / 100, rawMatchRate: pf },

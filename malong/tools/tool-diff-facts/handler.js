@@ -96,24 +96,21 @@ function extractSymbolsRegex(content) {
   return syms
 }
 
-function extractSymbols(content, ext, langParser) {
+async function extractSymbols(content, ext, langParser) {
   if (langParser) {
     try {
-      const tree = langParser.parse(content, ext)
-      if (tree) {
-        const result = langParser.extractSymbols(tree, content, ext)
-        const syms = Array.isArray(result) ? result : (result?.symbols || [])
-        if (syms.length) return syms
-      }
+      const result = await langParser.extractSymbolsAsync(content, ext)
+      const syms = Array.isArray(result) ? result : (result?.symbols || [])
+      if (syms.length) return syms
     } catch {}
   }
   return extractSymbolsRegex(content)
 }
 
-function extractChanges(change, langParser) {
+async function extractChanges(change, langParser) {
   const ext = extname(change.file)
-  const beforeSyms = extractSymbols(change.before, ext, langParser)
-  const afterSyms = extractSymbols(change.after, ext, langParser)
+  const beforeSyms = await extractSymbols(change.before, ext, langParser)
+  const afterSyms = await extractSymbols(change.after, ext, langParser)
   if (!beforeSyms.length && !afterSyms.length) return []
 
   const out = []
@@ -218,7 +215,7 @@ export async function handle(args, context) {
   const langParser = context?.langParserService
   const symbolsChanged = []
   for (const c of changes) {
-    symbolsChanged.push(...extractChanges(c, langParser))
+    symbolsChanged.push(...await extractChanges(c, langParser))
   }
 
   const filesInChange = changes.map(c => c.file)

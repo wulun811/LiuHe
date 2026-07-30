@@ -50,24 +50,20 @@ function matchesPrefix(name, prefixes) {
   return prefixes.some(p => name.startsWith(p))
 }
 
-function checkRules(file, content, rules, langParser) {
+async function checkRules(file, content, rules, langParser) {
   const ext = extname(file)
-  let tree
-  try { tree = langParser.parse(content, ext) } catch (e) {
+  let refs = [], symbols = []
+  try {
+    const result = await langParser.extractAllAsync(content, ext)
+    refs = result.refs || []
+    symbols = result.symbols || []
+  } catch (e) {
     return { violations: [], warnings: [{ file, reason: `parse_failed: ${e.message}` }] }
   }
-  if (!tree) return { violations: [], warnings: [{ file, reason: 'unsupported_language' }] }
+  if (!refs.length && !symbols.length) return { violations: [], warnings: [{ file, reason: 'unsupported_language' }] }
 
   const violations = []
   const warnings = []
-  let refs, symbols
-  try {
-    refs = langParser.extractReferences(tree, content, ext)
-    const symResult = langParser.extractSymbols(tree, content, ext)
-    symbols = Array.isArray(symResult) ? symResult : (symResult?.symbols || [])
-  } catch (e) {
-    return { violations: [], warnings: [{ file, reason: `extract_failed: ${e.message}` }] }
-  }
 
   for (const rule of rules) {
     if (rule._comment) continue
@@ -169,7 +165,7 @@ export async function handle(args, context) {
   const projectIds = new Set(projectRules.map(r => r.id))
   const allRules = [...BUILTIN_RULES.filter(r => !projectIds.has(r.id)), ...projectRules]
 
-  const { violations, warnings: checkWarnings } = checkRules(file, content, allRules, langParser)
+  const { violations, warnings: checkWarnings } = await checkRules(file, content, allRules, langParser)
   const allWarnings = [...ruleWarnings, ...checkWarnings]
 
   return {

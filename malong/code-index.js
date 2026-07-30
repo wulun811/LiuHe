@@ -169,16 +169,16 @@ class CodeIndex {
     return null
   }
 
-  indexFile(filePath, repo) {
+  async indexFile(filePath, repo) {
     if (!CACHED_EXT.has(extname(filePath))) return null
     let size = 0
     try { size = statSync(filePath).size } catch { return null }
     if (size > 1024 * 1024) return null
     const source = readFileSync(filePath, 'utf-8')
     const ext = extname(filePath)
-    const tree = this._langParser.parse(source, ext)
-    if (!tree) return null
-    const { symbols, refs } = this._langParser.extractAll(tree, source, ext)
+    const result = await this._langParser.extractAllAsync(source, ext)
+    if (!result) return null
+    const { symbols = [], refs = [] } = result
     const relPath = repo ? relative(repo, filePath) : filePath
     let mtime = Date.now()
     try { mtime = statSync(filePath).mtimeMs } catch {}
@@ -648,8 +648,8 @@ class CodeIndex {
       },
 
       // 索引单个文件（供 reindex handler 调用）
-      indexFile(filePath, repo) {
-        return self.indexFile(filePath, repo)
+      async indexFile(filePath, repo) {
+        return await self.indexFile(filePath, repo)
       },
 
       // 解析跨文件引用（供 reindex handler 调用）
@@ -739,21 +739,25 @@ class CodeIndex {
       },
 
       async classifyMessage(content, { timeout = 3000 } = {}) {
-        return self._langParser.classifyMessage(content)
+        return await self._langParser.classifyMessageAsync(content)
       },
 
       async extractSymbols(content, { timeout = 3000 } = {}) {
-        const tree = self._langParser.parse(content, '.js')
-        if (!tree) return { symbols: [], imports: [], hasErrors: false }
-        const result = self._langParser.extractSymbols(tree, content, '.js')
-        return { ...result, hasErrors: self._langParser.hasErrors(tree) }
+        const result = await self._langParser.extractAllAsync(content, '.js')
+        if (!result) return { symbols: [], imports: [], hasErrors: false }
+        return { symbols: result.symbols || [], imports: result.refs?.filter(r => r.type === 'import') || [], hasErrors: result.hasErrors || false }
       },
 
       async getSemanticDensity(content, { timeout = 3000 } = {}) {
-        const tree = self._langParser.parse(content, '.js')
-        if (!tree) return { density: 0, nodeCount: 0 }
-        const density = Math.min(1, tree.rootNode.childCount / 50)
-        return { density: Math.round(density * 100) / 100, nodeCount: tree.rootNode.childCount }
+        try {
+          const result = await self._langParser.extractAllAsync(content, '.js')
+          if (result && result.symbols) {
+            const nodeCount = result.symbols.length + (result.refs?.length || 0)
+            const density = Math.min(1, nodeCount / 50)
+            return { density: Math.round(density * 100) / 100, nodeCount }
+          }
+        } catch {}
+        return { density: 0, nodeCount: 0 }
       },
 
       async searchSymbols(query, { limit = 30 } = {}) {
@@ -968,7 +972,7 @@ class CodeIndex {
           return { path: relPath, status: 'deleted' }
         }
         const repo = self._watchedDir || self._resolveRepoDir(filePath)
-        const result = self.indexFile(filePath, repo)
+        const result = await self.indexFile(filePath, repo)
         if (result) self._core.log('info', `[code-index] synced: ${result.path} (${result.symbols} syms)`)
         if (self._core.emit) self._core.emit('file.changed', { path: filePath })
         return result

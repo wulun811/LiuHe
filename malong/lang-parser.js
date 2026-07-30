@@ -15,8 +15,9 @@ const TypeScript = _require('tree-sitter-typescript/bindings/node/typescript.js'
 const TSX = _require('tree-sitter-typescript/bindings/node/tsx.js')
 
 export const name = 'malong-lang-parser'
-export const version = '0.4.0'
+export const version = '0.5.0'
 
+const PARSE_MODE = process.env.MALONG_PARSE_MODE ?? 'shadow'  // 'rust' | 'builtin' | 'shadow'
 let _core
 let _mode = 'builtin'  // 'builtin' | 'rust-service'
 
@@ -751,17 +752,63 @@ const _parserCache = {}
 
 export async function init(core) {
   _core = core
-  
-  // 尝试连接 Rust 解析服务
-  await parseClient.init(core)
-  const connected = await parseClient.connect()
-  if (connected) {
-    _mode = 'rust-service'
-    const h = await parseClient.health().catch(() => null)
-    core.log('info', `[lang-parser] connected to malong-parse v${h?.version || '?'} (pid=${h?.pid || '?'})`)
-  } else {
+
+  // env var 控制模式: MALONG_PARSE_MODE=builtin → 强制 builtin, 不连 Rust
+  if (PARSE_MODE === 'builtin') {
     _mode = 'builtin'
-    core.log('warn', '[lang-parser] malong-parse unavailable, using builtin tree-sitter')
+    core.log('info', `[lang-parser] MALONG_PARSE_MODE=builtin, using builtin tree-sitter`)
+  } else {
+    await parseClient.init(core)
+    const connected = await parseClient.connect()
+    if (connected) {
+      _mode = 'rust-service'
+      const h = await parseClient.health().catch(() => null)
+      core.log('info', `[lang-parser] connected to malong-parse v${h?.version || '?'} (pid=${h?.pid || '?'})`)
+    } else if (PARSE_MODE === 'rust') {
+      core.log('error', `[lang-parser] MALONG_PARSE_MODE=rust but malong-parse unavailable — FALLING BACK to builtin`)
+      _mode = 'builtin'
+    } else {
+      _mode = 'builtin'
+      core.log('warn', '[lang-parser] malong-parse unavailable, using builtin tree-sitter')
+    }
+  }
+
+  // ── Shadow mode helpers ──
+
+  function _diffAndLog(method, builtin, rust) {
+    if (!builtin || !rust) return
+    let differs = false
+    const compare = (a, b, path) => {
+      if (Array.isArray(a) && Array.isArray(b)) {
+        if (a.length !== b.length) { differs = true; core.log('warn', `[lang-parser] shadow diff ${method}${path}: length ${a.length} vs ${b.length}`); return }
+        for (let i = 0; i < a.length; i++) compare(a[i], b[i], `${path}[${i}]`)
+      } else if (typeof a === 'object' && a !== null && typeof b === 'object' && b !== null) {
+        const keys = new Set([...Object.keys(a), ...Object.keys(b)])
+        for (const k of keys) compare(a[k], b[k], `${path}.${k}`)
+      } else if (a !== b) {
+        differs = true
+        if (typeof a === 'string' && typeof b === 'string' && a.length > 20) {
+          if (a.slice(0, 20) !== b.slice(0, 20)) core.log('warn', `[lang-parser] shadow diff ${method}${path}: "${a.slice(0,20)}..." vs "${b.slice(0,20)}..."`)
+        } else {
+          core.log('warn', `[lang-parser] shadow diff ${method}${path}: ${JSON.stringify(a)} vs ${JSON.stringify(b)}`)
+        }
+      }
+    }
+    compare(builtin, rust, '')
+    if (!differs) core.log('info', `[lang-parser] shadow OK ${method}`)
+  }
+
+  async function _runShadow(methodName, args, builtinFn) {
+    const builtinResult = await builtinFn()
+    if (_mode === 'shadow' && parseClient.isConnected()) {
+      try {
+        const rustResult = await parseClient[methodName](...args)
+        _diffAndLog(methodName, builtinResult, rustResult)
+      } catch (e) {
+        // shadow comparison failure is non-fatal
+      }
+    }
+    return builtinResult
   }
 
   core.registerService('langParser', {
@@ -776,6 +823,7 @@ export async function init(core) {
     getSupportedExts() { return ALL_EXTS },
     
     getMode() { return _mode },
+    getConfigMode() { return PARSE_MODE },
     isRustService() { return _mode === 'rust-service' },
 
     parse(source, ext) {
@@ -846,6 +894,13 @@ export async function init(core) {
     // ── 异步方法（优先使用 Rust 服务） ──
     
     async extractAllAsync(source, ext) {
+      if (_mode === 'shadow') {
+        return _runShadow('extractAll', [source, ext], async () => {
+          const tree = this.parse(source, ext)
+          if (!tree) return { symbols: [], refs: [] }
+          return this.extractAll(tree, source, ext)
+        })
+      }
       if (_mode === 'rust-service') {
         try {
           return await parseClient.extractAll(source, ext)
@@ -853,13 +908,19 @@ export async function init(core) {
           core.log('warn', `[lang-parser] rust-service extractAll failed, fallback: ${e.message}`)
         }
       }
-      // fallback to builtin
       const tree = this.parse(source, ext)
       if (!tree) return { symbols: [], refs: [] }
       return this.extractAll(tree, source, ext)
     },
 
     async extractSymbolsAsync(source, ext) {
+      if (_mode === 'shadow') {
+        return _runShadow('extractSymbols', [source, ext], async () => {
+          const tree = this.parse(source, ext)
+          if (!tree) return { symbols: [], imports: [] }
+          return this.extractSymbols(tree, source, ext)
+        })
+      }
       if (_mode === 'rust-service') {
         try {
           return await parseClient.extractSymbols(source, ext)
@@ -873,6 +934,13 @@ export async function init(core) {
     },
 
     async extractTopLevelAsync(source, ext) {
+      if (_mode === 'shadow') {
+        return _runShadow('extractTopLevel', [source, ext], async () => {
+          const tree = this.parse(source, ext)
+          if (!tree) return []
+          return this.extractTopLevel(tree, source, ext)
+        })
+      }
       if (_mode === 'rust-service') {
         try {
           return await parseClient.extractTopLevel(source, ext)
@@ -886,6 +954,13 @@ export async function init(core) {
     },
 
     async extractReferencesAsync(source, ext) {
+      if (_mode === 'shadow') {
+        return _runShadow('extractReferences', [source, ext], async () => {
+          const tree = this.parse(source, ext)
+          if (!tree) return []
+          return this.extractReferences(tree, source, ext)
+        })
+      }
       if (_mode === 'rust-service') {
         try {
           return await parseClient.extractReferences(source, ext)
@@ -899,6 +974,13 @@ export async function init(core) {
     },
 
     async hasErrorsAsync(source, ext) {
+      if (_mode === 'shadow') {
+        return _runShadow('hasErrors', [source, ext], async () => {
+          const tree = this.parse(source, ext)
+          if (!tree) return false
+          return this.hasErrors(tree)
+        })
+      }
       if (_mode === 'rust-service') {
         try {
           return await parseClient.hasErrors(source, ext)
@@ -912,6 +994,11 @@ export async function init(core) {
     },
 
     async classifyMessageAsync(content) {
+      if (_mode === 'shadow') {
+        return _runShadow('classifyMessage', [content], async () => {
+          return this.classifyMessage(content)
+        })
+      }
       if (_mode === 'rust-service') {
         try {
           return await parseClient.classifyMessage(content)
@@ -923,6 +1010,17 @@ export async function init(core) {
     },
 
     async batchExtractAsync(files) {
+      if (_mode === 'shadow') {
+        return _runShadow('batchExtract', [files], async () => {
+          return files.map(f => {
+            const ext = f.path.slice(f.path.lastIndexOf('.'))
+            const tree = this.parse(f.source, ext)
+            if (!tree) return { path: f.path, symbols: [], refs: [] }
+            const result = this.extractAll(tree, f.source, ext)
+            return { path: f.path, ...result }
+          })
+        })
+      }
       if (_mode === 'rust-service') {
         try {
           return await parseClient.batchExtract(files)
@@ -930,7 +1028,6 @@ export async function init(core) {
           core.log('warn', `[lang-parser] rust-service batchExtract failed, fallback: ${e.message}`)
         }
       }
-      // fallback: 逐个处理
       return files.map(f => {
         const ext = f.path.slice(f.path.lastIndexOf('.'))
         const tree = this.parse(f.source, ext)
@@ -940,7 +1037,7 @@ export async function init(core) {
       })
     },
   })
-  core.log('info', `[lang-parser] mode=${_mode}, loaded languages: ${Object.values(LANG_MAP).map(l => l.name).join(', ')}`)
+  core.log('info', `[lang-parser] config=${PARSE_MODE} effective=${_mode} loaded=${Object.values(LANG_MAP).map(l => l.name).join(',')}`)
 }
 
 export async function start() {}

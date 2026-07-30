@@ -308,14 +308,15 @@ function enrichFromLock(dir, deps) {
   }
 }
 
-function extractImports(file, content, langParser) {
+async function extractImports(file, content, langParser) {
   const ext = extname(file)
-  let tree
-  try { tree = langParser.parse(content, ext) } catch (e) {
+  let refs
+  try {
+    refs = await langParser.extractReferencesAsync(content, ext)
+  } catch (e) {
     return { imports: [], warnings: [{ file, reason: `parse_failed: ${e.message}` }] }
   }
-  if (!tree) return { imports: [], warnings: [{ file, reason: 'unsupported_language' }] }
-  const refs = langParser.extractReferences(tree, content, ext)
+  if (!refs || !refs.length) return { imports: [], warnings: [{ file, reason: 'unsupported_language' }] }
   const imports = refs.filter(r => r.type === 'import').map(r => {
     let mod = r.module
     if (mod.startsWith('.')) return { module: mod, raw: r.module, line: r.line, isRelative: true }
@@ -367,7 +368,7 @@ export async function handle(args, context) {
   const ext = extname(file)
   const stdlib = getStdlib(ext)
 
-  const { imports, warnings: importWarnings } = extractImports(file, content, langParser)
+  const { imports, warnings: importWarnings } = await extractImports(file, content, langParser)
 
   const { path: manifestPath, multiple: multipleManifests } = findManifest(workspaceDir, file, ext)
   if (!manifestPath) {
