@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::collections::BinaryHeap;
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
 use tokio::sync::Semaphore;
@@ -26,6 +27,8 @@ pub struct ServerState {
     pub requests_served: tokio::sync::Mutex<u64>,
     pub cache: std::sync::Mutex<TreeCache>,
     pub concurrency: Semaphore,
+    pub lang_stats: std::sync::Mutex<HashMap<String, u64>>,
+    pub sym_count_buckets: std::sync::Mutex<[u64; 5]>, // 0-10, 11-50, 51-200, 201-1000, 1000+
 }
 
 impl ServerState {
@@ -36,6 +39,8 @@ impl ServerState {
             requests_served: tokio::sync::Mutex::new(0),
             cache: Mutex::new(TreeCache::new()),
             concurrency: Semaphore::new(MAX_CONCURRENCY),
+            lang_stats: Mutex::new(HashMap::new()),
+            sym_count_buckets: Mutex::new([0; 5]),
         }
     }
 }
@@ -207,6 +212,17 @@ fn resolve_source(params: &serde_json::Value) -> Result<(String, String, String)
     }
 }
 
+fn record_stats(state: &ServerState, ext: &str, sym_count: usize) {
+    if let Ok(mut lang_stats) = state.lang_stats.lock() {
+        let lang = crate::parser_pool::ext_to_language_name(ext).unwrap_or("unknown").to_string();
+        *lang_stats.entry(lang).or_insert(0) += 1;
+    }
+    if let Ok(mut buckets) = state.sym_count_buckets.lock() {
+        let idx = if sym_count <= 10 { 0 } else if sym_count <= 50 { 1 } else if sym_count <= 200 { 2 } else if sym_count <= 1000 { 3 } else { 4 };
+        buckets[idx] += 1;
+    }
+}
+
 fn dispatch(req: Request, state: &ServerState) -> Response {
     let params = req.params;
 
@@ -215,6 +231,8 @@ fn dispatch(req: Request, state: &ServerState) -> Response {
             let uptime = state.start_time.elapsed().as_secs();
             let count = state.requests_served.try_lock().map(|c| *c).unwrap_or(0);
             let cache_stats = state.cache.lock().unwrap().stats();
+            let lang_stats = state.lang_stats.lock().unwrap();
+            let sym_buckets = state.sym_count_buckets.lock().unwrap();
             Response::success(req.id, serde_json::json!({
                 "version": env!("CARGO_PKG_VERSION"),
                 "pid": std::process::id(),
@@ -222,6 +240,16 @@ fn dispatch(req: Request, state: &ServerState) -> Response {
                 "parsers_loaded": state.parser_pool.supported_languages(),
                 "requests_served": count,
                 "cache": cache_stats,
+                "stats": {
+                    "by_language": *lang_stats,
+                    "symbol_counts": {
+                        "0_10": sym_buckets[0],
+                        "11_50": sym_buckets[1],
+                        "51_200": sym_buckets[2],
+                        "201_1000": sym_buckets[3],
+                        "1000_plus": sym_buckets[4],
+                    }
+                },
             }))
         }
 
@@ -240,6 +268,7 @@ fn dispatch(req: Request, state: &ServerState) -> Response {
                 let mut cache_lock = state.cache.lock().unwrap();
                 if let Some((t, s, l)) = cache_lock.get(&file_path) {
                     let result = extract::extract_all(t, s, l);
+                    record_stats(state, &ext, result.symbols.len());
                     return Response::success(req.id, serde_json::to_value(result).unwrap_or(serde_json::Value::Null));
                 }
             }
@@ -247,6 +276,7 @@ fn dispatch(req: Request, state: &ServerState) -> Response {
             match state.parser_pool.parse(&source, language) {
                 Ok(tree) => {
                     let result = extract::extract_all(&tree, &source, language);
+                    record_stats(state, &ext, result.symbols.len());
                     if !file_path.is_empty() {
                         state.cache.lock().unwrap().insert(&file_path, tree, source, language.to_string());
                     }
