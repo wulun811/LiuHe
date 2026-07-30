@@ -27,7 +27,7 @@ class Semaphore {
       this.current += weight
       return
     }
-    await new Promise(resolve => this.queue.push({ resolve, weight }))
+    await new Promise(resolve => this.queue.push({ resolve, weight, waitTime: Date.now() }))
   }
 
   release(weight = 1) {
@@ -41,6 +41,14 @@ class Semaphore {
       } else {
         break
       }
+    }
+  }
+
+  getStatus() {
+    return {
+      current: this.current,
+      max: this.max,
+      queue: this.queue.map(q => ({ weight: q.weight, waiting: Date.now() - q.waitTime })),
     }
   }
 }
@@ -137,7 +145,7 @@ async function initModules() {
   crashLog(`modules initialized, stateDir=${stateDir}, tools=${registry.getToolCount()}, concurrency=${concurrency}, pid=${process.pid}`)
 
   const health = await runHealthCheck({
-    stateDir, toolsDir, workspacesDir, registry, log: core.log
+    stateDir, toolsDir, workspacesDir, registry, log: core.log, semaphore, activeRequests
   })
   for (const c of health.checks) {
     safeLog(`[health] ${c.status === 'PASS' ? '✓' : c.status === 'CLEANED' ? '♻' : '✗'} ${c.name}: ${c.detail}`)
@@ -158,8 +166,10 @@ function buildContext() {
     repoMapService: core.getService('repoMap'),
     langParserService: core.getService('langParser'),
     runHealthCheck: () => runHealthCheck({
-      stateDir, toolsDir: join(__dirname, 'tools'), workspacesDir, registry, log: core.log
+      stateDir, toolsDir: join(__dirname, 'tools'), workspacesDir, registry, log: core.log, semaphore, activeRequests
     }),
+    semaphore,
+    activeRequests,
   }
 }
 
@@ -404,6 +414,69 @@ initModules().then(() => {
       } catch {}
     }, MEMORY_CHECK_INTERVAL_MS)
   }
+
+  // Watchdog: 每 30 秒检查一次健康状态
+  let watchdogRestarts = 0
+  const MAX_AUTO_RESTARTS = 3
+  let lastAutoRestart = 0
+
+  setInterval(async () => {
+    try {
+      const health = await runHealthCheck({
+        stateDir, toolsDir: join(__dirname, 'tools'), workspacesDir, registry, log: core.log, semaphore, activeRequests
+      })
+
+      // 检查是否有 FAIL 状态
+      const failChecks = health.checks.filter(c => c.status === 'FAIL')
+      if (failChecks.length > 0) {
+        crashLog(`WATCHDOG: ${failChecks.length} FAIL checks: ${failChecks.map(c => c.name).join(', ')}`)
+
+        // 如果是内存问题，尝试 GC
+        const memCheck = health.checks.find(c => c.name === 'Memory RSS')
+        if (memCheck && memCheck.status === 'FAIL' && typeof global.gc === 'function') {
+          try {
+            global.gc()
+            const mem = process.memoryUsage()
+            crashLog(`WATCHDOG: forced GC, RSS now ${Math.round(mem.rss / 1048576)}MB`)
+          } catch {}
+        }
+
+        // 自动软重启（每 5 分钟最多一次，最多 3 次）
+        const now = Date.now()
+        if (now - lastAutoRestart > 300_000 && watchdogRestarts < MAX_AUTO_RESTARTS) {
+          crashLog(`WATCHDOG: auto-restart #${watchdogRestarts + 1} triggered by FAIL checks`)
+          if (typeof global.gc === 'function') {
+            try { global.gc() } catch {}
+          }
+          watchdogRestarts++
+          lastAutoRestart = now
+        }
+      }
+
+      // 检查卡死请求
+      const stuckCheck = health.checks.find(c => c.name === 'Active Requests')
+      if (stuckCheck && stuckCheck.status === 'WARN') {
+        crashLog(`WATCHDOG: ${stuckCheck.detail}`)
+      }
+
+      // 检查信号量死锁
+      const semCheck = health.checks.find(c => c.name === 'Semaphore')
+      if (semCheck && semCheck.status === 'FAIL') {
+        crashLog(`WATCHDOG: semaphore deadlock detected, auto-restart`)
+        const now = Date.now()
+        if (now - lastAutoRestart > 300_000 && watchdogRestarts < MAX_AUTO_RESTARTS) {
+          crashLog(`WATCHDOG: auto-restart #${watchdogRestarts + 1} triggered by semaphore deadlock`)
+          if (typeof global.gc === 'function') {
+            try { global.gc() } catch {}
+          }
+          watchdogRestarts++
+          lastAutoRestart = now
+        }
+      }
+    } catch (e) {
+      crashLog(`WATCHDOG error: ${e.message}`)
+    }
+  }, 30_000)
 }).catch(e => {
   crashLog(`init failed: ${e.stack}`)
   process.exit(1)

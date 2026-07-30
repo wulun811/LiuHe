@@ -50,13 +50,59 @@ export function readUsageStats() {
   } catch { return null }
 }
 
-export async function runHealthCheck({ stateDir, toolsDir, workspacesDir, registry, log }) {
+export async function runHealthCheck({ stateDir, toolsDir, workspacesDir, registry, log, semaphore, activeRequests }) {
   const checks = []
   let ok = true
 
   function add(name, status, detail) {
     checks.push({ name, status, detail })
     if (status === 'FAIL') ok = false
+  }
+
+  // 运行时健康检查
+  if (semaphore && activeRequests) {
+    const mem = process.memoryUsage()
+    const rssMB = Math.round(mem.rss / 1048576)
+    const heapMB = Math.round(mem.heapUsed / 1048576)
+    const heapTotalMB = Math.round(mem.heapTotal / 1048576)
+
+    // 内存检查
+    if (rssMB > 800) {
+      add('Memory RSS', 'FAIL', `${rssMB}MB > 800MB threshold`)
+    } else if (rssMB > 600) {
+      add('Memory RSS', 'WARN', `${rssMB}MB > 600MB (consider restart)`)
+    } else {
+      add('Memory RSS', 'PASS', `${rssMB}MB RSS, ${heapMB}/${heapTotalMB}MB heap`)
+    }
+
+    // 信号量检查（死锁检测）
+    const semStatus = semaphore.getStatus()
+    if (semStatus.current > semStatus.max) {
+      add('Semaphore', 'FAIL', `current=${semStatus.current} > max=${semStatus.max} (deadlock?)`)
+    } else if (semStatus.queue.length > 10) {
+      add('Semaphore', 'WARN', `queue=${semStatus.queue.length} (stuck requests?)`)
+    } else {
+      add('Semaphore', 'PASS', `${semStatus.current}/${semStatus.max} slots, queue=${semStatus.queue.length}`)
+    }
+
+    // 卡死请求检查
+    const now = Date.now()
+    const stuckRequests = []
+    for (const [id, req] of activeRequests.entries()) {
+      const elapsed = now - req.startTime
+      if (elapsed > 60000) { // 超过 60 秒
+        stuckRequests.push({ id, tool: req.name, elapsed_ms: elapsed })
+      }
+    }
+    if (stuckRequests.length > 0) {
+      add('Active Requests', 'WARN', `${stuckRequests.length} stuck >60s: ${stuckRequests.map(r => `${r.tool}(${Math.round(r.elapsed_ms/1000)}s)`).join(', ')}`)
+    } else {
+      add('Active Requests', 'PASS', `${activeRequests.size} active, none stuck`)
+    }
+
+    // 进程运行时间
+    const uptime = Math.round(process.uptime())
+    add('Uptime', 'INFO', `${Math.round(uptime/3600)}h ${Math.round((uptime%3600)/60)}m`)
   }
 
   try {
