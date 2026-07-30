@@ -88,6 +88,8 @@ fn log_crash(msg: &str, context: Option<&str>) {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    human_panic::setup_panic!();
+
     tracing_subscriber::registry()
         .with(tracing_subscriber::EnvFilter::from_default_env()
             .add_directive("malong_parse=info".parse().unwrap()))
