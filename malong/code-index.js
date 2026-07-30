@@ -687,6 +687,11 @@ class CodeIndex {
             }
           }, WATCHER_DEBOUNCE)
         })
+        self._watcher.on('error', (err) => {
+          self._core.log('warn', `[code-index] watcher error (${err.code || err.message}) — disabling watch to avoid crash`)
+          try { self._watcher.close() } catch {}
+          self._watcher = null
+        })
         self._core.log('info', `[code-index] watching ${dir}`)
       } catch (e) {
         self._core.log('warn', `[code-index] watch failed: ${e.message}`)
