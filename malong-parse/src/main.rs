@@ -61,10 +61,24 @@ fn setup_crash_log() -> PathBuf {
     data_dir.join("parse-crash.log")
 }
 
-fn log_crash(msg: &str) {
+fn log_crash(msg: &str, context: Option<&str>) {
     let crash_log = setup_crash_log();
     let timestamp = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ");
-    let line = format!("[{}] {}\n", timestamp, msg);
+    let pid = std::process::id();
+    
+    let json = if let Some(ctx) = context {
+        format!(
+            r#"{{"timestamp":"{}","pid":{},"message":"{}","context":"{}"}}"#,
+            timestamp, pid, msg.replace('"', "\\\""), ctx.replace('"', "\\\"")
+        )
+    } else {
+        format!(
+            r#"{{"timestamp":"{}","pid":{},"message":"{}"}}"#,
+            timestamp, pid, msg.replace('"', "\\\"")
+        )
+    };
+    
+    let line = format!("{}\n", json);
     let _ = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -103,7 +117,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::spawn(async move {
         signal::ctrl_c().await.ok();
         info!("received Ctrl+C, shutting down");
-        log_crash(&format!("shutdown pid={}", std::process::id()));
+        log_crash(&format!("shutdown pid={}", std::process::id()), None);
         let _ = shutdown_tx_clone.send(());
     });
 
@@ -114,7 +128,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .recv()
             .await;
         info!("received SIGTERM, shutting down");
-        log_crash(&format!("SIGTERM pid={}", std::process::id()));
+        log_crash(&format!("SIGTERM pid={}", std::process::id()), None);
         let _ = shutdown_tx.send(());
     });
 
