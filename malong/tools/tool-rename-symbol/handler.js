@@ -65,6 +65,11 @@ export async function handle(args, context) {
     return { error: 'invalid_input', message: 'new_name must differ from symbol' }
   }
 
+  // 验证 new_name 是合法标识符
+  if (!/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(newName)) {
+    return { error: 'invalid_input', message: `"${newName}" is not a valid identifier. Must match /^[a-zA-Z_$][a-zA-Z0-9_$]*$/` }
+  }
+
   codeIndexService?.initWorkspace(workspaceDir)
 
   let semanticRefs = []

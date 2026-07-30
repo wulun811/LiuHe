@@ -147,6 +147,9 @@ async function handleRun(args, context) {
     return { error: 'invalid_input', message: `Unsafe scope: "${scope}". Only alphanumeric, /, ., -, :, spaces allowed.` }
   }
   const timeout = (args.timeout ?? 60) * 1000
+  if (timeout <= 0) {
+    return { error: 'invalid_input', message: 'timeout must be a positive number (seconds)' }
+  }
   const framework = args.framework || detectFramework(workspaceDir)
 
   if (framework === 'unknown') {
@@ -216,6 +219,15 @@ async function handleSuggest(args, context) {
 
   if (!file) {
     return { error: 'missing_parameter', message: 'file is required for action=suggest' }
+  }
+
+  // 检测 file 是否为目录
+  const absFile = join(workspaceDir, file)
+  if (existsSync(absFile)) {
+    const stat = statSync(absFile)
+    if (stat.isDirectory()) {
+      return { error: 'invalid_input', message: `"${file}" is a directory, not a file. Please specify a source file path.` }
+    }
   }
 
   const framework = args.framework || detectFramework(workspaceDir)
@@ -297,6 +309,15 @@ async function handleDiscover(args, context) {
 
   if (!file) {
     return { error: 'missing_parameter', message: 'file is required for action=discover' }
+  }
+
+  // 检测 file 是否为目录
+  const absFile = join(workspaceDir, file)
+  if (existsSync(absFile)) {
+    const stat = statSync(absFile)
+    if (stat.isDirectory()) {
+      return { error: 'invalid_input', message: `"${file}" is a directory, not a file. Please specify a source file path.` }
+    }
   }
 
   const framework = args.framework || detectFramework(workspaceDir)

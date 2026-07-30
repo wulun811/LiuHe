@@ -1,5 +1,5 @@
 import { join, dirname, basename, extname } from 'node:path'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 
 const CONVENTIONS = {
   '.py': (base, dir) => [
@@ -99,6 +99,15 @@ export async function handle(args, context) {
   const file = args?.file
   if (!file) {
     return { error: 'missing_parameter', message: 'file is required' }
+  }
+
+  // 检测 file 是否为目录
+  const absFile = join(workspaceDir, file)
+  if (existsSync(absFile)) {
+    const stat = (await import('node:fs')).statSync(absFile)
+    if (stat.isDirectory()) {
+      return { error: 'invalid_input', message: `"${file}" is a directory, not a file. Please specify a source file path.` }
+    }
   }
 
   const symbol = args?.symbol

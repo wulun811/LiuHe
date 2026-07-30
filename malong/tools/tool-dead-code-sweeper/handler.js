@@ -1,4 +1,4 @@
-import { join, extname, basename } from 'node:path'
+import { join, extname, basename, dirname } from 'node:path'
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 
 const SOURCE_EXTS = new Set(['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.py', '.go', '.rs', '.java', '.rb'])
@@ -84,7 +84,16 @@ export async function handle(args, context) {
 
   const scope = args?.scope || '.'
   const includeFiles = args?.include_files === true
-  const scanDir = scope === '.' ? workspaceDir : join(workspaceDir, scope)
+  let scanDir = scope === '.' ? workspaceDir : join(workspaceDir, scope)
+
+  // 检测 scope 是否为文件路径（而非目录）
+  if (scope !== '.' && existsSync(scanDir)) {
+    const stat = statSync(scanDir)
+    if (stat.isFile()) {
+      // 调整为扫描该文件所在目录
+      scanDir = dirname(scanDir)
+    }
+  }
 
   const files = []
   walkSourceFiles(workspaceDir, scanDir, files, 500)

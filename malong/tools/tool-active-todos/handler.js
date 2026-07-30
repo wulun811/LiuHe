@@ -1,5 +1,5 @@
 import { join, extname } from 'node:path'
-import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 
 const TODO_RE = /(?:#|\/\/|\/\*|\*|--)\s*(TODO|FIXME|XXX|HACK)\s*(?:\((\w+)\))?\s*[:\-]?\s*(.*)/i
 const SOURCE_EXTS = new Set(['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.py', '.go', '.rs', '.java', '.rb', '.c', '.cpp', '.h', '.php'])
@@ -34,7 +34,68 @@ export async function handle(args, context) {
     if (f.startsWith('./')) return f.slice(2)
     return f
   }))
-  const scanDir = scope === '.' ? workspaceDir : join(workspaceDir, scope)
+  let scanDir = scope === '.' ? workspaceDir : join(workspaceDir, scope)
+
+  // 检测 scope 是否为文件路径（而非目录）
+  if (scope !== '.' && existsSync(scanDir)) {
+    const stat = statSync(scanDir)
+    if (stat.isFile()) {
+      // 直接扫描该文件
+      const relPath = scanDir.startsWith(workspaceDir + '/') ? scanDir.slice(workspaceDir.length + 1) : scanDir
+      const absPath = scanDir
+      let lines
+      try { lines = readFileSync(absPath, 'utf-8').split('\n') } catch { return { scope, total_todos: 0, todos: [], truncated: false, summary: { high: 0, medium: 0, low: 0 }, scanned_files: 0 } }
+
+      const todos = []
+      for (let i = 0; i < lines.length; i++) {
+        const m = TODO_RE.exec(lines[i])
+        if (m) {
+          todos.push({
+            type: m[1].toUpperCase(),
+            file: relPath,
+            line: i + 1,
+            content: m[3].trim(),
+            author: m[2] || null,
+          })
+        }
+      }
+
+      const now = Date.now()
+      for (const t of todos) {
+        let mtime = 0
+        try { mtime = statSync(join(workspaceDir, t.file)).mtimeMs } catch {}
+        t.file_mtime = mtime > 0 ? new Date(mtime).toISOString() : null
+
+        if (currentFiles.has(t.file)) {
+          t.priority = 'high'
+          t.reason = '文件正在被编辑'
+        } else if (now - mtime < SEVEN_DAYS) {
+          const days = Math.floor((now - mtime) / 86400000)
+          t.priority = 'medium'
+          t.reason = `文件 ${days} 天前修改过`
+        } else {
+          const days = mtime > 0 ? Math.floor((now - mtime) / 86400000) : null
+          t.priority = 'low'
+          t.reason = days !== null ? `${days} 天前修改，文件未动` : '无法获取修改时间'
+        }
+      }
+
+      const order = { high: 0, medium: 1, low: 2 }
+      todos.sort((a, b) => order[a.priority] - order[b.priority])
+
+      const summary = { high: 0, medium: 0, low: 0 }
+      for (const t of todos) summary[t.priority]++
+
+      return {
+        scope,
+        total_todos: todos.length,
+        todos: todos.slice(0, 50),
+        truncated: todos.length > 50,
+        summary,
+        scanned_files: 1,
+      }
+    }
+  }
 
   const files = []
   walkFiles(workspaceDir, scanDir, files, 500)
