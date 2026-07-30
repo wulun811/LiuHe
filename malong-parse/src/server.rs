@@ -13,7 +13,7 @@ use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use crate::cache::TreeCache;
 
 use crate::parser_pool::ParserPool;
-use crate::protocol::{Request, Response, encode_frame, decode_frame};
+use crate::protocol::{Request, Response, encode_frame, decode_frame, DecodeResult};
 use crate::extract;
 use crate::simplify;
 use crate::classify;
@@ -87,13 +87,22 @@ pub async fn handle_connection(stream: UnixStream, state: Arc<ServerState>) {
         data.extend_from_slice(&buf[..n]);
 
         // Decode all available requests and add to priority queue
-        while let Some((consumed, req)) = decode_frame(&data) {
-            data.drain(..consumed);
-            request_queue.push(PrioritizedRequest {
-                request: req,
-                sequence,
-            });
-            sequence += 1;
+        loop {
+            match decode_frame(&data) {
+                DecodeResult::Frame(req, consumed) => {
+                    data.drain(..consumed);
+                    request_queue.push(PrioritizedRequest {
+                        request: req,
+                        sequence,
+                    });
+                    sequence += 1;
+                }
+                DecodeResult::Skip(consumed) => {
+                    warn!("skipping malformed frame ({} bytes)", consumed);
+                    data.drain(..consumed);
+                }
+                DecodeResult::Incomplete => break,
+            }
         }
 
         // Process requests from priority queue

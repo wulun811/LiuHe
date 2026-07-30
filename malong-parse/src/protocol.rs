@@ -68,20 +68,26 @@ pub fn encode_frame(msg: &impl Serialize) -> Result<Vec<u8>, serde_json::Error> 
     Ok(frame)
 }
 
-pub fn decode_frame(buf: &[u8]) -> Option<(usize, Request)> {
+pub enum DecodeResult {
+    Incomplete,
+    Frame(Request, usize),
+    Skip(usize),
+}
+
+pub fn decode_frame(buf: &[u8]) -> DecodeResult {
     if buf.len() < 4 {
-        return None;
+        return DecodeResult::Incomplete;
     }
     let len = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]) as usize;
     if len > MAX_FRAME_SIZE as usize {
-        return None;
+        return DecodeResult::Skip(4);
     }
     if buf.len() < 4 + len {
-        return None;
+        return DecodeResult::Incomplete;
     }
     let payload = &buf[4..4 + len];
     match serde_json::from_slice(payload) {
-        Ok(req) => Some((4 + len, req)),
-        Err(_) => None,
+        Ok(req) => DecodeResult::Frame(req, 4 + len),
+        Err(_) => DecodeResult::Skip(4 + len),
     }
 }

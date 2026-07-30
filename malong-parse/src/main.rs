@@ -124,7 +124,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let _ = shutdown_tx_clone.send(());
     });
 
-    let _state_clone2 = state.clone();
     tokio::spawn(async move {
         signal::unix::signal(signal::unix::SignalKind::terminate())
             .expect("failed to register SIGTERM")
