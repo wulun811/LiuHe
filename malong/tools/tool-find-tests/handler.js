@@ -180,11 +180,13 @@ export async function handle(args, context) {
   }
 
   const existingTests = byConvention.filter(c => c.exists)
-  let nextStep = null
+  let nextStep
   if (existingTests.length > 0) {
     nextStep = `Run: test_bridge(action="run", scope="${existingTests[0].path}")`
   } else if (byImport.length > 0) {
     nextStep = `Run: test_bridge(action="run", scope="${byImport[0].path}")`
+  } else {
+    nextStep = 'No tests found. Consider creating tests.'
   }
 
   return {

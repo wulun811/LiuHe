@@ -234,22 +234,30 @@ process.on('unhandledRejection', (reason) => {
 
 process.on('uncaughtException', (err) => {
   process.stderr.write(`[mcp] FATAL uncaught exception: ${err.stack}\n`)
-  process.exit(1)
+  // 强制刷新 stderr 后再退出
+  process.stderr.end(() => {
+    process.exit(1)
+  })
+  // 兜底：如果 stderr.end 回调没触发，500ms 后强制退出
+  setTimeout(() => process.exit(1), 500).unref()
 })
 
 process.on('SIGPIPE', () => {
-  process.stderr.write('[mcp] SIGPIPE received, exiting\n')
-  process.exit(0)
+  // SIGPIPE 不应该导致退出——pipe 可能是临时的
+  // 只记录，不退出。如果 opencode 真的关闭了连接，stdin close 会处理
+  process.stderr.write('[mcp] SIGPIPE received (ignored, waiting for stdin close)\n')
 })
 
 process.on('SIGTERM', () => {
   process.stderr.write('[mcp] SIGTERM received, shutting down\n')
-  process.exit(0)
+  process.stderr.end(() => process.exit(0))
+  setTimeout(() => process.exit(0), 500).unref()
 })
 
 process.on('SIGINT', () => {
   process.stderr.write('[mcp] SIGINT received, shutting down\n')
-  process.exit(0)
+  process.stderr.end(() => process.exit(0))
+  setTimeout(() => process.exit(0), 500).unref()
 })
 
 let buffer = ''
@@ -270,17 +278,22 @@ process.stdin.on('data', chunk => {
   }
 })
 
+let _stdinClosed = false
 process.stdin.on('end', () => {
-  if (_initialized) {
-    process.stderr.write('[mcp] stdin closed after init, exiting\n')
-    process.exit(0)
+  if (_initialized && !_stdinClosed) {
+    _stdinClosed = true
+    process.stderr.write('[mcp] stdin ended after init, exiting\n')
+    process.stderr.end(() => process.exit(0))
+    setTimeout(() => process.exit(0), 500).unref()
   }
 })
 
 process.stdin.on('close', () => {
-  if (_initialized) {
+  if (_initialized && !_stdinClosed) {
+    _stdinClosed = true
     process.stderr.write('[mcp] stdin closed after init, exiting\n')
-    process.exit(0)
+    process.stderr.end(() => process.exit(0))
+    setTimeout(() => process.exit(0), 500).unref()
   }
 })
 

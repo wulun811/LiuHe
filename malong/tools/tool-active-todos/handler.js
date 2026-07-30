@@ -146,11 +146,13 @@ export async function handle(args, context) {
   const summary = { high: 0, medium: 0, low: 0 }
   for (const t of todos) summary[t.priority]++
 
-  let nextStep = null
+  let nextStep
   if (summary.high > 0) {
     nextStep = `Address ${summary.high} high-priority TODOs in current files.`
   } else if (todos.length > 0) {
     nextStep = `Review TODOs above. Prioritize by file modification recency.`
+  } else {
+    nextStep = 'No TODOs found. Code is clean.'
   }
 
   return {
