@@ -152,8 +152,8 @@ export async function init(core) {
             results.push({ severity: 'warn', category: 'quality', message: `代码质量总分 ${(q.overall * 100).toFixed(0)}/100，低于建议值 60`, line: 1 })
           }
           for (const [dim, info] of Object.entries(q.dimensions || {})) {
-            if (info.score < 0.5) {
-              results.push({ severity: 'info', category: 'quality', message: `维度 "${dim}" 得分 ${(info.score * 100).toFixed(0)}/100: ${info.description || ''}`, line: 1 })
+            if (info.value < 0.5) {
+              results.push({ severity: 'info', category: 'quality', message: `维度 "${dim}" 得分 ${(info.value * 100).toFixed(0)}/100`, line: 1 })
             }
           }
           results._qualityScore = q
