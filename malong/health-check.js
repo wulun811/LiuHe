@@ -50,7 +50,7 @@ export function readUsageStats() {
   } catch { return null }
 }
 
-export async function runHealthCheck({ stateDir, toolsDir, workspacesDir, registry, log, semaphore, activeRequests }) {
+export async function runHealthCheck({ stateDir, toolsDir, workspacesDir, registry, log, semaphore, activeRequests, parseService }) {
   const checks = []
   let ok = true
 
@@ -103,6 +103,19 @@ export async function runHealthCheck({ stateDir, toolsDir, workspacesDir, regist
     // 进程运行时间
     const uptime = Math.round(process.uptime())
     add('Uptime', 'INFO', `${Math.round(uptime/3600)}h ${Math.round((uptime%3600)/60)}m`)
+
+    // 解析服务检查（Rust malong-parse）
+    if (parseService) {
+      const mode = parseService.getMode()
+      const isRust = parseService.isRustService()
+      if (isRust) {
+        add('Parse Service', 'PASS', `rust-service mode, config=${parseService.getConfigMode?.() || '?'}`)
+      } else if (mode === 'builtin') {
+        add('Parse Service', 'INFO', `builtin mode (fallback), env=${parseService.getConfigMode?.() || '?'}`)
+      } else {
+        add('Parse Service', 'WARN', `unexpected mode: ${mode}`)
+      }
+    }
   }
 
   try {

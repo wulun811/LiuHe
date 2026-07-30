@@ -204,7 +204,8 @@ async function initModules() {
   crashLog(`modules initialized, stateDir=${stateDir}, tools=${registry.getToolCount()}, concurrency=${concurrency}, pid=${process.pid}`)
 
   const health = await runHealthCheck({
-    stateDir, toolsDir, workspacesDir, registry, log: core.log, semaphore, activeRequests
+    stateDir, toolsDir, workspacesDir, registry, log: core.log, semaphore, activeRequests,
+    parseService: core.getService('langParser'),
   })
   for (const c of health.checks) {
     safeLog(`[health] ${c.status === 'PASS' ? '✓' : c.status === 'CLEANED' ? '♻' : '✗'} ${c.name}: ${c.detail}`)
@@ -225,7 +226,8 @@ function buildContext() {
     repoMapService: core.getService('repoMap'),
     langParserService: core.getService('langParser'),
     runHealthCheck: () => runHealthCheck({
-      stateDir, toolsDir: join(__dirname, 'tools'), workspacesDir, registry, log: core.log, semaphore, activeRequests
+      stateDir, toolsDir: join(__dirname, 'tools'), workspacesDir, registry, log: core.log, semaphore, activeRequests,
+      parseService: core.getService('langParser'),
     }),
     semaphore,
     activeRequests,
