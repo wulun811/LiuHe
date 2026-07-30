@@ -9,6 +9,8 @@ const SOCKET_PATH = `/tmp/malong-parse-${process.getuid()}.sock`
 const CONNECT_TIMEOUT_MS = 3000
 const REQUEST_TIMEOUT_MS = 30000
 const MAX_RETRIES = 2
+const HEARTBEAT_INTERVAL_MS = 30000
+const CIRCUIT_BREAKER_THRESHOLD = 3
 
 let _core = null
 let _socket = null
@@ -17,6 +19,9 @@ let _connecting = false
 let _pending = new Map()
 let _reqId = 0
 let _buffer = Buffer.alloc(0)
+let _heartbeatTimer = null
+let _circuitFailures = 0
+let _circuitOpen = false  // true = stop trying Rust, use builtin
 
 export const name = 'malong-parse-client'
 export const version = '0.1.0'
@@ -67,6 +72,8 @@ export async function connect() {
       _connected = true
       _connecting = false
       _setupHandlers()
+      _startHeartbeat()
+      _circuitRecordSuccess()
       _core?.log('info', '[parse-client] connected to malong-parse')
       resolve(true)
     })
@@ -89,17 +96,60 @@ function _setupHandlers() {
   _socket.on('close', () => {
     _connected = false
     _socket = null
+    _stopHeartbeat()
     _core?.log('warn', '[parse-client] connection closed')
     // 拒绝所有 pending 请求
     for (const [id, { reject }] of _pending) {
       reject(new Error('connection closed'))
     }
     _pending.clear()
+    // auto-reconnect after 1s
+    setTimeout(() => {
+      _core?.log('info', '[parse-client] attempting reconnect...')
+      connect().catch(() => {})
+    }, 1000)
   })
 
   _socket.on('error', (err) => {
     _core?.log('error', `[parse-client] socket error: ${err.message}`)
   })
+}
+
+function _startHeartbeat() {
+  _stopHeartbeat()
+  _heartbeatTimer = setInterval(() => {
+    if (!_connected) return
+    request('health', {}, 5000).catch(() => {
+      _core?.log('warn', '[parse-client] heartbeat failed')
+    })
+  }, HEARTBEAT_INTERVAL_MS)
+  if (_heartbeatTimer.unref) _heartbeatTimer.unref()
+}
+
+function _stopHeartbeat() {
+  if (_heartbeatTimer) {
+    clearInterval(_heartbeatTimer)
+    _heartbeatTimer = null
+  }
+}
+
+function _circuitRecordFailure() {
+  _circuitFailures++
+  if (_circuitFailures >= CIRCUIT_BREAKER_THRESHOLD) {
+    _circuitOpen = true
+    _core?.log('warn', `[parse-client] circuit breaker OPEN after ${_circuitFailures} failures, using builtin`)
+    // try half-open after 60s
+    setTimeout(() => {
+      _circuitOpen = false
+      _circuitFailures = 0
+      _core?.log('info', '[parse-client] circuit breaker half-open, retrying...')
+      connect().catch(() => {})
+    }, 60000)
+  }
+}
+
+function _circuitRecordSuccess() {
+  _circuitFailures = 0
 }
 
 function _processBuffer() {
@@ -129,6 +179,10 @@ function _processBuffer() {
 }
 
 async function request(method, params, timeoutMs = REQUEST_TIMEOUT_MS) {
+  if (_circuitOpen) {
+    throw new Error('circuit breaker open')
+  }
+
   if (!_connected) {
     const ok = await connect()
     if (!ok) throw new Error('not connected to malong-parse')
@@ -143,10 +197,15 @@ async function request(method, params, timeoutMs = REQUEST_TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       _pending.delete(id)
+      _circuitRecordFailure()
       reject(new Error(`request timeout after ${timeoutMs}ms`))
     }, timeoutMs)
 
-    _pending.set(id, { resolve, reject, timer })
+    _pending.set(id, {
+      resolve: (v) => { _circuitRecordSuccess(); resolve(v) },
+      reject: (e) => { _circuitRecordFailure(); reject(e) },
+      timer,
+    })
     _socket.write(frame)
   })
 }

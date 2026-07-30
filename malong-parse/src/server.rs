@@ -1,8 +1,9 @@
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
+use tokio::sync::Semaphore;
 use tracing::{info, warn, error};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
@@ -14,11 +15,15 @@ use crate::extract;
 use crate::simplify;
 use crate::classify;
 
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+const MAX_CONCURRENCY: usize = 16;
+
 pub struct ServerState {
     pub parser_pool: ParserPool,
     pub start_time: Instant,
     pub requests_served: tokio::sync::Mutex<u64>,
     pub cache: std::sync::Mutex<TreeCache>,
+    pub concurrency: Semaphore,
 }
 
 impl ServerState {
@@ -28,6 +33,7 @@ impl ServerState {
             start_time: Instant::now(),
             requests_served: tokio::sync::Mutex::new(0),
             cache: Mutex::new(TreeCache::new()),
+            concurrency: Semaphore::new(MAX_CONCURRENCY),
         }
     }
 }
@@ -52,6 +58,7 @@ pub async fn handle_connection(stream: UnixStream, state: Arc<ServerState>) {
             data.drain(..consumed);
             let response = handle_request(req, &state).await;
 
+
             match encode_frame(&response) {
                 Ok(frame) => {
                     if let Err(e) = writer.write_all(&frame).await {
@@ -67,31 +74,57 @@ pub async fn handle_connection(stream: UnixStream, state: Arc<ServerState>) {
     }
 }
 
-async fn handle_request(req: Request, state: &ServerState) -> Response {
-    let start = Instant::now();
+async fn handle_request(req: Request, state: &Arc<ServerState>) -> Response {
+    // concurrency limit
+    let _permit = match tokio::time::timeout(Duration::from_millis(500), state.concurrency.acquire()).await {
+        Ok(Ok(permit)) => permit,
+        _ => return Response::error(req.id, "SERVER_BUSY", "too many concurrent requests"),
+    };
 
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        dispatch(req.clone(), state)
-    }));
+    let start = Instant::now();
+    let state_arc = state.clone();
+    let req_id = req.id.clone();
+    let req_method = req.method.clone();
+
+    let result = tokio::time::timeout(REQUEST_TIMEOUT, async move {
+        match tokio::task::spawn_blocking(move || {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| dispatch(req, &state_arc)))
+        })
+        .await
+        {
+            Ok(r) => r,
+            Err(je) => Err(Box::new(je.to_string()) as Box<dyn std::any::Any + Send>),
+        }
+    })
+    .await;
 
     let duration = start.elapsed();
 
     match result {
-        Ok(resp) => {
+        Ok(Ok(resp)) => {
             let mut count = state.requests_served.lock().await;
             *count += 1;
-            info!("{} {} -> {}ms", req.method, req.id, duration.as_millis());
+            let ms = duration.as_millis();
+            if ms > 100 {
+                info!("SLOW {} {} -> {}ms", req_method, req_id, ms);
+            } else {
+                info!("{} {} -> {}ms", req_method, req_id, ms);
+            }
             resp
         }
-        Err(panic_info) => {
+        Ok(Err(panic_info)) => {
             let msg = panic_info
                 .downcast_ref::<&str>()
                 .map(|s| s.to_string())
                 .or_else(|| panic_info.downcast_ref::<String>().cloned())
                 .unwrap_or_else(|| "unknown panic".to_string());
 
-            error!("PANIC in {}: {}", req.method, msg);
-            Response::error_with_detail(req.id, "PARSE_PANIC", "tree-sitter panic recovered", msg)
+            error!("PANIC in {}: {}", req_method, msg);
+            Response::error_with_detail(req_id, "PARSE_PANIC", "tree-sitter panic recovered", msg)
+        }
+        Err(_) => {
+            error!("TIMEOUT {} {} after {}ms", req_method, req_id, REQUEST_TIMEOUT.as_millis());
+            Response::error(req_id, "REQUEST_TIMEOUT", "request timed out")
         }
     }
 }
