@@ -1,11 +1,15 @@
-use std::path::Path;
 use std::time::{Duration, Instant};
+use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use lru::LruCache;
 use tree_sitter::Tree;
 
 const MAX_ENTRIES: usize = 100;
 const MAX_MEMORY_BYTES: u64 = 50 * 1024 * 1024;
 const TTL: Duration = Duration::from_secs(300);
+
+const SOURCE_CACHE_MAX: usize = 50;
+const SOURCE_CACHE_TTL: Duration = Duration::from_secs(300);
 
 #[derive(Hash, PartialEq, Eq, Clone)]
 pub struct CacheKey {
@@ -120,6 +124,73 @@ impl TreeCache {
             "misses": self.misses,
             "hit_ratio": if self.hits + self.misses > 0 { self.hits as f64 / (self.hits + self.misses) as f64 } else { 0.0 },
             "ttl_secs": TTL.as_secs(),
+        })
+    }
+}
+
+fn content_hash(source: &str, ext: &str) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    source.hash(&mut hasher);
+    ext.hash(&mut hasher);
+    hasher.finish()
+}
+
+struct SourceCacheEntry {
+    result: serde_json::Value,
+    created_at: Instant,
+}
+
+pub struct SourceCache {
+    entries: HashMap<u64, SourceCacheEntry>,
+    order: Vec<u64>,
+    hits: u64,
+    misses: u64,
+}
+
+impl SourceCache {
+    pub fn new() -> Self {
+        Self { entries: HashMap::new(), order: Vec::new(), hits: 0, misses: 0 }
+    }
+
+    pub fn get(&mut self, source: &str, ext: &str) -> Option<serde_json::Value> {
+        let key = content_hash(source, ext);
+        let expired = self.entries.get(&key).map(|e| e.created_at.elapsed() > SOURCE_CACHE_TTL).unwrap_or(false);
+        if expired {
+            self.entries.remove(&key);
+            self.order.retain(|k| *k != key);
+            self.misses += 1;
+            return None;
+        }
+        if let Some(entry) = self.entries.get(&key) {
+            self.hits += 1;
+            return Some(entry.result.clone());
+        }
+        self.misses += 1;
+        None
+    }
+
+    pub fn insert(&mut self, source: &str, ext: &str, result: serde_json::Value) {
+        let key = content_hash(source, ext);
+        if self.entries.contains_key(&key) {
+            self.entries.get_mut(&key).unwrap().result = result;
+            return;
+        }
+        if self.entries.len() >= SOURCE_CACHE_MAX {
+            if let Some(oldest) = self.order.first().copied() {
+                self.entries.remove(&oldest);
+                self.order.remove(0);
+            }
+        }
+        self.order.push(key);
+        self.entries.insert(key, SourceCacheEntry { result, created_at: Instant::now() });
+    }
+
+    pub fn stats(&self) -> serde_json::Value {
+        serde_json::json!({
+            "entries": self.entries.len(),
+            "max_entries": SOURCE_CACHE_MAX,
+            "hits": self.hits,
+            "misses": self.misses,
         })
     }
 }

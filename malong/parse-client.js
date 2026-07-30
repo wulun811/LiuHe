@@ -287,10 +287,27 @@ async function request(method, params, timeoutMs = REQUEST_TIMEOUT_MS, priority 
   }
 
   const id = `req-${++_reqId}`
-  const msg = JSON.stringify({ id, method, params, priority })
-  const frame = Buffer.alloc(4 + Buffer.byteLength(msg))
-  frame.writeUInt32BE(Buffer.byteLength(msg), 0)
-  frame.write(msg, 4)
+
+  let frame
+  const rawSource = params?.source
+  if (rawSource && typeof rawSource === 'string') {
+    const { source, ...restParams } = params
+    const sourceBuf = Buffer.from(source, 'utf-8')
+    const header = JSON.stringify({ id, method, params: { ...restParams, source_len: sourceBuf.length }, priority })
+    const headerBuf = Buffer.from(header, 'utf-8')
+    const totalLen = 4 + headerBuf.length + sourceBuf.length
+    frame = Buffer.alloc(4 + totalLen)
+    frame.writeUInt32BE(totalLen, 0)
+    frame.writeUInt32BE(headerBuf.length, 4)
+    headerBuf.copy(frame, 8)
+    sourceBuf.copy(frame, 8 + headerBuf.length)
+  } else {
+    const msg = JSON.stringify({ id, method, params, priority })
+    const msgBuf = Buffer.from(msg, 'utf-8')
+    frame = Buffer.alloc(4 + msgBuf.length)
+    frame.writeUInt32BE(msgBuf.length, 0)
+    msgBuf.copy(frame, 4)
+  }
 
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {

@@ -10,10 +10,10 @@ use tokio::sync::Semaphore;
 use tracing::{info, warn, error};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
-use crate::cache::TreeCache;
+use crate::cache::{TreeCache, SourceCache};
 
 use crate::parser_pool::ParserPool;
-use crate::protocol::{Request, Response, encode_frame, decode_frame, DecodeResult};
+use crate::protocol::{Response, DecodedRequest, encode_frame, decode_frame, DecodeResult};
 use crate::extract;
 use crate::simplify;
 use crate::classify;
@@ -26,6 +26,7 @@ pub struct ServerState {
     pub start_time: Instant,
     pub requests_served: tokio::sync::Mutex<u64>,
     pub cache: std::sync::Mutex<TreeCache>,
+    pub source_cache: std::sync::Mutex<SourceCache>,
     pub concurrency: Semaphore,
     pub lang_stats: std::sync::Mutex<HashMap<String, u64>>,
     pub sym_count_buckets: std::sync::Mutex<[u64; 5]>, // 0-10, 11-50, 51-200, 201-1000, 1000+
@@ -39,6 +40,7 @@ impl ServerState {
             start_time: Instant::now(),
             requests_served: tokio::sync::Mutex::new(0),
             cache: Mutex::new(TreeCache::new()),
+            source_cache: Mutex::new(SourceCache::new()),
             concurrency: Semaphore::new(MAX_CONCURRENCY),
             lang_stats: Mutex::new(HashMap::new()),
             sym_count_buckets: Mutex::new([0; 5]),
@@ -48,16 +50,21 @@ impl ServerState {
 }
 
 // Priority queue wrapper for requests
-#[derive(Eq, PartialEq)]
 struct PrioritizedRequest {
-    request: Request,
-    sequence: u64,  // For FIFO within same priority
+    decoded: DecodedRequest,
+    sequence: u64,
 }
+
+impl PartialEq for PrioritizedRequest {
+    fn eq(&self, other: &Self) -> bool {
+        self.sequence == other.sequence
+    }
+}
+impl Eq for PrioritizedRequest {}
 
 impl Ord for PrioritizedRequest {
     fn cmp(&self, other: &Self) -> Ordering {
-        // Higher priority first, then lower sequence (earlier) first
-        other.request.priority.cmp(&self.request.priority)
+        other.decoded.request.priority.cmp(&self.decoded.request.priority)
             .then_with(|| other.sequence.cmp(&self.sequence))
     }
 }
@@ -89,10 +96,10 @@ pub async fn handle_connection(stream: UnixStream, state: Arc<ServerState>) {
         // Decode all available requests and add to priority queue
         loop {
             match decode_frame(&data) {
-                DecodeResult::Frame(req, consumed) => {
+                DecodeResult::Frame(decoded, consumed) => {
                     data.drain(..consumed);
                     request_queue.push(PrioritizedRequest {
-                        request: req,
+                        decoded,
                         sequence,
                     });
                     sequence += 1;
@@ -107,7 +114,7 @@ pub async fn handle_connection(stream: UnixStream, state: Arc<ServerState>) {
 
         // Process requests from priority queue
         while let Some(prioritized) = request_queue.pop() {
-            let response = handle_request(prioritized.request, &state).await;
+            let response = handle_request(prioritized.decoded, &state).await;
 
             match encode_frame(&response) {
                 Ok(frame) => {
@@ -124,21 +131,21 @@ pub async fn handle_connection(stream: UnixStream, state: Arc<ServerState>) {
     }
 }
 
-async fn handle_request(req: Request, state: &Arc<ServerState>) -> Response {
+async fn handle_request(decoded: DecodedRequest, state: &Arc<ServerState>) -> Response {
     // concurrency limit
     let _permit = match tokio::time::timeout(Duration::from_millis(500), state.concurrency.acquire()).await {
         Ok(Ok(permit)) => permit,
-        _ => return Response::error(req.id, "SERVER_BUSY", "too many concurrent requests"),
+        _ => return Response::error(decoded.request.id, "SERVER_BUSY", "too many concurrent requests"),
     };
 
     let start = Instant::now();
     let state_arc = state.clone();
-    let req_id = req.id.clone();
-    let req_method = req.method.clone();
+    let req_id = decoded.request.id.clone();
+    let req_method = decoded.request.method.clone();
 
     let result = tokio::time::timeout(REQUEST_TIMEOUT, async move {
         match tokio::task::spawn_blocking(move || {
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| dispatch(req, &state_arc)))
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| dispatch(decoded, &state_arc)))
         })
         .await
         {
@@ -179,7 +186,15 @@ async fn handle_request(req: Request, state: &Arc<ServerState>) -> Response {
     }
 }
 
-fn resolve_source(params: &serde_json::Value) -> Result<(String, String, String), String> {
+fn resolve_source(params: &serde_json::Value, raw_source: Option<&[u8]>) -> Result<(String, String, String), String> {
+    if let Some(raw) = raw_source {
+        let ext = params["ext"].as_str().unwrap_or("");
+        if raw.len() > 1_000_000 {
+            return Err("source exceeds 1MB limit".to_string());
+        }
+        let source = String::from_utf8_lossy(raw).into_owned();
+        return Ok((source, ext.to_string(), String::new()));
+    }
     if let Some(source) = params["source"].as_str() {
         let ext = params["ext"].as_str().unwrap_or("");
         if source.len() > 1_000_000 {
@@ -251,7 +266,9 @@ fn record_hot_file(state: &ServerState, file_path: &str) {
     }
 }
 
-fn dispatch(req: Request, state: &ServerState) -> Response {
+fn dispatch(decoded: DecodedRequest, state: &ServerState) -> Response {
+    let req = decoded.request;
+    let raw_source = decoded.raw_source;
     let params = req.params;
 
     match req.method.as_str() {
@@ -259,6 +276,7 @@ fn dispatch(req: Request, state: &ServerState) -> Response {
             let uptime = state.start_time.elapsed().as_secs();
             let count = state.requests_served.try_lock().map(|c| *c).unwrap_or(0);
             let cache_stats = state.cache.lock().unwrap().stats();
+            let source_cache_stats = state.source_cache.lock().unwrap().stats();
             let lang_stats = state.lang_stats.lock().unwrap();
             let sym_buckets = state.sym_count_buckets.lock().unwrap();
             let hot_files = state.hot_files.lock().unwrap();
@@ -274,6 +292,7 @@ fn dispatch(req: Request, state: &ServerState) -> Response {
                 "parsers_loaded": state.parser_pool.supported_languages(),
                 "requests_served": count,
                 "cache": cache_stats,
+                "source_cache": source_cache_stats,
                 "stats": {
                     "by_language": *lang_stats,
                     "symbol_counts": {
@@ -289,7 +308,7 @@ fn dispatch(req: Request, state: &ServerState) -> Response {
         }
 
         "extract_all" => {
-            let (source, ext, file_path) = match resolve_source(&params) {
+            let (source, ext, file_path) = match resolve_source(&params, raw_source.as_deref()) {
                 Ok(v) => v,
                 Err(e) => return Response::error(req.id, "BAD_REQUEST", &e),
             };
@@ -307,6 +326,11 @@ fn dispatch(req: Request, state: &ServerState) -> Response {
                     record_stats(state, &ext, result.symbols.len());
                     return Response::success(req.id, serde_json::to_value(result).unwrap_or(serde_json::Value::Null));
                 }
+            } else {
+                let mut sc = state.source_cache.lock().unwrap();
+                if let Some(cached) = sc.get(&source, &ext) {
+                    return Response::success(req.id, cached);
+                }
             }
 
             match state.parser_pool.parse(&source, language) {
@@ -314,17 +338,20 @@ fn dispatch(req: Request, state: &ServerState) -> Response {
                     let result = extract::extract_all(&tree, &source, language);
                     record_stats(state, &ext, result.symbols.len());
                     record_hot_file(state, &file_path);
+                    let value = serde_json::to_value(result).unwrap();
                     if !file_path.is_empty() {
                         state.cache.lock().unwrap().insert(&file_path, tree, source, language.to_string());
+                    } else {
+                        state.source_cache.lock().unwrap().insert(&source, &ext, value.clone());
                     }
-                    Response::success(req.id, serde_json::to_value(result).unwrap())
+                    Response::success(req.id, value)
                 }
                 Err(e) => Response::error(req.id, "PARSE_ERROR", &e),
             }
         }
 
         "extract_symbols" => {
-            let (source, ext, file_path) = match resolve_source(&params) {
+            let (source, ext, file_path) = match resolve_source(&params, raw_source.as_deref()) {
                 Ok(v) => v,
                 Err(e) => return Response::error(req.id, "BAD_REQUEST", &e),
             };
@@ -355,7 +382,7 @@ fn dispatch(req: Request, state: &ServerState) -> Response {
         }
 
         "extract_top_level" => {
-            let (source, ext, file_path) = match resolve_source(&params) {
+            let (source, ext, file_path) = match resolve_source(&params, raw_source.as_deref()) {
                 Ok(v) => v,
                 Err(e) => return Response::error(req.id, "BAD_REQUEST", &e),
             };
@@ -386,7 +413,7 @@ fn dispatch(req: Request, state: &ServerState) -> Response {
         }
 
         "extract_references" => {
-            let (source, ext, file_path) = match resolve_source(&params) {
+            let (source, ext, file_path) = match resolve_source(&params, raw_source.as_deref()) {
                 Ok(v) => v,
                 Err(e) => return Response::error(req.id, "BAD_REQUEST", &e),
             };
@@ -417,7 +444,7 @@ fn dispatch(req: Request, state: &ServerState) -> Response {
         }
 
         "has_errors" => {
-            let (source, ext, file_path) = match resolve_source(&params) {
+            let (source, ext, file_path) = match resolve_source(&params, raw_source.as_deref()) {
                 Ok(v) => v,
                 Err(e) => return Response::error(req.id, "BAD_REQUEST", &e),
             };
@@ -440,7 +467,7 @@ fn dispatch(req: Request, state: &ServerState) -> Response {
         }
 
         "simplify_ast" => {
-            let (source, ext, file_path) = match resolve_source(&params) {
+            let (source, ext, file_path) = match resolve_source(&params, raw_source.as_deref()) {
                 Ok(v) => v,
                 Err(e) => return Response::error(req.id, "BAD_REQUEST", &e),
             };
@@ -471,7 +498,7 @@ fn dispatch(req: Request, state: &ServerState) -> Response {
         }
 
         "compute_metrics" => {
-            let (source, ext, file_path) = match resolve_source(&params) {
+            let (source, ext, file_path) = match resolve_source(&params, raw_source.as_deref()) {
                 Ok(v) => v,
                 Err(e) => return Response::error(req.id, "BAD_REQUEST", &e),
             };
