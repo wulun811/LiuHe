@@ -1,7 +1,7 @@
 {
   "name": "naming_consistency",
   "version": "1.1.0",
-  "description": "New symbols vs project naming: style (snake/camel/Pascal) + verb consistency. Call reindex first. Returns suggestions.",
+  "description": "New symbols vs project naming: style (snake/camel/Pascal) + verb consistency. Index required. Pairs with guard_patterns before commit. Returns suggestions.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -15,7 +15,9 @@
       },
       "new_symbols": {
         "type": "array",
-        "items": { "type": "string" },
+        "items": {
+          "type": "string"
+        },
         "description": "New function/class/variable names to check"
       },
       "lang": {
@@ -23,11 +25,21 @@
         "description": "Optional: python|javascript|typescript|go|rust|java (default: by extension)"
       }
     },
-    "required": ["workspace_dir", "file", "new_symbols"],
+    "required": [
+      "workspace_dir",
+      "file",
+      "new_symbols"
+    ],
     "additionalProperties": false
   },
   "handler": "./handler.js",
   "protocol_version": "1.0",
-  "tags": ["naming", "style", "consistency"],
-  "dependencies": ["reindex"]
+  "tags": [
+    "naming",
+    "style",
+    "consistency"
+  ],
+  "dependencies": [
+    "reindex"
+  ]
 }

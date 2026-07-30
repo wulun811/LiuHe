@@ -176,6 +176,9 @@ export async function handle(args, context) {
     file,
     rules_active: allRules.length,
     violations,
+    next_step: violations.length
+      ? 'Fix violations, then re-run guard_patterns.'
+      : 'Clean. Verify with test_bridge(action="run").',
     ...(allWarnings.length ? { warnings: allWarnings } : {}),
   }
 }

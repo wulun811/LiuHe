@@ -434,6 +434,9 @@ export async function handle(args, context) {
     declared_deps: Object.keys(deps).length,
     issues,
     dependencies_found: dependenciesFound,
+    next_step: issues.length
+      ? 'Add missing deps to manifest, then re-run to verify.'
+      : 'Dependencies OK. Next: guard_patterns for code quality.',
     warnings: [...importWarnings, ...manifestWarnings].length ? [...importWarnings, ...manifestWarnings] : undefined,
   }
 }

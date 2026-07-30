@@ -1,18 +1,35 @@
 {
   "name": "symbol_search",
   "version": "1.0.0",
-  "description": "Find function/class/method definitions by name. Prefer over grep for symbol lookup. For finding usages, use references.",
+  "description": "Find function/class/method definitions by name. Prefer over grep for symbol lookup. Before modifying found symbols, use impact_analysis. For finding usages, use references.",
   "inputSchema": {
     "type": "object",
     "properties": {
-      "workspace_dir": { "type": "string", "description": "REQUIRED: Absolute path to the project root directory. Call reindex first if this is a new workspace." },
-      "query": { "type": "string", "description": "Symbol name substring to search (case-sensitive)" },
-      "limit": { "type": "number", "description": "Max results (default 30)" }
+      "workspace_dir": {
+        "type": "string",
+        "description": "REQUIRED: Absolute path to the project root directory. Call reindex first if this is a new workspace."
+      },
+      "query": {
+        "type": "string",
+        "description": "Symbol name substring to search (case-sensitive)"
+      },
+      "limit": {
+        "type": "number",
+        "description": "Max results (default 30)"
+      }
     },
-    "required": ["workspace_dir", "query"]
+    "required": [
+      "workspace_dir",
+      "query"
+    ]
   },
   "handler": "./handler.js",
   "protocol_version": "1.0",
-  "tags": ["search", "symbol"],
-  "dependencies": ["reindex"]
+  "tags": [
+    "search",
+    "symbol"
+  ],
+  "dependencies": [
+    "reindex"
+  ]
 }

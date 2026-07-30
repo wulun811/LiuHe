@@ -1,7 +1,7 @@
 {
   "name": "diff_facts",
   "version": "1.1.0",
-  "description": "After edit_transaction: AST symbol changes, caller/test sync. No git.",
+  "description": "After edit_transaction: AST symbol changes, caller/test sync. No git. If test_sync found, verify: test_bridge.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -14,11 +14,19 @@
         "description": "\"last_txn\" (default) or \"txn:<id>\" (get id from edit_transaction action=begin)"
       }
     },
-    "required": ["workspace_dir"],
+    "required": [
+      "workspace_dir"
+    ],
     "additionalProperties": false
   },
   "handler": "./handler.js",
   "protocol_version": "1.0",
-  "tags": ["diff", "transaction", "ast"],
-  "dependencies": ["edit_transaction"]
+  "tags": [
+    "diff",
+    "transaction",
+    "ast"
+  ],
+  "dependencies": [
+    "edit_transaction"
+  ]
 }

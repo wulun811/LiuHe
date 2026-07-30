@@ -90,6 +90,10 @@ export async function handle(args, context) {
     const stats = getCumulativeStats()
     result.cumulative_stats = stats
 
+    if (result.success && !dryRun) {
+      result.next_step = 'Verify: fix_imports. Run tests: test_bridge(action="run").'
+    }
+
     return result
 
   } catch (e) {

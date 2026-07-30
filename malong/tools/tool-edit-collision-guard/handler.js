@@ -105,7 +105,7 @@ export async function handle(args, context) {
     snapshots.delete(key)
     snapshots.set(key, { hash, lines, seq: ++logicalClock, size: stat.size })
     evictIfNeeded()
-    return { status: 'recorded', file, hash }
+    return { status: 'recorded', file, hash, next_step: 'Snapshot saved. Remember to check before editing.' }
   }
 
   if (!existsSync(absPath)) {
@@ -121,7 +121,7 @@ export async function handle(args, context) {
 
   const currentHash = contentHashFast(absPath)
   if (currentHash === snap.hash) {
-    return { status: 'up_to_date', file, recommendation: 'safe to edit' }
+    return { status: 'up_to_date', file, recommendation: 'safe to edit', next_step: 'Safe to edit. Use edit_transaction or edit_batch.' }
   }
 
   const modifiedBy = classifyModification(workspaceDir, file, snap.hash)
@@ -133,6 +133,7 @@ export async function handle(args, context) {
     read_seq: snap.seq,
     modified_by: modifiedBy,
     recommendation: 're-read file before editing',
+    next_step: 'File changed externally. Re-read file, then record_read again.',
     warning: modifiedBy === 'external'
       ? 'file modified externally since last read, old_string may be based on stale version'
       : 'file modified within this transaction, usually safe (self-modified)'

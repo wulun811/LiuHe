@@ -1,26 +1,65 @@
 {
   "name": "call_chain",
   "version": "1.1.0",
-  "description": "Callers/callees at a specific line. Use when you know the line but not the symbol name.",
+  "description": "Callers/callees at a specific line. Use when you know the line but not the symbol name. For symbol-level blast radius, use impact_analysis.",
   "inputSchema": {
     "type": "object",
     "properties": {
-      "workspace_dir": { "type": "string", "description": "REQUIRED: Absolute path to the project root directory. Call reindex first." },
-      "file": { "type": "string", "description": "File path relative to workspace_dir (e.g. \"src/auth.py\")" },
-      "line": { "type": "number", "description": "Line number of the function to analyze. Provide this OR symbol (at least one required)." },
-      "symbol": { "type": "string", "description": "Symbol name to analyze. Provide this OR line (at least one required). If both provided, symbol takes precedence." },
-      "depth": { "type": "number", "description": "Call chain depth (default: 2, max: 10)" },
-      "max_callers": { "type": "number", "description": "Max callers to return (default: 20)" },
-      "max_callees": { "type": "number", "description": "Max callees to return (default: 20)" }
+      "workspace_dir": {
+        "type": "string",
+        "description": "REQUIRED: Absolute path to the project root directory. Call reindex first."
+      },
+      "file": {
+        "type": "string",
+        "description": "File path relative to workspace_dir (e.g. \"src/auth.py\")"
+      },
+      "line": {
+        "type": "number",
+        "description": "Line number of the function to analyze. Provide this OR symbol (at least one required)."
+      },
+      "symbol": {
+        "type": "string",
+        "description": "Symbol name to analyze. Provide this OR line (at least one required). If both provided, symbol takes precedence."
+      },
+      "depth": {
+        "type": "number",
+        "description": "Call chain depth (default: 2, max: 10)"
+      },
+      "max_callers": {
+        "type": "number",
+        "description": "Max callers to return (default: 20)"
+      },
+      "max_callees": {
+        "type": "number",
+        "description": "Max callees to return (default: 20)"
+      }
     },
-    "required": ["workspace_dir", "file"],
+    "required": [
+      "workspace_dir",
+      "file"
+    ],
     "anyOf": [
-      { "required": ["line"] },
-      { "required": ["symbol"] }
+      {
+        "required": [
+          "line"
+        ]
+      },
+      {
+        "required": [
+          "symbol"
+        ]
+      }
     ]
   },
   "handler": "./handler.js",
   "protocol_version": "1.0",
-  "tags": ["call", "chain", "callers", "callees"],
-  "dependencies": ["reindex"]
+  "tags": [
+    "call",
+    "chain",
+    "callers",
+    "callees"
+  ],
+  "dependencies": [
+    "reindex"
+  ]
 }

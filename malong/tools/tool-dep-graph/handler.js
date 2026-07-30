@@ -32,5 +32,9 @@ export async function handle(args, context) {
 
   const staleness = checkFileStaleness(codeIndexService, workspaceDir, file)
   const result = await codeIndexService.getModuleDependencies(file, { depth: args?.depth || 3 })
+  const hasCircular = result?.circular_dependencies?.length > 0
+  result.next_step = hasCircular
+    ? 'Circular dependency detected. Use fix_imports to resolve.'
+    : 'To modify a dependency, check impact first: impact_analysis(file=...)'
   return attachStalenessWarning(result, staleness)
 }

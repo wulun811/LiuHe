@@ -1,7 +1,7 @@
 {
   "name": "edit_batch",
   "version": "1.0.0",
-  "description": "Apply multiple edits to one file atomically. dry_run previews diff. Prefer over repeated edit calls.",
+  "description": "Apply multiple edits to one file atomically. dry_run previews diff. Prefer over repeated edit calls. After editing: fix_imports + test_bridge.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -14,11 +14,23 @@
         "items": {
           "type": "object",
           "properties": {
-            "old_string": { "type": "string", "description": "Text to search for (must uniquely match)" },
-            "new_string": { "type": "string", "description": "Text to replace with" },
-            "replace_all": { "type": "boolean", "description": "Replace all occurrences (default: false)" }
+            "old_string": {
+              "type": "string",
+              "description": "Text to search for (must uniquely match)"
+            },
+            "new_string": {
+              "type": "string",
+              "description": "Text to replace with"
+            },
+            "replace_all": {
+              "type": "boolean",
+              "description": "Replace all occurrences (default: false)"
+            }
           },
-          "required": ["old_string", "new_string"]
+          "required": [
+            "old_string",
+            "new_string"
+          ]
         },
         "description": "Array of edits to apply. Example: [{\"old_string\": \"foo\", \"new_string\": \"bar\"}]"
       },
@@ -31,10 +43,18 @@
         "description": "Apply successful edits even if some fail. Returns applied_indices, failed_indices, and retry_edits for fixing"
       }
     },
-    "required": ["file_path", "edits"]
+    "required": [
+      "file_path",
+      "edits"
+    ]
   },
   "handler": "./handler.js",
   "protocol_version": "1.0",
-  "tags": ["edit", "batch", "atomic", "whitespace-tolerant"],
+  "tags": [
+    "edit",
+    "batch",
+    "atomic",
+    "whitespace-tolerant"
+  ],
   "dependencies": []
 }

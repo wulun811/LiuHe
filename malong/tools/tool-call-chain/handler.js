@@ -85,6 +85,7 @@ export async function handle(args, context) {
     truncated_callees: impact.truncated_callees || false,
     test_references: formatTestRefs(impact),
     recently_modified: checkRecentModifications(workspaceDir, impact),
+    next_step: `For full blast radius + risk level + test references, use impact_analysis(symbol="${impact.target_symbol || symbol}")`,
     metadata: {
       parse_time_ms: Date.now() - startTime,
       cache_hit: !!impact._fromCache,

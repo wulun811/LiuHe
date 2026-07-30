@@ -1,7 +1,7 @@
 {
   "name": "dependency_gatekeeper",
   "version": "1.1.0",
-  "description": "Imports vs manifests: undeclared deps + install hints. Py/JS/Go/Rust.",
+  "description": "Imports vs manifests: undeclared deps + install hints. Py/JS/Go/Rust. Pairs with guard_patterns as quality gate.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -14,11 +14,18 @@
         "description": "Source file to check (relative to workspace_dir)"
       }
     },
-    "required": ["workspace_dir", "file"],
+    "required": [
+      "workspace_dir",
+      "file"
+    ],
     "additionalProperties": false
   },
   "handler": "./handler.js",
   "protocol_version": "1.0",
-  "tags": ["dependency", "import", "manifest"],
+  "tags": [
+    "dependency",
+    "import",
+    "manifest"
+  ],
   "dependencies": []
 }

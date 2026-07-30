@@ -225,6 +225,17 @@ export async function handle(args, context) {
   const callerSync = await checkCallerSync(symbolsChanged, filesInChange, context?.codeIndexService, workspaceDir)
   const testSync = checkTestSync(changes, workspaceDir)
 
+  const hasStaleTests = testSync?.tests_possibly_stale?.length > 0
+  const hasCallerIssues = Array.isArray(callerSync) && callerSync.some(c => c.not_updated?.length > 0)
+  let nextStep
+  if (hasStaleTests) {
+    nextStep = `Run affected tests: test_bridge(action='run', scope='${testSync.tests_possibly_stale.join(', ')}')`
+  } else if (hasCallerIssues) {
+    nextStep = 'Review affected callers with impact_analysis.'
+  } else {
+    nextStep = 'No sync issues. Changes are self-contained.'
+  }
+
   return {
     since,
     txn_id: txn.txnId,
@@ -232,6 +243,7 @@ export async function handle(args, context) {
     symbols_changed: symbolsChanged,
     caller_sync: callerSync,
     test_sync: testSync,
+    next_step: nextStep,
     ...(truncated ? { truncated: true } : {}),
     ...(warnings.length ? { warnings } : {}),
   }

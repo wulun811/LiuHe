@@ -1,18 +1,35 @@
 {
   "name": "dep_graph",
   "version": "1.0.0",
-  "description": "Trace import dependencies up to N levels deep. No built-in equivalent.",
+  "description": "Trace import dependencies up to N levels deep. No built-in equivalent. Circular deps? Use fix_imports. Modifying a dependency? impact_analysis first.",
   "inputSchema": {
     "type": "object",
     "properties": {
-      "workspace_dir": { "type": "string", "description": "REQUIRED: Absolute path to the project root directory. Call reindex first if this is a new workspace." },
-      "file": { "type": "string", "description": "File path relative to workspace_dir (e.g. \"scripts/lib/tools/spawn.mjs\")" },
-      "depth": { "type": "number", "description": "Transitive depth (default 3, max 10)" }
+      "workspace_dir": {
+        "type": "string",
+        "description": "REQUIRED: Absolute path to the project root directory. Call reindex first if this is a new workspace."
+      },
+      "file": {
+        "type": "string",
+        "description": "File path relative to workspace_dir (e.g. \"scripts/lib/tools/spawn.mjs\")"
+      },
+      "depth": {
+        "type": "number",
+        "description": "Transitive depth (default 3, max 10)"
+      }
     },
-    "required": ["workspace_dir", "file"]
+    "required": [
+      "workspace_dir",
+      "file"
+    ]
   },
   "handler": "./handler.js",
   "protocol_version": "1.0",
-  "tags": ["dependency", "graph"],
-  "dependencies": ["reindex"]
+  "tags": [
+    "dependency",
+    "graph"
+  ],
+  "dependencies": [
+    "reindex"
+  ]
 }

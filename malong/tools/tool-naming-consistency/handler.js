@@ -191,6 +191,9 @@ export async function handle(args, context) {
       project_style: projectStyle,
       new_symbols_checked: newSymbols.length,
       issues,
+      next_step: issues.length
+        ? 'Consider renaming before commit. Use edit_transaction.'
+        : 'Naming consistent. Ready to commit.',
       ...(!projectStyle.dominant ? { note: 'insufficient project symbols for this language; style checks skipped' } : {}),
       ...(newSymbols.length === 0 ? { note: 'no symbols to check' } : {}),
     }

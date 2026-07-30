@@ -43,6 +43,9 @@ export async function handle(args, context) {
   }
   if (results.length === 0) {
     res.suggestion = `No symbols found. If files were recently added, call reindex(workspace_dir="${workspaceDir}") to update the index.`
+    res.next_step = 'Check if workspace is indexed, or use glob to find the symbol manually.'
+  } else {
+    res.next_step = `Before modifying found symbols, check blast radius: impact_analysis(symbol="${results[0].name}")`
   }
   return res
 }

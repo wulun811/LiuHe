@@ -230,6 +230,61 @@ console.log('\n═══ T12: edit_sandbox edge cases ═══')
 }
 
 // ═══════════════════════════════════════════
+console.log('\n═══ T13: next_step assertions ═══')
+{
+  const handle = await loadTool('tool-active-todos')
+  const r1 = await handle({ workspace_dir: FIXTURES, scope: '.' }, mockContext)
+  assert(typeof r1.next_step === 'string' && r1.next_step.length > 0, 'T13: active_todos has next_step')
+
+  const handle2 = await loadTool('tool-config-drift')
+  const r2 = await handle2({ workspace_dir: FIXTURES }, mockContext)
+  assert(typeof r2.next_step === 'string' && r2.next_step.length > 0, 'T13: config_drift has next_step')
+
+  const handle3 = await loadTool('tool-exception-guard')
+  const r3 = await handle3({ workspace_dir: FIXTURES, file: 'src/auth.py' }, mockContext)
+  assert(typeof r3.next_step === 'string' && r3.next_step.length > 0, 'T13: exception_guard has next_step')
+
+  const handle4 = await loadTool('tool-dead-code-sweeper')
+  const r4 = await handle4({ workspace_dir: FIXTURES }, mockContext)
+  assert(typeof r4.next_step === 'string' && r4.next_step.length > 0, 'T13: sweep_dead_code has next_step')
+
+  const handle5 = await loadTool('tool-edit-sandbox')
+  const r5 = await handle5({ workspace_dir: FIXTURES, file: 'src/auth.py', new_content: 'x = 1\n' }, mockContext)
+  assert(typeof r5.next_step === 'string' && r5.next_step.length > 0, 'T13: sandbox_validate has next_step')
+
+  const handle6 = await loadTool('tool-mock-syncer')
+  const r6 = await handle6({ workspace_dir: FIXTURES, file: 'src/auth.py', function: 'login' }, mockContext)
+  assert(typeof r6.next_step === 'string' && r6.next_step.length > 0, 'T13: mock_sync has next_step')
+
+  const handle7 = await loadTool('tool-find-tests')
+  const r7 = await handle7({ workspace_dir: FIXTURES, file: 'src/auth.py' }, mockContext)
+  assert(typeof r7.next_step === 'string' && r7.next_step.length > 0, 'T13: find_tests has next_step')
+
+  const handle8 = await loadTool('tool-rename-symbol')
+  const r8 = await handle8({ workspace_dir: FIXTURES, symbol: 'login', new_name: 'authenticate', file: 'src/auth.py', dry_run: true }, mockContext)
+  assert(typeof r8.next_step === 'string' && r8.next_step.length > 0, 'T13: rename_symbol has next_step')
+
+  const handle9 = await loadTool('tool-test-bridge')
+  const r9 = await handle9({ workspace_dir: FIXTURES, action: 'discover', file: 'src/auth.py' }, mockContext)
+  assert(typeof r9.next_step === 'string' && r9.next_step.length > 0, 'T13: test_bridge has next_step')
+
+  const handle10 = await loadTool('tool-inspect')
+  const r10 = await handle10({ workspace_dir: FIXTURES, symbol: 'login', file: 'src/auth.py' }, mockContext)
+  // inspect may return error if no index; only check next_step if success
+  if (!r10.error) {
+    assert(typeof r10.next_step === 'string' && r10.next_step.length > 0, 'T13: inspect has next_step')
+  } else {
+    assert(true, 'T13: inspect returns error (no index) - skipped')
+  }
+
+  const handle11 = await loadTool('tool-edit-collision-guard')
+  const r11 = await handle11({ workspace_dir: FIXTURES, file: 'src/auth.py', action: 'record_read' }, mockContext)
+  assert(typeof r11.next_step === 'string' && r11.next_step.length > 0, 'T13: collision_guard(record_read) has next_step')
+  const r11b = await handle11({ workspace_dir: FIXTURES, file: 'src/auth.py', action: 'check' }, mockContext)
+  assert(typeof r11b.next_step === 'string' && r11b.next_step.length > 0, 'T13: collision_guard(check) has next_step')
+}
+
+// ═══════════════════════════════════════════
 console.log(`\n${'═'.repeat(50)}`)
 console.log(`总计: ${passed} passed, ${failed} failed`)
 if (errors.length > 0) {

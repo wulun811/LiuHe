@@ -115,6 +115,11 @@ export async function handle(args, context) {
     }
   }
 
+  const hasHardcodedCopies = result.suspected_literals?.length > 0 || result.direct_references?.length > 1
+  result.next_step = hasHardcodedCopies
+    ? `Use rename_symbol for atomic cross-file rename of "${symbol}".`
+    : `Single definition. Use edit_transaction to modify "${symbol}".`
+
   attachStalenessWarning(result, staleness)
 
   if (misuseWarning) {

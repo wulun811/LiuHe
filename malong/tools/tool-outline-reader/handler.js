@@ -38,5 +38,9 @@ export async function handle(args, context) {
     result = await codeIndexService.getFileOutline(file, opts)
     if (result && !result.error) result.auto_indexed = true
   }
+  if (result && !result.error) {
+    const firstSymbol = result?.symbols?.[0]?.name || result?.functions?.[0]?.name || 'symbol'
+    result.next_step = `Before editing, check callers: impact_analysis(symbol="${firstSymbol}")`
+  }
   return attachStalenessWarning(result, staleness)
 }
