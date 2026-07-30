@@ -1,6 +1,7 @@
-// 码龙 — 多语言解析器工厂 (v2 P2.1)
+// 码龙 — 多语言解析器工厂 (v2 P3.0)
 // 统一管理 tree-sitter 语言加载/缓存/符号提取/引用提取
-// 详见：通天计划 §六 码龙
+// 支持双模式：Rust 服务优先，fallback 到 builtin
+// 详见：通天计划 §六 码龙, P3-rust-parser-service.md
 
 import Parser from 'tree-sitter'
 import JavaScript from 'tree-sitter-javascript'
@@ -8,14 +9,16 @@ import Python from 'tree-sitter-python'
 import Go from 'tree-sitter-go'
 import Rust from 'tree-sitter-rust'
 import { createRequire } from 'node:module'
+import * as parseClient from './parse-client.js'
 const _require = createRequire(import.meta.url)
 const TypeScript = _require('tree-sitter-typescript/bindings/node/typescript.js')
 const TSX = _require('tree-sitter-typescript/bindings/node/tsx.js')
 
 export const name = 'malong-lang-parser'
-export const version = '0.3.0'
+export const version = '0.4.0'
 
 let _core
+let _mode = 'builtin'  // 'builtin' | 'rust-service'
 
 export const LANG_MAP = {
   '.js': { lang: JavaScript, name: 'javascript' },
@@ -748,6 +751,19 @@ const _parserCache = {}
 
 export async function init(core) {
   _core = core
+  
+  // 尝试连接 Rust 解析服务
+  await parseClient.init(core)
+  const connected = await parseClient.connect()
+  if (connected) {
+    _mode = 'rust-service'
+    const h = await parseClient.health().catch(() => null)
+    core.log('info', `[lang-parser] connected to malong-parse v${h?.version || '?'} (pid=${h?.pid || '?'})`)
+  } else {
+    _mode = 'builtin'
+    core.log('warn', '[lang-parser] malong-parse unavailable, using builtin tree-sitter')
+  }
+
   core.registerService('langParser', {
     getParser(ext) {
       if (!_parserCache[ext]) {
@@ -758,6 +774,9 @@ export async function init(core) {
 
     getLanguage(ext) { return langFor(ext) },
     getSupportedExts() { return ALL_EXTS },
+    
+    getMode() { return _mode },
+    isRustService() { return _mode === 'rust-service' },
 
     parse(source, ext) {
       const p = this.getParser(ext)
@@ -823,12 +842,110 @@ export async function init(core) {
       }
       return { hasCode: codeScore > 0, codeRatio: Math.min(1, codeScore / Math.max(1, total * 0.3)), primaryType: codeScore > 0 ? 'code' : 'text', nodeCount: tree.rootNode.childCount }
     },
+
+    // ── 异步方法（优先使用 Rust 服务） ──
+    
+    async extractAllAsync(source, ext) {
+      if (_mode === 'rust-service') {
+        try {
+          return await parseClient.extractAll(source, ext)
+        } catch (e) {
+          core.log('warn', `[lang-parser] rust-service extractAll failed, fallback: ${e.message}`)
+        }
+      }
+      // fallback to builtin
+      const tree = this.parse(source, ext)
+      if (!tree) return { symbols: [], refs: [] }
+      return this.extractAll(tree, source, ext)
+    },
+
+    async extractSymbolsAsync(source, ext) {
+      if (_mode === 'rust-service') {
+        try {
+          return await parseClient.extractSymbols(source, ext)
+        } catch (e) {
+          core.log('warn', `[lang-parser] rust-service extractSymbols failed, fallback: ${e.message}`)
+        }
+      }
+      const tree = this.parse(source, ext)
+      if (!tree) return { symbols: [], imports: [] }
+      return this.extractSymbols(tree, source, ext)
+    },
+
+    async extractTopLevelAsync(source, ext) {
+      if (_mode === 'rust-service') {
+        try {
+          return await parseClient.extractTopLevel(source, ext)
+        } catch (e) {
+          core.log('warn', `[lang-parser] rust-service extractTopLevel failed, fallback: ${e.message}`)
+        }
+      }
+      const tree = this.parse(source, ext)
+      if (!tree) return []
+      return this.extractTopLevel(tree, source, ext)
+    },
+
+    async extractReferencesAsync(source, ext) {
+      if (_mode === 'rust-service') {
+        try {
+          return await parseClient.extractReferences(source, ext)
+        } catch (e) {
+          core.log('warn', `[lang-parser] rust-service extractReferences failed, fallback: ${e.message}`)
+        }
+      }
+      const tree = this.parse(source, ext)
+      if (!tree) return []
+      return this.extractReferences(tree, source, ext)
+    },
+
+    async hasErrorsAsync(source, ext) {
+      if (_mode === 'rust-service') {
+        try {
+          return await parseClient.hasErrors(source, ext)
+        } catch (e) {
+          core.log('warn', `[lang-parser] rust-service hasErrors failed, fallback: ${e.message}`)
+        }
+      }
+      const tree = this.parse(source, ext)
+      if (!tree) return false
+      return this.hasErrors(tree)
+    },
+
+    async classifyMessageAsync(content) {
+      if (_mode === 'rust-service') {
+        try {
+          return await parseClient.classifyMessage(content)
+        } catch (e) {
+          core.log('warn', `[lang-parser] rust-service classifyMessage failed, fallback: ${e.message}`)
+        }
+      }
+      return this.classifyMessage(content)
+    },
+
+    async batchExtractAsync(files) {
+      if (_mode === 'rust-service') {
+        try {
+          return await parseClient.batchExtract(files)
+        } catch (e) {
+          core.log('warn', `[lang-parser] rust-service batchExtract failed, fallback: ${e.message}`)
+        }
+      }
+      // fallback: 逐个处理
+      return files.map(f => {
+        const ext = f.path.slice(f.path.lastIndexOf('.'))
+        const tree = this.parse(f.source, ext)
+        if (!tree) return { path: f.path, symbols: [], refs: [] }
+        const result = this.extractAll(tree, f.source, ext)
+        return { path: f.path, ...result }
+      })
+    },
   })
-  core.log('info', `[lang-parser] loaded languages: ${Object.values(LANG_MAP).map(l => l.name).join(', ')}`)
+  core.log('info', `[lang-parser] mode=${_mode}, loaded languages: ${Object.values(LANG_MAP).map(l => l.name).join(', ')}`)
 }
 
 export async function start() {}
 
 export async function stop() {
   for (const k of Object.keys(_parserCache)) delete _parserCache[k]
+  await parseClient.disconnect()
 }

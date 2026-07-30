@@ -1,6 +1,8 @@
 import { existsSync, mkdirSync, appendFileSync, writeFileSync } from 'node:fs'
 import { join, resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { spawn } from 'node:child_process'
+import net from 'node:net'
 import ToolRegistry from './tool-registry.js'
 import { runHealthCheck } from './health-check.js'
 import crypto from 'node:crypto'
@@ -14,6 +16,60 @@ const DEFAULT_CONCURRENCY = 3
 const HEAVY_TOOLS = new Set(['reindex', 'repo_map'])
 const MEMORY_CHECK_INTERVAL_MS = 30_000
 const MEMORY_DANGER_MB = 480
+
+// ── Rust 解析服务自动拉起 ──
+
+const PARSE_SERVICE_SOCKET = `/tmp/malong-parse-${process.getuid()}.sock`
+const PARSE_SERVICE_BIN = join(os.homedir(), '.local', 'bin', 'malong-parse')
+const PARSE_SERVICE_BIN_ALT = join(__dirname, '..', '..', '..', 'malong-parse', 'target', 'release', 'malong-parse')
+
+async function ensureParseService() {
+  // 检查是否已运行
+  if (existsSync(PARSE_SERVICE_SOCKET)) {
+    try {
+      const test = net.createConnection(PARSE_SERVICE_SOCKET)
+      await new Promise((resolve, reject) => {
+        test.on('connect', () => { test.destroy(); resolve(true) })
+        test.on('error', reject)
+        setTimeout(() => { test.destroy(); reject(new Error('timeout')) }, 1000)
+      })
+      crashLog('malong-parse already running')
+      return
+    } catch {}
+  }
+
+  // 查找二进制
+  let binPath = PARSE_SERVICE_BIN
+  if (!existsSync(binPath)) {
+    binPath = PARSE_SERVICE_BIN_ALT
+    if (!existsSync(binPath)) {
+      crashLog('malong-parse binary not found, using builtin tree-sitter')
+      return
+    }
+  }
+
+  // 启动服务
+  try {
+    const child = spawn(binPath, [], {
+      detached: true,
+      stdio: ['ignore', 'ignore', 'ignore'],
+    })
+    child.unref()
+    crashLog(`malong-parse started (pid=${child.pid})`)
+
+    // 等待 socket 就绪
+    for (let i = 0; i < 20; i++) {
+      await new Promise(r => setTimeout(r, 100))
+      if (existsSync(PARSE_SERVICE_SOCKET)) {
+        crashLog('malong-parse socket ready')
+        return
+      }
+    }
+    crashLog('malong-parse failed to start within 2s')
+  } catch (e) {
+    crashLog(`malong-parse spawn error: ${e.message}`)
+  }
+}
 
 class Semaphore {
   constructor(max) {
@@ -130,6 +186,9 @@ let registry
 const activeRequests = new Map()
 
 async function initModules() {
+  // 确保 Rust 解析服务运行（在 lang-parser 初始化之前）
+  await ensureParseService()
+  
   langParserMod = await import('./lang-parser.js')
   await langParserMod.init(core)
   codeIndexMod = await import('./code-index.js')
