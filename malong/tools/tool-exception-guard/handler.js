@@ -86,7 +86,7 @@ export async function handle(args, context) {
   const content = readFileSync(absPath, 'utf-8')
   const ext = extname(file)
 
-  let hierarchy = {}
+  let hierarchy = Object.create(null)
   if (codeIndexService) {
     const dbPath = join(getWorkspaceDir(workspaceDir), 'code-index.db')
     if (existsSync(dbPath)) {

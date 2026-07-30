@@ -284,7 +284,7 @@ async function analyzeFileAST(content, lang, currentFile, langParser) {
       const definedSymbols = new Set()
       const usedSymbols = new Set()
       const imports = []
-      const symbolLines = {}
+      const symbolLines = Object.create(null)
       const relativeImports = []
 
       for (const sym of asyncResult.symbols) {
@@ -332,7 +332,7 @@ function analyzeFile(content, lang, currentFile = '') {
   const usedSymbols = new Set()
   const imports = []
   const undefinedSymbols = []
-  const symbolLines = {}
+  const symbolLines = Object.create(null)
   const relativeImports = []
 
   const pyImportRe = /^(?:from\s+(\S+)\s+)?import\s+(.+)$/
