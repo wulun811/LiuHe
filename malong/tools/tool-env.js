@@ -49,11 +49,6 @@ export async function init(core) {
       }
 
       const deps = {
-        'tree-sitter': checkDependency('tree-sitter'),
-        'tree-sitter-javascript': checkDependency('tree-sitter-javascript'),
-        'tree-sitter-python': checkDependency('tree-sitter-python'),
-        'tree-sitter-go': checkDependency('tree-sitter-go'),
-        'tree-sitter-rust': checkDependency('tree-sitter-rust'),
         'better-sqlite3': checkDependency('better-sqlite3'),
       }
 

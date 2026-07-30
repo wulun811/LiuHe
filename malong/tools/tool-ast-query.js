@@ -1,5 +1,5 @@
 // 码龙 — AST 查询工具 (v2 P2.1)
-// 用 tree-sitter 查询多语言符号表、引用、调用图
+// 用 Rust 解析服务查询多语言符号表、引用、调用图
 // 详见：通天计划 §六
 
 export const name = 'tool-ast-query'

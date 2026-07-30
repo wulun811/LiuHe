@@ -1,5 +1,5 @@
 // 码龙 — Repo Map 生成器 (v2 P2.1)
-// 多语言 tree-sitter 生成带缩进的文本版代码地图 (~1500 tokens/中型项目)
+// 多语言代码地图生成器，带缩进的文本版代码地图 (~1500 tokens/中型项目)
 // 详见：通天计划 §六 码龙
 
 import { readFileSync } from 'node:fs'

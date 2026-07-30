@@ -190,7 +190,7 @@ function _circuitRecordFailure() {
   _circuitFailures++
   if (_circuitFailures >= CIRCUIT_BREAKER_THRESHOLD) {
     _circuitOpen = true
-    _core?.log('warn', `[parse-client] circuit breaker OPEN after ${_circuitFailures} failures, using builtin`)
+    _core?.log('error', `[parse-client] circuit breaker OPEN after ${_circuitFailures} failures, malong-parse unavailable`)
     // try half-open after 60s
     setTimeout(() => {
       _circuitOpen = false

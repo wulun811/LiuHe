@@ -1,5 +1,5 @@
-// 码龙 — 公共代码索引服务 (v2 P2.1)
-// 多语言 tree-sitter 解析，SQLite 存储符号/引用/依赖
+// 码龙 — 公共代码索引服务 (v2 P5.0)
+// 多语言 Rust 解析服务，SQLite 存储符号/引用/依赖
 // 详见：通天计划 §六 码龙
 
 import Database from 'better-sqlite3'

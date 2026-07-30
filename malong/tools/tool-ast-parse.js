@@ -1,5 +1,5 @@
 // 码龙 — AST 解析工具 (v2 P2.1)
-// 用 tree-sitter 解析多语言源码，返回可序列化的简化 AST
+// 用 Rust 解析服务解析多语言源码，返回可序列化的简化 AST
 // 详见：通天计划 §六
 
 export const name = 'tool-ast-parse'
