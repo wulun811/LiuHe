@@ -49,17 +49,40 @@ function checkSyntaxBasic(newContent, ext) {
   const openers = { '(': ')', '[': ']', '{': '}' }
   const closers = new Set([')', ']', '}'])
   const stack = []
+  let inMultiLineString = false
+  let multiLineStringChar = ''
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
-    let inString = false
-    let stringChar = ''
+    let inString = inMultiLineString
+    let stringChar = multiLineStringChar
 
     for (let j = 0; j < line.length; j++) {
       const ch = line[j]
       if (inString) {
-        if (ch === stringChar && line[j - 1] !== '\\') inString = false
+        if (stringChar.length === 3) {
+          if (line.slice(j, j + 3) === stringChar) {
+            inString = false
+            multiLineStringChar = ''
+            j += 2
+          }
+          continue
+        }
+        if (ch === stringChar && line[j - 1] !== '\\') {
+          inString = false
+          multiLineStringChar = ''
+        }
         continue
+      }
+      if (ext === '.py') {
+        const tri = line.slice(j, j + 3)
+        if (tri === '"""' || tri === "'''") {
+          inString = true
+          stringChar = tri
+          multiLineStringChar = tri
+          j += 2
+          continue
+        }
       }
       if (ch === '"' || ch === "'" || ch === '`') { inString = true; stringChar = ch; continue }
       if (ch === '#' && ext === '.py') break
@@ -76,6 +99,8 @@ function checkSyntaxBasic(newContent, ext) {
         }
       }
     }
+    inMultiLineString = inString && (stringChar.length === 3 || stringChar === '`')
+    multiLineStringChar = inMultiLineString ? stringChar : ''
   }
 
   for (const unclosed of stack) {

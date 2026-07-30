@@ -29,43 +29,47 @@ function walkTestFiles(baseDir, dir, files, maxFiles) {
 
 function extractSignature(content, functionName, ext) {
   const lines = content.split('\n')
+  const fnEsc = escapeRegex(functionName)
   for (let i = 0; i < lines.length; i++) {
-    let m
+    let startRe
     if (ext === '.py') {
-      m = new RegExp(`^\\s*(?:async\\s+)?def\\s+${functionName}\\s*\\(`).exec(lines[i])
-      if (m) {
-        let sigLine = lines[i]
-        let j = i
-        while (!sigLine.includes(')') && j < lines.length - 1) {
-          j++
-          sigLine += ' ' + lines[j].trim()
-        }
-        const pm = new RegExp(`def\\s+${functionName}\\s*\\(([^)]*)\\)(?:\\s*->\\s*(.+?))?\\s*:`).exec(sigLine)
-        if (pm) {
-          const params = pm[1]
-            ? pm[1].split(',').map(p => {
-                const trimmed = p.trim()
-                const name = trimmed.split(/[:\s=]/)[0].trim()
-                const hasDefault = trimmed.includes('=')
-                return { name, has_default: hasDefault, raw: trimmed }
-              }).filter(p => p.name && p.name !== 'self' && p.name !== 'cls')
-            : []
-          const returnType = pm[2] ? pm[2].trim() : null
-          return { name: functionName, params, return_type: returnType, line: i + 1 }
+      startRe = new RegExp(`^\\s*(?:async\\s+)?def\\s+${fnEsc}\\s*\\(`)
+    } else {
+      startRe = new RegExp(`(?:function\\s+${fnEsc}|(?:const|let|var)\\s+${fnEsc}\\s*=\\s*(?:async\\s+)?(?:function)?\\s*)\\(`)
+    }
+    if (startRe.exec(lines[i])) {
+      let sigLine = lines[i]
+      let j = i
+      let depth = 0
+      for (let k = 0; k < sigLine.length; k++) {
+        if (sigLine[k] === '(') depth++
+        else if (sigLine[k] === ')') depth--
+      }
+      while (depth > 0 && j < lines.length - 1) {
+        j++
+        sigLine += ' ' + lines[j].trim()
+        for (let k = 0; k < lines[j].length; k++) {
+          if (lines[j][k] === '(') depth++
+          else if (lines[j][k] === ')') depth--
         }
       }
-    } else {
-      m = new RegExp(`(?:function\\s+${functionName}|(?:const|let|var)\\s+${functionName}\\s*=\\s*(?:async\\s+)?(?:function)?\\s*)\\(([^)]*)\\)`).exec(lines[i])
-      if (m) {
-        const params = m[1]
-          ? m[1].split(',').map(p => {
+      let pm
+      if (ext === '.py') {
+        pm = new RegExp(`def\\s+${fnEsc}\\s*\\((.+)\\)(?:\\s*->\\s*(.+?))?\\s*:`).exec(sigLine)
+      } else {
+        pm = new RegExp(`\\((.+)\\)`).exec(sigLine)
+      }
+      if (pm) {
+        const params = pm[1]
+          ? pm[1].split(',').map(p => {
               const trimmed = p.trim()
               const name = trimmed.split(/[:\s=]/)[0].trim()
               const hasDefault = trimmed.includes('=')
               return { name, has_default: hasDefault, raw: trimmed }
             }).filter(p => p.name && p.name !== 'self' && p.name !== 'cls')
           : []
-        return { name: functionName, params, return_type: null, line: i + 1 }
+        const returnType = ext === '.py' && pm[2] ? pm[2].trim() : null
+        return { name: functionName, params, return_type: returnType, line: i + 1 }
       }
     }
   }
@@ -78,29 +82,34 @@ function findMockUsage(content, functionName, testFile) {
   const fnEscaped = escapeRegex(functionName)
   const fnLower = functionName.toLowerCase()
 
+  const reReturnValue = new RegExp(`(?:mock|patch|spy|stub).*${fnEscaped}.*\\.return_value\\s*=\\s*(.+)`, 'i')
+  const rePatch = new RegExp(`@(?:patch|mock).*${fnEscaped}`, 'i')
+  const reSpy = new RegExp(`(?:jest\\.(?:fn|spyOn)|sinon\\.(?:stub|spy)).*${fnEscaped}`, 'i')
+  const reCall = new RegExp(`mock_${escapeRegex(fnLower)}\\s*\\(([^)]*)\\)`, 'i')
+
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
 
     let m
-    m = new RegExp(`(?:mock|patch|spy|stub).*${fnEscaped}.*\\.return_value\\s*=\\s*(.+)`, 'i').exec(line)
+    m = reReturnValue.exec(line)
     if (m) {
       mocks.push({ file: testFile, line: i + 1, mock_type: 'return_value', value: m[1].trim(), context: line.trim() })
       continue
     }
 
-    m = new RegExp(`@(?:patch|mock).*${fnEscaped}`, 'i').exec(line)
+    m = rePatch.exec(line)
     if (m) {
       mocks.push({ file: testFile, line: i + 1, mock_type: 'patch', value: line.trim(), context: line.trim() })
       continue
     }
 
-    m = new RegExp(`(?:jest\\.(?:fn|spyOn)|sinon\\.(?:stub|spy)).*${fnEscaped}`, 'i').exec(line)
+    m = reSpy.exec(line)
     if (m) {
       mocks.push({ file: testFile, line: i + 1, mock_type: 'spy', value: line.trim(), context: line.trim() })
       continue
     }
 
-    m = new RegExp(`mock_${escapeRegex(fnLower)}\\s*\\(([^)]*)\\)`, 'i').exec(line)
+    m = reCall.exec(line)
     if (m) {
       const argCount = m[1].trim() ? m[1].split(',').length : 0
       mocks.push({ file: testFile, line: i + 1, mock_type: 'call', arguments: m[1].trim(), arg_count: argCount, context: line.trim() })

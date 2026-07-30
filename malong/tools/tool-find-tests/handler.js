@@ -75,7 +75,7 @@ function extractTestNames(filePath, workspaceDir) {
     for (let i = 0; i < lines.length; i++) {
       let m
       if (ext === '.py') {
-        m = /^\s*def\s+(test_\w+)/.exec(lines[i])
+        m = /^\s*(?:async\s+)?def\s+(test_\w+)/.exec(lines[i])
       } else if (['.js', '.mjs', '.ts', '.tsx'].includes(ext)) {
         m = /(?:it|test)\s*\(\s*['"`](.+?)['"`]/.exec(lines[i])
         if (!m) m = /(?:describe)\s*\(\s*['"`](.+?)['"`]/.exec(lines[i])

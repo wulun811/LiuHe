@@ -127,7 +127,7 @@ function extractTestNames(filePath, workspaceDir) {
     const lines = content.split('\n')
     for (let i = 0; i < lines.length; i++) {
       let m
-      if (ext === '.py') m = /^\s*def\s+(test_\w+)/.exec(lines[i])
+      if (ext === '.py') m = /^\s*(?:async\s+)?def\s+(test_\w+)/.exec(lines[i])
       else if (['.js', '.mjs', '.ts', '.tsx'].includes(ext)) m = /(?:it|test)\s*\(\s*['"`](.+?)['"`]/.exec(lines[i])
       else if (ext === '.go') m = /^func\s+(Test\w+)/.exec(lines[i])
       if (m) tests.push({ name: m[1], line: i + 1 })
@@ -183,10 +183,6 @@ async function handleRun(args, context) {
 
   const parsed = parseOutput(rawOutput, framework)
   const failures = enrichFailures(parsed.failures, workspaceDir)
-
-  const recentlyModifiedSources = failures
-    .filter(f => f.test_recently_modified)
-    .map(f => f.file)
 
   let suggestedFix = null
   if (failures.length > 0) {

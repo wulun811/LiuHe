@@ -22,7 +22,7 @@ function walk(baseDir, dir, re, results, scanned, maxFiles, maxResults) {
   try { entries = readdirSync(dir, { withFileTypes: true }) } catch { return }
   for (const entry of entries) {
     if (scanned.files >= maxFiles || results.length >= maxResults) break
-    if (entry.name.startsWith('.') || entry.name === 'node_modules' || entry.name === '__pycache__') continue
+    if (entry.name.startsWith('.') || entry.name === 'node_modules' || entry.name === '__pycache__' || entry.name === 'venv' || entry.name === 'dist' || entry.name === 'build') continue
     const fullPath = join(dir, entry.name)
     if (entry.isDirectory()) {
       walk(baseDir, fullPath, re, results, scanned, maxFiles, maxResults)

@@ -5,12 +5,24 @@
   "inputSchema": {
     "type": "object",
     "properties": {
-      "workspace_dir": { "type": "string", "description": "REQUIRED: Absolute path to the project root directory." },
-      "file": { "type": "string", "description": "File to check (relative to workspace_dir). Omit to scan all source files." }
+      "workspace_dir": {
+        "type": "string",
+        "description": "REQUIRED: Absolute path to the project root directory."
+      },
+      "file": {
+        "type": "string",
+        "description": "File to check (relative to workspace_dir). Omit to scan all source files."
+      }
     },
-    "required": ["workspace_dir"]
+    "required": [
+      "workspace_dir"
+    ]
   },
   "handler": "./handler.js",
   "protocol_version": "1.0",
-  "tags": ["quality", "config"]
+  "tags": [
+    "quality",
+    "config"
+  ],
+  "dependencies": []
 }

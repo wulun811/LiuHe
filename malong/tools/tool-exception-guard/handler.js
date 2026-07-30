@@ -105,24 +105,36 @@ export async function handle(args, context) {
 
   if (Object.keys(hierarchy).length === 0) {
     try {
-      const srcDir = join(workspaceDir, 'src')
-      const dirs = [workspaceDir, srcDir]
-      for (const dir of dirs) {
+      const dirs = []
+      const walkDir = (dir, depth) => {
+        if (depth > 3) return
         let entries
-        try { entries = readdirSync(dir, { withFileTypes: true }) } catch { continue }
+        try { entries = readdirSync(dir, { withFileTypes: true }) } catch { return }
         for (const entry of entries) {
-          if (!entry.isFile() || !entry.name.endsWith('.py')) continue
-          try {
-            const c = readFileSync(join(dir, entry.name), 'utf-8')
-            const classRe = /^class\s+(\w+)\s*\((\w+)\)/gm
-            let cm
-            while ((cm = classRe.exec(c)) !== null) {
-              if (/Error|Exception/.test(cm[2])) {
-                hierarchy[cm[1]] = { base: cm[2], module: entry.name, file: entry.name, line: c.slice(0, cm.index).split('\n').length }
-              }
-            }
-          } catch {}
+          if (entry.name.startsWith('.') || entry.name === 'node_modules' || entry.name === '__pycache__' || entry.name === 'venv' || entry.name === 'dist' || entry.name === 'build') continue
+          const full = join(dir, entry.name)
+          if (entry.isDirectory()) {
+            walkDir(full, depth + 1)
+          } else if (entry.isFile() && entry.name.endsWith('.py')) {
+            dirs.push(full)
+          }
         }
+      }
+      walkDir(workspaceDir, 0)
+      const srcDir = join(workspaceDir, 'src')
+      if (srcDir !== workspaceDir) walkDir(srcDir, 0)
+      for (const filePath of dirs) {
+        try {
+          const c = readFileSync(filePath, 'utf-8')
+          const classRe = /^class\s+(\w+)\s*\((\w+)\)/gm
+          let cm
+          while ((cm = classRe.exec(c)) !== null) {
+            if (/Error|Exception/.test(cm[2])) {
+              const relPath = filePath.startsWith(workspaceDir + '/') ? filePath.slice(workspaceDir.length + 1) : filePath
+              hierarchy[cm[1]] = { base: cm[2], module: relPath, file: relPath, line: c.slice(0, cm.index).split('\n').length }
+            }
+          }
+        } catch {}
       }
     } catch {}
   }
