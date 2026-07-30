@@ -30,9 +30,9 @@ async function probeEnv() {
   _mode = 'direct'
 }
 
-function exec(cmd, args, cwd, timeout) {
+function exec(cmd, args, cwd, timeout, env) {
   return new Promise((resolve, reject) => {
-    const child = execFile(cmd, args, { cwd, timeout: timeout || DEFAULT_TIMEOUT, maxBuffer: 4 * 1024 * 1024 }, (err, stdout, stderr) => {
+    const child = execFile(cmd, args, { cwd, timeout: timeout || DEFAULT_TIMEOUT, maxBuffer: 4 * 1024 * 1024, env: env ? { ...process.env, ...env } : undefined }, (err, stdout, stderr) => {
       resolve({
         exitCode: err?.code ?? (err ? 1 : 0),
         signal: err?.signal ?? null,

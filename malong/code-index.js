@@ -163,9 +163,9 @@ class CodeIndex {
       const r = this._db.prepare('INSERT OR IGNORE INTO files (path, repo, size, mtime) VALUES (?, ?, ?, ?)').run(relPath, '', sourceLength, mtime)
       fileId = r.lastInsertRowid
     }
-      this._impactCache?.clear()
-      this._contextCache?.clear()
-      this._outlineCache?.clear()
+    this._impactCache?.clear()
+    this._contextCache?.clear()
+    this._outlineCache?.clear()
 
     if (symbols.length > 0) {
       const SYM_BATCH = 180
@@ -1104,7 +1104,7 @@ class CodeIndex {
           } else if (req.method === 'GET' && parts[0] === 'deps' && parts[1]) {
             result = await svc.getModuleDependencies(decodeURIComponent(parts[1]))
           } else if (req.method === 'GET' && parts[0] === 'deadcode') {
-            result = svc.detectDeadCode()
+            result = await svc.detectDeadCode()
           } else if (req.method === 'GET' && parts[0] === 'complexity' && parts[1]) {
             result = await svc.getComplexity(decodeURIComponent(parts[1]))
           } else if (req.method === 'GET' && parts[0] === 'search') {
