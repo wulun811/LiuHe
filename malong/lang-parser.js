@@ -920,9 +920,9 @@ export async function init(core) {
 
     // ── 异步方法（优先使用 Rust 服务） ──
     
-    async extractAllAsync(source, ext) {
+    async extractAllAsync(source, ext, filePath) {
       if (_mode === 'shadow') {
-        return _runShadow('extractAll', [source, ext], async () => {
+        return _runShadow('extractAll', [source, ext, filePath], async () => {
           const tree = this.parse(source, ext)
           if (!tree) return { symbols: [], refs: [] }
           return this.extractAll(tree, source, ext)
@@ -930,7 +930,7 @@ export async function init(core) {
       }
       if (_mode === 'rust-service') {
         try {
-          return await parseClient.extractAll(source, ext)
+          return await parseClient.extractAll(source, ext, filePath)
         } catch (e) {
           core.log('warn', `[lang-parser] rust-service extractAll failed, fallback: ${e.message}`)
         }
@@ -940,9 +940,9 @@ export async function init(core) {
       return this.extractAll(tree, source, ext)
     },
 
-    async extractSymbolsAsync(source, ext) {
+    async extractSymbolsAsync(source, ext, filePath) {
       if (_mode === 'shadow') {
-        return _runShadow('extractSymbols', [source, ext], async () => {
+        return _runShadow('extractSymbols', [source, ext, filePath], async () => {
           const tree = this.parse(source, ext)
           if (!tree) return { symbols: [], imports: [] }
           return this.extractSymbols(tree, source, ext)
@@ -950,7 +950,7 @@ export async function init(core) {
       }
       if (_mode === 'rust-service') {
         try {
-          return await parseClient.extractSymbols(source, ext)
+          return await parseClient.extractSymbols(source, ext, filePath)
         } catch (e) {
           core.log('warn', `[lang-parser] rust-service extractSymbols failed, fallback: ${e.message}`)
         }
@@ -960,9 +960,9 @@ export async function init(core) {
       return this.extractSymbols(tree, source, ext)
     },
 
-    async extractTopLevelAsync(source, ext) {
+    async extractTopLevelAsync(source, ext, filePath) {
       if (_mode === 'shadow') {
-        return _runShadow('extractTopLevel', [source, ext], async () => {
+        return _runShadow('extractTopLevel', [source, ext, filePath], async () => {
           const tree = this.parse(source, ext)
           if (!tree) return []
           return this.extractTopLevel(tree, source, ext)
@@ -970,7 +970,7 @@ export async function init(core) {
       }
       if (_mode === 'rust-service') {
         try {
-          return await parseClient.extractTopLevel(source, ext)
+          return await parseClient.extractTopLevel(source, ext, filePath)
         } catch (e) {
           core.log('warn', `[lang-parser] rust-service extractTopLevel failed, fallback: ${e.message}`)
         }
@@ -980,9 +980,9 @@ export async function init(core) {
       return this.extractTopLevel(tree, source, ext)
     },
 
-    async extractReferencesAsync(source, ext) {
+    async extractReferencesAsync(source, ext, filePath) {
       if (_mode === 'shadow') {
-        return _runShadow('extractReferences', [source, ext], async () => {
+        return _runShadow('extractReferences', [source, ext, filePath], async () => {
           const tree = this.parse(source, ext)
           if (!tree) return []
           return this.extractReferences(tree, source, ext)
@@ -990,7 +990,7 @@ export async function init(core) {
       }
       if (_mode === 'rust-service') {
         try {
-          return await parseClient.extractReferences(source, ext)
+          return await parseClient.extractReferences(source, ext, filePath)
         } catch (e) {
           core.log('warn', `[lang-parser] rust-service extractReferences failed, fallback: ${e.message}`)
         }
@@ -1000,9 +1000,9 @@ export async function init(core) {
       return this.extractReferences(tree, source, ext)
     },
 
-    async hasErrorsAsync(source, ext) {
+    async hasErrorsAsync(source, ext, filePath) {
       if (_mode === 'shadow') {
-        return _runShadow('hasErrors', [source, ext], async () => {
+        return _runShadow('hasErrors', [source, ext, filePath], async () => {
           const tree = this.parse(source, ext)
           if (!tree) return false
           return this.hasErrors(tree)
@@ -1010,7 +1010,7 @@ export async function init(core) {
       }
       if (_mode === 'rust-service') {
         try {
-          return await parseClient.hasErrors(source, ext)
+          return await parseClient.hasErrors(source, ext, filePath)
         } catch (e) {
           core.log('warn', `[lang-parser] rust-service hasErrors failed, fallback: ${e.message}`)
         }
@@ -1036,7 +1036,7 @@ export async function init(core) {
       return this.classifyMessage(content)
     },
 
-    async computeMetricsAsync(source, ext) {
+    async computeMetricsAsync(source, ext, filePath) {
       const buildResult = (tree, src) => {
         const cyc = calcCyclomaticFromTree(tree.rootNode)
         const cog = calcCognitiveFromTree(tree.rootNode)
@@ -1075,7 +1075,7 @@ export async function init(core) {
       }
 
       if (_mode === 'shadow') {
-        return _runShadow('computeMetrics', [source, ext], async () => {
+        return _runShadow('computeMetrics', [source, ext, filePath], async () => {
           const tree = this.parse(source, ext)
           if (!tree) return null
           return buildResult(tree, source)
@@ -1083,7 +1083,7 @@ export async function init(core) {
       }
       if (_mode === 'rust-service') {
         try {
-          return await parseClient.computeMetrics(source, ext)
+          return await parseClient.computeMetrics(source, ext, filePath)
         } catch (e) {
           core.log('warn', `[lang-parser] rust-service computeMetrics failed, fallback: ${e.message}`)
         }

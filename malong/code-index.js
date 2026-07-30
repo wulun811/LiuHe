@@ -174,9 +174,9 @@ class CodeIndex {
     let size = 0
     try { size = statSync(filePath).size } catch { return null }
     if (size > 1024 * 1024) return null
-    const source = readFileSync(filePath, 'utf-8')
     const ext = extname(filePath)
-    const result = await this._langParser.extractAllAsync(source, ext)
+    const source = readFileSync(filePath, 'utf-8')
+    const result = await this._langParser.extractAllAsync(source, ext, filePath)
     if (!result) return null
     const { symbols = [], refs = [] } = result
     const relPath = repo ? relative(repo, filePath) : filePath

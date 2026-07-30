@@ -4,6 +4,7 @@
 
 import net from 'node:net'
 import { existsSync } from 'node:fs'
+import { spawn } from 'node:child_process'
 
 const SOCKET_PATH = `/tmp/malong-parse-${process.getuid()}.sock`
 const CONNECT_TIMEOUT_MS = 3000
@@ -11,6 +12,9 @@ const REQUEST_TIMEOUT_MS = 30000
 const MAX_RETRIES = 2
 const HEARTBEAT_INTERVAL_MS = 30000
 const CIRCUIT_BREAKER_THRESHOLD = 3
+const BINARY_PATH = `${process.env.HOME || '/home'}/.local/bin/malong-parse`
+const MAX_RESTART_ATTEMPTS = 3
+const RESTART_COOLDOWN_MS = 10000
 
 let _core = null
 let _socket = null
@@ -54,8 +58,11 @@ export async function connect() {
   _connecting = true
 
   if (!existsSync(SOCKET_PATH)) {
-    _connecting = false
-    return false
+    const started = await _startProcess()
+    if (!started) {
+      _connecting = false
+      return false
+    }
   }
 
   return new Promise((resolve) => {
@@ -131,6 +138,41 @@ function _stopHeartbeat() {
     clearInterval(_heartbeatTimer)
     _heartbeatTimer = null
   }
+}
+
+let _restartAttempts = 0
+let _lastRestartTime = 0
+
+async function _startProcess() {
+  const now = Date.now()
+  if (now - _lastRestartTime < RESTART_COOLDOWN_MS) return false
+  if (_restartAttempts >= MAX_RESTART_ATTEMPTS) {
+    _core?.log('error', `[parse-client] max restart attempts (${MAX_RESTART_ATTEMPTS}) reached, giving up`)
+    return false
+  }
+  if (!existsSync(BINARY_PATH)) {
+    _core?.log('error', `[parse-client] binary not found: ${BINARY_PATH}`)
+    return false
+  }
+  _restartAttempts++
+  _lastRestartTime = now
+  _core?.log('info', `[parse-client] starting malong-parse (attempt ${_restartAttempts}/${MAX_RESTART_ATTEMPTS})...`)
+  const child = spawn(BINARY_PATH, [], {
+    stdio: 'ignore',
+    detached: true,
+  })
+  child.unref()
+  // wait for socket to appear
+  for (let i = 0; i < 30; i++) {
+    await new Promise(r => setTimeout(r, 200))
+    if (existsSync(SOCKET_PATH)) {
+      _core?.log('info', `[parse-client] socket ready after ${(i + 1) * 200}ms`)
+      _restartAttempts = 0
+      return true
+    }
+  }
+  _core?.log('warn', `[parse-client] socket not ready after 6s`)
+  return false
 }
 
 function _circuitRecordFailure() {
