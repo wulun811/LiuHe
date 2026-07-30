@@ -29,6 +29,7 @@ pub struct ServerState {
     pub concurrency: Semaphore,
     pub lang_stats: std::sync::Mutex<HashMap<String, u64>>,
     pub sym_count_buckets: std::sync::Mutex<[u64; 5]>, // 0-10, 11-50, 51-200, 201-1000, 1000+
+    pub hot_files: std::sync::Mutex<Vec<(String, u64)>>, // (file_path, access_count)
 }
 
 impl ServerState {
@@ -41,6 +42,7 @@ impl ServerState {
             concurrency: Semaphore::new(MAX_CONCURRENCY),
             lang_stats: Mutex::new(HashMap::new()),
             sym_count_buckets: Mutex::new([0; 5]),
+            hot_files: Mutex::new(Vec::new()),
         }
     }
 }
@@ -223,6 +225,19 @@ fn record_stats(state: &ServerState, ext: &str, sym_count: usize) {
     }
 }
 
+fn record_hot_file(state: &ServerState, file_path: &str) {
+    if file_path.is_empty() { return; }
+    if let Ok(mut hot_files) = state.hot_files.lock() {
+        if let Some(entry) = hot_files.iter_mut().find(|(p, _)| p == file_path) {
+            entry.1 += 1;
+        } else {
+            hot_files.push((file_path.to_string(), 1));
+        }
+        hot_files.sort_by(|a, b| b.1.cmp(&a.1));
+        if hot_files.len() > 100 { hot_files.truncate(100); }
+    }
+}
+
 fn dispatch(req: Request, state: &ServerState) -> Response {
     let params = req.params;
 
@@ -233,6 +248,10 @@ fn dispatch(req: Request, state: &ServerState) -> Response {
             let cache_stats = state.cache.lock().unwrap().stats();
             let lang_stats = state.lang_stats.lock().unwrap();
             let sym_buckets = state.sym_count_buckets.lock().unwrap();
+            let hot_files = state.hot_files.lock().unwrap();
+            let hot_files_json: Vec<serde_json::Value> = hot_files.iter().take(20).map(|(p, c)| {
+                serde_json::json!({ "path": p, "count": c })
+            }).collect();
             Response::success(req.id, serde_json::json!({
                 "version": env!("CARGO_PKG_VERSION"),
                 "pid": std::process::id(),
@@ -248,7 +267,8 @@ fn dispatch(req: Request, state: &ServerState) -> Response {
                         "51_200": sym_buckets[2],
                         "201_1000": sym_buckets[3],
                         "1000_plus": sym_buckets[4],
-                    }
+                    },
+                    "hot_files": hot_files_json,
                 },
             }))
         }
@@ -265,6 +285,7 @@ fn dispatch(req: Request, state: &ServerState) -> Response {
             };
 
             if !file_path.is_empty() {
+                record_hot_file(state, &file_path);
                 let mut cache_lock = state.cache.lock().unwrap();
                 if let Some((t, s, l)) = cache_lock.get(&file_path) {
                     let result = extract::extract_all(t, s, l);
@@ -277,6 +298,7 @@ fn dispatch(req: Request, state: &ServerState) -> Response {
                 Ok(tree) => {
                     let result = extract::extract_all(&tree, &source, language);
                     record_stats(state, &ext, result.symbols.len());
+                    record_hot_file(state, &file_path);
                     if !file_path.is_empty() {
                         state.cache.lock().unwrap().insert(&file_path, tree, source, language.to_string());
                     }
