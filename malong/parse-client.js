@@ -82,6 +82,7 @@ export async function connect() {
       _startHeartbeat()
       _circuitRecordSuccess()
       _core?.log('info', '[parse-client] connected to malong-parse')
+      _preheat().catch(() => {})
       resolve(true)
     })
 
@@ -173,6 +174,16 @@ async function _startProcess() {
   }
   _core?.log('warn', `[parse-client] socket not ready after 6s`)
   return false
+}
+
+async function _preheat() {
+  const jsFixture = 'function foo() { return 1; }; class Bar { constructor() { this.x = 1 } }'
+  try {
+    await request('extract_all', { source: jsFixture, ext: '.js' }, 5000)
+    _core?.log('info', '[parse-client] parser pool warmed')
+  } catch (e) {
+    // preheat failure is non-fatal
+  }
 }
 
 function _circuitRecordFailure() {
@@ -341,7 +352,7 @@ export async function computeMetrics(source, ext, filePath) {
 }
 
 export async function batchExtract(files) {
-  // files: [{path, source}]
+  // files: [{path, source}] or [{path, file_path}]
   const result = await request('batch_extract', { files }, 120000)
   return result.results.map(r => {
     if (r.error) {

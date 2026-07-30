@@ -404,6 +404,19 @@ fn dispatch(req: Request, state: &ServerState) -> Response {
             let results: Vec<serde_json::Value> = files.par_iter()
                 .map(|f| {
                     let path = f["path"].as_str().unwrap_or("");
+                    let file_path = f["file_path"].as_str().unwrap_or("");
+
+                    // try cache first (file_path mode)
+                    if !file_path.is_empty() {
+                        let mut cache_lock = state.cache.lock().unwrap();
+                        if let Some((t, s, l)) = cache_lock.get(file_path) {
+                            let result = extract::extract_all(t, s, l);
+                            return serde_json::json!({
+                                "path": path,
+                                "result": serde_json::to_value(result).unwrap()
+                            });
+                        }
+                    }
 
                     // support both source and file_path
                     let source = if let Some(s) = f["source"].as_str() {
@@ -414,15 +427,15 @@ fn dispatch(req: Request, state: &ServerState) -> Response {
                             });
                         }
                         s.to_string()
-                    } else if let Some(fp) = f["file_path"].as_str() {
-                        let metadata = match std::fs::metadata(fp) {
+                    } else if !file_path.is_empty() {
+                        let metadata = match std::fs::metadata(file_path) {
                             Ok(m) => m,
                             Err(_) => return serde_json::json!({ "path": path, "error": "FILE_NOT_FOUND" }),
                         };
                         if metadata.len() > 1_000_000 {
                             return serde_json::json!({ "path": path, "error": "FILE_TOO_LARGE" });
                         }
-                        match std::fs::read_to_string(fp) {
+                        match std::fs::read_to_string(file_path) {
                             Ok(s) => s,
                             Err(_) => return serde_json::json!({ "path": path, "error": "FILE_READ_ERROR" }),
                         }
@@ -447,6 +460,9 @@ fn dispatch(req: Request, state: &ServerState) -> Response {
                     match state.parser_pool.parse(&source, language) {
                         Ok(tree) => {
                             let result = extract::extract_all(&tree, &source, language);
+                            if !file_path.is_empty() {
+                                state.cache.lock().unwrap().insert(file_path, tree, source, language.to_string());
+                            }
                             serde_json::json!({
                                 "path": path,
                                 "result": serde_json::to_value(result).unwrap()

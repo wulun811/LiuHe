@@ -6,7 +6,6 @@ import Database from 'better-sqlite3'
 import { join, relative, extname, resolve } from 'node:path'
 import { readFileSync, writeFileSync, existsSync, unlinkSync, watch, chmodSync, statSync } from 'node:fs'
 import { createServer } from 'node:http'
-import { Worker } from 'node:worker_threads'
 import { DEFAULT_IGNORE_DIRS } from './file-collector.js'
 
 const SCHEMA = `
@@ -528,22 +527,26 @@ class CodeIndex {
 
       let parsed = []
       if (changedFiles.length) {
-        const workerUrl = new URL('./parse-worker.js', import.meta.url)
-        const mid = Math.ceil(changedFiles.length / 2)
-        const batches = [changedFiles.slice(0, mid), changedFiles.slice(mid)].filter(b => b.length > 0)
-        const runWorker = (files) => new Promise((res) => {
-          const w = new Worker(workerUrl)
-          const timer = setTimeout(() => {
-            console.error(`[code-index] parse worker timeout (${files.length} files) — skipping batch`)
-            try { w.terminate() } catch {}
-            res([])
-          }, 300000)
-          w.on('message', (msg) => { clearTimeout(timer); res(msg.results); w.terminate() })
-          w.on('error', (e) => { clearTimeout(timer); console.error(`[code-index] parse worker error: ${e.message}`); res([]) })
-          w.postMessage({ files, repo })
-        })
-        const workerResults = await Promise.all(batches.map(b => runWorker(b)))
-        parsed = workerResults.flat()
+        const BATCH_SIZE = 50
+        parsed = []
+        for (let i = 0; i < changedFiles.length; i += BATCH_SIZE) {
+          const chunk = changedFiles.slice(i, i + BATCH_SIZE)
+          const files = chunk.map(fp => ({ path: relative(repo, fp), file_path: fp }))
+          const results = await this._langParser.batchExtractAsync(files)
+          for (const r of results) {
+            if (r.error) {
+              console.error(`[code-index] batch parse error for ${r.path}: ${r.error}`)
+              continue
+            }
+            parsed.push({
+              relPath: r.path,
+              sourceLength: 0,
+              symbols: r.symbols || [],
+              refs: r.refs || [],
+            })
+          }
+          if (i + BATCH_SIZE < changedFiles.length) await new Promise(r => setImmediate(r))
+        }
         console.error(`[code-index] parse: ${parsed.length}/${changedFiles.length} files in ${((Date.now() - t0) / 1000).toFixed(1)}s`)
       }
 

@@ -8,6 +8,7 @@ import JavaScript from 'tree-sitter-javascript'
 import Python from 'tree-sitter-python'
 import Go from 'tree-sitter-go'
 import Rust from 'tree-sitter-rust'
+import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import * as parseClient from './parse-client.js'
 const _require = createRequire(import.meta.url)
@@ -1094,16 +1095,17 @@ export async function init(core) {
     },
 
     async batchExtractAsync(files) {
+      const _batchBuiltin = (list) => list.map(f => {
+        const ext = f.path.slice(f.path.lastIndexOf('.'))
+        const source = f.source || (f.file_path && readFileSync(f.file_path, 'utf-8'))
+        if (!source) return { path: f.path, symbols: [], refs: [] }
+        const tree = this.parse(source, ext)
+        if (!tree) return { path: f.path, symbols: [], refs: [] }
+        const result = this.extractAll(tree, source, ext)
+        return { path: f.path, ...result }
+      })
       if (_mode === 'shadow') {
-        return _runShadow('batchExtract', [files], async () => {
-          return files.map(f => {
-            const ext = f.path.slice(f.path.lastIndexOf('.'))
-            const tree = this.parse(f.source, ext)
-            if (!tree) return { path: f.path, symbols: [], refs: [] }
-            const result = this.extractAll(tree, f.source, ext)
-            return { path: f.path, ...result }
-          })
-        })
+        return _runShadow('batchExtract', [files], async () => _batchBuiltin(files))
       }
       if (_mode === 'rust-service') {
         try {
@@ -1112,13 +1114,7 @@ export async function init(core) {
           core.log('warn', `[lang-parser] rust-service batchExtract failed, fallback: ${e.message}`)
         }
       }
-      return files.map(f => {
-        const ext = f.path.slice(f.path.lastIndexOf('.'))
-        const tree = this.parse(f.source, ext)
-        if (!tree) return { path: f.path, symbols: [], refs: [] }
-        const result = this.extractAll(tree, f.source, ext)
-        return { path: f.path, ...result }
-      })
+      return _batchBuiltin(files)
     },
   })
   core.log('info', `[lang-parser] config=${PARSE_MODE} effective=${_mode} loaded=${Object.values(LANG_MAP).map(l => l.name).join(',')}`)
