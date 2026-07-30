@@ -26,6 +26,7 @@ let _buffer = Buffer.alloc(0)
 let _heartbeatTimer = null
 let _circuitFailures = 0
 let _circuitOpen = false  // true = stop trying Rust, use builtin
+let _reconnectPromise = null  // 重连期间的 Promise，用于请求排队
 
 export const name = 'malong-parse-client'
 export const version = '0.1.0'
@@ -36,6 +37,12 @@ export async function init(core) {
 
 export async function connect() {
   if (_connected) return true
+  
+  // 如果正在重连，等待完成
+  if (_reconnectPromise) {
+    return _reconnectPromise
+  }
+  
   if (_connecting) {
     // 等待连接完成
     return new Promise((resolve) => {
@@ -56,43 +63,60 @@ export async function connect() {
   }
 
   _connecting = true
+  
+  // 创建重连 Promise，让其他请求可以等待
+  _reconnectPromise = (async () => {
+    try {
+      if (!existsSync(SOCKET_PATH)) {
+        const started = await _startProcess()
+        if (!started) {
+          _connecting = false
+          _reconnectPromise = null
+          return false
+        }
+      }
 
-  if (!existsSync(SOCKET_PATH)) {
-    const started = await _startProcess()
-    if (!started) {
+      const result = await new Promise((resolve) => {
+        const sock = net.createConnection(SOCKET_PATH)
+        const timer = setTimeout(() => {
+          sock.destroy()
+          _connecting = false
+          _reconnectPromise = null
+          resolve(false)
+        }, CONNECT_TIMEOUT_MS)
+
+        sock.on('connect', () => {
+          clearTimeout(timer)
+          _socket = sock
+          _connected = true
+          _connecting = false
+          _reconnectPromise = null
+          _setupHandlers()
+          _startHeartbeat()
+          _circuitRecordSuccess()
+          _core?.log('info', '[parse-client] connected to malong-parse')
+          _preheat().catch(() => {})
+          resolve(true)
+        })
+
+        sock.on('error', (err) => {
+          clearTimeout(timer)
+          _connecting = false
+          _reconnectPromise = null
+          _core?.log('warn', `[parse-client] connection failed: ${err.message}`)
+          resolve(false)
+        })
+      })
+      
+      return result
+    } catch (err) {
       _connecting = false
+      _reconnectPromise = null
       return false
     }
-  }
-
-  return new Promise((resolve) => {
-    const sock = net.createConnection(SOCKET_PATH)
-    const timer = setTimeout(() => {
-      sock.destroy()
-      _connecting = false
-      resolve(false)
-    }, CONNECT_TIMEOUT_MS)
-
-    sock.on('connect', () => {
-      clearTimeout(timer)
-      _socket = sock
-      _connected = true
-      _connecting = false
-      _setupHandlers()
-      _startHeartbeat()
-      _circuitRecordSuccess()
-      _core?.log('info', '[parse-client] connected to malong-parse')
-      _preheat().catch(() => {})
-      resolve(true)
-    })
-
-    sock.on('error', (err) => {
-      clearTimeout(timer)
-      _connecting = false
-      _core?.log('warn', `[parse-client] connection failed: ${err.message}`)
-      resolve(false)
-    })
-  })
+  })()
+  
+  return _reconnectPromise
 }
 
 function _setupHandlers() {
@@ -111,10 +135,20 @@ function _setupHandlers() {
       reject(new Error('connection closed'))
     }
     _pending.clear()
-    // auto-reconnect after 1s
-    setTimeout(() => {
+    // auto-reconnect after 1s，设置 _reconnectPromise 让后续请求等待
+    let reconnectResolve
+    _reconnectPromise = new Promise((resolve) => {
+      reconnectResolve = resolve
+    })
+    setTimeout(async () => {
       _core?.log('info', '[parse-client] attempting reconnect...')
-      connect().catch(() => {})
+      _reconnectPromise = null  // 清除 promise，让 connect() 执行实际连接
+      const ok = await connect()
+      reconnectResolve(ok)
+      if (ok) {
+        _reconnectPromise = null  // 重连成功，清除 promise
+      }
+      // 如果重连失败，保持 _reconnectPromise 为 false，后续请求会检查并失败
     }, 1000)
   })
 
@@ -231,18 +265,29 @@ function _processBuffer() {
   }
 }
 
-async function request(method, params, timeoutMs = REQUEST_TIMEOUT_MS) {
+async function request(method, params, timeoutMs = REQUEST_TIMEOUT_MS, priority = 0) {
   if (_circuitOpen) {
     throw new Error('circuit breaker open')
   }
 
   if (!_connected) {
-    const ok = await connect()
-    if (!ok) throw new Error('not connected to malong-parse')
+    // 如果正在重连，等待重连完成（最多 5 秒）
+    if (_reconnectPromise) {
+      const waitResult = await Promise.race([
+        _reconnectPromise,
+        new Promise(resolve => setTimeout(() => resolve(false), 5000))
+      ])
+      if (!waitResult) {
+        throw new Error('reconnect timeout (5s)')
+      }
+    } else {
+      const ok = await connect()
+      if (!ok) throw new Error('not connected to malong-parse')
+    }
   }
 
   const id = `req-${++_reqId}`
-  const msg = JSON.stringify({ id, method, params })
+  const msg = JSON.stringify({ id, method, params, priority })
   const frame = Buffer.alloc(4 + Buffer.byteLength(msg))
   frame.writeUInt32BE(Buffer.byteLength(msg), 0)
   frame.write(msg, 4)
@@ -353,7 +398,7 @@ export async function computeMetrics(source, ext, filePath) {
 
 export async function batchExtract(files) {
   // files: [{path, source}] or [{path, file_path}]
-  const result = await request('batch_extract', { files }, 120000)
+  const result = await request('batch_extract', { files }, 120000, 1)  // priority=1 for batch
   return result.results.map(r => {
     if (r.error) {
       return { path: r.path, error: r.error }

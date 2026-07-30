@@ -2,12 +2,14 @@ use serde::{Deserialize, Serialize};
 
 pub const MAX_FRAME_SIZE: u32 = 16 * 1024 * 1024;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct Request {
     pub id: String,
     pub method: String,
     #[serde(default)]
     pub params: serde_json::Value,
+    #[serde(default)]
+    pub priority: u8,  // 0 = normal, 1 = high (batch)
 }
 
 #[derive(Debug, Serialize)]

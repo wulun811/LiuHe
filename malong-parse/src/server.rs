@@ -1,6 +1,8 @@
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use std::collections::BinaryHeap;
+use std::cmp::Ordering;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
 use tokio::sync::Semaphore;
@@ -38,10 +40,33 @@ impl ServerState {
     }
 }
 
+// Priority queue wrapper for requests
+#[derive(Eq, PartialEq)]
+struct PrioritizedRequest {
+    request: Request,
+    sequence: u64,  // For FIFO within same priority
+}
+
+impl Ord for PrioritizedRequest {
+    fn cmp(&self, other: &Self) -> Ordering {
+        // Higher priority first, then lower sequence (earlier) first
+        other.request.priority.cmp(&self.request.priority)
+            .then_with(|| other.sequence.cmp(&self.sequence))
+    }
+}
+
+impl PartialOrd for PrioritizedRequest {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 pub async fn handle_connection(stream: UnixStream, state: Arc<ServerState>) {
     let (mut reader, mut writer) = stream.into_split();
     let mut buf = vec![0u8; 65536];
     let mut data = Vec::new();
+    let mut request_queue: BinaryHeap<PrioritizedRequest> = BinaryHeap::new();
+    let mut sequence = 0u64;
 
     loop {
         let n = match reader.read(&mut buf).await {
@@ -54,10 +79,19 @@ pub async fn handle_connection(stream: UnixStream, state: Arc<ServerState>) {
         };
         data.extend_from_slice(&buf[..n]);
 
+        // Decode all available requests and add to priority queue
         while let Some((consumed, req)) = decode_frame(&data) {
             data.drain(..consumed);
-            let response = handle_request(req, &state).await;
+            request_queue.push(PrioritizedRequest {
+                request: req,
+                sequence,
+            });
+            sequence += 1;
+        }
 
+        // Process requests from priority queue
+        while let Some(prioritized) = request_queue.pop() {
+            let response = handle_request(prioritized.request, &state).await;
 
             match encode_frame(&response) {
                 Ok(frame) => {
