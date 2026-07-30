@@ -159,9 +159,9 @@ export async function parse(source, ext) {
   return request('has_errors', { source, ext })
 }
 
-export async function extractAll(source, ext) {
-  const result = await request('extract_all', { source, ext })
-  // 转换格式以匹配 lang-parser.js 的输出
+export async function extractAll(source, ext, filePath) {
+  const params = filePath ? { file_path: filePath, ext } : { source, ext }
+  const result = await request('extract_all', params)
   return {
     symbols: result.symbols.map(s => ({
       name: s.name,
@@ -180,8 +180,9 @@ export async function extractAll(source, ext) {
   }
 }
 
-export async function extractSymbols(source, ext) {
-  const result = await request('extract_symbols', { source, ext })
+export async function extractSymbols(source, ext, filePath) {
+  const params = filePath ? { file_path: filePath, ext } : { source, ext }
+  const result = await request('extract_symbols', params)
   return {
     symbols: result.symbols.map(s => ({
       name: s.name,
@@ -196,8 +197,9 @@ export async function extractSymbols(source, ext) {
   }
 }
 
-export async function extractTopLevel(source, ext) {
-  const result = await request('extract_top_level', { source, ext })
+export async function extractTopLevel(source, ext, filePath) {
+  const params = filePath ? { file_path: filePath, ext } : { source, ext }
+  const result = await request('extract_top_level', params)
   return result.symbols.map(s => ({
     name: s.name,
     type: s.kind,
@@ -205,8 +207,9 @@ export async function extractTopLevel(source, ext) {
   }))
 }
 
-export async function extractReferences(source, ext) {
-  const result = await request('extract_references', { source, ext })
+export async function extractReferences(source, ext, filePath) {
+  const params = filePath ? { file_path: filePath, ext } : { source, ext }
+  const result = await request('extract_references', params)
   return result.refs.map(r => ({
     type: r.kind,
     name: r.name,
@@ -216,21 +219,24 @@ export async function extractReferences(source, ext) {
   }))
 }
 
-export async function hasErrors(source, ext) {
-  const result = await request('has_errors', { source, ext })
+export async function hasErrors(source, ext, filePath) {
+  const params = filePath ? { file_path: filePath, ext } : { source, ext }
+  const result = await request('has_errors', params)
   return result.has_errors
 }
 
-export async function simplifyAST(source, ext, depth = 30) {
-  return request('simplify_ast', { source, ext, options: { max_depth: depth } })
+export async function simplifyAST(source, ext, depth = 30, filePath) {
+  const params = filePath ? { file_path: filePath, ext, options: { max_depth: depth } } : { source, ext, options: { max_depth: depth } }
+  return request('simplify_ast', params)
 }
 
 export async function classifyMessage(content) {
   return request('classify_message', { content })
 }
 
-export async function computeMetrics(source, ext) {
-  return request('compute_metrics', { source, ext })
+export async function computeMetrics(source, ext, filePath) {
+  const params = filePath ? { file_path: filePath, ext } : { source, ext }
+  return request('compute_metrics', params)
 }
 
 export async function batchExtract(files) {

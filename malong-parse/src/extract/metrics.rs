@@ -14,16 +14,7 @@ pub struct Metrics {
 
 pub fn compute_metrics(tree: &Tree, source: &str, language: &str) -> Metrics {
     let loc = source.lines().count() as u32;
-
-    let comment_chars = if language == "python" {
-        count_py(source)
-    } else if language == "go" || language == "rust" {
-        count_hash(source) + count_cs(source)
-    } else {
-        count_cs(source)
-    };
     let total_chars = source.len().max(1) as f64;
-    let comment_ratio = (comment_chars as f64 / total_chars * 100.0 * 100.0).round() / 100.0;
 
     let mut cyc = 1u32;
     let mut cog = 0u32;
@@ -203,6 +194,15 @@ pub fn compute_metrics(tree: &Tree, source: &str, language: &str) -> Metrics {
         &branch_kinds,
         &branch_kinds_cog,
     );
+
+    let comment_chars = if language == "python" {
+        count_py(source)
+    } else if language == "go" || language == "rust" {
+        count_hash(source) + count_cs(source)
+    } else {
+        count_cs(source)
+    };
+    let comment_ratio = (comment_chars as f64 / total_chars * 100.0 * 100.0).round() / 100.0;
 
     Metrics {
         cyclomatic_complexity: cyc,

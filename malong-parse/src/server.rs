@@ -313,14 +313,31 @@ fn dispatch(req: Request, state: &ServerState) -> Response {
             let results: Vec<serde_json::Value> = files.par_iter()
                 .map(|f| {
                     let path = f["path"].as_str().unwrap_or("");
-                    let source = f["source"].as_str().unwrap_or("");
 
-                    if source.len() > 1_000_000 {
-                        return serde_json::json!({
-                            "path": path,
-                            "error": "FILE_TOO_LARGE"
-                        });
-                    }
+                    // support both source and file_path
+                    let source = if let Some(s) = f["source"].as_str() {
+                        if s.len() > 1_000_000 {
+                            return serde_json::json!({
+                                "path": path,
+                                "error": "FILE_TOO_LARGE"
+                            });
+                        }
+                        s.to_string()
+                    } else if let Some(fp) = f["file_path"].as_str() {
+                        let metadata = match std::fs::metadata(fp) {
+                            Ok(m) => m,
+                            Err(_) => return serde_json::json!({ "path": path, "error": "FILE_NOT_FOUND" }),
+                        };
+                        if metadata.len() > 1_000_000 {
+                            return serde_json::json!({ "path": path, "error": "FILE_TOO_LARGE" });
+                        }
+                        match std::fs::read_to_string(fp) {
+                            Ok(s) => s,
+                            Err(_) => return serde_json::json!({ "path": path, "error": "FILE_READ_ERROR" }),
+                        }
+                    } else {
+                        return serde_json::json!({ "path": path, "error": "MISSING_SOURCE" });
+                    };
 
                     let ext = std::path::Path::new(path)
                         .extension()
@@ -336,9 +353,9 @@ fn dispatch(req: Request, state: &ServerState) -> Response {
                         }),
                     };
 
-                    match state.parser_pool.parse(source, language) {
+                    match state.parser_pool.parse(&source, language) {
                         Ok(tree) => {
-                            let result = extract::extract_all(&tree, source, language);
+                            let result = extract::extract_all(&tree, &source, language);
                             serde_json::json!({
                                 "path": path,
                                 "result": serde_json::to_value(result).unwrap()

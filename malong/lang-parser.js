@@ -1037,21 +1037,48 @@ export async function init(core) {
     },
 
     async computeMetricsAsync(source, ext) {
+      const buildResult = (tree, src) => {
+        const cyc = calcCyclomaticFromTree(tree.rootNode)
+        const cog = calcCognitiveFromTree(tree.rootNode)
+        let maxNesting = 0, funcCount = 0, classCount = 0
+        function walk(n, depth) {
+          if (n.type === 'function_declaration' || n.type === 'function_definition' || n.type === 'function_item' ||
+              n.type === 'method_definition' || n.type === 'method_declaration' || n.type === 'arrow_function') funcCount++
+          if (n.type === 'class_declaration' || n.type === 'class_definition' || n.type === 'struct_item' ||
+              n.type === 'enum_item' || n.type === 'trait_item') classCount++
+          const isBranch = n.type === 'if_statement' || n.type === 'else_clause' || n.type === 'for_statement' ||
+                           n.type === 'while_statement' || n.type === 'do_statement' || n.type === 'catch_clause' ||
+                           n.type === 'ternary_expression' || n.type === 'conditional_expression'
+          const nd = isBranch ? depth + 1 : depth
+          if (nd > maxNesting) maxNesting = nd
+          for (let i = 0; i < n.childCount; i++) { const c = n.child(i); if (c) walk(c, nd) }
+        }
+        walk(tree.rootNode, 0)
+        const lines = src.split('\n')
+        let commentCount = 0
+        for (const line of lines) {
+          const t = line.trim()
+          if (t.startsWith('//') || t.startsWith('/*') || t.startsWith('*') || t.startsWith('#') || t.startsWith('"""') || t.startsWith("'''")) {
+            commentCount += line.length
+          }
+        }
+        const commentRatio = src.length > 0 ? Math.round((commentCount / src.length) * 10000) / 100 : 0
+        return {
+          cyclomatic_complexity: cyc,
+          cognitive_complexity: cog,
+          max_nesting_depth: maxNesting,
+          function_count: funcCount,
+          class_count: classCount,
+          loc: lines.length,
+          comment_ratio: commentRatio,
+        }
+      }
+
       if (_mode === 'shadow') {
         return _runShadow('computeMetrics', [source, ext], async () => {
           const tree = this.parse(source, ext)
           if (!tree) return null
-          const cyc = calcCyclomaticFromTree(tree.rootNode)
-          const cog = calcCognitiveFromTree(tree.rootNode)
-          return {
-            cyclomatic_complexity: cyc,
-            cognitive_complexity: cog,
-            max_nesting_depth: 0,
-            function_count: 0,
-            class_count: 0,
-            loc: source.split('\n').length,
-            comment_ratio: 0,
-          }
+          return buildResult(tree, source)
         })
       }
       if (_mode === 'rust-service') {
@@ -1063,17 +1090,7 @@ export async function init(core) {
       }
       const tree = this.parse(source, ext)
       if (!tree) return null
-      const cyc = calcCyclomaticFromTree(tree.rootNode)
-      const cog = calcCognitiveFromTree(tree.rootNode)
-      return {
-        cyclomatic_complexity: cyc,
-        cognitive_complexity: cog,
-        max_nesting_depth: 0,
-        function_count: 0,
-        class_count: 0,
-        loc: source.split('\n').length,
-        comment_ratio: 0,
-      }
+      return buildResult(tree, source)
     },
 
     async batchExtractAsync(files) {
