@@ -307,6 +307,10 @@ async function analyzeFileAST(content, lang, currentFile, langParser) {
       for (const sym of usedSymbols) {
         if (KEYWORDS.has(sym) || SPECIAL.has(sym) || builtins.has(sym) || sym.startsWith('__')) continue
         if (sym === sym.toUpperCase() && sym.length > 2) continue
+        if (sym.includes('.')) {
+          const root = sym.split('.')[0]
+          if (builtins.has(root) || KEYWORDS.has(root) || root === 'this' || root === 'self' || definedSymbols.has(root)) continue
+        }
         if (!definedSymbols.has(sym)) undefinedSymbols.push(sym)
       }
       return { definedSymbols, usedSymbols, imports, undefinedSymbols: [...new Set(undefinedSymbols)], symbolLines, relativeImports }
@@ -511,6 +515,10 @@ function analyzeFile(content, lang, currentFile = '') {
   for (const sym of usedSymbols) {
     if (KEYWORDS.has(sym) || SPECIAL.has(sym) || builtins.has(sym) || sym.startsWith('__')) continue
     if (sym === sym.toUpperCase() && sym.length > 2) continue
+    if (sym.includes('.')) {
+      const root = sym.split('.')[0]
+      if (builtins.has(root) || KEYWORDS.has(root) || root === 'this' || root === 'self' || definedSymbols.has(root)) continue
+    }
     if (!definedSymbols.has(sym)) {
       undefinedSymbols.push(sym)
     }

@@ -572,6 +572,25 @@ class CodeIndex {
       writeFileSync(metadataPath, JSON.stringify(metadata, null, 2))
     }
 
+    async function doSyncFileChange(filePath) {
+      if (!existsSync(filePath)) {
+        const relPath = self._watchedDir ? relative(self._watchedDir, filePath) : filePath
+        const matched = self._db.prepare('SELECT id FROM files WHERE path = ?').get(relPath)
+        if (matched) {
+          self._db.prepare('DELETE FROM symbols WHERE file_id = ?').run(matched.id)
+          self._db.prepare('DELETE FROM refs WHERE source_file_id = ?').run(matched.id)
+          self._db.prepare('DELETE FROM files WHERE id = ?').run(matched.id)
+        }
+        if (self._core.emit) self._core.emit('file.changed', { path: filePath, type: 'deleted' })
+        return { path: relPath, status: 'deleted' }
+      }
+      const repo = self._watchedDir || self._resolveRepoDir(filePath)
+      const result = await self.indexFile(filePath, repo)
+      if (result) self._core.log('info', `[code-index] synced: ${result.path} (${result.symbols} syms)`)
+      if (self._core.emit) self._core.emit('file.changed', { path: filePath })
+      return result
+    }
+
     // 启动文件监听器（增量索引）
     function startWatcher(dir) {
       self._watchedDir = dir
@@ -592,7 +611,7 @@ class CodeIndex {
             for (const f of files) {
               const fullPath = join(dir, f)
               if (existsSync(fullPath)) {
-                self.syncFileChange(fullPath)
+                doSyncFileChange(fullPath)
               }
             }
           }, WATCHER_DEBOUNCE)
@@ -927,22 +946,7 @@ class CodeIndex {
       },
 
       async syncFileChange(filePath) {
-        if (!existsSync(filePath)) {
-          const relPath = self._watchedDir ? relative(self._watchedDir, filePath) : filePath
-          const matched = self._db.prepare('SELECT id FROM files WHERE path = ?').get(relPath)
-          if (matched) {
-            self._db.prepare('DELETE FROM symbols WHERE file_id = ?').run(matched.id)
-            self._db.prepare('DELETE FROM refs WHERE source_file_id = ?').run(matched.id)
-            self._db.prepare('DELETE FROM files WHERE id = ?').run(matched.id)
-          }
-          if (self._core.emit) self._core.emit('file.changed', { path: filePath, type: 'deleted' })
-          return { path: relPath, status: 'deleted' }
-        }
-        const repo = self._watchedDir || self._resolveRepoDir(filePath)
-        const result = await self.indexFile(filePath, repo)
-        if (result) self._core.log('info', `[code-index] synced: ${result.path} (${result.symbols} syms)`)
-        if (self._core.emit) self._core.emit('file.changed', { path: filePath })
-        return result
+        return doSyncFileChange(filePath)
       },
 
       async indexProject(rootDir, { timeout = 60000 } = {}) {
