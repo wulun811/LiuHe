@@ -1,7 +1,7 @@
 {
   "name": "config_drift",
   "version": "1.0.0",
-  "description": "Detect config drift: env vars / DB tables / services used in code but missing from .env.example, docker-compose.yml, CI configs.",
+  "description": "Detect config drift: env vars / DB tables / services in code but missing from .env.example, docker-compose.yml. No index required (pure regex). After fixing, re-run to verify. Pairs with exception_guard as quality gate.",
   "inputSchema": {
     "type": "object",
     "properties": {

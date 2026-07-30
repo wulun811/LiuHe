@@ -191,6 +191,13 @@ export async function handle(args, context) {
 
   const mismatches = detectMismatches(signature, allMocks)
 
+  let nextStep = null
+  if (mismatches.length > 0) {
+    nextStep = `Fix mismatches above, then verify: test_bridge(action="run")`
+  } else {
+    nextStep = `Mocks are in sync. Run tests: test_bridge(action="run")`
+  }
+
   return {
     target: {
       file,
@@ -204,5 +211,6 @@ export async function handle(args, context) {
       mismatches_found: mismatches.length,
       fixable: mismatches.length > 0,
     },
+    next_step: nextStep,
   }
 }

@@ -146,6 +146,13 @@ export async function handle(args, context) {
   const summary = { high: 0, medium: 0, low: 0 }
   for (const t of todos) summary[t.priority]++
 
+  let nextStep = null
+  if (summary.high > 0) {
+    nextStep = `Address ${summary.high} high-priority TODOs in current files.`
+  } else if (todos.length > 0) {
+    nextStep = `Review TODOs above. Prioritize by file modification recency.`
+  }
+
   return {
     scope,
     total_todos: todos.length,
@@ -153,5 +160,6 @@ export async function handle(args, context) {
     truncated: todos.length > 50,
     summary,
     scanned_files: files.length,
+    next_step: nextStep,
   }
 }

@@ -1,11 +1,11 @@
 {
   "name": "sweep_dead_code",
   "version": "1.0.0",
-  "description": "Detect dead code: unused imports, unused functions, orphan files. Uses code-index detectDeadCode + AST import analysis.",
+  "description": "Detect dead code: unused imports, unused functions, orphan files. Index optional (regex import fallback). Remove dead code via edit_transaction. Unused imports are safe to remove immediately.",
   "inputSchema": {
     "type": "object",
     "properties": {
-      "workspace_dir": { "type": "string", "description": "REQUIRED: Absolute path to the project root directory. Call reindex first." },
+      "workspace_dir": { "type": "string", "description": "REQUIRED: Absolute path to the project root directory. Index optional (regex import fallback)." },
       "scope": { "type": "string", "description": "Scan scope: directory relative to workspace_dir (default: \".\")" },
       "include_files": { "type": "boolean", "description": "Also detect orphan files (default: false)" }
     },

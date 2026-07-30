@@ -181,11 +181,19 @@ export async function handle(args, context) {
   }
   summary.estimated_tokens_saved = summary.unused_imports * 50 + summary.unused_functions * 200 + summary.orphan_files * 500
 
+  let nextStep = null
+  if (deadCode.length > 0) {
+    nextStep = `Remove dead code via edit_transaction. Unused imports are safe to remove immediately.`
+  } else {
+    nextStep = `No dead code found.`
+  }
+
   return {
     scope,
     dead_code: deadCode.slice(0, 100),
     truncated: deadCode.length > 100,
     summary,
     scanned_files: files.length,
+    next_step: nextStep,
   }
 }

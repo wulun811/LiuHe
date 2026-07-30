@@ -1,11 +1,11 @@
 {
   "name": "rename_symbol",
   "version": "1.0.0",
-  "description": "Atomic cross-file symbol rename. Finds all references, applies word-boundary-safe replacement via edit_transaction. dry_run=true by default.",
+  "description": "Atomic cross-file symbol rename via edit_transaction. Word-boundary-safe, string/comment-aware. dry_run=true (default) previews; set false to apply. Index optional (text fallback). After renaming, verify with test_bridge(action=\"run\") and check mocks with mock_sync.",
   "inputSchema": {
     "type": "object",
     "properties": {
-      "workspace_dir": { "type": "string", "description": "REQUIRED: Absolute path to the project root directory. Call reindex first." },
+      "workspace_dir": { "type": "string", "description": "REQUIRED: Absolute path to the project root directory. Index optional (text fallback)." },
       "symbol": { "type": "string", "description": "Current symbol name to rename" },
       "new_name": { "type": "string", "description": "New symbol name" },
       "file": { "type": "string", "description": "File where the symbol is defined (relative to workspace_dir)" },

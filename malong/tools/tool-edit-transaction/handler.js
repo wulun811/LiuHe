@@ -148,7 +148,11 @@ export async function handle(args, context) {
     case 'commit': {
       const txnId = args?.txn_id
       if (!txnId) return makeError(ErrorCodes.INVALID_INPUT, 'txn_id is required', { suggestion: 'Provide the transaction ID to commit' })
-      return store.commit(txnId)
+      const commitResult = store.commit(txnId)
+      if (commitResult && !commitResult.error) {
+        commitResult.next_step = 'Verify changes: test_bridge(action="run")'
+      }
+      return commitResult
     }
 
     case 'undo_commit': {

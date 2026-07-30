@@ -194,6 +194,13 @@ async function handleRun(args, context) {
     suggestedFix = unique.slice(0, 3).join('；')
   }
 
+  let nextStep = null
+  if (exitCode !== 0) {
+    nextStep = 'Fix failures above, then re-run. Use inspect() to understand failing code.'
+  } else {
+    nextStep = 'All tests pass. Use edit_transaction to commit changes.'
+  }
+
   return {
     action: 'run',
     framework,
@@ -208,6 +215,7 @@ async function handleRun(args, context) {
       duration_ms: parsed.results.reduce((s, r) => s + (r.duration_ms || 0), 0),
     },
     suggested_fix: suggestedFix,
+    next_step: nextStep,
   }
 }
 
@@ -292,6 +300,12 @@ async function handleSuggest(args, context) {
     suggestedCommand = buildCommand(framework, testFiles.map(f => `"${f}"`).join(' '), workspaceDir)
   }
 
+  let nextStep = null
+  if (affectedTests.length > 0) {
+    const firstFile = affectedTests[0].file
+    nextStep = `Run: test_bridge(action="run", scope="${firstFile}")`
+  }
+
   return {
     action: 'suggest',
     source_file: file,
@@ -300,6 +314,7 @@ async function handleSuggest(args, context) {
     affected_tests: affectedTests.slice(0, 30),
     total: affectedTests.length,
     suggested_command: suggestedCommand,
+    next_step: nextStep,
   }
 }
 
@@ -342,6 +357,11 @@ async function handleDiscover(args, context) {
   if (testFiles.length === 0) coverageHint = 'no tests found — consider creating tests'
   else coverageHint = `${testFiles.length} test file(s) found with ${tests.length} test function(s)`
 
+  let nextStep = null
+  if (tests.length > 0) {
+    nextStep = `Run: test_bridge(action="run", scope="${tests[0].file}")`
+  }
+
   return {
     action: 'discover',
     source_file: file,
@@ -349,6 +369,7 @@ async function handleDiscover(args, context) {
     tests: tests.slice(0, 50),
     total: tests.length,
     coverage_hint: coverageHint,
+    next_step: nextStep,
   }
 }
 

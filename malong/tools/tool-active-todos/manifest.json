@@ -1,7 +1,7 @@
 {
   "name": "active_todos",
   "version": "1.0.0",
-  "description": "Scan TODO/FIXME/XXX/HACK comments, prioritize by current work context. Pure regex, zero token.",
+  "description": "Scan TODO/FIXME/XXX/HACK comments, prioritize by current work context. Pure regex, zero token, no index required. Pass current_files to boost priority of files being edited.",
   "inputSchema": {
     "type": "object",
     "properties": {

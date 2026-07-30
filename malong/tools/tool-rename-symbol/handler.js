@@ -172,6 +172,9 @@ export async function handle(args, context) {
     definition,
     conflict_warning: conflictWarning,
     affected_callers: affectedCallers.length > 0 ? affectedCallers : undefined,
+    next_step: dryRun
+      ? `Apply: rename_symbol(..., dry_run=false). Then verify: test_bridge(action="run")`
+      : `Verify: test_bridge(action="run"). Check mocks: mock_sync(file="${file}", function="${symbol}")`,
   }
 
   if (!dryRun) {

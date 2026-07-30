@@ -1,11 +1,11 @@
 {
   "name": "find_tests",
   "version": "1.0.0",
-  "description": "Find test files for a source file: naming conventions + import graph reverse lookup + optional symbol-level test search.",
+  "description": "Find test files for a source file: naming conventions + import graph reverse lookup. Index optional (convention fallback). For running found tests, use test_bridge(action=\"run\"). Prefer over manual glob/find for test discovery.",
   "inputSchema": {
     "type": "object",
     "properties": {
-      "workspace_dir": { "type": "string", "description": "REQUIRED: Absolute path to the project root directory. Call reindex first." },
+      "workspace_dir": { "type": "string", "description": "REQUIRED: Absolute path to the project root directory. Index optional (convention fallback)." },
       "file": { "type": "string", "description": "Source file path relative to workspace_dir (e.g. \"src/auth.py\")" },
       "symbol": { "type": "string", "description": "Optional: narrow to tests referencing a specific symbol" }
     },

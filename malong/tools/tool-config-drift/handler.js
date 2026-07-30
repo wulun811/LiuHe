@@ -177,6 +177,13 @@ export async function handle(args, context) {
     return true
   })
 
+  let nextStep = null
+  if (uniqueDrifts.length > 0) {
+    nextStep = `Add missing vars to .env.example via edit_transaction, then re-run to verify.`
+  } else {
+    nextStep = `Config is in sync.`
+  }
+
   return {
     file: file || '(project-wide)',
     config_references: allRefs.slice(0, 50),
@@ -191,5 +198,6 @@ export async function handle(args, context) {
       drifts_found: uniqueDrifts.length,
       clean: uniqueDrifts.length === 0,
     },
+    next_step: nextStep,
   }
 }

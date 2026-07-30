@@ -179,6 +179,14 @@ export async function handle(args, context) {
     coverageHint = `${byImport.length} test file(s) actively import target module`
   }
 
+  const existingTests = byConvention.filter(c => c.exists)
+  let nextStep = null
+  if (existingTests.length > 0) {
+    nextStep = `Run: test_bridge(action="run", scope="${existingTests[0].path}")`
+  } else if (byImport.length > 0) {
+    nextStep = `Run: test_bridge(action="run", scope="${byImport[0].path}")`
+  }
+
   return {
     source_file: file,
     by_convention: byConvention,
@@ -186,5 +194,6 @@ export async function handle(args, context) {
     test_symbols: testSymbols.length > 0 ? testSymbols : undefined,
     coverage_hint: coverageHint,
     search_methods: searchMethods,
+    next_step: nextStep,
   }
 }

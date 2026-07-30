@@ -84,5 +84,6 @@ export async function handle(args, context) {
   }
 
   result.metadata = { sections_included: sections, parse_time_ms: Date.now() - t0 }
+  result.next_step = `Before modifying: impact_analysis(symbol="${symbol}", file="${file}"). After modifying: test_bridge(action="run")`
   return result
 }

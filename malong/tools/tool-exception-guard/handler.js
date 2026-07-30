@@ -179,6 +179,13 @@ export async function handle(args, context) {
   const builtinCount = raises.filter(r => BUILTIN_EXCEPTIONS.has(r.exception)).length
   const customCount = raises.filter(r => !BUILTIN_EXCEPTIONS.has(r.exception)).length
 
+  let nextStep = null
+  if (issues.length > 0) {
+    nextStep = `Fix issues via edit_transaction, then verify: test_bridge(action="run")`
+  } else {
+    nextStep = `Exception usage is clean.`
+  }
+
   return {
     file,
     project_exceptions: hierarchy,
@@ -189,5 +196,6 @@ export async function handle(args, context) {
       project_exception_count: projectExcNames.length,
       builtin_usage_ratio: raises.length > 0 ? Math.round(builtinCount / raises.length * 100) / 100 : 0,
     },
+    next_step: nextStep,
   }
 }

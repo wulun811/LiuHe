@@ -1,7 +1,7 @@
 {
   "name": "sandbox_validate",
   "version": "1.0.0",
-  "description": "Pre-validate edits before writing: syntax check (tree-sitter), indentation consistency, undefined symbol detection. Zero-cost trial.",
+  "description": "Pre-validate edits before writing: syntax check, indentation consistency, undefined symbol detection. Zero-cost trial. If valid, apply with edit_transaction. Prefer over write-then-discover-errors workflow.",
   "inputSchema": {
     "type": "object",
     "properties": {

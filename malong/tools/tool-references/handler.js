@@ -63,7 +63,11 @@ export async function handle(args, context) {
   if (misuseWarning) {
     result.misuse_warning = misuseWarning
   }
-  
+
+  if (results.length > 0) {
+    result.next_step = `For test refs: find_tests(file="${args?.file || ''}")`
+  }
+
   return result
 }
 

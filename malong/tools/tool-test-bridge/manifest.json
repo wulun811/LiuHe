@@ -1,7 +1,7 @@
 {
   "name": "test_bridge",
   "version": "1.0.0",
-  "description": "Close the edit→verify loop. action=run: run tests + parse output + enrich failures with code context. action=suggest: recommend which tests to run after code changes. action=discover: find available tests for a file.",
+  "description": "Close the edit→verify loop. action=run: execute tests, parse output, enrich failures with code context + root cause hints. action=suggest: recommend tests after code changes. action=discover: find available tests for a file. For finding test files without running, use find_tests. After fixing failures, re-run. Pairs with rename_symbol, mock_sync.",
   "inputSchema": {
     "type": "object",
     "properties": {

@@ -169,6 +169,9 @@ export async function handle(args, context) {
 
   if (issues.length === 0) {
     result.hint = 'No import issues found. If you recently changed function signatures, use impact_analysis to check for broken callers.'
+    result.next_step = 'Check dead code: sweep_dead_code()'
+  } else {
+    result.next_step = `Fix ${issues.length} issue(s) via edit_transaction, then verify: test_bridge(action="run")`
   }
 
   attachStalenessWarning(result, staleness)

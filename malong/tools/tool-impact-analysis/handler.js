@@ -89,5 +89,7 @@ export async function handle(args, context) {
     result.misuse_warning = misuseWarning
   }
 
+  result.next_step = `After modifying, verify: test_bridge(action="run")`
+
   return result
 }

@@ -202,9 +202,17 @@ export async function handle(args, context) {
   const warnCount = [checks.syntax, checks.indentation, checks.symbol_references]
     .reduce((n, c) => n + (c.errors?.filter(e => e.severity !== 'error').length || 0), 0)
 
+  let nextStep = null
+  if (errorCount === 0) {
+    nextStep = `Validation passed. Apply with edit_transaction.`
+  } else {
+    nextStep = `Fix the errors above, then re-validate.`
+  }
+
   return {
     valid: errorCount === 0,
     checks,
     summary: { errors: errorCount, warnings: warnCount, fixable: errorCount > 0 },
+    next_step: nextStep,
   }
 }
