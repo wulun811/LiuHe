@@ -10,6 +10,11 @@ export const version = '0.7.0'
 let _core
 
 export async function init(core) {
+  const mode = process.env.MALONG_PARSE_MODE
+  if (mode === 'builtin' || mode === 'shadow') {
+    throw new Error(`MALONG_PARSE_MODE=${mode} is not supported in v0.7.0. Only rust-service mode is available.`)
+  }
+
   _core = core
   await parseClient.init(core)
   await parseClient.connect()
