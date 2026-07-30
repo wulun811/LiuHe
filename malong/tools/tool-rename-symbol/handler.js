@@ -8,6 +8,53 @@ function escapeRegex(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
+function getStringRanges(line) {
+  const ranges = []
+  let i = 0
+  while (i < line.length) {
+    const ch = line[i]
+    if (ch === '"' || ch === "'" || ch === '`') {
+      const start = i
+      i++
+      while (i < line.length && line[i] !== ch) {
+        if (line[i] === '\\') i++
+        i++
+      }
+      ranges.push([start, i])
+    } else if (ch === '/' && line[i + 1] === '/') {
+      ranges.push([i, line.length])
+      break
+    } else if (ch === '/' && line[i + 1] === '*') {
+      const end = line.indexOf('*/', i + 2)
+      ranges.push([i, end === -1 ? line.length : end + 2])
+      i = end === -1 ? line.length : end + 2
+      continue
+    } else if (ch === '#') {
+      ranges.push([i, line.length])
+      break
+    }
+    i++
+  }
+  return ranges
+}
+
+function replaceOutsideStrings(line, re, replacement) {
+  const ranges = getStringRanges(line)
+  let result = ''
+  let lastEnd = 0
+  let m
+  re.lastIndex = 0
+  while ((m = re.exec(line)) !== null) {
+    const inString = ranges.some(([s, e]) => m.index >= s && m.index < e)
+    if (!inString) {
+      result += line.slice(lastEnd, m.index) + replacement
+      lastEnd = m.index + m[0].length
+    }
+  }
+  result += line.slice(lastEnd)
+  return result
+}
+
 function findTextRefs(workspaceDir, symbol, maxFiles = 300, maxResults = 100) {
   const results = []
   const re = new RegExp(`\\b${escapeRegex(symbol)}\\b`)
@@ -119,7 +166,7 @@ export async function handle(args, context) {
       if (!wordRe.test(stripped)) continue
       wordRe.lastIndex = 0
 
-      const newLine = line.replace(wordRe, newName)
+      const newLine = replaceOutsideStrings(line, wordRe, newName)
       if (newLine !== line) {
         fileEdits.push({ line: ref.line, old: line, new: newLine })
       }

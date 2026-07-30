@@ -72,7 +72,7 @@ export async function handle(args, context) {
   let analysis = await analyzeFileAST(content, lang, file, langParserService) || analyzeFile(content, lang, file)
 
   for (const sym of analysis.undefinedSymbols) {
-    const candidates = findCandidates(codeIndexService, sym, file, maxCandidates)
+    const candidates = await findCandidates(codeIndexService, sym, file, maxCandidates)
     issues.push({
       type: 'undefined_symbol',
       symbol: sym,
@@ -552,9 +552,9 @@ function resolveRelativeImport(relativeModule, currentFile) {
   return base.join('.') || '.'
 }
 
-function findCandidates(codeIndexService, symbol, file, maxCandidates) {
+async function findCandidates(codeIndexService, symbol, file, maxCandidates) {
   try {
-    const refs = codeIndexService.getReferences(symbol) || []
+    const refs = (await codeIndexService.getReferences(symbol)) || []
     return refs
       .filter(r => (r.source_file || r.file || r.caller_file) !== file)
       .slice(0, maxCandidates)
