@@ -1,9 +1,10 @@
-import { existsSync, mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, appendFileSync, writeFileSync } from 'node:fs'
 import { join, resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import ToolRegistry from './tool-registry.js'
 import { runHealthCheck } from './health-check.js'
 import crypto from 'node:crypto'
+import os from 'node:os'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -11,6 +12,8 @@ const REQUEST_TIMEOUT_MS = 120_000
 const RECOMMENDED_HEAP_MB = 512
 const DEFAULT_CONCURRENCY = 3
 const HEAVY_TOOLS = new Set(['reindex', 'repo_map'])
+const MEMORY_CHECK_INTERVAL_MS = 30_000
+const MEMORY_DANGER_MB = 480
 
 class Semaphore {
   constructor(max) {
@@ -45,12 +48,12 @@ class Semaphore {
 function checkV8HeapLimit() {
   const maxOldSpace = process.argv.find(a => a.startsWith('--max-old-space-size='))
   if (!maxOldSpace) {
-    process.stderr.write(`[mcp] WARNING: V8 heap limit is unlimited. Start with --max-old-space-size=${RECOMMENDED_HEAP_MB} to reduce memory usage.\n`)
+    safeLog(`WARNING: V8 heap limit is unlimited. Start with --max-old-space-size=${RECOMMENDED_HEAP_MB}`)
     return 0
   }
   const heapMB = parseInt(maxOldSpace.split('=')[1], 10)
   if (heapMB > RECOMMENDED_HEAP_MB * 2) {
-    process.stderr.write(`[mcp] WARNING: V8 heap limit is ${heapMB}MB. Consider --max-old-space-size=${RECOMMENDED_HEAP_MB}.\n`)
+    safeLog(`WARNING: V8 heap limit is ${heapMB}MB. Consider --max-old-space-size=${RECOMMENDED_HEAP_MB}`)
   }
   return heapMB
 }
@@ -79,7 +82,19 @@ const workspacesDir = join(stateDir, 'workspaces')
 if (!existsSync(stateDir)) mkdirSync(stateDir, { recursive: true })
 if (!existsSync(workspacesDir)) mkdirSync(workspacesDir, { recursive: true })
 
-// 获取 workspace 的数据库目录
+const CRASH_LOG = join(stateDir, 'crash.log')
+
+function safeLog(msg) {
+  try { process.stderr.write(`[mcp] ${msg}\n`) } catch {}
+}
+
+function crashLog(msg) {
+  const ts = new Date().toISOString()
+  const line = `[${ts}] ${msg}\n`
+  try { appendFileSync(CRASH_LOG, line) } catch {}
+  safeLog(msg)
+}
+
 function getWorkspaceDir(workspaceDir) {
   const hash = crypto.createHash('md5').update(resolve(workspaceDir)).digest('hex').slice(0, 12)
   const wsDir = join(workspacesDir, hash)
@@ -90,7 +105,7 @@ function getWorkspaceDir(workspaceDir) {
 const core = {
   stateDir,
   services,
-  log(level, msg) { process.stderr.write(`[${level}] ${msg}\n`) },
+  log(level, msg) { safeLog(`[${level}] ${msg}`) },
   emit() {},
   on() {},
   off() {},
@@ -104,6 +119,7 @@ let langParserMod, codeIndexMod, repoMapMod
 let _ready = false
 let _initialized = false
 let registry
+const activeRequests = new Map()
 
 async function initModules() {
   langParserMod = await import('./lang-parser.js')
@@ -113,22 +129,21 @@ async function initModules() {
   repoMapMod = await import('./repo-map.js')
   await repoMapMod.init(core)
 
-  // 初始化工具注册中心
   const toolsDir = join(__dirname, 'tools')
   registry = new ToolRegistry(toolsDir, { log: core.log })
   await registry.loadAll()
 
   _ready = true
-  core.log('info', `[mcp] modules initialized, stateDir=${stateDir}, tools=${registry.getToolCount()}`)
+  crashLog(`modules initialized, stateDir=${stateDir}, tools=${registry.getToolCount()}, concurrency=${concurrency}, pid=${process.pid}`)
 
   const health = await runHealthCheck({
     stateDir, toolsDir, workspacesDir, registry, log: core.log
   })
   for (const c of health.checks) {
-    core.log('info', `[health] ${c.status === 'PASS' ? '✓' : c.status === 'CLEANED' ? '♻' : '✗'} ${c.name}: ${c.detail}`)
+    safeLog(`[health] ${c.status === 'PASS' ? '✓' : c.status === 'CLEANED' ? '♻' : '✗'} ${c.name}: ${c.detail}`)
   }
   if (health.status !== 'ok') {
-    core.log('warn', `[health] ${health.checks.filter(c => c.status === 'FAIL').length} failure(s) detected`)
+    safeLog(`[health] ${health.checks.filter(c => c.status === 'FAIL').length} failure(s) detected`)
   }
 }
 
@@ -148,14 +163,22 @@ function buildContext() {
   }
 }
 
-function respond(id, result) {
-  const msg = JSON.stringify({ jsonrpc: '2.0', id, result })
-  process.stdout.write(msg + '\n')
+function safeRespond(id, result) {
+  try {
+    const msg = JSON.stringify({ jsonrpc: '2.0', id, result })
+    process.stdout.write(msg + '\n')
+  } catch (e) {
+    crashLog(`stdout write failed (result): ${e.code || e.message}`)
+  }
 }
 
-function respondError(id, code, message) {
-  const msg = JSON.stringify({ jsonrpc: '2.0', id, error: { code, message } })
-  process.stdout.write(msg + '\n')
+function safeRespondError(id, code, message) {
+  try {
+    const msg = JSON.stringify({ jsonrpc: '2.0', id, error: { code, message } })
+    process.stdout.write(msg + '\n')
+  } catch (e) {
+    crashLog(`stdout write failed (error): ${e.code || e.message}`)
+  }
 }
 
 function handleRequest(req) {
@@ -165,100 +188,161 @@ function handleRequest(req) {
   switch (method) {
     case 'initialize':
       _initialized = true
-      respond(id, {
+      crashLog(`initialize from client, pid=${process.pid}`)
+      safeRespond(id, {
         protocolVersion: '2024-11-05',
         capabilities: { tools: {} },
-        serverInfo: { name: 'malong-mcp', version: '0.2.0' },
+        serverInfo: { name: 'malong-mcp', version: '0.3.0' },
       })
       break
 
     case 'ping':
-      respond(id, 'pong')
+      safeRespond(id, 'pong')
       break
 
     case 'tools/list':
-      respond(id, { tools: registry.listTools() })
+      safeRespond(id, { tools: registry.listTools() })
       break
 
     case 'tools/call': {
       if (!_ready) {
-        respondError(id, -32000, 'Server still loading modules, please retry in a few seconds')
+        safeRespondError(id, -32000, 'Server still loading modules, please retry in a few seconds')
         break
       }
       const { name, arguments: toolArgs } = params || {}
-      
+
       if (!registry.hasTool(name)) {
-        respondError(id, -32601, `Tool not found: ${name}`)
+        safeRespondError(id, -32601, `Tool not found: ${name}`)
         break
       }
 
       const weight = HEAVY_TOOLS.has(name) ? concurrency : 1
+      const reqId = `${id}_${name}_${Date.now()}`
+      activeRequests.set(reqId, { name, startTime: Date.now() })
+
       const callTool = async () => {
         await semaphore.acquire(weight)
         let timer
+        let timedOut = false
         try {
           const context = buildContext()
           const timeoutPromise = new Promise((_, reject) => {
-            timer = setTimeout(() => reject(new Error(`Request timeout after ${REQUEST_TIMEOUT_MS}ms`)), REQUEST_TIMEOUT_MS)
+            timer = setTimeout(() => {
+              timedOut = true
+              reject(new Error(`Request timeout after ${REQUEST_TIMEOUT_MS}ms`))
+            }, REQUEST_TIMEOUT_MS)
           })
           const toolPromise = registry.callTool(name, toolArgs, context)
+          toolPromise.catch(() => {})
+
           const result = await Promise.race([toolPromise, timeoutPromise])
-          respond(id, {
-            content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-          })
+          if (!timedOut) {
+            safeRespond(id, {
+              content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+            })
+          } else {
+            crashLog(`tool ${name} completed AFTER timeout (${REQUEST_TIMEOUT_MS}ms) — result discarded`)
+          }
+        } catch (e) {
+          if (!timedOut) {
+            safeRespondError(id, -32603, e.message)
+          }
         } finally {
           clearTimeout(timer)
           semaphore.release(weight)
+          activeRequests.delete(reqId)
         }
       }
       callTool().catch(e => {
-        respondError(id, -32603, e.message)
+        activeRequests.delete(reqId)
+        crashLog(`callTool top-level catch: ${name} — ${e.stack || e.message}`)
+        safeRespondError(id, -32603, e.message)
       })
       break
     }
 
     case 'shutdown':
-      respond(id, {})
+      safeRespond(id, {})
       process.exit(0)
       break
 
     default:
       if (method.startsWith('notifications/')) break
-      respond(id, null)
+      safeRespond(id, null)
   }
 }
 
 process.on('unhandledRejection', (reason) => {
-  process.stderr.write(`[mcp] unhandled rejection: ${reason}\n`)
+  crashLog(`unhandled rejection: ${reason}`)
 })
 
 process.on('uncaughtException', (err) => {
-  process.stderr.write(`[mcp] FATAL uncaught exception: ${err.stack}\n`)
-  // 强制刷新 stderr 后再退出
-  process.stderr.end(() => {
-    process.exit(1)
-  })
-  // 兜底：如果 stderr.end 回调没触发，500ms 后强制退出
+  crashLog(`FATAL uncaught exception: ${err.stack || err}`)
+  writeCrashDump('uncaughtException')
+  process.stderr.end(() => process.exit(1))
   setTimeout(() => process.exit(1), 500).unref()
 })
 
 process.on('SIGPIPE', () => {
-  // SIGPIPE 不应该导致退出——pipe 可能是临时的
-  // 只记录，不退出。如果 opencode 真的关闭了连接，stdin close 会处理
-  process.stderr.write('[mcp] SIGPIPE received (ignored, waiting for stdin close)\n')
+  crashLog('SIGPIPE received (ignored, waiting for stdin close)')
 })
 
 process.on('SIGTERM', () => {
-  process.stderr.write('[mcp] SIGTERM received, shutting down\n')
+  crashLog('SIGTERM received, shutting down')
+  writeCrashDump('SIGTERM')
   process.stderr.end(() => process.exit(0))
   setTimeout(() => process.exit(0), 500).unref()
 })
 
 process.on('SIGINT', () => {
-  process.stderr.write('[mcp] SIGINT received, shutting down\n')
+  crashLog('SIGINT received, shutting down')
+  writeCrashDump('SIGINT')
   process.stderr.end(() => process.exit(0))
   setTimeout(() => process.exit(0), 500).unref()
 })
+
+process.on('exit', (code) => {
+  crashLog(`process exiting with code=${code}, pid=${process.pid}, uptime=${Math.round(process.uptime())}s`)
+})
+
+function writeCrashDump(reason) {
+  try {
+    const mem = process.memoryUsage()
+    const dump = {
+      timestamp: new Date().toISOString(),
+      reason,
+      pid: process.pid,
+      uptime_s: Math.round(process.uptime()),
+      node_version: process.version,
+      platform: os.platform(),
+      memory: {
+        rss_mb: Math.round(mem.rss / 1048576),
+        heap_used_mb: Math.round(mem.heapUsed / 1048576),
+        heap_total_mb: Math.round(mem.heapTotal / 1048576),
+        external_mb: Math.round(mem.external / 1048576),
+      },
+      system: {
+        total_mem_mb: Math.round(os.totalmem() / 1048576),
+        free_mem_mb: Math.round(os.freemem() / 1048576),
+        load_avg: os.loadavg().map(l => Math.round(l * 100) / 100),
+      },
+      semaphore: {
+        current: semaphore.current,
+        max: semaphore.max,
+        queue_length: semaphore.queue.length,
+      },
+      active_requests: Array.from(activeRequests.entries()).map(([k, v]) => ({
+        id: k,
+        tool: v.name,
+        elapsed_ms: Date.now() - v.startTime,
+      })),
+      argv: process.argv.join(' '),
+    }
+    const dumpPath = join(stateDir, 'last-crash-dump.json')
+    writeFileSync(dumpPath, JSON.stringify(dump, null, 2))
+    crashLog(`crash dump written: ${dumpPath}`)
+  } catch {}
+}
 
 let buffer = ''
 process.stdin.setEncoding('utf-8')
@@ -272,7 +356,7 @@ process.stdin.on('data', chunk => {
       try {
         handleRequest(JSON.parse(trimmed))
       } catch (e) {
-        process.stderr.write(`[mcp] parse error: ${e.message}, line: ${trimmed.slice(0, 100)}\n`)
+        crashLog(`parse error: ${e.message}, line: ${trimmed.slice(0, 100)}`)
       }
     }
   }
@@ -282,7 +366,8 @@ let _stdinClosed = false
 process.stdin.on('end', () => {
   if (_initialized && !_stdinClosed) {
     _stdinClosed = true
-    process.stderr.write('[mcp] stdin ended after init, exiting\n')
+    crashLog('stdin ended after init, exiting')
+    writeCrashDump('stdin_end')
     process.stderr.end(() => process.exit(0))
     setTimeout(() => process.exit(0), 500).unref()
   }
@@ -291,22 +376,35 @@ process.stdin.on('end', () => {
 process.stdin.on('close', () => {
   if (_initialized && !_stdinClosed) {
     _stdinClosed = true
-    process.stderr.write('[mcp] stdin closed after init, exiting\n')
+    crashLog('stdin closed after init, exiting')
+    writeCrashDump('stdin_close')
     process.stderr.end(() => process.exit(0))
     setTimeout(() => process.exit(0), 500).unref()
   }
 })
 
+process.stdout.on('error', (e) => {
+  crashLog(`stdout error: ${e.code || e.message}`)
+})
+
 initModules().then(() => {
   const heapMB = checkV8HeapLimit()
-  core.log('info', `[mcp] server ready, V8 heap=${heapMB}MB, concurrency=${concurrency}`)
+  crashLog(`server ready, V8 heap=${heapMB}MB, concurrency=${concurrency}, pid=${process.pid}`)
+
   if (typeof global.gc === 'function') {
-    core.log('info', '[mcp] --expose-gc detected, periodic GC enabled')
+    safeLog('[mcp] --expose-gc detected, periodic GC + memory monitoring enabled')
     setInterval(() => {
-      try { global.gc() } catch {}
-    }, 60_000)
+      try {
+        global.gc()
+        const mem = process.memoryUsage()
+        const rssMB = Math.round(mem.rss / 1048576)
+        if (rssMB > MEMORY_DANGER_MB) {
+          crashLog(`MEMORY WARNING: RSS=${rssMB}MB (danger threshold=${MEMORY_DANGER_MB}MB), heap=${Math.round(mem.heapUsed / 1048576)}MB, active_requests=${activeRequests.size}`)
+        }
+      } catch {}
+    }, MEMORY_CHECK_INTERVAL_MS)
   }
 }).catch(e => {
-  process.stderr.write(`[mcp] init failed: ${e.stack}\n`)
+  crashLog(`init failed: ${e.stack}`)
   process.exit(1)
 })
