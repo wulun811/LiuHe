@@ -2,8 +2,8 @@ use tree_sitter::{Node, Tree};
 use super::{Symbol, Import, Reference, has_error_node};
 
 pub fn extract_all(tree: &Tree, source: &str) -> super::ExtractResult {
-    let mut symbols = Vec::new();
-    let mut refs = Vec::new();
+    let mut symbols = Vec::with_capacity(256);
+    let mut refs = Vec::with_capacity(128);
 
     fn walk(node: Node, source: &str, depth: u32, symbols: &mut Vec<Symbol>, refs: &mut Vec<Reference>) {
         if depth > 100 { return; }
@@ -125,8 +125,8 @@ pub fn extract_all(tree: &Tree, source: &str) -> super::ExtractResult {
 }
 
 pub fn extract_symbols(tree: &Tree, source: &str) -> (Vec<Symbol>, Vec<Import>) {
-    let mut symbols = Vec::new();
-    let mut imports = Vec::new();
+    let mut symbols = Vec::with_capacity(256);
+    let mut imports = Vec::with_capacity(32);
 
     fn walk(node: Node, source: &str, depth: u32, symbols: &mut Vec<Symbol>, imports: &mut Vec<Import>) {
         if depth > 100 { return; }
@@ -213,7 +213,7 @@ pub fn extract_symbols(tree: &Tree, source: &str) -> (Vec<Symbol>, Vec<Import>) 
 }
 
 pub fn extract_top_level(tree: &Tree, source: &str) -> Vec<Symbol> {
-    let mut syms = Vec::new();
+    let mut syms = Vec::with_capacity(64);
 
     fn walk(node: Node, source: &str, depth: u32, syms: &mut Vec<Symbol>) {
         if depth > 50 { return; }
@@ -292,7 +292,7 @@ pub fn extract_top_level(tree: &Tree, source: &str) -> Vec<Symbol> {
 }
 
 pub fn extract_references(tree: &Tree, source: &str) -> Vec<Reference> {
-    let mut refs = Vec::new();
+    let mut refs = Vec::with_capacity(128);
 
     fn walk(node: Node, source: &str, refs: &mut Vec<Reference>) {
         if node.kind() == "call_expression" {
