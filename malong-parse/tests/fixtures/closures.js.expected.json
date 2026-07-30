@@ -1,0 +1,143 @@
+{
+  "symbols": [
+    {
+      "name": "createCounter",
+      "type": "function",
+      "startLine": 3,
+      "endLine": 10
+    },
+    {
+      "name": "memoize",
+      "type": "function",
+      "startLine": 12,
+      "endLine": 23
+    },
+    {
+      "name": "curry",
+      "type": "function",
+      "startLine": 25,
+      "endLine": 34
+    },
+    {
+      "name": "add",
+      "type": "variable",
+      "startLine": 36,
+      "endLine": 36
+    },
+    {
+      "name": "add5",
+      "type": "variable",
+      "startLine": 37,
+      "endLine": 37
+    },
+    {
+      "name": "compose",
+      "type": "function",
+      "startLine": 39,
+      "endLine": 43
+    },
+    {
+      "name": "pipe",
+      "type": "function",
+      "startLine": 45,
+      "endLine": 49
+    },
+    {
+      "name": "double",
+      "type": "variable",
+      "startLine": 51,
+      "endLine": 51
+    },
+    {
+      "name": "increment",
+      "type": "variable",
+      "startLine": 52,
+      "endLine": 52
+    },
+    {
+      "name": "square",
+      "type": "variable",
+      "startLine": 53,
+      "endLine": 53
+    },
+    {
+      "name": "transform",
+      "type": "variable",
+      "startLine": 55,
+      "endLine": 55
+    }
+  ],
+  "refs": [
+    {
+      "type": "call",
+      "name": "JSON.stringify",
+      "line": 15
+    },
+    {
+      "type": "call",
+      "name": "cache.has",
+      "line": 16
+    },
+    {
+      "type": "call",
+      "name": "cache.get",
+      "line": 17
+    },
+    {
+      "type": "call",
+      "name": "fn.apply",
+      "line": 19
+    },
+    {
+      "type": "call",
+      "name": "cache.set",
+      "line": 20
+    },
+    {
+      "type": "call",
+      "name": "fn.apply",
+      "line": 28
+    },
+    {
+      "type": "call",
+      "name": "curried.apply",
+      "line": 31
+    },
+    {
+      "type": "call",
+      "name": "curry",
+      "line": 36
+    },
+    {
+      "type": "call",
+      "name": "add",
+      "line": 37
+    },
+    {
+      "type": "call",
+      "name": "fns.reduceRight",
+      "line": 41
+    },
+    {
+      "type": "call",
+      "name": "fn",
+      "line": 41
+    },
+    {
+      "type": "call",
+      "name": "fns.reduce",
+      "line": 47
+    },
+    {
+      "type": "call",
+      "name": "fn",
+      "line": 47
+    },
+    {
+      "type": "call",
+      "name": "pipe",
+      "line": 55
+    }
+  ],
+  "hasErrors": false
+}

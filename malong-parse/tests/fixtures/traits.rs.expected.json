@@ -1,0 +1,111 @@
+{
+  "symbols": [
+    {
+      "name": "Drawable",
+      "type": "type",
+      "startLine": 3,
+      "endLine": 5
+    },
+    {
+      "name": "Resizable",
+      "type": "type",
+      "startLine": 7,
+      "endLine": 9
+    },
+    {
+      "name": "Point",
+      "type": "class",
+      "startLine": 11,
+      "endLine": 14
+    },
+    {
+      "name": "Point",
+      "type": "method",
+      "startLine": 16,
+      "endLine": 20
+    },
+    {
+      "name": "draw",
+      "type": "function",
+      "startLine": 17,
+      "endLine": 19
+    },
+    {
+      "name": "Line",
+      "type": "class",
+      "startLine": 22,
+      "endLine": 25
+    },
+    {
+      "name": "Line",
+      "type": "method",
+      "startLine": 27,
+      "endLine": 32
+    },
+    {
+      "name": "draw",
+      "type": "function",
+      "startLine": 28,
+      "endLine": 31
+    },
+    {
+      "name": "Line",
+      "type": "method",
+      "startLine": 34,
+      "endLine": 39
+    },
+    {
+      "name": "resize",
+      "type": "function",
+      "startLine": 35,
+      "endLine": 38
+    },
+    {
+      "name": "print_drawable",
+      "type": "function",
+      "startLine": 41,
+      "endLine": 43
+    },
+    {
+      "name": "main",
+      "type": "function",
+      "startLine": 45,
+      "endLine": 57
+    },
+    {
+      "name": "p",
+      "type": "variable",
+      "startLine": 46,
+      "endLine": 46
+    },
+    {
+      "name": "l",
+      "type": "variable",
+      "startLine": 47,
+      "endLine": 47
+    }
+  ],
+  "refs": [
+    {
+      "type": "call",
+      "name": "print_drawable",
+      "line": 52
+    },
+    {
+      "type": "call",
+      "name": "print_drawable",
+      "line": 53
+    },
+    {
+      "type": "call",
+      "name": "l.resize",
+      "line": 55
+    },
+    {
+      "type": "call",
+      "name": "print_drawable",
+      "line": 56
+    }
+  ],
+  "hasErrors": false
+}

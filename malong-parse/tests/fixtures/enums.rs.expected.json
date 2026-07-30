@@ -1,0 +1,75 @@
+{
+  "symbols": [
+    {
+      "name": "Color",
+      "type": "type",
+      "startLine": 4,
+      "endLine": 9
+    },
+    {
+      "name": "Shape",
+      "type": "type",
+      "startLine": 12,
+      "endLine": 16
+    },
+    {
+      "name": "Shape",
+      "type": "method",
+      "startLine": 18,
+      "endLine": 26
+    },
+    {
+      "name": "area",
+      "type": "function",
+      "startLine": 19,
+      "endLine": 25
+    },
+    {
+      "name": "describe_color",
+      "type": "function",
+      "startLine": 28,
+      "endLine": 35
+    },
+    {
+      "name": "main",
+      "type": "function",
+      "startLine": 37,
+      "endLine": 43
+    },
+    {
+      "name": "circle",
+      "type": "variable",
+      "startLine": 38,
+      "endLine": 38
+    },
+    {
+      "name": "color",
+      "type": "variable",
+      "startLine": 41,
+      "endLine": 41
+    }
+  ],
+  "refs": [
+    {
+      "type": "call",
+      "name": "\"Red\".to_string",
+      "line": 30
+    },
+    {
+      "type": "call",
+      "name": "\"Green\".to_string",
+      "line": 31
+    },
+    {
+      "type": "call",
+      "name": "\"Blue\".to_string",
+      "line": 32
+    },
+    {
+      "type": "call",
+      "name": "Color::Custom",
+      "line": 41
+    }
+  ],
+  "hasErrors": false
+}

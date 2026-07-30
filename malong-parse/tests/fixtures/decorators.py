@@ -1,23 +1,59 @@
-import functools
+# Python decorators example
 
-def log_call(func):
+import functools
+import time
+
+def timer(func):
+    """Decorator to measure function execution time."""
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
-        print(f"calling {func.__name__}")
-        return func(*args, **kwargs)
+        start = time.time()
+        result = func(*args, **kwargs)
+        end = time.time()
+        print(f"{func.__name__} took {end - start:.4f}s")
+        return result
     return wrapper
 
-@log_call
-def hello(name):
-    return f"Hello, {name}"
+def retry(max_attempts=3, delay=1):
+    """Decorator factory for retry logic."""
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            for attempt in range(max_attempts):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    if attempt == max_attempts - 1:
+                        raise
+                    time.sleep(delay)
+            return None
+        return wrapper
+    return decorator
 
-class Calculator:
-    def __init__(self):
-        self.total = 0
-    
-    def add(self, x):
-        self.total += x
-        return self
-    
-    def result(self):
-        return self.total
+def memoize(func):
+    """Decorator for memoization."""
+    cache = {}
+    @functools.wraps(func)
+    def wrapper(*args):
+        if args not in cache:
+            cache[args] = func(*args)
+        return cache[args]
+    return wrapper
+
+@timer
+def slow_function():
+    time.sleep(0.1)
+    return "done"
+
+@retry(max_attempts=3, delay=0.1)
+def unreliable_function():
+    import random
+    if random.random() < 0.5:
+        raise ValueError("Random failure")
+    return "success"
+
+@memoize
+def fibonacci(n):
+    if n < 2:
+        return n
+    return fibonacci(n - 1) + fibonacci(n - 2)

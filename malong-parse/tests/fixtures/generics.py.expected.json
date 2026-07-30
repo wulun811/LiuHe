@@ -1,0 +1,99 @@
+{
+  "symbols": [
+    {
+      "name": "T",
+      "type": "variable",
+      "startLine": 5,
+      "endLine": 5
+    },
+    {
+      "name": "Stack",
+      "type": "class",
+      "startLine": 7,
+      "endLine": 25
+    },
+    {
+      "name": "__init__",
+      "type": "function",
+      "startLine": 8,
+      "endLine": 9
+    },
+    {
+      "name": "self",
+      "type": "variable",
+      "startLine": 9,
+      "endLine": 9
+    },
+    {
+      "name": "push",
+      "type": "function",
+      "startLine": 11,
+      "endLine": 12
+    },
+    {
+      "name": "pop",
+      "type": "function",
+      "startLine": 14,
+      "endLine": 17
+    },
+    {
+      "name": "peek",
+      "type": "function",
+      "startLine": 19,
+      "endLine": 22
+    },
+    {
+      "name": "is_empty",
+      "type": "function",
+      "startLine": 24,
+      "endLine": 25
+    },
+    {
+      "name": "first_item",
+      "type": "function",
+      "startLine": 27,
+      "endLine": 30
+    },
+    {
+      "name": "last_item",
+      "type": "function",
+      "startLine": 32,
+      "endLine": 35
+    }
+  ],
+  "refs": [
+    {
+      "type": "import",
+      "name": "",
+      "line": 3,
+      "module": "typing",
+      "symbols": [
+        "TypeVar",
+        "Generic",
+        "List",
+        "Optional"
+      ]
+    },
+    {
+      "type": "call",
+      "name": "TypeVar",
+      "line": 5
+    },
+    {
+      "type": "call",
+      "name": "self._items.append",
+      "line": 12
+    },
+    {
+      "type": "call",
+      "name": "self._items.pop",
+      "line": 16
+    },
+    {
+      "type": "call",
+      "name": "len",
+      "line": 25
+    }
+  ],
+  "hasErrors": false
+}

@@ -1,0 +1,62 @@
+{
+  "symbols": [
+    {
+      "name": "UserManager",
+      "type": "class",
+      "startLine": 9,
+      "endLine": 24
+    },
+    {
+      "name": "addUser",
+      "type": "method",
+      "startLine": 12,
+      "endLine": 14
+    },
+    {
+      "name": "getUser",
+      "type": "method",
+      "startLine": 16,
+      "endLine": 18
+    },
+    {
+      "name": "getActiveUsers",
+      "type": "method",
+      "startLine": 20,
+      "endLine": 23
+    },
+    {
+      "name": "createManager",
+      "type": "function",
+      "startLine": 26,
+      "endLine": 28
+    }
+  ],
+  "refs": [
+    {
+      "type": "call",
+      "name": "this.users.set",
+      "line": 13
+    },
+    {
+      "type": "call",
+      "name": "this.users.get",
+      "line": 17
+    },
+    {
+      "type": "call",
+      "name": "Array.from(this.users.values())\n      .filter",
+      "line": 21
+    },
+    {
+      "type": "call",
+      "name": "Array.from",
+      "line": 21
+    },
+    {
+      "type": "call",
+      "name": "this.users.values",
+      "line": 21
+    }
+  ],
+  "hasErrors": false
+}

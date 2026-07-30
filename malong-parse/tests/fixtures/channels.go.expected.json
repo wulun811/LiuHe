@@ -1,0 +1,123 @@
+{
+  "symbols": [
+    {
+      "name": "producer",
+      "type": "function",
+      "startLine": 11,
+      "endLine": 17
+    },
+    {
+      "name": "consumer",
+      "type": "function",
+      "startLine": 19,
+      "endLine": 24
+    },
+    {
+      "name": "fanOut",
+      "type": "function",
+      "startLine": 26,
+      "endLine": 38
+    },
+    {
+      "name": "main",
+      "type": "function",
+      "startLine": 40,
+      "endLine": 50
+    },
+    {
+      "name": "wg",
+      "type": "variable",
+      "startLine": 42,
+      "endLine": 42
+    }
+  ],
+  "refs": [
+    {
+      "type": "import",
+      "name": "",
+      "line": 6,
+      "module": "fmt",
+      "symbols": []
+    },
+    {
+      "type": "import",
+      "name": "",
+      "line": 7,
+      "module": "sync",
+      "symbols": []
+    },
+    {
+      "type": "import",
+      "name": "",
+      "line": 8,
+      "module": "time",
+      "symbols": []
+    },
+    {
+      "type": "call",
+      "name": "time.Sleep",
+      "line": 14
+    },
+    {
+      "type": "call",
+      "name": "close",
+      "line": 16
+    },
+    {
+      "type": "call",
+      "name": "wg.Done",
+      "line": 20
+    },
+    {
+      "type": "call",
+      "name": "fmt.Printf",
+      "line": 22
+    },
+    {
+      "type": "call",
+      "name": "make",
+      "line": 27
+    },
+    {
+      "type": "call",
+      "name": "make",
+      "line": 29
+    },
+    {
+      "type": "call",
+      "name": "func(ch chan int) {\n\t\t\tfor val := range input {\n\t\t\t\tch <- val * 2\n\t\t\t}\n\t\t\tclose(ch)\n\t\t}",
+      "line": 30
+    },
+    {
+      "type": "call",
+      "name": "close",
+      "line": 34
+    },
+    {
+      "type": "call",
+      "name": "make",
+      "line": 41
+    },
+    {
+      "type": "call",
+      "name": "producer",
+      "line": 44
+    },
+    {
+      "type": "call",
+      "name": "wg.Add",
+      "line": 46
+    },
+    {
+      "type": "call",
+      "name": "consumer",
+      "line": 47
+    },
+    {
+      "type": "call",
+      "name": "wg.Wait",
+      "line": 49
+    }
+  ],
+  "hasErrors": false
+}

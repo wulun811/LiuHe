@@ -1,76 +1,196 @@
 {
   "symbols": [
     {
-      "name": "log_call",
+      "name": "timer",
       "type": "function",
-      "startLine": 3,
-      "endLine": 8
+      "startLine": 6,
+      "endLine": 15
     },
     {
       "name": "wrapper",
       "type": "function",
-      "startLine": 5,
-      "endLine": 7
+      "startLine": 9,
+      "endLine": 14
     },
     {
-      "name": "hello",
-      "type": "function",
-      "startLine": 11,
-      "endLine": 12
-    },
-    {
-      "name": "Calculator",
-      "type": "class",
-      "startLine": 14,
-      "endLine": 23
-    },
-    {
-      "name": "__init__",
-      "type": "function",
-      "startLine": 15,
-      "endLine": 16
-    },
-    {
-      "name": "self",
+      "name": "start",
       "type": "variable",
-      "startLine": 16,
-      "endLine": 16
-    },
-    {
-      "name": "add",
-      "type": "function",
-      "startLine": 18,
-      "endLine": 20
+      "startLine": 10,
+      "endLine": 10
     },
     {
       "name": "result",
+      "type": "variable",
+      "startLine": 11,
+      "endLine": 11
+    },
+    {
+      "name": "end",
+      "type": "variable",
+      "startLine": 12,
+      "endLine": 12
+    },
+    {
+      "name": "retry",
       "type": "function",
-      "startLine": 22,
-      "endLine": 23
+      "startLine": 17,
+      "endLine": 31
+    },
+    {
+      "name": "decorator",
+      "type": "function",
+      "startLine": 19,
+      "endLine": 30
+    },
+    {
+      "name": "wrapper",
+      "type": "function",
+      "startLine": 21,
+      "endLine": 29
+    },
+    {
+      "name": "memoize",
+      "type": "function",
+      "startLine": 33,
+      "endLine": 41
+    },
+    {
+      "name": "cache",
+      "type": "variable",
+      "startLine": 35,
+      "endLine": 35
+    },
+    {
+      "name": "wrapper",
+      "type": "function",
+      "startLine": 37,
+      "endLine": 40
+    },
+    {
+      "name": "slow_function",
+      "type": "function",
+      "startLine": 44,
+      "endLine": 46
+    },
+    {
+      "name": "unreliable_function",
+      "type": "function",
+      "startLine": 49,
+      "endLine": 53
+    },
+    {
+      "name": "fibonacci",
+      "type": "function",
+      "startLine": 56,
+      "endLine": 59
     }
   ],
   "refs": [
     {
       "type": "import",
       "name": "",
-      "line": 1,
+      "line": 3,
       "module": "functools",
+      "symbols": []
+    },
+    {
+      "type": "import",
+      "name": "",
+      "line": 4,
+      "module": "time",
       "symbols": []
     },
     {
       "type": "call",
       "name": "functools.wraps",
-      "line": 4
+      "line": 8
     },
     {
       "type": "call",
-      "name": "print",
-      "line": 6
+      "name": "time.time",
+      "line": 10
     },
     {
       "type": "call",
       "name": "func",
-      "line": 7
+      "line": 11
+    },
+    {
+      "type": "call",
+      "name": "time.time",
+      "line": 12
+    },
+    {
+      "type": "call",
+      "name": "print",
+      "line": 13
+    },
+    {
+      "type": "call",
+      "name": "functools.wraps",
+      "line": 20
+    },
+    {
+      "type": "call",
+      "name": "range",
+      "line": 22
+    },
+    {
+      "type": "call",
+      "name": "func",
+      "line": 24
+    },
+    {
+      "type": "call",
+      "name": "time.sleep",
+      "line": 28
+    },
+    {
+      "type": "call",
+      "name": "functools.wraps",
+      "line": 36
+    },
+    {
+      "type": "call",
+      "name": "func",
+      "line": 39
+    },
+    {
+      "type": "call",
+      "name": "time.sleep",
+      "line": 45
+    },
+    {
+      "type": "call",
+      "name": "retry",
+      "line": 48
+    },
+    {
+      "type": "import",
+      "name": "",
+      "line": 50,
+      "module": "random",
+      "symbols": []
+    },
+    {
+      "type": "call",
+      "name": "random.random",
+      "line": 51
+    },
+    {
+      "type": "call",
+      "name": "ValueError",
+      "line": 52
+    },
+    {
+      "type": "call",
+      "name": "fibonacci",
+      "line": 59
+    },
+    {
+      "type": "call",
+      "name": "fibonacci",
+      "line": 59
     }
   ],
   "hasErrors": false

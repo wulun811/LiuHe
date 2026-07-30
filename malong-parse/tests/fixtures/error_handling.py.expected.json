@@ -1,0 +1,147 @@
+{
+  "symbols": [
+    {
+      "name": "CustomError",
+      "type": "class",
+      "startLine": 3,
+      "endLine": 6
+    },
+    {
+      "name": "__init__",
+      "type": "function",
+      "startLine": 4,
+      "endLine": 6
+    },
+    {
+      "name": "self",
+      "type": "variable",
+      "startLine": 6,
+      "endLine": 6
+    },
+    {
+      "name": "ValidationError",
+      "type": "class",
+      "startLine": 8,
+      "endLine": 11
+    },
+    {
+      "name": "__init__",
+      "type": "function",
+      "startLine": 9,
+      "endLine": 11
+    },
+    {
+      "name": "self",
+      "type": "variable",
+      "startLine": 11,
+      "endLine": 11
+    },
+    {
+      "name": "divide",
+      "type": "function",
+      "startLine": 13,
+      "endLine": 16
+    },
+    {
+      "name": "safe_divide",
+      "type": "function",
+      "startLine": 18,
+      "endLine": 28
+    },
+    {
+      "name": "process_data",
+      "type": "function",
+      "startLine": 30,
+      "endLine": 44
+    },
+    {
+      "name": "result",
+      "type": "variable",
+      "startLine": 38,
+      "endLine": 38
+    }
+  ],
+  "refs": [
+    {
+      "type": "call",
+      "name": "super().__init__",
+      "line": 5
+    },
+    {
+      "type": "call",
+      "name": "super",
+      "line": 5
+    },
+    {
+      "type": "call",
+      "name": "super().__init__",
+      "line": 10
+    },
+    {
+      "type": "call",
+      "name": "super",
+      "line": 10
+    },
+    {
+      "type": "call",
+      "name": "ValueError",
+      "line": 15
+    },
+    {
+      "type": "call",
+      "name": "divide",
+      "line": 20
+    },
+    {
+      "type": "call",
+      "name": "print",
+      "line": 22
+    },
+    {
+      "type": "call",
+      "name": "print",
+      "line": 25
+    },
+    {
+      "type": "call",
+      "name": "print",
+      "line": 28
+    },
+    {
+      "type": "call",
+      "name": "isinstance",
+      "line": 32
+    },
+    {
+      "type": "call",
+      "name": "TypeError",
+      "line": 33
+    },
+    {
+      "type": "call",
+      "name": "ValidationError",
+      "line": 36
+    },
+    {
+      "type": "call",
+      "name": "divide",
+      "line": 38
+    },
+    {
+      "type": "call",
+      "name": "data.get",
+      "line": 38
+    },
+    {
+      "type": "call",
+      "name": "str",
+      "line": 42
+    },
+    {
+      "type": "call",
+      "name": "str",
+      "line": 44
+    }
+  ],
+  "hasErrors": false
+}

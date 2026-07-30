@@ -1,0 +1,52 @@
+{
+  "symbols": [
+    {
+      "name": "classify_number",
+      "type": "function",
+      "startLine": 3,
+      "endLine": 11
+    },
+    {
+      "name": "describe_option",
+      "type": "function",
+      "startLine": 13,
+      "endLine": 21
+    },
+    {
+      "name": "Command",
+      "type": "type",
+      "startLine": 23,
+      "endLine": 28
+    },
+    {
+      "name": "process_command",
+      "type": "function",
+      "startLine": 30,
+      "endLine": 37
+    },
+    {
+      "name": "main",
+      "type": "function",
+      "startLine": 39,
+      "endLine": 43
+    }
+  ],
+  "refs": [
+    {
+      "type": "call",
+      "name": "\"zero\".to_string",
+      "line": 17
+    },
+    {
+      "type": "call",
+      "name": "\"nothing\".to_string",
+      "line": 18
+    },
+    {
+      "type": "call",
+      "name": "\"Quitting\".to_string",
+      "line": 32
+    }
+  ],
+  "hasErrors": false
+}

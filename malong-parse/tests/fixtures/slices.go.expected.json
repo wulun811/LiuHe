@@ -1,0 +1,134 @@
+{
+  "symbols": [
+    {
+      "name": "processSlice",
+      "type": "function",
+      "startLine": 7,
+      "endLine": 16
+    },
+    {
+      "name": "filterSlice",
+      "type": "function",
+      "startLine": 18,
+      "endLine": 26
+    },
+    {
+      "name": "mapSlice",
+      "type": "function",
+      "startLine": 28,
+      "endLine": 34
+    },
+    {
+      "name": "countWords",
+      "type": "function",
+      "startLine": 36,
+      "endLine": 53
+    },
+    {
+      "name": "main",
+      "type": "function",
+      "startLine": 55,
+      "endLine": 65
+    }
+  ],
+  "refs": [
+    {
+      "type": "import",
+      "name": "",
+      "line": 5,
+      "module": "fmt",
+      "symbols": []
+    },
+    {
+      "type": "call",
+      "name": "len",
+      "line": 12
+    },
+    {
+      "type": "call",
+      "name": "float64",
+      "line": 13
+    },
+    {
+      "type": "call",
+      "name": "float64",
+      "line": 13
+    },
+    {
+      "type": "call",
+      "name": "len",
+      "line": 13
+    },
+    {
+      "type": "call",
+      "name": "make",
+      "line": 19
+    },
+    {
+      "type": "call",
+      "name": "predicate",
+      "line": 21
+    },
+    {
+      "type": "call",
+      "name": "append",
+      "line": 22
+    },
+    {
+      "type": "call",
+      "name": "make",
+      "line": 29
+    },
+    {
+      "type": "call",
+      "name": "len",
+      "line": 29
+    },
+    {
+      "type": "call",
+      "name": "transform",
+      "line": 31
+    },
+    {
+      "type": "call",
+      "name": "make",
+      "line": 37
+    },
+    {
+      "type": "call",
+      "name": "len",
+      "line": 49
+    },
+    {
+      "type": "call",
+      "name": "processSlice",
+      "line": 57
+    },
+    {
+      "type": "call",
+      "name": "fmt.Printf",
+      "line": 58
+    },
+    {
+      "type": "call",
+      "name": "filterSlice",
+      "line": 60
+    },
+    {
+      "type": "call",
+      "name": "fmt.Printf",
+      "line": 61
+    },
+    {
+      "type": "call",
+      "name": "mapSlice",
+      "line": 63
+    },
+    {
+      "type": "call",
+      "name": "fmt.Printf",
+      "line": 64
+    }
+  ],
+  "hasErrors": false
+}

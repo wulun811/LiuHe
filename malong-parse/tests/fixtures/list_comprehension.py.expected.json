@@ -1,0 +1,104 @@
+{
+  "symbols": [
+    {
+      "name": "process_list",
+      "type": "function",
+      "startLine": 3,
+      "endLine": 19
+    },
+    {
+      "name": "squares",
+      "type": "variable",
+      "startLine": 5,
+      "endLine": 5
+    },
+    {
+      "name": "evens",
+      "type": "variable",
+      "startLine": 8,
+      "endLine": 8
+    },
+    {
+      "name": "matrix",
+      "type": "variable",
+      "startLine": 11,
+      "endLine": 11
+    },
+    {
+      "name": "square_dict",
+      "type": "variable",
+      "startLine": 14,
+      "endLine": 14
+    },
+    {
+      "name": "unique_squares",
+      "type": "variable",
+      "startLine": 17,
+      "endLine": 17
+    },
+    {
+      "name": "transform_data",
+      "type": "function",
+      "startLine": 21,
+      "endLine": 31
+    },
+    {
+      "name": "total",
+      "type": "variable",
+      "startLine": 23,
+      "endLine": 23
+    },
+    {
+      "name": "pairs",
+      "type": "variable",
+      "startLine": 26,
+      "endLine": 26
+    },
+    {
+      "name": "indexed",
+      "type": "variable",
+      "startLine": 29,
+      "endLine": 29
+    },
+    {
+      "name": "filter_and_map",
+      "type": "function",
+      "startLine": 33,
+      "endLine": 36
+    },
+    {
+      "name": "result",
+      "type": "variable",
+      "startLine": 35,
+      "endLine": 35
+    }
+  ],
+  "refs": [
+    {
+      "type": "call",
+      "name": "range",
+      "line": 11
+    },
+    {
+      "type": "call",
+      "name": "range",
+      "line": 11
+    },
+    {
+      "type": "call",
+      "name": "sum",
+      "line": 23
+    },
+    {
+      "type": "call",
+      "name": "zip",
+      "line": 26
+    },
+    {
+      "type": "call",
+      "name": "enumerate",
+      "line": 29
+    }
+  ],
+  "hasErrors": false
+}

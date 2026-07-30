@@ -1,0 +1,92 @@
+{
+  "symbols": [
+    {
+      "name": "fetchData",
+      "type": "function",
+      "startLine": 3,
+      "endLine": 9
+    },
+    {
+      "name": "processItems",
+      "type": "function",
+      "startLine": 11,
+      "endLine": 15
+    },
+    {
+      "name": "createPromise",
+      "type": "function",
+      "startLine": 17,
+      "endLine": 19
+    },
+    {
+      "name": "handleError",
+      "type": "function",
+      "startLine": 21,
+      "endLine": 23
+    },
+    {
+      "name": "main",
+      "type": "function",
+      "startLine": 25,
+      "endLine": 29
+    }
+  ],
+  "refs": [
+    {
+      "type": "call",
+      "name": "setTimeout",
+      "line": 5
+    },
+    {
+      "type": "call",
+      "name": "resolve",
+      "line": 6
+    },
+    {
+      "type": "call",
+      "name": "items.map",
+      "line": 12
+    },
+    {
+      "type": "call",
+      "name": "fetchData",
+      "line": 12
+    },
+    {
+      "type": "call",
+      "name": "Promise.all",
+      "line": 13
+    },
+    {
+      "type": "call",
+      "name": "Promise.resolve",
+      "line": 18
+    },
+    {
+      "type": "call",
+      "name": "Promise.reject",
+      "line": 22
+    },
+    {
+      "type": "call",
+      "name": "processItems",
+      "line": 27
+    },
+    {
+      "type": "call",
+      "name": "console.log",
+      "line": 28
+    },
+    {
+      "type": "call",
+      "name": "main().catch",
+      "line": 31
+    },
+    {
+      "type": "call",
+      "name": "main",
+      "line": 31
+    }
+  ],
+  "hasErrors": false
+}

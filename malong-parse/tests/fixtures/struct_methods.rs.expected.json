@@ -1,0 +1,118 @@
+{
+  "symbols": [
+    {
+      "name": "Rectangle",
+      "type": "class",
+      "startLine": 3,
+      "endLine": 6
+    },
+    {
+      "name": "Rectangle",
+      "type": "method",
+      "startLine": 8,
+      "endLine": 39
+    },
+    {
+      "name": "new",
+      "type": "function",
+      "startLine": 10,
+      "endLine": 12
+    },
+    {
+      "name": "square",
+      "type": "function",
+      "startLine": 15,
+      "endLine": 17
+    },
+    {
+      "name": "area",
+      "type": "function",
+      "startLine": 20,
+      "endLine": 22
+    },
+    {
+      "name": "scale",
+      "type": "function",
+      "startLine": 25,
+      "endLine": 28
+    },
+    {
+      "name": "into_string",
+      "type": "function",
+      "startLine": 31,
+      "endLine": 33
+    },
+    {
+      "name": "is_valid",
+      "type": "function",
+      "startLine": 36,
+      "endLine": 38
+    },
+    {
+      "name": "Circle",
+      "type": "class",
+      "startLine": 41,
+      "endLine": 43
+    },
+    {
+      "name": "Circle",
+      "type": "method",
+      "startLine": 45,
+      "endLine": 57
+    },
+    {
+      "name": "new",
+      "type": "function",
+      "startLine": 46,
+      "endLine": 48
+    },
+    {
+      "name": "area",
+      "type": "function",
+      "startLine": 50,
+      "endLine": 52
+    },
+    {
+      "name": "circumference",
+      "type": "function",
+      "startLine": 54,
+      "endLine": 56
+    },
+    {
+      "name": "main",
+      "type": "function",
+      "startLine": 59,
+      "endLine": 68
+    },
+    {
+      "name": "rect",
+      "type": "variable",
+      "startLine": 60,
+      "endLine": 60
+    },
+    {
+      "name": "circle",
+      "type": "variable",
+      "startLine": 66,
+      "endLine": 66
+    }
+  ],
+  "refs": [
+    {
+      "type": "call",
+      "name": "Rectangle::new",
+      "line": 60
+    },
+    {
+      "type": "call",
+      "name": "rect.scale",
+      "line": 63
+    },
+    {
+      "type": "call",
+      "name": "Circle::new",
+      "line": 66
+    }
+  ],
+  "hasErrors": false
+}

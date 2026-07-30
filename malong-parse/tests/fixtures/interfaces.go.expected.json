@@ -1,0 +1,93 @@
+{
+  "symbols": [
+    {
+      "name": "Shape",
+      "type": "type",
+      "startLine": 7,
+      "endLine": 10
+    },
+    {
+      "name": "Circle",
+      "type": "type",
+      "startLine": 12,
+      "endLine": 14
+    },
+    {
+      "name": "Area",
+      "type": "method",
+      "startLine": 16,
+      "endLine": 18
+    },
+    {
+      "name": "Perimeter",
+      "type": "method",
+      "startLine": 20,
+      "endLine": 22
+    },
+    {
+      "name": "Rectangle",
+      "type": "type",
+      "startLine": 24,
+      "endLine": 26
+    },
+    {
+      "name": "Area",
+      "type": "method",
+      "startLine": 28,
+      "endLine": 30
+    },
+    {
+      "name": "Perimeter",
+      "type": "method",
+      "startLine": 32,
+      "endLine": 34
+    },
+    {
+      "name": "PrintShapeInfo",
+      "type": "function",
+      "startLine": 36,
+      "endLine": 38
+    },
+    {
+      "name": "main",
+      "type": "function",
+      "startLine": 40,
+      "endLine": 46
+    }
+  ],
+  "refs": [
+    {
+      "type": "import",
+      "name": "",
+      "line": 5,
+      "module": "fmt",
+      "symbols": []
+    },
+    {
+      "type": "call",
+      "name": "fmt.Printf",
+      "line": 37
+    },
+    {
+      "type": "call",
+      "name": "s.Area",
+      "line": 37
+    },
+    {
+      "type": "call",
+      "name": "s.Perimeter",
+      "line": 37
+    },
+    {
+      "type": "call",
+      "name": "PrintShapeInfo",
+      "line": 44
+    },
+    {
+      "type": "call",
+      "name": "PrintShapeInfo",
+      "line": 45
+    }
+  ],
+  "hasErrors": false
+}

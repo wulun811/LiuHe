@@ -1,0 +1,132 @@
+{
+  "symbols": [
+    {
+      "name": "Animal",
+      "type": "class",
+      "startLine": 3,
+      "endLine": 8
+    },
+    {
+      "name": "__init__",
+      "type": "function",
+      "startLine": 4,
+      "endLine": 5
+    },
+    {
+      "name": "self",
+      "type": "variable",
+      "startLine": 5,
+      "endLine": 5
+    },
+    {
+      "name": "speak",
+      "type": "function",
+      "startLine": 7,
+      "endLine": 8
+    },
+    {
+      "name": "Dog",
+      "type": "class",
+      "startLine": 10,
+      "endLine": 19
+    },
+    {
+      "name": "__init__",
+      "type": "function",
+      "startLine": 11,
+      "endLine": 13
+    },
+    {
+      "name": "self",
+      "type": "variable",
+      "startLine": 13,
+      "endLine": 13
+    },
+    {
+      "name": "speak",
+      "type": "function",
+      "startLine": 15,
+      "endLine": 16
+    },
+    {
+      "name": "fetch",
+      "type": "function",
+      "startLine": 18,
+      "endLine": 19
+    },
+    {
+      "name": "Cat",
+      "type": "class",
+      "startLine": 21,
+      "endLine": 32
+    },
+    {
+      "name": "__init__",
+      "type": "function",
+      "startLine": 22,
+      "endLine": 24
+    },
+    {
+      "name": "self",
+      "type": "variable",
+      "startLine": 24,
+      "endLine": 24
+    },
+    {
+      "name": "speak",
+      "type": "function",
+      "startLine": 26,
+      "endLine": 27
+    },
+    {
+      "name": "purr",
+      "type": "function",
+      "startLine": 29,
+      "endLine": 32
+    },
+    {
+      "name": "create_pet",
+      "type": "function",
+      "startLine": 34,
+      "endLine": 39
+    }
+  ],
+  "refs": [
+    {
+      "type": "call",
+      "name": "super().__init__",
+      "line": 12
+    },
+    {
+      "type": "call",
+      "name": "super",
+      "line": 12
+    },
+    {
+      "type": "call",
+      "name": "super().__init__",
+      "line": 23
+    },
+    {
+      "type": "call",
+      "name": "super",
+      "line": 23
+    },
+    {
+      "type": "call",
+      "name": "Dog",
+      "line": 36
+    },
+    {
+      "type": "call",
+      "name": "Cat",
+      "line": 38
+    },
+    {
+      "type": "call",
+      "name": "Animal",
+      "line": 39
+    }
+  ],
+  "hasErrors": false
+}

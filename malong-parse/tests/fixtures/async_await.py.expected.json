@@ -1,0 +1,101 @@
+{
+  "symbols": [
+    {
+      "name": "fetch_data",
+      "type": "function",
+      "startLine": 6,
+      "endLine": 8
+    },
+    {
+      "name": "process_items",
+      "type": "function",
+      "startLine": 10,
+      "endLine": 13
+    },
+    {
+      "name": "tasks",
+      "type": "variable",
+      "startLine": 11,
+      "endLine": 11
+    },
+    {
+      "name": "results",
+      "type": "variable",
+      "startLine": 12,
+      "endLine": 12
+    },
+    {
+      "name": "main",
+      "type": "function",
+      "startLine": 15,
+      "endLine": 19
+    },
+    {
+      "name": "urls",
+      "type": "variable",
+      "startLine": 16,
+      "endLine": 16
+    },
+    {
+      "name": "results",
+      "type": "variable",
+      "startLine": 17,
+      "endLine": 17
+    }
+  ],
+  "refs": [
+    {
+      "type": "import",
+      "name": "",
+      "line": 3,
+      "module": "asyncio",
+      "symbols": []
+    },
+    {
+      "type": "import",
+      "name": "",
+      "line": 4,
+      "module": "typing",
+      "symbols": [
+        "List",
+        "Optional"
+      ]
+    },
+    {
+      "type": "call",
+      "name": "asyncio.sleep",
+      "line": 7
+    },
+    {
+      "type": "call",
+      "name": "fetch_data",
+      "line": 11
+    },
+    {
+      "type": "call",
+      "name": "asyncio.gather",
+      "line": 12
+    },
+    {
+      "type": "call",
+      "name": "process_items",
+      "line": 17
+    },
+    {
+      "type": "call",
+      "name": "print",
+      "line": 19
+    },
+    {
+      "type": "call",
+      "name": "asyncio.run",
+      "line": 22
+    },
+    {
+      "type": "call",
+      "name": "main",
+      "line": 22
+    }
+  ],
+  "hasErrors": false
+}

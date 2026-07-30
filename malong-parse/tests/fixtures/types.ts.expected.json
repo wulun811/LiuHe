@@ -1,0 +1,58 @@
+{
+  "symbols": [
+    {
+      "name": "UserService",
+      "type": "class",
+      "startLine": 16,
+      "endLine": 30
+    },
+    {
+      "name": "addUser",
+      "type": "method",
+      "startLine": 19,
+      "endLine": 21
+    },
+    {
+      "name": "getUser",
+      "type": "method",
+      "startLine": 23,
+      "endLine": 25
+    },
+    {
+      "name": "removeUser",
+      "type": "method",
+      "startLine": 27,
+      "endLine": 29
+    },
+    {
+      "name": "createUser",
+      "type": "function",
+      "startLine": 32,
+      "endLine": 34
+    },
+    {
+      "name": "isAdmin",
+      "type": "function",
+      "startLine": 36,
+      "endLine": 38
+    }
+  ],
+  "refs": [
+    {
+      "type": "call",
+      "name": "this.users.set",
+      "line": 20
+    },
+    {
+      "type": "call",
+      "name": "this.users.get",
+      "line": 24
+    },
+    {
+      "type": "call",
+      "name": "this.users.delete",
+      "line": 28
+    }
+  ],
+  "hasErrors": false
+}

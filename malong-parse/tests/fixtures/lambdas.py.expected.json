@@ -1,0 +1,171 @@
+{
+  "symbols": [
+    {
+      "name": "make_multiplier",
+      "type": "function",
+      "startLine": 3,
+      "endLine": 5
+    },
+    {
+      "name": "counter",
+      "type": "function",
+      "startLine": 7,
+      "endLine": 14
+    },
+    {
+      "name": "count",
+      "type": "variable",
+      "startLine": 9,
+      "endLine": 9
+    },
+    {
+      "name": "increment",
+      "type": "function",
+      "startLine": 10,
+      "endLine": 13
+    },
+    {
+      "name": "compose",
+      "type": "function",
+      "startLine": 16,
+      "endLine": 18
+    },
+    {
+      "name": "apply_twice",
+      "type": "function",
+      "startLine": 21,
+      "endLine": 22
+    },
+    {
+      "name": "map_filter_reduce",
+      "type": "function",
+      "startLine": 24,
+      "endLine": 35
+    },
+    {
+      "name": "doubled",
+      "type": "variable",
+      "startLine": 26,
+      "endLine": 26
+    },
+    {
+      "name": "evens",
+      "type": "variable",
+      "startLine": 29,
+      "endLine": 29
+    },
+    {
+      "name": "total",
+      "type": "variable",
+      "startLine": 33,
+      "endLine": 33
+    },
+    {
+      "name": "repeat",
+      "type": "function",
+      "startLine": 38,
+      "endLine": 45
+    },
+    {
+      "name": "decorator",
+      "type": "function",
+      "startLine": 39,
+      "endLine": 44
+    },
+    {
+      "name": "wrapper",
+      "type": "function",
+      "startLine": 40,
+      "endLine": 43
+    },
+    {
+      "name": "result",
+      "type": "variable",
+      "startLine": 42,
+      "endLine": 42
+    },
+    {
+      "name": "greet",
+      "type": "function",
+      "startLine": 48,
+      "endLine": 49
+    }
+  ],
+  "refs": [
+    {
+      "type": "call",
+      "name": "f",
+      "line": 18
+    },
+    {
+      "type": "call",
+      "name": "g",
+      "line": 18
+    },
+    {
+      "type": "call",
+      "name": "f",
+      "line": 22
+    },
+    {
+      "type": "call",
+      "name": "f",
+      "line": 22
+    },
+    {
+      "type": "call",
+      "name": "list",
+      "line": 26
+    },
+    {
+      "type": "call",
+      "name": "map",
+      "line": 26
+    },
+    {
+      "type": "call",
+      "name": "list",
+      "line": 29
+    },
+    {
+      "type": "call",
+      "name": "filter",
+      "line": 29
+    },
+    {
+      "type": "import",
+      "name": "",
+      "line": 32,
+      "module": "functools",
+      "symbols": [
+        "reduce"
+      ]
+    },
+    {
+      "type": "call",
+      "name": "reduce",
+      "line": 33
+    },
+    {
+      "type": "call",
+      "name": "range",
+      "line": 41
+    },
+    {
+      "type": "call",
+      "name": "func",
+      "line": 42
+    },
+    {
+      "type": "call",
+      "name": "repeat",
+      "line": 47
+    },
+    {
+      "type": "call",
+      "name": "print",
+      "line": 49
+    }
+  ],
+  "hasErrors": false
+}
