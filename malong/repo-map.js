@@ -15,10 +15,12 @@ const CHARS_PER_TOKEN = 4
 
 let _core, _langParser, _cache = null, _cacheTime = 0
 
-function extractTopSymbols(source, ext) {
-  const tree = _langParser.parse(source, ext)
-  if (!tree) return []
-  return _langParser.extractTopLevel(tree, source, ext)
+async function extractTopSymbols(source, ext) {
+  try {
+    return await _langParser.extractTopLevelAsync(source, ext)
+  } catch {
+    return []
+  }
 }
 
 function estimateTokens(text) {
@@ -44,7 +46,7 @@ async function buildTree(files, rootDir, relevantFiles, relevantEntities) {
       const isLast = i === parts.length - 1
       if (isLast) {
         const symbols = file.isCode && readFileSync(file.path, 'utf-8').length < 50000
-          ? extractTopSymbols(readFileSync(file.path, 'utf-8'), extname(file.path)) : []
+          ? await extractTopSymbols(readFileSync(file.path, 'utf-8'), extname(file.path)) : []
         const filtered = entitySet ? symbols.filter(s => entitySet.has(s.name)) : symbols
         const entry = { name: parts[i], type: 'file', symbols: filtered, depth: i + 1 }
         current.children.push(entry)
@@ -98,7 +100,7 @@ async function getFilesByEntities(files, rootDir, entities) {
     if (!f.isCode) continue
     const source = readFileSync(f.path, 'utf-8')
     if (source.length > 100000) continue
-    const syms = extractTopSymbols(source, extname(f.path))
+    const syms = await extractTopSymbols(source, extname(f.path))
     if (syms.some(s => entitySet.has(s.name))) {
       result.push(f)
     }

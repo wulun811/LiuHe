@@ -51,42 +51,6 @@ CREATE INDEX IF NOT EXISTS idx_ref_name ON refs(target_name);
 const CACHED_EXT = new Set(['.js', '.mjs', '.cjs', '.py', '.go', '.rs'])
 const WATCHER_DEBOUNCE = 300
 
-function extractSymbols(tree, source) {
-  const symbols = []
-  const imports = []
-
-  function walk(node, depth = 0) {
-    if (depth > 100) return
-    if (node.type === 'function_declaration') {
-      const name = node.childForFieldName('name')
-      if (name) symbols.push({ name: source.slice(name.startIndex, name.endIndex), type: 'function', startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 })
-    } else if (node.type === 'class_declaration') {
-      const name = node.childForFieldName('name')
-      if (name) symbols.push({ name: source.slice(name.startIndex, name.endIndex), type: 'class', startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 })
-    } else if (node.type === 'method_definition') {
-      const name = node.childForFieldName('name')
-      if (name) symbols.push({ name: source.slice(name.startIndex, name.endIndex), type: 'method', startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 })
-    } else if (node.type === 'import_statement') {
-      const s = node.childForFieldName('source')
-      if (s) imports.push({ target: source.slice(s.startIndex, s.endIndex).replace(/['"]/g, ''), kind: 'import' })
-    } else if ((node.type === 'lexical_declaration' || node.type === 'variable_declaration') && (depth === 1 || !node.parent)) {
-      for (const c of node.children) {
-        if (c.type === 'variable_declarator') {
-          const name = c.childForFieldName('name')
-          if (name) symbols.push({ name: source.slice(name.startIndex, name.endIndex), type: 'variable', startLine: c.startPosition.row + 1, endLine: c.endPosition.row + 1 })
-        }
-      }
-    } else if (node.type === 'export_statement') {
-      for (let i = 0; i < node.childCount; i++) walk(node.child(i), depth + 1)
-      return
-    }
-    for (let i = 0; i < node.childCount; i++) walk(node.child(i), depth + 1)
-  }
-
-  walk(tree.rootNode)
-  return { symbols, imports }
-}
-
 function _calcComplexity(sym) {
   const loc = Math.max(1, (sym.end_line || sym.start_line) - sym.start_line + 1)
   const cyclomatic = Math.min(10, Math.ceil(loc / 10))

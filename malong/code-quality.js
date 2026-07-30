@@ -28,18 +28,6 @@ function calcCyclomatic(node) {
   return score
 }
 
-function calcCyclomaticTree(tree) {
-  let score = 1
-  function walk(n) {
-    if (['if_statement', 'for_statement', 'while_statement', 'do_statement',
-         'switch_expression', 'catch_clause', 'ternary_expression',
-         'conditional_expression', 'case_expression'].includes(n.type)) score++
-    for (let i = 0; i < n.childCount; i++) walk(n.child(i))
-  }
-  walk(tree.rootNode)
-  return score
-}
-
 function calcCognitive(node, depth = 0) {
   let score = 0
   function walk(n, nesting) {
@@ -59,22 +47,6 @@ function calcCognitive(node, depth = 0) {
   return score
 }
 
-function calcCognitiveTree(node, depth = 0) {
-  let score = 0
-  function walk(n, nesting) {
-    const isBranch = ['if_statement', 'else_clause', 'for_statement', 'while_statement',
-                      'do_statement', 'catch_clause', 'ternary_expression',
-                      'conditional_expression'].includes(n.type)
-    if (isBranch) {
-      score += 1 + nesting
-      nesting++
-    }
-    for (let i = 0; i < n.childCount; i++) walk(n.child(i), nesting)
-  }
-  walk(node, 0)
-  return score
-}
-
 // ── 2. archViolation: 依赖边界违规 ──
 
 function countArchViolations(source) {
@@ -85,33 +57,6 @@ function countArchViolations(source) {
     const depth = (line.match(/\./g) || []).length
     if (depth > 3 && line.includes('.')) violations++
   }
-  return violations
-}
-
-function calcArchViolations(tree, source, ext) {
-  let violations = 0
-  function walk(node) {
-    if (!node) return
-    const t = node.type
-    if (t === 'call_expression') {
-      const text = source?.slice(node.startIndex, node.endIndex) || node.text || ''
-      const name = node.name || node.text || ''
-      if (/(^|\b)(process|global|root|eval|Function)\b/.test(name)) violations++
-    } else if (t === 'member_expression') {
-      let depth = 0
-      // Walk JSON AST (children) or tree AST (child)
-      let cur = node
-      while (cur && cur.type === 'member_expression') { depth++; cur = cur.children?.[0] || cur.child?.(0) }
-      if (depth > 3) violations++
-    }
-    if (node.children && Array.isArray(node.children)) {
-      for (const c of node.children) walk(c)
-    } else {
-      for (let i = 0; i < (node.childCount || 0); i++) walk(node.child(i))
-    }
-  }
-  if (tree.rootNode) walk(tree.rootNode)
-  else walk(tree)
   return violations
 }
 
@@ -212,12 +157,7 @@ export async function init(core) {
       }
 
       if (cyc === undefined) {
-        // final fallback to sync parse
-        const tree = _langParser.parse(source, ext)
-        if (!tree) return { dimensions: {}, overall: 0, error: 'parse_failed' }
-        cyc = calcCyclomaticTree(tree.rootNode)
-        cog = calcCognitiveTree(tree.rootNode)
-        arch = calcArchViolations(tree, source, ext)
+        return { dimensions: {}, overall: 0, error: 'parse_failed' }
       } else {
         // compute arch violations from source (simplified)
         arch = countArchViolations(source)
