@@ -9,27 +9,44 @@ function isTestFile(path) {
   return TEST_PATTERNS.some(p => p.test(path))
 }
 
-function findTxn(txnRoot, since) {
-  if (!existsSync(txnRoot)) return null
+function _scanTxnDirs(txnRoot) {
+  const results = []
+  if (!existsSync(txnRoot)) return results
   const dirs = readdirSync(txnRoot, { withFileTypes: true }).filter(d => d.isDirectory())
-  if (!dirs.length) return null
+  for (const d of dirs) {
+    if (d.name === 'recent') {
+      const recentDir = join(txnRoot, 'recent')
+      const recentEntries = readdirSync(recentDir, { withFileTypes: true }).filter(e => e.isDirectory())
+      for (const e of recentEntries) {
+        results.push({ dirName: join('recent', e.name), absDir: join(recentDir, e.name) })
+      }
+    } else {
+      results.push({ dirName: d.name, absDir: join(txnRoot, d.name) })
+    }
+  }
+  return results
+}
+
+function findTxn(txnRoot, since) {
+  const entries = _scanTxnDirs(txnRoot)
+  if (!entries.length) return null
 
   if (since === 'last_txn' || !since) {
     let latest = null, latestTime = 0
-    for (const d of dirs) {
+    for (const { dirName, absDir } of entries) {
       try {
-        const manifest = JSON.parse(readFileSync(join(txnRoot, d.name, 'manifest.json'), 'utf-8'))
-        if (manifest.created > latestTime) { latestTime = manifest.created; latest = { ...manifest, dirName: d.name } }
+        const manifest = JSON.parse(readFileSync(join(absDir, 'manifest.json'), 'utf-8'))
+        if (manifest.created > latestTime) { latestTime = manifest.created; latest = { ...manifest, dirName } }
       } catch {}
     }
     return latest
   }
 
   const txnId = since.startsWith('txn:') ? since.slice(4) : since
-  for (const d of dirs) {
+  for (const { dirName, absDir } of entries) {
     try {
-      const manifest = JSON.parse(readFileSync(join(txnRoot, d.name, 'manifest.json'), 'utf-8'))
-      if (manifest.txnId === txnId) return { ...manifest, dirName: d.name }
+      const manifest = JSON.parse(readFileSync(join(absDir, 'manifest.json'), 'utf-8'))
+      if (manifest.txnId === txnId) return { ...manifest, dirName }
     } catch {}
   }
   return null
