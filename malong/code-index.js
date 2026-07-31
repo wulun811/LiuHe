@@ -7,6 +7,8 @@ import { join, relative, extname, resolve } from 'node:path'
 import { readFileSync, writeFileSync, existsSync, unlinkSync, watch, chmodSync, statSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { DEFAULT_IGNORE_DIRS } from './file-collector.js'
+import { sha256 } from './hash-utils.js'
+import { computeFileAnchors } from './symbol-anchors.js'
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS files (
@@ -144,6 +146,17 @@ function initDb(dir) {
   db.exec(SCHEMA)
   try { db.exec('ALTER TABLE refs ADD COLUMN line INTEGER DEFAULT 0') } catch (e) { if (!e.message?.includes('duplicate column')) console.error('[code-index] migration error:', e.message) }
   try { db.exec("ALTER TABLE refs ADD COLUMN call_expr TEXT DEFAULT ''") } catch (e) { if (!e.message?.includes('duplicate column')) console.error('[code-index] migration error:', e.message) }
+  // 原语化 P1：版本锚点列（附录 C/E；parent_id/signature 已在 SCHEMA 建表）
+  for (const [table, col] of [
+    ['files', "content_hash TEXT DEFAULT ''"],
+    ['files', "index_state TEXT DEFAULT 'fresh'"],
+    ['symbols', "stable_id TEXT DEFAULT ''"],
+    ['symbols', "body_hash TEXT DEFAULT ''"],
+    ['symbols', "signature_hash TEXT DEFAULT ''"],
+  ]) {
+    try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${col}`) } catch (e) { if (!e.message?.includes('duplicate column')) console.error('[code-index] migration error:', e.message) }
+  }
+  try { db.exec('CREATE INDEX IF NOT EXISTS idx_sym_stable ON symbols(stable_id)') } catch (e) { console.error('[code-index] migration error:', e.message) }
   return db
 }
 
@@ -212,21 +225,21 @@ class CodeIndex {
     let mtime = Date.now()
     try { mtime = statSync(filePath).mtimeMs } catch {}
     return this._db.transaction(() => {
-      return this._indexFileDb(relPath, source.length, symbols, refs, mtime)
+      return this._indexFileDb(relPath, source.length, symbols, refs, mtime, sha256(source))
     })()
   }
 
-  _indexFileDb(relPath, sourceLength, symbols, refs, mtime) {
+  _indexFileDb(relPath, sourceLength, symbols, refs, mtime, contentHash) {
     let fileId = null
     const existing = this._db.prepare('SELECT id FROM files WHERE path = ?').get(relPath)
     if (existing) {
       fileId = existing.id
       this._db.prepare('DELETE FROM symbols WHERE file_id = ?').run(fileId)
       this._db.prepare('DELETE FROM refs WHERE source_file_id = ?').run(fileId)
-      this._db.prepare("UPDATE files SET size = ?, mtime = ?, indexed_at = datetime('now') WHERE id = ?").run(sourceLength, mtime, fileId)
+      this._db.prepare("UPDATE files SET size = ?, mtime = ?, content_hash = ?, index_state = 'fresh', indexed_at = datetime('now') WHERE id = ?").run(sourceLength, mtime, contentHash || '', fileId)
     }
     if (!fileId) {
-      const r = this._db.prepare('INSERT OR IGNORE INTO files (path, repo, size, mtime) VALUES (?, ?, ?, ?)').run(relPath, '', sourceLength, mtime)
+      const r = this._db.prepare('INSERT OR IGNORE INTO files (path, repo, size, mtime, content_hash, index_state) VALUES (?, ?, ?, ?, ?, ?)').run(relPath, '', sourceLength, mtime, contentHash || '', 'fresh')
       fileId = r.lastInsertRowid
     }
     this._impactCache?.clear()
@@ -239,10 +252,12 @@ class CodeIndex {
       for (let i = 0; i < symRows.length; i += SYM_BATCH * 5) {
         const batch = symRows.slice(i, i + SYM_BATCH * 5)
         const ph = Array(batch.length / 5).fill('(?,?,?,?,?)').join(',')
-        this._db.prepare(`INSERT INTO symbols (file_id, name, type, start_line, end_line) VALUES ${ph}`).run(...batch)
+        this._db.prepare(`INSERT INTO symbols (file_id, name, type, start_line, end_line) VALUES ${ph}`).run(...batch.flat())
       }
     }
     const insertedSyms = this._db.prepare('SELECT id, name, type, start_line, end_line FROM symbols WHERE file_id = ?').all(fileId)
+    // 原语化 P1：索引/重抽时同步回填锚点（附录 D 写后一致性 + 附录 A stable_id）
+    this._backfillFileAnchors(relPath, insertedSyms)
     const symIdMap = new Map(insertedSyms.map(s => [s.name, s.id]))
     const funcSyms = insertedSyms.filter(s => s.type === 'function' || s.type === 'method')
 
@@ -1074,6 +1089,23 @@ class CodeIndex {
         }
       },
 
+      // 原语化 P1：版本锚点查询（附录 A/C/E）
+      getSymbolByStableId(stableId) {
+        return self.getSymbolByStableId(stableId)
+      },
+
+      findSymbolsInFile(filePath, name, kind) {
+        return self.findSymbolsInFile(filePath, name, kind)
+      },
+
+      getFileByPath(filePath) {
+        return self.getFileByPath(filePath)
+      },
+
+      markIndexDirty(filePath, reason) {
+        return self.markIndexDirty(filePath, reason)
+      },
+
       async getFileOutline(filePath, { depth = 1, includeRefs = false, includeTestRefs = false, maxItems = 50 } = {}) {
         const cacheKey = `${self._currentWorkspace || ''}\0${filePath}\0${depth}\0${includeRefs}\0${includeTestRefs}\0${maxItems}`
         if (self._outlineCache.has(cacheKey)) {
@@ -1223,6 +1255,49 @@ class CodeIndex {
       try { chmodSync(udsPath, 0o600) } catch {}
       core.log('info', `[code-index] UDS server on ${udsPath}`)
     })
+  }
+
+  // ===== 原语化 P1：版本锚点（附录 A/C/E）=====
+
+  _backfillFileAnchors(relPath, insertedSyms) {
+    if (!insertedSyms || insertedSyms.length === 0) return
+    const absPath = this._currentWorkspace ? join(this._currentWorkspace, relPath) : relPath
+    let anchors = null
+    try {
+      anchors = computeFileAnchors(absPath, relPath, insertedSyms)
+    } catch { return }
+    if (!anchors || anchors.length === 0) return
+    const upd = this._db.prepare('UPDATE symbols SET parent_id = ?, signature = ?, stable_id = ?, body_hash = ?, signature_hash = ? WHERE id = ?')
+    for (const a of anchors) {
+      upd.run(a.parentId, a.signature, a.stableId, a.bodyHash, a.signatureHash, a.id)
+    }
+  }
+
+  getSymbolByStableId(stableId) {
+    if (!stableId || !this._db) return null
+    return this._db.prepare('SELECT s.id, s.file_id, s.name, s.type, s.signature, s.start_line, s.end_line, s.stable_id, s.body_hash, s.signature_hash, f.path AS file_path FROM symbols s JOIN files f ON s.file_id = f.id WHERE s.stable_id = ?').get(stableId) || null
+  }
+
+  findSymbolsInFile(filePath, name, kind) {
+    if (!this._db) return []
+    let rows = this._db.prepare('SELECT s.id, s.file_id, s.name, s.type, s.signature, s.start_line, s.end_line, s.stable_id, s.body_hash, s.signature_hash, f.path AS file_path FROM symbols s JOIN files f ON s.file_id = f.id WHERE f.path = ? AND s.name = ?').all(filePath, name)
+    if (kind && rows.length > 1) {
+      const k = rows.filter(r => r.type === kind)
+      if (k.length > 0) rows = k
+    }
+    return rows
+  }
+
+  getFileByPath(filePath) {
+    if (!this._db) return null
+    return this._db.prepare('SELECT * FROM files WHERE path = ?').get(filePath) || null
+  }
+
+  markIndexDirty(filePath, reason) {
+    if (!this._db) return
+    this._db.prepare("UPDATE files SET index_state = 'dirty', content_hash = '' WHERE path = ?").run(filePath)
+    if (reason) this._core?.log?.('warn', `[code-index] index dirty: ${filePath} (${reason})`)
+    this.clearCachesForFile(filePath)
   }
 
   async start() {

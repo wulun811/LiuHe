@@ -1,0 +1,77 @@
+{
+  "name": "read_symbol",
+  "version": "1.0.0",
+  "description": "Default primitive for reading a code symbol with version, outline, and safe fallback. Resolves by stable symbol_id or name+file, returns body with exact file hash / symbol body_hash (version anchors), index freshness, pipeline trace, and budget truncation. Non-code files degrade to line_range/file reads. Use read_outline only when you need full file structure without editing.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "workspace_dir": {
+        "type": "string",
+        "description": "REQUIRED: Absolute path to the project root directory."
+      },
+      "locator": {
+        "type": "object",
+        "properties": {
+          "symbol_id": {
+            "type": "string",
+            "description": "Stable symbol id (lang:path::qualified_name#kind). Preferred anchor."
+          },
+          "file_path": {
+            "type": "string",
+            "description": "Workspace-relative file path (e.g. src/auth.py)"
+          },
+          "name": {
+            "type": "string",
+            "description": "Symbol name (used with file_path when symbol_id unknown)"
+          },
+          "kind": {
+            "type": "string",
+            "description": "Optional: function/method/class/variable to disambiguate"
+          },
+          "line_range": {
+            "type": "array",
+            "items": { "type": "integer" },
+            "description": "Degraded line_range read for non-code files: [start, end] 1-based inclusive"
+          }
+        },
+        "required": ["file_path"]
+      },
+      "mode": {
+        "type": "string",
+        "enum": ["core", "rich"],
+        "description": "core (default): body + version + outline depth=1. rich: adds navigation counts."
+      },
+      "context_lines": {
+        "type": "integer",
+        "description": "Context lines around symbol (default 3)"
+      },
+      "include_outline": {
+        "type": "boolean",
+        "description": "Include file outline summary (default true)"
+      },
+      "outline_depth": {
+        "type": "integer",
+        "description": "Outline depth (default 1)"
+      },
+      "budget_hint": {
+        "type": "integer",
+        "description": "Max body chars to return; must truncate, not hint (default 1200)"
+      },
+      "source": {
+        "type": "string",
+        "enum": ["live", "indexed"],
+        "description": "live (default): read current file + check staleness. indexed: read-only snapshot, never use for write."
+      },
+      "on_ambiguous": {
+        "type": "string",
+        "enum": ["fail"],
+        "description": "fail (default): return candidates, never silently pick."
+      }
+    },
+    "required": ["workspace_dir", "locator"]
+  },
+  "handler": "./handler.js",
+  "protocol_version": "1.0",
+  "tags": ["primitive", "read"],
+  "dependencies": []
+}

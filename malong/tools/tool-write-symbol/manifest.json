@@ -1,0 +1,97 @@
+{
+  "name": "write_symbol",
+  "version": "1.0.0",
+  "description": "Default primitive for safely editing one symbol or one text patch. Runs the full write pipeline: version conflict state machine (CLEAN / FILE_CHANGED_SYMBOL_STABLE / SYMBOL_CHANGED / SYMBOL_SIGNATURE_CHANGED / SYMBOL_DELETED / AMBIGUOUS_SYMBOL), file lock, validation (syntax + brackets), atomic temp+rename, synchronous reindex, undo journal (backup + state), pipeline trace. Non-code files: use edit_mode=patch with old_string/new_string. Always read_symbol first to obtain base_version. Do not use edit_transaction for a normal single-symbol edit.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "workspace_dir": {
+        "type": "string",
+        "description": "REQUIRED: Absolute path to the project root directory."
+      },
+      "locator": {
+        "type": "object",
+        "properties": {
+          "symbol_id": {
+            "type": "string",
+            "description": "Stable symbol id (preferred). Read it from read_symbol output."
+          },
+          "file_path": {
+            "type": "string",
+            "description": "Workspace-relative file path (e.g. src/auth.py)"
+          },
+          "name": {
+            "type": "string",
+            "description": "Symbol name (used with file_path when symbol_id unknown)"
+          },
+          "kind": {
+            "type": "string",
+            "description": "Optional: function/method/class/variable to disambiguate"
+          }
+        },
+        "required": ["file_path"]
+      },
+      "base_version": {
+        "type": "object",
+        "description": "REQUIRED (unless allow_unsafe_no_base): the version object returned by read_symbol. Conflict adjudication anchor.",
+        "properties": {
+          "file": {
+            "type": "object",
+            "description": "{ hash: \"sha256:...\" } — file hash from read_symbol"
+          },
+          "symbol": {
+            "type": "object",
+            "description": "{ body_hash, signature_hash } — symbol hashes from read_symbol"
+          }
+        }
+      },
+      "content": {
+        "type": "string",
+        "description": "New content. For replace_symbol: the full new symbol (boundary=full) or new body (boundary=body)."
+      },
+      "edit_mode": {
+        "type": "string",
+        "enum": ["replace_symbol", "patch", "insert_after_symbol"],
+        "description": "replace_symbol (default) / patch (sub-symbol old_string→new_string) / insert_after_symbol"
+      },
+      "patch": {
+        "type": "object",
+        "description": "Required when edit_mode=patch",
+        "properties": {
+          "old_string": { "type": "string", "description": "Exact text to replace (must be unique in scope)" },
+          "new_string": { "type": "string", "description": "Replacement text" }
+        }
+      },
+      "boundary": {
+        "type": "string",
+        "enum": ["full", "body"],
+        "description": "full (default): replace whole symbol. body: keep signature line, replace the rest."
+      },
+      "preserve_decorators": {
+        "type": "boolean",
+        "description": "Warn if content drops decorators that exist above the symbol (default true)"
+      },
+      "dry_run": {
+        "type": "boolean",
+        "description": "Validate and produce diff without writing (default false)"
+      },
+      "allow_unsafe_no_base": {
+        "type": "boolean",
+        "description": "Bypass base_version requirement (audited). Only for deliberate full-file overwrites."
+      },
+      "safety": {
+        "type": "object",
+        "description": "Safety knobs",
+        "properties": {
+          "profile": { "type": "string", "enum": ["fast", "standard", "strict"], "description": "standard (default)" },
+          "block_on_validation_error": { "type": "boolean", "description": "Block write if validation fails (default false)" }
+        }
+      }
+    },
+    "required": ["workspace_dir", "locator", "base_version", "content"]
+  },
+  "handler": "./handler.js",
+  "protocol_version": "1.0",
+  "tags": ["primitive", "write"],
+  "dependencies": []
+}
