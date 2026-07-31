@@ -1,5 +1,6 @@
 import { join, extname } from 'node:path'
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { stripStrings } from '../../string-utils.js'
 
 const TODO_RE = /(?:#|\/\/|\/\*|\*|--)\s*(TODO|FIXME|XXX|HACK)\s*(?:\((\w+)\))?\s*[:\-]?\s*(.*)/i
 const SOURCE_EXTS = new Set(['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.py', '.go', '.rs', '.java', '.rb', '.c', '.cpp', '.h', '.php'])
@@ -48,7 +49,7 @@ export async function handle(args, context) {
 
       const todos = []
       for (let i = 0; i < lines.length; i++) {
-        const m = TODO_RE.exec(lines[i])
+        const m = TODO_RE.exec(stripStrings(lines[i]))
         if (m) {
           todos.push({
             type: m[1].toUpperCase(),
@@ -107,7 +108,7 @@ export async function handle(args, context) {
     try { lines = readFileSync(absPath, 'utf-8').split('\n') } catch { continue }
 
     for (let i = 0; i < lines.length; i++) {
-      const m = TODO_RE.exec(lines[i])
+      const m = TODO_RE.exec(stripStrings(lines[i]))
       if (m) {
         todos.push({
           type: m[1].toUpperCase(),

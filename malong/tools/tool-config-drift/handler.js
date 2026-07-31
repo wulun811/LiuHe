@@ -1,5 +1,6 @@
 import { join, extname } from 'node:path'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { stripStrings } from '../../string-utils.js'
 
 const ENV_PATTERNS = [
   /os\.environ\[["'](\w+)["']\]/g,
@@ -19,6 +20,9 @@ const SERVICE_PATTERNS = [
   /redis[._](?:client|Redis|from_url|connect)/i,
   /mongo(?:ose|db|client)/i,
 ]
+
+// SQL 执行调用（该行内的字符串是真实 SQL，表名应检出；否则视为自然语言）
+const SQL_CALL_RE = /(?:\.\s*)?(?:execute|executemany|executescript|query|prepare|run)\s*\(/i
 
 const SOURCE_EXTS = new Set(['.js', '.mjs', '.cjs', '.ts', '.tsx', '.py', '.go', '.rs', '.java', '.rb'])
 const SKIP_DIRS = new Set(['node_modules', '.git', '__pycache__', '.venv', 'venv', 'dist', 'build'])
@@ -42,10 +46,13 @@ function extractRefs(content, file) {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
     if (/^\s*(#|\/\/|\*)/.test(line)) continue
+    // 字符串感知：剥离字面量后做模式匹配（防模板/字符串里的自然语言误报，如 "initialize from client"）
+    const codeLine = stripStrings(line)
 
     for (const pat of ENV_PATTERNS) {
       pat.lastIndex = 0
       let m
+      // ENV key 本身在字符串字面量里（os.environ['KEY']），不能剥离；注释行已在上方过滤
       while ((m = pat.exec(line)) !== null) {
         refs.push({ type: 'env_var', name: m[1], line: i + 1, context: line.trim() })
       }
@@ -54,7 +61,9 @@ function extractRefs(content, file) {
     for (const pat of DB_PATTERNS) {
       pat.lastIndex = 0
       let m
-      while ((m = pat.exec(line)) !== null) {
+      // SQL 调用行（execute/query 等）字符串里是真实 SQL → 原行匹配；普通行 → 剥离字符串防自然语言误报
+      const matchLine = SQL_CALL_RE.test(line) ? line : codeLine
+      while ((m = pat.exec(matchLine)) !== null) {
         const name = m[1]
         if (!/^(?:SELECT|INSERT|UPDATE|DELETE|FROM|INTO|TABLE|WHERE|SET|VALUES|AND|OR|JOIN|LEFT|RIGHT|INNER|OUTER|ON|AS|GROUP|ORDER|BY|HAVING|LIMIT|OFFSET|UNION|ALL|DISTINCT|CASE|WHEN|THEN|ELSE|END|NULL|NOT|IN|EXISTS|BETWEEN|LIKE|IS|CREATE|DROP|ALTER|INDEX|VIEW|TRIGGER|PROCEDURE|FUNCTION|DATABASE|SCHEMA|GRANT|REVOKE|COMMIT|ROLLBACK|BEGIN|TRANSACTION|PRIMARY|KEY|FOREIGN|REFERENCES|CONSTRAINT|DEFAULT|CHECK|UNIQUE|AUTO_INCREMENT|INT|INTEGER|VARCHAR|TEXT|BOOLEAN|DATE|TIMESTAMP|FLOAT|DOUBLE|DECIMAL|BLOB|CHAR|BIGINT|SMALLINT|TINYINT|SERIAL)$/i.test(name)) {
           refs.push({ type: 'db_table', name, line: i + 1, context: line.trim() })
@@ -63,8 +72,8 @@ function extractRefs(content, file) {
     }
 
     for (const pat of SERVICE_PATTERNS) {
-      if (pat.test(line)) {
-        const svc = /redis/i.test(line) ? 'redis' : /mongo/i.test(line) ? 'mongodb' : 'unknown'
+      if (pat.test(codeLine)) {
+        const svc = /redis/i.test(codeLine) ? 'redis' : /mongo/i.test(codeLine) ? 'mongodb' : 'unknown'
         refs.push({ type: 'service', name: svc, line: i + 1, context: line.trim() })
       }
     }

@@ -581,6 +581,13 @@ function analyzeFile(content, lang, currentFile = '') {
       while ((apm = arrowParamRe.exec(trimmed)) !== null) {
         apm[1].split(',').forEach(s => { const n = s.trim(); if (n && /^[a-zA-Z_]\w*$/.test(n)) definedSymbols.add(n) })
       }
+      // 无括号单参数 arrow（如 new Promise(resolve => ...)）：=> 左侧标识符即参数
+      const arrowSingleRe = /([a-zA-Z_$][\w$]*)\s*=>/g
+      let asm
+      while ((asm = arrowSingleRe.exec(trimmed)) !== null) {
+        const prev = trimmed[asm.index - 1] || ''
+        if (prev !== '.' && !/[\w$]/.test(prev)) definedSymbols.add(asm[1])
+      }
     }
 
     if (lang === 'python') {

@@ -142,5 +142,47 @@ writeFileSync(`${WS}/src/ci2.js`, `export async function run() {\n  return proce
 r = await configDrift({ workspace_dir: WS, file: 'src/ci2.js' }, {})
 assert(r.drifts.some(d => d.name === 'TRULY_MISSING'), `真缺失变量仍报（不漏报）`)
 
+// ═══════════ golden 14：active_todos 字符串感知（字符串字面量里的 TODO 文本不误报） ═══════════
+console.log('── golden 14: active_todos 字符串感知 ──')
+const strJs = [
+  "const a = '// TODO: 字符串里的 TODO 不是真 TODO'",
+  'const b = "// FIXME: 双引号字符串也不是"',
+  '// TODO: 真实注释 TODO 应保留',
+  'function f() { return 1 }',
+  '',
+].join('\n')
+writeFileSync(`${WS}/src/str.js`, strJs)
+r = await activeTodos({ workspace_dir: WS, scope: 'src' }, {})
+const strTodos = r.todos.filter(t => t.file === 'src/str.js')
+assert(strTodos.length === 1 && strTodos[0].type === 'TODO', `字符串 TODO 不误报、注释 TODO 保留（得 ${JSON.stringify(strTodos)})`)
+assert(strTodos[0].content === '真实注释 TODO 应保留', `注释内容正确（得 ${strTodos[0].content}）`)
+
+// ═══════════ golden 15：fix_imports 无括号单参数 arrow（new Promise(resolve => ...) 不误报 undefined） ═══════════
+console.log('── golden 15: 无括号单参数 arrow ──')
+writeFileSync(`${WS}/src/arrow.js`, `export function run() {\n  return new Promise(resolve => {\n    resolve(42)\n  })\n}\n`)
+r = await fixImports({ workspace_dir: WS, file: 'src/arrow.js' }, context)
+const arrowUndef = r.issues.filter(i => i.type === 'undefined_symbol' && i.symbol === 'resolve')
+assert(arrowUndef.length === 0, `Promise(resolve => ...) 的 resolve 不误报 undefined（得 ${JSON.stringify(arrowUndef)})`)
+writeFileSync(`${WS}/src/arrow2.js`, `const xs = [1, 2, 3]\nconst doubled = xs.map(x => x * 2)\nexport function run() {\n  return doubled.reduce((acc, cur) => acc + cur, 0)\n}\n`)
+r = await fixImports({ workspace_dir: WS, file: 'src/arrow2.js' }, context)
+const arrowUndef2 = r.issues.filter(i => i.type === 'undefined_symbol')
+assert(arrowUndef2.length === 0, `map/reduce arrow 参数不误报（得 ${JSON.stringify(arrowUndef2)})`)
+
+// ═══════════ golden 16：config_drift 字符串感知（模板字符串里的 from/join 自然语言不误报表名） ═══════════
+console.log('── golden 16: config_drift 字符串感知 ──')
+const dbstrJs = 'export function log() {\n  return `initialize from client, pid=${process.pid}`\n}\n'
+writeFileSync(`${WS}/src/dbstr.js`, dbstrJs)
+r = await configDrift({ workspace_dir: WS, file: 'src/dbstr.js' }, {})
+const dbRefs = r.config_references.filter(x => x.type === 'db_table')
+assert(dbRefs.length === 0, `模板字符串里 from client 不误报表名（得 ${JSON.stringify(dbRefs)})`)
+writeFileSync(`${WS}/src/dbstr2.js`, "import { query } from './db'\nexport async function run() {\n  const rows = await query('SELECT * FROM orders WHERE id = ?')\n  return rows\n}\n")
+r = await configDrift({ workspace_dir: WS, file: 'src/dbstr2.js' }, {})
+const dbRefs2 = r.config_references.filter(x => x.type === 'db_table')
+assert(dbRefs2.some(x => x.name === 'orders'), `SQL 调用行字符串里的表名应检出 orders（得 ${JSON.stringify(dbRefs2)})`)
+writeFileSync(`${WS}/src/dbstr3.js`, "export function describe() {\n  return `sessions table has 100 rows`\n}\n")
+r = await configDrift({ workspace_dir: WS, file: 'src/dbstr3.js' }, {})
+const dbRefs3 = r.config_references.filter(x => x.type === 'db_table')
+assert(dbRefs3.length === 0, `自然语言模板文本不误报表名（得 ${JSON.stringify(dbRefs3)})`)
+
 console.log(`\n=== test-gatekeeper-golden: ${pass} passed, ${fail} failed ===`)
 process.exit(fail ? 1 : 0)
