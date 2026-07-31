@@ -144,6 +144,21 @@ pub fn extract_all(tree: &Tree, source: &str) -> super::ExtractResult {
                 for i in 0..node.child_count() {
                     if let Some(c) = node.child(i) {
                         if c.kind() == "use_as_clause" {
+                            // 8：`use std::io::Result as IoResult` —— 旧实现 continue 整个跳过，别名导入全丢。
+                            // 绑定名 = alias 字段；module = path 字段全路径。name 仅供 live 工具读（DB 存 import 只用 module，不读 name）
+                            let path_str = c.child_by_field_name("path")
+                                .map(|p| source[p.byte_range()].to_string()).unwrap_or_default();
+                            let alias = c.child_by_field_name("alias")
+                                .map(|a| source[a.byte_range()].to_string()).unwrap_or_default();
+                            if !alias.is_empty() && alias != "*" {
+                                refs.push(Reference {
+                                    kind: "import".to_string(),
+                                    name: alias,
+                                    line: c.start_position().row as u32 + 1,
+                                    module: Some(path_str),
+                                    symbols: Some(vec![]),
+                                });
+                            }
                             continue;
                         }
                         if c.kind() == "scoped_use_list" {
@@ -155,19 +170,23 @@ pub fn extract_all(tree: &Tree, source: &str) -> super::ExtractResult {
                                         for k in 0..item.child_count() {
                                             if let Some(u) = item.child(k) {
                                                 if u.kind() == "identifier" {
+                                                    let module = format!("{}::{}", path_str, &source[u.byte_range()]);
+                                                    let binding = last_path_segment(&module).to_string();
                                                     refs.push(Reference {
                                                         kind: "import".to_string(),
-                                                        name: String::new(),
+                                                        name: binding,
                                                         line: u.start_position().row as u32 + 1,
-                                                        module: Some(format!("{}::{}", path_str, &source[u.byte_range()])),
+                                                        module: Some(module),
                                                         symbols: Some(vec![]),
                                                     });
                                                 } else if u.kind() == "scoped_identifier" {
+                                                    let module = source[u.byte_range()].to_string();
+                                                    let binding = last_path_segment(&module).to_string();
                                                     refs.push(Reference {
                                                         kind: "import".to_string(),
-                                                        name: String::new(),
+                                                        name: binding,
                                                         line: u.start_position().row as u32 + 1,
-                                                        module: Some(source[u.byte_range()].to_string()),
+                                                        module: Some(module),
                                                         symbols: Some(vec![]),
                                                     });
                                                 }
@@ -177,13 +196,18 @@ pub fn extract_all(tree: &Tree, source: &str) -> super::ExtractResult {
                                 }
                             }
                         } else if c.kind() == "scoped_identifier" || c.kind() == "identifier" {
-                            refs.push(Reference {
-                                kind: "import".to_string(),
-                                name: String::new(),
-                                line: c.start_position().row as u32 + 1,
-                                module: Some(source[c.byte_range()].to_string()),
-                                symbols: Some(vec![]),
-                            });
+                            let module = source[c.byte_range()].to_string();
+                            let binding = last_path_segment(&module).to_string();
+                            // 8：glob `use foo::*` 绑定为 *，无法静态判定具体名 → 跳过
+                            if binding != "*" {
+                                refs.push(Reference {
+                                    kind: "import".to_string(),
+                                    name: binding,
+                                    line: c.start_position().row as u32 + 1,
+                                    module: Some(module),
+                                    symbols: Some(vec![]),
+                                });
+                            }
                         }
                     }
                 }
@@ -559,5 +583,33 @@ fn build() -> CpfBuilder {
         for noise in ["iter", "filter", "count"] {
             assert!(!names.contains(&noise), "noise {:?} filtered in extract_references; refs={:?}", noise, names);
         }
+    }
+
+    #[test]
+    fn test_use_imports() {
+        let src = r#"
+use std::collections::HashMap;
+use std::{io, fs};
+use std::io::Result as IoResult;
+use crate::utils::helper;
+use serde::*;
+
+fn main() {
+    let m = HashMap::new();
+}
+"#;
+        let tree = parse_rust(src);
+        let result = extract_all(&tree, src);
+        let by_name: std::collections::HashMap<String, String> = result.refs.iter()
+            .filter(|r| r.kind == "import")
+            .map(|r| (r.name.clone(), r.module.clone().unwrap_or_default()))
+            .collect();
+        // 8：name = 绑定名（路径末段 / 别名），module = 全路径
+        assert_eq!(by_name.get("HashMap").map(|s| s.as_str()), Some("std::collections::HashMap"), "deep path; imports={:?}", by_name);
+        assert!(by_name.contains_key("io"), "nested list io; imports={:?}", by_name);
+        assert!(by_name.contains_key("fs"), "nested list fs; imports={:?}", by_name);
+        assert_eq!(by_name.get("IoResult").map(|s| s.as_str()), Some("std::io::Result"), "alias binding; imports={:?}", by_name);
+        assert_eq!(by_name.get("helper").map(|s| s.as_str()), Some("crate::utils::helper"), "crate path; imports={:?}", by_name);
+        assert!(!by_name.contains_key("*"), "glob binding must be skipped; imports={:?}", by_name);
     }
 }

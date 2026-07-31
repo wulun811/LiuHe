@@ -125,6 +125,26 @@ const tpl = \`import('./in-template.js')\`
   assert(cls7 && cls7.startLine === 8 && cls7.endLine === 12, `中文类行号精确（得 ${JSON.stringify(cls7)}）`)
   assert(r7.symbols.every(s => s.startLine >= 1 && s.endLine >= s.startLine), '全部行号有效')
 
+  console.log('\n── 8. Rust use 导入提取（第 8 轮：name=绑定名 + 别名 + glob 跳过） ──')
+  const rustUse = `
+use std::collections::HashMap;
+use std::{io, fs};
+use std::io::Result as IoResult;
+use crate::utils::helper;
+use serde::*;
+
+fn main() {
+    let m = HashMap::new();
+}
+`
+  const r8 = await extractAll(rustUse, '.rs')
+  const imp8 = Object.fromEntries(r8.refs.filter(r => r.type === 'import').map(r => [r.name, r.module]))
+  assert(imp8['HashMap'] === 'std::collections::HashMap', `深路径绑定 name=HashMap（得 ${JSON.stringify(imp8)}）`)
+  assert('io' in imp8 && 'fs' in imp8, `嵌套 use list 逐项绑定 io/fs（得 ${JSON.stringify(Object.keys(imp8))}）`)
+  assert(imp8['IoResult'] === 'std::io::Result', `use as 别名绑定 name=IoResult（得 ${imp8['IoResult']}）`)
+  assert(imp8['helper'] === 'crate::utils::helper', `crate 路径绑定 name=helper（得 ${imp8['helper']}）`)
+  assert(!('*' in imp8), 'glob use 绑定 * 被跳过（无法静态判定）')
+
   console.log(`\n═══════════════════════════════════════`)
   console.log(`提取正确性: ${passed} passed, ${failed} failed`)
   process.exit(failed > 0 ? 1 : 0)
