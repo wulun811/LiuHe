@@ -44,6 +44,7 @@ export async function handle(args, context) {
   const budget = Math.max(200, parseInt(args?.budget_hint) || 1200)
   const source = args?.source || 'live'
   const onAmbiguous = args?.on_ambiguous || 'fail'
+  const hasRange = Array.isArray(locator?.line_range) && locator.line_range.length === 2
 
   const t0 = Date.now()
   let staleness = null
@@ -62,7 +63,8 @@ export async function handle(args, context) {
     const st = statSync(absPath)
     size = st.size
     mtime = st.mtimeMs
-    if (size > MAX_LIVE_READ) {
+    // 附录 E：file 模式大文件截断保护；line_range 模式必须读全文（目标行可能在后段）
+    if (size > MAX_LIVE_READ && !hasRange) {
       const buf = readFileSync(absPath)
       content = buf.subarray(0, MAX_LIVE_READ).toString('utf-8')
     } else {
@@ -123,7 +125,6 @@ export async function handle(args, context) {
   if (!symbol) {
     // 降级：line_range / file（附录 E）
     const lines = content.split('\n')
-    const hasRange = Array.isArray(locator.line_range) && locator.line_range.length === 2
     if (hasRange) {
       const [a, b] = [Math.max(1, locator.line_range[0]), Math.max(1, locator.line_range[1])]
       range = [a, b]

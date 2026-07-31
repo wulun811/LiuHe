@@ -25,7 +25,7 @@ export function traceId() {
 
 // ---------- 锁（附录 D：OS advisory 优先，fallback lockfile + pid；2s 超时） ----------
 
-export function acquireLock(absPath, timeoutMs = LOCK_TIMEOUT_MS) {
+export async function acquireLock(absPath, timeoutMs = LOCK_TIMEOUT_MS) {
   const lockPath = `${absPath}.mlock`
   const start = Date.now()
   for (;;) {
@@ -51,7 +51,7 @@ export function acquireLock(absPath, timeoutMs = LOCK_TIMEOUT_MS) {
         }
       } catch { continue }
       if (Date.now() - start > timeoutMs) return { locked: true }
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50)
+      await new Promise(r => setTimeout(r, 50))
     }
   }
 }
@@ -110,7 +110,8 @@ export function classifyConflict(base, cur, isSymbolMode) {
 const CONFLICT_POLICY = {
   CLEAN: 'allow',
   FILE_CHANGED_SYMBOL_STABLE: 'allow_warn',
-  FILE_CHANGED: 'allow_warn',
+  // 附录 C/E：patch/file 模式无符号锚，文件变了必须重读（§16.3：>1MB 中间被改必报 VERSION_CONFLICT）
+  FILE_CHANGED: 'reject',
   SYMBOL_CHANGED: 'reject',
   SYMBOL_SIGNATURE_CHANGED: 'reject',
   SYMBOL_DELETED: 'reject',
@@ -169,7 +170,7 @@ function applyBodyEdit(lines, range, newContent, preserveSignature) {
   if (b === a) {
     return { error: { code: 'SINGLE_LINE_SYMBOL', message: 'Single-line symbol: use boundary=full or patch mode.' } }
   }
-  const before = lines.slice(0, a)
+  const before = lines.slice(0, a - 1)
   const after = lines.slice(b)
   const newLines = newContent.split('\n')
   return { lines: [...before, ...newLines, ...after], diff: makeSimpleDiff(lines, [...before, ...newLines, ...after]) }
@@ -292,59 +293,16 @@ export async function writeSymbol(args, context) {
     })
   }
 
-  // 1) resolve locator → 符号 / 降级模式
-  let symbol = null
-  let symbolRows = []
-  if (locator.symbol_id && codeIndexService) {
-    symbol = codeIndexService.getSymbolByStableId(locator.symbol_id)
-    if (symbol && symbol.file_path !== filePath) symbol = null
-    if (!symbol) {
-      return { success: false, error: { code: 'SYMBOL_NOT_FOUND', message: `No symbol with stable_id ${locator.symbol_id} in ${filePath}` }, trace_id }
-    }
-  } else if (locator.name && codeIndexService) {
-    symbolRows = codeIndexService.findSymbolsInFile(filePath, locator.name, locator.kind)
-    if (symbolRows.length > 1) {
-      return {
-        success: false,
-        error: {
-          code: 'AMBIGUOUS_SYMBOL',
-          message: `${symbolRows.length} candidates for "${locator.name}" in ${filePath}`,
-          candidates: symbolRows.map(r => ({ symbol_id: r.stable_id, name: r.name, kind: r.type, range: [r.start_line, r.end_line], signature: r.signature })),
-        },
-        trace_id,
-      }
-    }
-    symbol = symbolRows[0] || null
-    if (!symbol) {
-      return { success: false, error: { code: 'SYMBOL_NOT_FOUND', message: `No symbol named "${locator.name}" in ${filePath}` }, trace_id }
-    }
+  // 1) 锁（附录 D：锁内 resolve + live read + conflict 一体，防 TOCTOU 静默覆盖）
+  const lock = await acquireLock(absPath)
+  if (lock.locked) {
+    return { success: false, error: { code: 'FILE_LOCKED', message: `File is locked by another writer: ${filePath}`, suggestion: 'Retry after a moment.' }, trace_id }
   }
-  pipelineStep(pipeline, 'resolve_locator', symbol ? 'ok' : 'ok', { via: symbol ? 'symbol' : 'degraded_patch' })
+  pipelineStep(pipeline, 'lock', 'ok')
 
-  // 2) live 读当前文件 → current version
-  let content = ''
-  try { content = readFileSync(absPath, 'utf-8') } catch (e) {
-    return { success: false, error: { code: 'READ_FAILED', message: e.message }, trace_id }
-  }
-  const curFileHash = sha256(content)
-  const lines = content.split('\n')
-  const range = symbol ? [symbol.start_line, Math.max(symbol.start_line, symbol.end_line)] : null
-  let curBodyHash = null
-  let curSigHash = null
-  if (symbol && range) {
-    const body = lines.slice(range[0] - 1, range[1]).join('\n')
-    curBodyHash = sha256(body)
-    const sigLine = extractSignatureLine(lines, symbol)
-    curSigHash = sha256(sigLine || '')
-  }
-  const current = {
-    file: { hash: `sha256:${curFileHash}`, size: content.length },
-    symbol: symbol ? { body_hash: `sha256:${curBodyHash}`, signature_hash: `sha256:${curSigHash}` } : null,
-  }
-
-  // 3) 冲突判定（附录 C 状态机）
   const baseVersion = args?.base_version
   if (!baseVersion && !force) {
+    lock.release()
     return {
       success: false,
       error: {
@@ -356,47 +314,109 @@ export async function writeSymbol(args, context) {
     }
   }
   const base = force && !baseVersion ? null : baseVersion
+
+  let symbol = null
+  let symbolRows = []
+  let content = ''
+  let lines = []
+  let range = null
+  let curBodyHash = null
+  let curSigHash = null
+  let current = null
   let conflict = null
-  if (base) {
-    conflict = classifyConflict(
-      { file: { hash: base.file?.hash }, symbol: base.symbol || null },
-      current,
-      !!symbol
-    )
-    pipelineStep(pipeline, 'version_check', conflict.type === 'CLEAN' ? 'ok' : 'warn', { conflict: conflict.type })
-    const policy = CONFLICT_POLICY[conflict.type] || 'reject'
-    if (policy === 'reject') {
-      const suggestion = conflict.type === 'SYMBOL_CHANGED' || conflict.type === 'SYMBOL_SIGNATURE_CHANGED'
-        ? 'Re-read the symbol and regenerate content.'
-        : conflict.type === 'SYMBOL_DELETED' ? 'Symbol was deleted; re-read the file.'
-        : 'Resolve ambiguity via symbol_id.'
-      return {
-        success: false,
-        error: {
-          code: 'VERSION_CONFLICT',
-          conflict_type: conflict.type,
-          message: `base_version mismatch: ${conflict.type}`,
-          suggestion,
-          next_action: { tool: 'read_symbol', params: { locator: { file_path: filePath, symbol_id: symbol?.stable_id || undefined, name: symbol?.name }, mode: 'core' } },
-        },
-        trace_id,
-        current_version: current,
+  let newContent = null
+  let reindex = null
+  let newVersion = null
+  let diff = null
+  let validation = null
+  let journal = null
+  let newBodyLineCount = null
+  let successResult = null
+  try {
+    // 2) 锁内 resolve locator → 符号 / 降级模式
+    if (locator.symbol_id && codeIndexService) {
+      symbol = codeIndexService.getSymbolByStableId(locator.symbol_id)
+      if (symbol && symbol.file_path !== filePath) symbol = null
+      if (!symbol) {
+        return { success: false, error: { code: 'SYMBOL_NOT_FOUND', message: `No symbol with stable_id ${locator.symbol_id} in ${filePath}` }, trace_id }
+      }
+    } else if (locator.name && codeIndexService) {
+      symbolRows = codeIndexService.findSymbolsInFile(filePath, locator.name, locator.kind)
+      if (symbolRows.length > 1) {
+        return {
+          success: false,
+          error: {
+            code: 'AMBIGUOUS_SYMBOL',
+            message: `${symbolRows.length} candidates for "${locator.name}" in ${filePath}`,
+            candidates: symbolRows.map(r => ({ symbol_id: r.stable_id, name: r.name, kind: r.type, range: [r.start_line, r.end_line], signature: r.signature })),
+          },
+          trace_id,
+        }
+      }
+      symbol = symbolRows[0] || null
+      if (!symbol) {
+        return { success: false, error: { code: 'SYMBOL_NOT_FOUND', message: `No symbol named "${locator.name}" in ${filePath}` }, trace_id }
       }
     }
-  }
+    pipelineStep(pipeline, 'resolve_locator', symbol ? 'ok' : 'ok', { via: symbol ? 'symbol' : 'degraded_patch' })
 
-  // 4) 锁（附录 D）
-  const lock = acquireLock(absPath)
-  if (lock.locked) {
-    return { success: false, error: { code: 'FILE_LOCKED', message: `File is locked by another writer: ${filePath}`, suggestion: 'Retry after a moment.' }, trace_id }
-  }
-  pipelineStep(pipeline, 'lock', 'ok')
-  try {
+    // 3) 锁内 live 读当前文件 → current version
+    try { content = readFileSync(absPath, 'utf-8') } catch (e) {
+      return { success: false, error: { code: 'READ_FAILED', message: e.message }, trace_id }
+    }
+    const curFileHash = sha256(content)
+    lines = content.split('\n')
+    range = symbol ? [symbol.start_line, Math.max(symbol.start_line, symbol.end_line)] : null
+    if (symbol && range) {
+      const body = lines.slice(range[0] - 1, range[1]).join('\n')
+      curBodyHash = sha256(body)
+      const sigLine = extractSignatureLine(lines, symbol)
+      curSigHash = sha256(sigLine || '')
+    }
+    current = {
+      file: { hash: `sha256:${curFileHash}`, size: content.length },
+      symbol: symbol ? { body_hash: `sha256:${curBodyHash}`, signature_hash: `sha256:${curSigHash}` } : null,
+    }
+
+    // 4) 锁内冲突判定（附录 C 状态机）
+    if (base) {
+      // 跨符号链式写（读 A 写 A 后拿 new_version 直接写 B）：base.symbol 是 A 的 hash，
+      // 对 B 无符号级意义 → 降级为 file-level 比较（附录 C：符号级冲突只对目标符号判定）
+      const baseForCheck = { ...base }
+      if (symbol && base.symbol?.symbol_id && base.symbol.symbol_id !== symbol.stable_id) {
+        baseForCheck.symbol = null
+        pipelineStep(pipeline, 'version_check', 'ok', { note: 'cross_symbol_chain: file-level check' })
+      }
+      conflict = classifyConflict(
+        { file: { hash: baseForCheck.file?.hash }, symbol: baseForCheck.symbol || null },
+        current,
+        !!symbol
+      )
+      pipelineStep(pipeline, 'version_check', conflict.type === 'CLEAN' ? 'ok' : 'warn', { conflict: conflict.type })
+      const policy = CONFLICT_POLICY[conflict.type] || 'reject'
+      if (policy === 'reject') {
+        const suggestion = conflict.type === 'SYMBOL_CHANGED' || conflict.type === 'SYMBOL_SIGNATURE_CHANGED'
+          ? 'Re-read the symbol and regenerate content.'
+          : conflict.type === 'SYMBOL_DELETED' ? 'Symbol was deleted; re-read the file.'
+          : 'Resolve ambiguity via symbol_id.'
+        return {
+          success: false,
+          error: {
+            code: 'VERSION_CONFLICT',
+            conflict_type: conflict.type,
+            message: `base_version mismatch: ${conflict.type}`,
+            suggestion,
+            next_action: { tool: 'read_symbol', params: { locator: { file_path: filePath, symbol_id: symbol?.stable_id || undefined, name: symbol?.name }, mode: 'core' } },
+          },
+          trace_id,
+          current_version: current,
+        }
+      }
+    }
+
     // 5) 应用编辑
     let newLines = null
-    let diff = null
     let alreadyApplied = false
-    let newBodyLineCount = null
     const scopeContent = symbol && range ? lines.slice(range[0] - 1, range[1]).join('\n') : content
 
     if (editMode === 'patch') {
@@ -492,11 +512,11 @@ export async function writeSymbol(args, context) {
       }
     }
 
-    const newContent = newLines.join('\n')
+    newContent = newLines.join('\n')
 
     // 6) 校验（sandbox 基础 + 语法，dry_run 也校验）
     const bracket = checkBracketBalance(newContent)
-    const validation = {
+    validation = {
       bracket: bracket.ok ? { status: 'pass' } : { status: 'fail', errors: [bracket.detail] },
     }
     if (langOf(filePath)) {
@@ -511,7 +531,7 @@ export async function writeSymbol(args, context) {
     }
 
     // 7) journal（写前建，staged）
-    const journal = createJournal(workspaceDir, filePath, absPath, content, {
+    journal = createJournal(workspaceDir, filePath, absPath, content, {
       editMode, boundary, state: 'staged', base_file_hash: base?.file?.hash || null,
     })
     updateJournalState(journal.dir, { state: 'staged', new_hash: sha256(newContent) })
@@ -548,39 +568,8 @@ export async function writeSymbol(args, context) {
     pipelineStep(pipeline, 'atomic_write', 'ok')
     updateJournalState(journal.dir, { state: 'committed', committed_at: new Date().toISOString() })
 
-    // 9) 写后同步重抽（附录 D：写完立刻可读）
-    let reindex = null
-    if (codeIndexService && langOf(filePath)) {
-      try {
-        const r = await codeIndexService.indexFile(absPath, workspaceDir)
-        reindex = { status: 'ok', symbols: r?.symbols ?? 0, refs: r?.refs ?? 0 }
-        pipelineStep(pipeline, 'reindex', 'ok')
-      } catch (e) {
-        reindex = { status: 'failed', reason: e.message }
-        codeIndexService.markIndexDirty(filePath, 'write_pending_reindex')
-        pipelineStep(pipeline, 'reindex', 'warn', { reason: e.message })
-      }
-    } else if (codeIndexService) {
-      // 非代码文件：只更新 content_hash（附录 E）
-      try {
-        const row = codeIndexService.getFileByPath(filePath)
-        if (row) {
-          codeIndexService._db.prepare("UPDATE files SET content_hash = ?, index_state = 'fresh' WHERE path = ?").run(sha256(newContent), filePath)
-          reindex = { status: 'ok', note: 'non-code: content_hash updated' }
-        } else {
-          reindex = { status: 'ok', note: 'non-code: not_indexed' }
-        }
-      } catch (e) { reindex = { status: 'failed', reason: e.message } }
-      pipelineStep(pipeline, 'reindex', reindex.status === 'ok' ? 'ok' : 'warn', { note: reindex.note || reindex.reason })
-    }
-
-    // 10) force 写审计（附录 E）
-    if (force) {
-      auditLog(workspaceDir, { event: 'force_write', file: filePath, trace_id })
-    }
-
-    lock.release()
-    const newVersion = {
+    // 组装 new_version（锁内，行号用 apply 后的真实值）
+    newVersion = {
       file: { hash: `sha256:${sha256(newContent)}`, size: newContent.length },
       symbol: null,
     }
@@ -595,7 +584,11 @@ export async function writeSymbol(args, context) {
       }
     }
 
-    return {
+    // 10) force 写审计（附录 E）
+    if (force) {
+      auditLog(workspaceDir, { event: 'force_write', file: filePath, trace_id })
+    }
+    successResult = {
       success: true,
       symbol_id: symbol?.stable_id || null,
       txn_id: journal.txnId,
@@ -612,7 +605,6 @@ export async function writeSymbol(args, context) {
         expires_at: null,
         reverse: { file: filePath, backup: `${JOURNAL_ROOT}/journal/${journal.txnId}/backup/${basename(filePath)}` },
       },
-      reindex,
       pipeline,
       trace_id,
       duration_ms: Date.now() - t0,
@@ -620,6 +612,35 @@ export async function writeSymbol(args, context) {
   } finally {
     lock.release()
   }
+  if (!successResult) {
+    return { success: false, error: { code: 'INTERNAL', message: 'writeSymbol completed without result', trace_id } }
+  }
+  // 9) 写后同步重抽（附录 D：写完立刻可读；锁外执行，缩短临界区）
+  if (codeIndexService && langOf(filePath)) {
+    try {
+      const r = await codeIndexService.indexFile(absPath, workspaceDir)
+      reindex = { status: 'ok', symbols: r?.symbols ?? 0, refs: r?.refs ?? 0 }
+      pipelineStep(pipeline, 'reindex', 'ok')
+    } catch (e) {
+      reindex = { status: 'failed', reason: e.message }
+      codeIndexService.markIndexDirty(filePath, 'write_pending_reindex')
+      pipelineStep(pipeline, 'reindex', 'warn', { reason: e.message })
+    }
+  } else if (codeIndexService) {
+    // 非代码文件：只更新 content_hash（附录 E）
+    try {
+      const row = codeIndexService.getFileByPath(filePath)
+      if (row) {
+        codeIndexService._db.prepare("UPDATE files SET content_hash = ?, index_state = 'fresh' WHERE path = ?").run(sha256(newContent), filePath)
+        reindex = { status: 'ok', note: 'non-code: content_hash updated' }
+      } else {
+        reindex = { status: 'ok', note: 'non-code: not_indexed' }
+      }
+    } catch (e) { reindex = { status: 'failed', reason: e.message } }
+    pipelineStep(pipeline, 'reindex', reindex.status === 'ok' ? 'ok' : 'warn', { note: reindex.note || reindex.reason })
+  }
+  if (reindex) successResult.reindex = reindex
+  return successResult
 }
 
 function pipelineStep(pipeline, step, status, extra = {}) {

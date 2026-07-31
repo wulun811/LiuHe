@@ -2,7 +2,7 @@
 // 依赖：malong-parse 服务在跑（真实 parse 校验）。
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync, statSync } from 'node:fs'
+import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync, statSync, unlinkSync } from 'node:fs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const MALONG_DIR = join(__dirname, '..')
@@ -343,8 +343,9 @@ const wrMod = await import(join(MALONG_DIR, 'write-runtime.js'))
 const { acquireLock } = wrMod
 const fakeLock = `${WS}/src/auth.py.mlock`
 writeFileSync(fakeLock, JSON.stringify({ pid: 999999, ts: Date.now() }))
-const lock2 = acquireLock(`${WS}/src/auth.py`, 100)
+const lock2 = await acquireLock(`${WS}/src/auth.py`, 100)
 assert(lock2.locked === true, 'P3 锁存在 → FILE_LOCKED 语义（超时返回 locked）')
+unlinkSync(fakeLock)
 
 // 3.15 写后索引同步：重抽后两个 helper 的 body_hash 都应更新（64 hex）
 const hNow = codeIndex._db.prepare("SELECT body_hash FROM symbols s JOIN files f ON s.file_id = f.id WHERE f.path = 'src/auth.py' AND s.name = 'helper' AND s.type = 'function'").all()

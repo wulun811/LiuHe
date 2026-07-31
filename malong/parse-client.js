@@ -254,6 +254,8 @@ function _processBuffer() {
         _pending.delete(response.id)
         clearTimeout(pending.timer)
         if (response.error) {
+          // 业务错误（FILE_TOO_LARGE / FILE_NOT_FOUND 等）：服务本身正常，不算熔断失败
+          _circuitRecordSuccess()
           pending.reject(new Error(`${response.error.code}: ${response.error.message}`))
         } else {
           pending.resolve(response.result)
