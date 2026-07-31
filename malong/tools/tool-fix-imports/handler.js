@@ -465,7 +465,7 @@ function detectLanguage(filePath) {
   return 'unknown'
 }
 
-function analyzeFile(content, lang, currentFile = '') {
+export function analyzeFile(content, lang, currentFile = '') {
   const lines = content.split('\n')
   const definedSymbols = new Set()
   const usedSymbols = new Set()
@@ -700,6 +700,9 @@ function stripCommentsAndStrings(content, lang) {
       }
       return ' ' + parts.join(' ') + ' '
     })
+    // 正则字面量（含 flags）：体与 flag 都不是标识符引用，整体剥掉（先于引号剥离，体可能含引号）。
+    // body 首字符非空格：`a / b / c` 除法链的 body 必以空格开头，正则 body 一般不以空格开头（除法安全）
+    s = s.replace(/\/((?:\\.|[^\\/\n ])(?:(?:[^\\/\n]|\\.)*?))\/([gimsuy]*)/g, ' ')
     s = s.replace(/"(?:[^"\\]|\\.)*"/g, ' ')
     s = s.replace(/'(?:[^'\\]|\\.)*'/g, ' ')
   }
