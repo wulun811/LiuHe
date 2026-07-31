@@ -31,8 +31,11 @@ export async function acquireLock(absPath, timeoutMs = LOCK_TIMEOUT_MS) {
   for (;;) {
     try {
       const fd = openSync(lockPath, 'wx')
-      writeSync(fd, JSON.stringify({ pid: process.pid, ts: Date.now() }))
-      closeSync(fd)
+      try {
+        writeSync(fd, JSON.stringify({ pid: process.pid, ts: Date.now() }))
+      } finally {
+        closeSync(fd) // 9（F3）：writeSync 抛错（ENOSPC）时旧实现跳过 closeSync → fd 泄漏 + 空锁文件残留
+      }
       let released = false
       return {
         release() {
@@ -469,12 +472,16 @@ export async function writeSymbol(args, context) {
     }
     if (symbol && range && newBodyLineCount != null) {
       const newLinesArr = newContent.split('\n')
-      const symStart = (editMode === 'replace_symbol' && boundary === 'body') ? range[0] + 1 : range[0]
-      const newRange = [symStart, symStart + Math.max(0, newBodyLineCount - 1)]
+      // 9（F2）：body_hash/range 遵循索引约定（symbol-anchors：slice(start_line-1,end_line) 含签名行的全符号）。
+      // 旧实现 boundary=body 时 symStart=range[0]+1 → body_hash 只算 body（不含签名），与 read_symbol /
+      // 预写 curBodyHash 的 full 约定不一致 → 同符号链式写（拿 new_version 当下一轮 base）误判 SYMBOL_CHANGED。
+      const isBodyOnly = editMode === 'replace_symbol' && boundary === 'body'
+      const fullEnd = isBodyOnly ? range[0] + newBodyLineCount : range[0] + Math.max(0, newBodyLineCount - 1)
+      const newRange = [range[0], fullEnd]
       newVersion.symbol = {
         symbol_id: symbol.stable_id || null,
         range: newRange,
-        body_hash: `sha256:${sha256(newLinesArr.slice(Math.max(0, newRange[0] - 1), Math.max(newRange[0] - 1, newRange[1])).join('\n'))}`,
+        body_hash: `sha256:${sha256(newLinesArr.slice(range[0] - 1, fullEnd).join('\n'))}`,
       }
     }
 
@@ -515,6 +522,17 @@ export async function writeSymbol(args, context) {
       const r = await codeIndexService.indexFile(absPath, workspaceDir)
       reindex = { status: 'ok', symbols: r?.symbols ?? 0, refs: r?.refs ?? 0 }
       pipelineStep(pipeline, 'reindex', 'ok')
+      // 9（F2）：用重抽后的索引值校正 new_version.symbol——索引 body_hash/range 是 read_symbol 的权威来源。
+      // 锁内算术推算（newBodyLineCount）会因 content 尾随换行与 parser end_line 对不上 →
+      // 同符号链式写（拿 new_version 当下一轮 base）body_hash 不一致被误判 SYMBOL_CHANGED。
+      const nvSym = successResult.new_version?.symbol
+      if (nvSym?.symbol_id) {
+        const fresh = codeIndexService.getSymbolByStableId(nvSym.symbol_id)
+        if (fresh && fresh.body_hash) {
+          nvSym.body_hash = `sha256:${fresh.body_hash}`
+          nvSym.range = [fresh.start_line, fresh.end_line]
+        }
+      }
     } catch (e) {
       reindex = { status: 'failed', reason: e.message }
       codeIndexService.markIndexDirty(filePath, 'write_pending_reindex')
@@ -882,7 +900,9 @@ function applyBatchItem(lines, range, w, symbol, editMode, boundary, preserveDec
     }
     const patched = lines.join('\n').replace(oldString, newString)
     const newLines = patched.split('\n')
-    return { lines: newLines, diff: makeSimpleDiff(lines, newLines), status: 'ok' }
+    // 9（F1）：文件级 patch 也要回 delta——旧实现无 delta → 不入 appliedEdits → 批内后续符号项
+    // offset 计算（line ~674 的 endLine==null 全量偏移分支）拿不到这笔 → range 错位静默改错行。
+    return { lines: newLines, delta: newLines.length - lines.length, diff: makeSimpleDiff(lines, newLines), status: 'ok' }
   }
   if (editMode === 'replace_symbol') {
     if (!symbol || !range) return { error: { code: 'missing_parameter', message: 'replace_symbol requires a resolved symbol' } }

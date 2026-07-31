@@ -450,3 +450,4 @@ if (failures.length > 0) {
   console.log('\n失败列表:')
   for (const f of failures) console.log(`  ✗ ${f}`)
 }
+process.exit(failed ? 1 : 0) // 9（F8）：显式退出，避免 parse-client 常驻 socket 挂住 event loop

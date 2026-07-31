@@ -251,7 +251,7 @@ function register(core) {
         }
       }
       return {
-        status: Object.values(results).every(r => r.status === 'pass') ? 'pass' : 'fail',
+        status: Object.values(results).some(r => r.status === 'fail') ? 'fail' : 'pass', // 9（F5）：skip 不算 fail（无脚本+无 js 文件时旧 every(===pass) 为 false → 虚假 fail）
         results,
         scripts,
       }

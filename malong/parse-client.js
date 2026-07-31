@@ -3,11 +3,15 @@
 // 详见：docs/六合工具集/docs/P3-rust-parser-service.md
 
 import net from 'node:net'
-import { existsSync, unlinkSync } from 'node:fs'
+import { existsSync, unlinkSync, openSync, writeSync, closeSync, readFileSync, statSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { isInString } from './string-utils.js'
 
 const SOCKET_PATH = `/tmp/malong-parse-${process.getuid()}.sock`
+const PID_PATH = `/tmp/malong-parse-${process.getuid()}.pid`
+const RESTART_LOCK = `/tmp/malong-parse-${process.getuid()}.restart-lock`
+const RESTART_LOCK_STALE_MS = 30000
+const HEALTH_PROBE_TIMEOUT_MS = 2000
 const MAX_FRAME_SIZE = 64 * 1024 * 1024
 const CONNECT_TIMEOUT_MS = 3000
 const REQUEST_TIMEOUT_MS = 30000
@@ -244,10 +248,17 @@ function _circuitRecordFailure() {
     _circuitOpen = true
     _core?.log('error', `[parse-client] circuit breaker OPEN after ${_circuitFailures} failures, malong-parse unavailable`)
     if (existsSync(SOCKET_PATH)) {
-      // socket 文件还在但服务持续失败 → 进程挂死（活着但不响应）。
-      // half-open 只重连同一个挂死进程 → 死循环，必须 force 重启（P2-A1）
-      _core?.log('error', '[parse-client] socket exists but service unresponsive — restarting process')
-      _restartProcess().catch(() => {})
+      // 9（F6）：共享 daemon 多会话安全——本连接失败可能只是大请求排队慢，daemon 还活着服务其他会话。
+      // 直接重启会 SIGKILL 掉所有会话的在途请求。先探活：活着→本地退避（不重启）；真无响应→协调重启（P2-A1 保留）
+      _probeDaemon().then((alive) => {
+        if (alive) {
+          _core?.log('warn', '[parse-client] daemon alive but slow — local backoff, NOT restarting shared process')
+          setTimeout(() => { _circuitOpen = false; _circuitFailures = 0; connect().catch(() => {}) }, 15000)
+        } else {
+          _core?.log('error', '[parse-client] daemon unresponsive — coordinated restart')
+          _restartProcess().catch(() => {})
+        }
+      }).catch(() => _restartProcess().catch(() => {}))
     } else {
       // try half-open after 60s
       setTimeout(() => {
@@ -264,15 +275,60 @@ function _circuitRecordSuccess() {
   _circuitFailures = 0
 }
 
+// 9（F6）：独立探活连接（绕过熔断、不复用可能已死的 _socket）——daemon 在 timeout 内回任意帧就算活着
+function _probeDaemon(timeoutMs = HEALTH_PROBE_TIMEOUT_MS) {
+  return new Promise((resolve) => {
+    if (!existsSync(SOCKET_PATH)) return resolve(false)
+    const sock = net.createConnection(SOCKET_PATH)
+    let settled = false
+    const done = (ok) => { if (settled) return; settled = true; clearTimeout(timer); try { sock.destroy() } catch {}; resolve(ok) }
+    const timer = setTimeout(() => done(false), timeoutMs)
+    sock.on('connect', () => {
+      const id = `probe-${++_reqId}`
+      const msgBuf = Buffer.from(JSON.stringify({ id, method: 'health', params: {}, priority: 0 }), 'utf-8')
+      const frame = Buffer.alloc(4 + msgBuf.length)
+      frame.writeUInt32BE(msgBuf.length, 0)
+      msgBuf.copy(frame, 4)
+      let buf = Buffer.alloc(0)
+      sock.on('data', (chunk) => {
+        buf = Buffer.concat([buf, chunk])
+        if (buf.length >= 4) {
+          const len = buf.readUInt32BE(0)
+          if (len <= MAX_FRAME_SIZE && buf.length >= 4 + len) done(true)
+        }
+      })
+      sock.write(frame)
+    })
+    sock.on('error', () => done(false))
+  })
+}
+
 let _restarting = false
 async function _restartProcess() {
-  if (_restarting) return // B5：并发触发互斥（两个 daemon 抢同一 socket，孤儿进程泄漏）
+  if (_restarting) return // B5：进程内并发触发互斥（两个 daemon 抢同一 socket，孤儿进程泄漏）
+  // 9（F7）：跨会话重启互斥——共享 daemon 可能被多会话同时熔断，只有一个执行重启，其余等待后重连，
+  // 避免抢 socket / 双 spawn（crash log 见过同时间戳两个 daemon pid）。O_EXCL 拿不到锁 = 别人正在重启。
+  let lockFd = null
+  try {
+    lockFd = openSync(RESTART_LOCK, 'wx')
+    writeSync(lockFd, JSON.stringify({ pid: process.pid, ts: Date.now() }))
+  } catch {
+    let stale = false
+    try { stale = Date.now() - statSync(RESTART_LOCK).mtimeMs > RESTART_LOCK_STALE_MS } catch { stale = true }
+    if (stale) { try { unlinkSync(RESTART_LOCK) } catch {} } // 持锁会话崩了 → 清陈旧锁，下次熔断再抢
+    _core?.log('info', '[parse-client] restart in progress elsewhere; waiting then reconnect')
+    setTimeout(() => { _circuitOpen = false; _circuitFailures = 0; connect().catch(() => {}) }, 3000)
+    return
+  }
   _restarting = true
   try {
-    if (_childPid) {
-      try { process.kill(_childPid, 'SIGKILL') } catch {}
-      _childPid = null
-    }
+    // 杀真实 daemon：读 pid 文件（权威来源）。共享 daemon 可能是别的会话起的 → 本会话 _childPid 为 null，
+    // 旧实现只杀 _childPid 会漏杀别人起的挂死 daemon；pid 文件优先，_childPid 兜底
+    let pid = NaN
+    try { pid = parseInt(readFileSync(PID_PATH, 'utf-8').trim(), 10) } catch {}
+    if (Number.isFinite(pid) && pid > 0) { try { process.kill(pid, 'SIGKILL') } catch {} }
+    if (_childPid && _childPid !== pid) { try { process.kill(_childPid, 'SIGKILL') } catch {} }
+    _childPid = null
     try { unlinkSync(SOCKET_PATH) } catch {}
     const ok = await _startProcess()
     if (ok) {
@@ -290,6 +346,8 @@ async function _restartProcess() {
     }
   } finally {
     _restarting = false
+    try { closeSync(lockFd) } catch {}
+    try { unlinkSync(RESTART_LOCK) } catch {}
   }
 }
 

@@ -251,6 +251,30 @@ const wP2 = await writeSymbol({
 }, wctx)
 assert(wP2.success === true && wP2.status === 'already_applied', `P3 patch 重试 → already_applied（幂等，§16.7）（得 ${JSON.stringify(wP2.error || wP2.status)}）`)
 
+// 3.6b boundary=body 链式写（9-F2：new_version body_hash 须含签名行、与索引约定一致，否则同符号链式写误判 SYMBOL_CHANGED）
+const helper1 = helperSyms[1] // helper(x, scale=1)，前序测试未触碰
+const rB = await readHandler({ workspace_dir: WS, locator: { file_path: 'src/auth.py', symbol_id: helper1.stable_id } }, ctx)
+const wB1 = await writeSymbol({
+  workspace_dir: WS,
+  locator: { file_path: 'src/auth.py', symbol_id: helper1.stable_id },
+  base_version: { file: rB.version.file, symbol: rB.version.symbol },
+  edit_mode: 'replace_symbol',
+  boundary: 'body',
+  content: `    return x * scale + 100\n`,
+}, wctx)
+assert(wB1.success === true, `P3 3.6b boundary=body 写入成功（得 ${JSON.stringify(wB1.error || 'ok')}）`)
+// 拿 new_version 直接链式写同一符号（不重读）—— 旧实现 body_hash 只算 body（不含签名）→ 与预写 full 约定不一致 → 误判 SYMBOL_CHANGED
+const wB2 = await writeSymbol({
+  workspace_dir: WS,
+  locator: { file_path: 'src/auth.py', symbol_id: helper1.stable_id },
+  base_version: { file: wB1.new_version.file, symbol: wB1.new_version.symbol },
+  edit_mode: 'replace_symbol',
+  boundary: 'body',
+  content: `    return x * scale + 200\n`,
+}, wctx)
+assert(wB2.success === true, `P3 3.6b boundary=body 链式写不误判 SYMBOL_CHANGED（9-F2）（得 ${JSON.stringify(wB2.error || wB2.status)}）`)
+assert(wB2.safety_report?.collision?.status !== 'SYMBOL_CHANGED', `P3 3.6b 冲突类型非 SYMBOL_CHANGED（得 ${wB2.safety_report?.collision?.status}）`)
+
 // 3.7 patch 歧义：old_string 多处匹配 → AMBIGUOUS（先写入含重复行的 body）
 const r7prep = await readHandler({ workspace_dir: WS, locator: { file_path: 'src/auth.py', symbol_id: helper0.stable_id } }, ctx)
 const w7prep = await writeSymbol({
@@ -405,4 +429,4 @@ assert(checkBracketBalance('function f( { return 1 }').ok === false, 'P3 真不�
 
 // ══════════════ 汇总 ══════════════
 console.log(`\n${pass} passed, ${fail} failed`)
-if (fail > 0) process.exit(1)
+process.exit(fail ? 1 : 0) // 9（F8）：成功也要显式退出——否则 parse-client 的常驻 socket 挂住 event loop，进程不退（并行跑表现为超时）

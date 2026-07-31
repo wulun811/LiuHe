@@ -231,5 +231,21 @@ assert(codeIndex._currentWorkspace === WS, `_currentWorkspace 已设置（得 ${
 const r10b = await svc.getSymbols('src/auth.py')
 assert(Array.isArray(r10b) && r10b.length >= 2, `懒初始化后索引可查询（${r10b.length} 个符号）`)
 
+// ── 场景 11：文件级 patch 插行在前 + 符号替换在后（9-F1：文件级 patch 必须回 delta，否则后续符号项 offset 错位静默改错行）──
+console.log('── 场景 11: 文件级 patch 插行 + 符号重定位 ──')
+const vApi11 = await currentVersion('src/api.py')
+const apiLogout11 = svc.findSymbolsInFile('src/api.py', 'handle_logout')[0]
+const r11 = await writeSymbols({ workspace_dir: WS, writes: [
+  // item 0：文件级 patch（无 locator）在文件顶部插 2 行注释 → 后续所有符号实际行号 +2
+  { file_path: 'src/api.py', edit_mode: 'patch', base_version: vApi11, patch: { old_string: 'from auth import AuthService', new_string: '# hdr-1\n# hdr-2\nfrom auth import AuthService' } },
+  // item 1：替换 handle_logout（位于插入点之后，需 +2 重定位；无 base_version → 不走冲突判定，错位会真改错行）
+  { file_path: 'src/api.py', locator: { symbol_id: apiLogout11.stable_id }, content: `def handle_logout(session_id):\n    svc = AuthService()\n    return svc.logout(session_id, audit=True)\n` },
+] }, wctx)
+assert(r11.success === true, `文件级 patch + 符号替换批量成功（得 ${r11.error?.code || r11.error?.message || 'ok'}）`)
+const after11 = readFileSync(`${WS}/src/api.py`, 'utf-8')
+assert(after11.includes('# hdr-1\n# hdr-2\nfrom auth import AuthService'), `文件级 patch 插入 2 行生效`)
+assert(after11.includes('return svc.logout(session_id, audit=True)'), `handle_logout 被正确替换（offset 重定位 +2，9-F1）`)
+assert(after11.includes('def handle_login(username, password):') && after11.includes('return svc.login(username, password)'), `handle_login 未被错位编辑破坏（旧实现 offset=0 会改错行）`)
+
 console.log(`\n=== test-mvp-batch: ${pass} passed, ${fail} failed ===`)
 process.exit(fail ? 1 : 0)

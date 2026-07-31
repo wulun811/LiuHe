@@ -2,6 +2,7 @@
 // 从 write-runtime.js 拆分（P4 批量后运行时已近千行）
 
 export function countOccurrences(haystack, needle) {
+  if (!needle) return 0 // 9（F4）：空 needle → indexOf('',idx) 恒命中且 idx+=0 不前进 → 死循环
   let n = 0
   let idx = 0
   for (;;) {
