@@ -294,16 +294,16 @@ async function testSandbox() {
     return
   }
 
-  // 5a. 简单命令
+  // 5a. 简单命令（docker 容器固有开销 2-6.5s/次 ×2 = 最坏 ~13s，阈值 15s）
   const { ms: msEcho } = await timeit(() => sandbox.exec('echo hello', '/tmp', { timeout: 15000 }))
-  record('sandbox echo', msEcho, 10000)
+  record('sandbox echo', msEcho, 15000)
 
-  // 5b. 带 env 的命令
+  // 5b. 带 env 的命令（docker 容器启动 6-7s 起，波动可到 15s+，阈值 20s）
   const { ms: msEnv, result: envResult } = await timeit(() =>
     sandbox.exec('echo $TEST_VAR', '/tmp', { timeout: 15000, env: { TEST_VAR: 'hello_env' } })
   )
   const envOk = envResult?.stdout?.includes('hello_env')
-  record('sandbox env 传递', msEnv, 15000, envOk ? 'env OK' : 'env MISSING!')
+  record('sandbox env 传递', msEnv, 20000, envOk ? 'env OK' : 'env MISSING!')
   if (!envOk) { console.log('  ⚠ env 变量未传递到子进程'); failed++; passed-- }
 
   // 5c. 超时

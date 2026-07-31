@@ -15,10 +15,15 @@ const DEFAULT_TIMEOUT = 30000
 let _core, _mode = 'direct'
 
 async function probeEnv() {
-  // Check docker + image exists and can run
+  // 快查：docker daemon 活着 + 镜像存在（毫秒级），不再 docker run 探测
+  // 原 docker run 探测 = 一次容器生命周期（2-6.5s）+ 可能自动拉镜像（15s+），且没镜像时不降级
   try {
-    const r = await exec('docker', ['run', '--rm', DOCKER_IMAGE, 'echo', 'probe'], process.cwd(), 15000)
-    if (r.exitCode === 0) { _mode = 'docker'; return }
+    const v = await exec('docker', ['version', '--format', '{{.Server.Version}}'], process.cwd(), 5000)
+    if (v.exitCode === 0) {
+      const img = await exec('docker', ['image', 'inspect', '--format', '{{.Id}}', DOCKER_IMAGE], process.cwd(), 5000)
+      if (img.exitCode === 0) { _mode = 'docker'; return }
+      // daemon 活着但镜像缺失：不自动拉（拉镜像可能是分钟级），降级 bwrap
+    }
   } catch {}
   // Check bwrap can actually run
   try {
