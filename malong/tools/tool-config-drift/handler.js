@@ -23,6 +23,18 @@ const SERVICE_PATTERNS = [
 const SOURCE_EXTS = new Set(['.js', '.mjs', '.cjs', '.ts', '.tsx', '.py', '.go', '.rs', '.java', '.rb'])
 const SKIP_DIRS = new Set(['node_modules', '.git', '__pycache__', '.venv', 'venv', 'dist', 'build'])
 
+// CI / 平台内置注入变量（不属于项目配置，不应报 drift）
+const CI_BUILTIN_VARS = new Set([
+  'CI', 'CONTINUOUS_INTEGRATION', 'HOME', 'PATH', 'LANG', 'SHELL', 'USER', 'TERM', 'TZ', 'PWD', 'TMPDIR',
+  'NODE_ENV', 'DEBUG',
+  'GITHUB_ACTIONS', 'GITHUB_TOKEN', 'GITHUB_ACTOR', 'GITHUB_SHA', 'GITHUB_REF', 'GITHUB_REPOSITORY',
+  'GITHUB_RUN_ID', 'GITHUB_RUN_NUMBER', 'GITHUB_EVENT_NAME', 'GITHUB_WORKSPACE', 'GITHUB_HEAD_REF',
+  'GITHUB_BASE_REF', 'GITHUB_JOB', 'GITHUB_STEP_SUMMARY', 'GITHUB_OUTPUT', 'GITHUB_ENV', 'GITHUB_PATH',
+  'GITHUB_WORKFLOW', 'GITHUB_ACTION', 'GITHUB_ACTOR_ID', 'GITHUB_REPOSITORY_ID', 'GITHUB_RETENTION_DAYS',
+  'RUNNER_OS', 'RUNNER_ARCH', 'RUNNER_TEMP', 'RUNNER_TOOL_CACHE', 'RUNNER_WORKSPACE', 'RUNNER_NAME', 'RUNNER_ENVIRONMENT',
+  'TRAVIS', 'TRAVIS_BUILD_ID', 'CIRCLE_CI', 'GITLAB_CI', 'APPVEYOR', 'AZURE_PIPELINES', 'JENKINS_URL',
+])
+
 function extractRefs(content, file) {
   const refs = []
   const lines = content.split('\n')
@@ -149,7 +161,7 @@ export async function handle(args, context) {
 
   const drifts = []
   for (const ref of allRefs) {
-    if (ref.type === 'env_var' && !env.vars.has(ref.name)) {
+    if (ref.type === 'env_var' && !env.vars.has(ref.name) && !CI_BUILTIN_VARS.has(ref.name)) {
       drifts.push({
         type: 'missing_env_var',
         name: ref.name,

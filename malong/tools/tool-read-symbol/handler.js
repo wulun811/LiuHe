@@ -167,9 +167,10 @@ export async function handle(args, context) {
     },
   }
 
-  // ---- outline 摘要 ----
+  // ---- outline 摘要（core 默认不带，省 token；rich 带；显式 include_outline=true 强制） ----
   let outline = null
-  if (args?.include_outline !== false && codeIndexService) {
+  const wantOutline = args?.mode === 'rich' ? (args?.include_outline !== false) : (args?.include_outline === true)
+  if (wantOutline && codeIndexService) {
     try {
       const depth = Math.max(0, Math.min(10, parseInt(args?.outline_depth) || 1))
       const o = await codeIndexService.getFileOutline(filePath, { depth })

@@ -94,5 +94,53 @@ assert(r9b.error === 'path_blocked' || r9b.error_code === 'PATH_BLOCKED', `绝�
 const r9c = await editBatch({ workspace_dir: WS, file_path: `${WS}/src/contract.py`, edits: [{ old_string: 'return 2', new_string: 'return 3' }] }, { codeIndexService: { indexFile: async () => ({ symbols: 0 }), markIndexDirty() {} } })
 assert(r9c.success === true, `file_path（绝对，workspace 内）反向兼容`)
 
+// ═══════════ golden 10：sweep_dead_code 字符串/注释感知（模板/三引号/块注释内 import 文本不误报） ═══════════
+console.log('── golden 10: sweep_dead_code 字符串感知 ──')
+const { handle: deadSweep } = await import(join(MALONG_DIR, 'tools/tool-dead-code-sweeper/handler.js'))
+const sweepCtx = { codeIndexService: null, getWorkspaceDir: () => DATA }
+writeFileSync(`${WS}/src/sweep.js`, `import { helper } from './utils'\nimport { realUnused } from './other'\n\nconst snippet = \`\nimport { helper } from './utils'\nusage:\n  helper(1)\n\`\n\n/*\nimport { helper } from './utils'\n*/\n\nexport function run() {\n  return helper(1)\n}\n`)
+r = await deadSweep({ workspace_dir: WS, scope: 'src' }, sweepCtx)
+const sweepUnused = r.dead_code.filter(d => d.type === 'unused_import')
+assert(!sweepUnused.some(d => d.symbol === 'helper' && d.file.includes('sweep.js')), `模板/注释内 import 文本不误报 helper（得 ${JSON.stringify(sweepUnused)})`)
+assert(sweepUnused.some(d => d.symbol === 'realUnused' && d.file.includes('sweep.js')), `真 unused realUnused 仍报（不漏报）`)
+writeFileSync(`${WS}/src/sweep2.py`, `import os\n\nDOC = """\nimport os\nusage: os.listdir()\n"""\n\ndef run():\n    return 1\n`)
+r = await deadSweep({ workspace_dir: WS, scope: 'src' }, sweepCtx)
+const sweepUnusedPy = r.dead_code.filter(d => d.type === 'unused_import' && d.file.includes('sweep2.py'))
+assert(!sweepUnusedPy.some(d => d.symbol === 'os'), `三引号 docstring 内 import 文本不误报 os（得 ${JSON.stringify(sweepUnusedPy)})`)
+
+// ═══════════ golden 11：exception_guard 不支持语言显式声明（不静默 clean） ═══════════
+console.log('── golden 11: exception_guard 语言感知 ──')
+const { handle: excGuard } = await import(join(MALONG_DIR, 'tools/tool-exception-guard/handler.js'))
+writeFileSync(`${WS}/src/main.go`, 'package main\n\nfunc main() {\n\tpanic("boom")\n}\n')
+r = await excGuard({ workspace_dir: WS, file: 'src/main.go' }, { codeIndexService: null, getWorkspaceDir: () => DATA })
+assert(r.error === 'unsupported_language', `不支持扩展名显式报错（得 ${r.error}）`)
+assert(r.issues.length === 0 && r.summary.language_supported === false, `不谎报 clean（issues=0 且 language_supported=false）`)
+r = await excGuard({ workspace_dir: WS, file: 'src/sweep2.py' }, { codeIndexService: null, getWorkspaceDir: () => DATA })
+assert(r.error === undefined && Array.isArray(r.issues), `支持语言正常路径不受影响`)
+
+// ═══════════ golden 12：active_todos 跳过 fixtures（测试假数据不污染） ═══════════
+console.log('── golden 12: active_todos fixtures 跳过 ──')
+const { handle: activeTodos } = await import(join(MALONG_DIR, 'tools/tool-active-todos/handler.js'))
+mkdirSync(`${WS}/fixtures`, { recursive: true })
+mkdirSync(`${WS}/src`, { recursive: true })
+writeFileSync(`${WS}/fixtures/dummy.js`, '// TODO: 假数据里的 TODO 不应被扫到\nconst x = 1\n')
+writeFileSync(`${WS}/src/real.js`, '// TODO: 真实代码里的 TODO 应保留\nfunction f() { return 1 }\n')
+r = await activeTodos({ workspace_dir: WS, scope: '.' }, {})
+assert(r.todos.every(t => t.file !== 'fixtures/dummy.js'), `fixtures 内 TODO 被跳过（得 ${r.todos.map(t => t.file).join(',')})`)
+assert(r.todos.some(t => t.file === 'src/real.js'), `真实代码 TODO 保留`)
+
+// ═══════════ golden 13：config_drift CI 内置变量白名单（GITHUB_* 不误报） ═══════════
+console.log('── golden 13: config_drift CI 白名单 ──')
+const { handle: configDrift } = await import(join(MALONG_DIR, 'tools/tool-config-drift/handler.js'))
+writeFileSync(`${WS}/src/ci.js`, `export async function run() {\n  const repo = process.env.GITHUB_REPOSITORY\n  const token = process.env.GITHUB_TOKEN\n  const custom = process.env.MY_CUSTOM_KEY\n  return { repo, token, custom }\n}\n`)
+writeFileSync(`${WS}/.env.example`, 'MY_CUSTOM_KEY=x\n')
+r = await configDrift({ workspace_dir: WS, file: 'src/ci.js' }, {})
+const ciDrifts = r.drifts.filter(d => d.type === 'missing_env_var')
+assert(!ciDrifts.some(d => d.name === 'GITHUB_REPOSITORY' || d.name === 'GITHUB_TOKEN'), `CI 内置变量不误报（得 ${JSON.stringify(ciDrifts)})`)
+assert(!ciDrifts.some(d => d.name === 'MY_CUSTOM_KEY'), `已声明变量不误报`)
+writeFileSync(`${WS}/src/ci2.js`, `export async function run() {\n  return process.env.TRULY_MISSING\n}\n`)
+r = await configDrift({ workspace_dir: WS, file: 'src/ci2.js' }, {})
+assert(r.drifts.some(d => d.name === 'TRULY_MISSING'), `真缺失变量仍报（不漏报）`)
+
 console.log(`\n=== test-gatekeeper-golden: ${pass} passed, ${fail} failed ===`)
 process.exit(fail ? 1 : 0)

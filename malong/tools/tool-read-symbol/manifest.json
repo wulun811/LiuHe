@@ -39,7 +39,7 @@
       "mode": {
         "type": "string",
         "enum": ["core", "rich"],
-        "description": "core (default): body + version + outline depth=1. rich: adds navigation counts."
+        "description": "core (default): body + version, no outline (saves tokens). rich: adds outline + navigation counts."
       },
       "context_lines": {
         "type": "integer",
@@ -47,7 +47,7 @@
       },
       "include_outline": {
         "type": "boolean",
-        "description": "Include file outline summary (default true)"
+        "description": "Include file outline summary. Default: off in core mode, on in rich mode. Set true to force."
       },
       "outline_depth": {
         "type": "integer",

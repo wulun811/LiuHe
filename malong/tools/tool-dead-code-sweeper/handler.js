@@ -35,33 +35,75 @@ function findUnusedImports(content, ext) {
   const lines = content.split('\n')
   const imports = new Map()
   const used = new Set()
+  const isPy = ext === '.py'
+
+  // 字符串/注释感知状态：仅用于防 import 文本误认
+  // （模板字符串 / 三引号 / 块注释内部的行不做 import 检测；used 收集保持全词保守方向不变）
+  let inTemplate = false    // JS 反引号
+  let inBlockComment = false // JS /* */
+  let inTriple = null        // Py """ / '''
+
+  const countBackticks = (line) => {
+    let n = 0
+    for (let j = 0; j < line.length; j++) {
+      if (line[j] === '\\') { j++; continue }
+      if (line[j] === '`') n++
+    }
+    return n
+  }
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
+    let importOk = !inTemplate && !inBlockComment && !inTriple
+
+    // 行尾更新状态（供下一行判断）
+    if (isPy) {
+      if (inTriple) {
+        if (line.indexOf(inTriple) !== -1) inTriple = null
+      } else {
+        const m = line.match(/(?:"""|''')/)
+        if (m) {
+          const rest = line.slice(line.indexOf(m[0]) + 3)
+          if (!rest.includes(m[0])) inTriple = m[0]
+        }
+      }
+    } else {
+      if (inBlockComment) {
+        if (line.indexOf('*/') !== -1) inBlockComment = false
+      } else if (line.includes('/*')) {
+        const start = line.indexOf('/*')
+        const end = line.indexOf('*/', start + 2)
+        if (end === -1) inBlockComment = true
+      }
+      if (countBackticks(line) % 2 === 1) inTemplate = !inTemplate
+    }
+
     let m
 
-    if (ext === '.py') {
-      m = /^(?:from\s+\S+\s+)?import\s+(.+)/.exec(line)
-      if (m) {
-        const raw = m[1].replace(/[()]/g, '')
-        const names = raw.split(',').map(s => {
-          const parts = s.trim().split(/\s+as\s+/)
-          const name = (parts[1] || parts[0]).trim()
-          return name.includes('.') ? name.split('.')[0] : name
-        })
-        for (const n of names) {
-          if (n && !n.startsWith('#') && !n.startsWith('\\')) imports.set(n, i + 1)
+    if (importOk) {
+      if (ext === '.py') {
+        m = /^(?:from\s+\S+\s+)?import\s+(.+)/.exec(line)
+        if (m) {
+          const raw = m[1].replace(/[()]/g, '')
+          const names = raw.split(',').map(s => {
+            const parts = s.trim().split(/\s+as\s+/)
+            const name = (parts[1] || parts[0]).trim()
+            return name.includes('.') ? name.split('.')[0] : name
+          })
+          for (const n of names) {
+            if (n && !n.startsWith('#') && !n.startsWith('\\')) imports.set(n, i + 1)
+          }
+          continue
         }
-        continue
-      }
-    } else if (['.js', '.mjs', '.ts', '.tsx', '.jsx'].includes(ext)) {
-      m = /import\s+(?:{([^}]+)}|(\w+))/.exec(line)
-      if (m) {
-        const names = m[1] ? m[1].split(',').map(s => s.trim().split(/\s+as\s+/).pop().trim()) : [m[2]]
-        for (const n of names) {
-          if (n) imports.set(n, i + 1)
+      } else if (['.js', '.mjs', '.ts', '.tsx', '.jsx'].includes(ext)) {
+        m = /^\s*import\s+(?:{([^}]+)}|(\w+))/.exec(line)
+        if (m) {
+          const names = m[1] ? m[1].split(',').map(s => s.trim().split(/\s+as\s+/).pop().trim()) : [m[2]]
+          for (const n of names) {
+            if (n) imports.set(n, i + 1)
+          }
+          continue
         }
-        continue
       }
     }
 

@@ -86,6 +86,35 @@
     },
     "required": ["workspace_dir", "writes"]
   },
+  "examples": [
+    {
+      "name": "multi-file refactor with base_version",
+      "arguments": {
+        "workspace_dir": "/path/to/project",
+        "writes": [
+          {
+            "file_path": "src/auth.py",
+            "locator": { "symbol_id": "python:src/auth.py::AuthService#method" },
+            "base_version": {
+              "file": { "hash": "sha256:..." },
+              "symbol": { "symbol_id": "python:src/auth.py::AuthService#method", "body_hash": "sha256:...", "signature_hash": "sha256:..." }
+            },
+            "content": "def login(self, username, password):\n    return self._hash(username, password)\n"
+          },
+          {
+            "file_path": "src/api.py",
+            "edit_mode": "patch",
+            "patch": { "old_string": "return svc.login(u, p)", "new_string": "return svc.login(u, p, remember=False)" },
+            "base_version": {
+              "file": { "hash": "sha256:..." },
+              "symbol": null
+            }
+          }
+        ],
+        "policy": { "all_or_nothing": true, "dry_run": false }
+      }
+    }
+  ],
   "handler": "./handler.js",
   "protocol_version": "1.0",
   "tags": ["primitive", "write", "batch"],

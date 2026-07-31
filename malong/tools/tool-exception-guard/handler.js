@@ -85,6 +85,25 @@ export async function handle(args, context) {
 
   const content = readFileSync(absPath, 'utf-8')
   const ext = extname(file)
+  const SUPPORTED_EXTS = new Set(['.py', '.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx'])
+  const languageSupported = SUPPORTED_EXTS.has(ext)
+  if (!languageSupported) {
+    return {
+      file,
+      error: 'unsupported_language',
+      message: `exception_guard 仅支持 Python/JS/TS，不支持 ${ext} 文件（跳过检查，不误报）`,
+      project_exceptions: {},
+      issues: [],
+      summary: {
+        raises_checked: 0,
+        issues_found: 0,
+        project_exception_count: 0,
+        builtin_usage_ratio: 0,
+        language_supported: false,
+      },
+      next_step: `Use exception_guard on a .py/.js/.ts file instead`,
+    }
+  }
 
   let hierarchy = Object.create(null)
   if (codeIndexService) {

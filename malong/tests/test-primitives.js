@@ -136,7 +136,12 @@ assert(r1.index_status?.state === 'fresh' || r1.index_status?.state === 'dirty' 
 assert(Array.isArray(r1.pipeline) && r1.pipeline.length >= 2, 'P2 pipeline 返回')
 assert(!!r1.trace_id, 'P2 trace_id 返回')
 assert(r1.budget?.truncated === true || r1.symbol?.text.length <= 400 + 20, 'P2 budget 截断生效（400 字符内）')
-assert(r1.outline?.items?.length > 0, 'P2 outline 摘要返回')
+assert(r1.outline === null, 'P2 core 模式默认不带 outline（省 token）')
+const r1Rich = await readHandler({ workspace_dir: WS, locator: { file_path: 'src/auth.py', symbol_id: loginSyms[0].stable_id }, mode: 'rich', budget_hint: 400 }, ctx)
+assert(r1Rich.outline?.items?.length > 0, 'P2 rich 模式带 outline 摘要')
+assert(r1Rich.navigation?.callers_count !== undefined, 'P2 rich 模式带 navigation')
+const r1Force = await readHandler({ workspace_dir: WS, locator: { file_path: 'src/auth.py', symbol_id: loginSyms[0].stable_id }, include_outline: true }, ctx)
+assert(r1Force.outline?.items?.length > 0, 'P2 include_outline=true 显式强制带 outline')
 
 const rAmb = await readHandler({ workspace_dir: WS, locator: { file_path: 'src/auth.py', name: 'login' } }, ctx)
 assert(rAmb.success === false && rAmb.error?.code === 'AMBIGUOUS_SYMBOL', 'P2 同名 login → AMBIGUOUS_SYMBOL 不自动选')
