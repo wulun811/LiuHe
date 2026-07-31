@@ -131,8 +131,9 @@ function _setupHandlers() {
     _socket = null
     _stopHeartbeat()
     _core?.log('warn', '[parse-client] connection closed')
-    // 拒绝所有 pending 请求
-    for (const [id, { reject }] of _pending) {
+    // 拒绝所有 pending 请求（wrapper reject 记一次熔断失败；清 timer 防 30s 后双倍计数）
+    for (const [id, { reject, timer }] of _pending) {
+      clearTimeout(timer)
       reject(new Error('connection closed'))
     }
     _pending.clear()
@@ -197,6 +198,10 @@ async function _startProcess() {
     stdio: 'ignore',
     detached: true,
   })
+  child.on('error', (e) => {
+    // 二进制不可执行（EACCES/损坏 ELF 等）：异步错误，必须监听否则 uncaughtException 崩服务
+    _core?.log('error', `[parse-client] spawn error: ${e.message}`)
+  })
   child.unref()
   // wait for socket to appear
   for (let i = 0; i < 30; i++) {
@@ -255,9 +260,10 @@ function _processBuffer() {
         _pending.delete(response.id)
         clearTimeout(pending.timer)
         if (response.error) {
-          // 业务错误（FILE_TOO_LARGE / FILE_NOT_FOUND 等）：服务本身正常，不算熔断失败
+          // 业务错误（FILE_TOO_LARGE / FILE_NOT_FOUND 等）：服务本身正常——记成功（服务活着）
+          // + rawReject（不记失败）。熔断只应反映「服务不可用」
           _circuitRecordSuccess()
-          pending.reject(new Error(`${response.error.code}: ${response.error.message}`))
+          pending.rawReject(new Error(`${response.error.code}: ${response.error.message}`))
         } else {
           pending.resolve(response.result)
         }
@@ -328,6 +334,7 @@ async function request(method, params, timeoutMs = REQUEST_TIMEOUT_MS, priority 
     _pending.set(id, {
       resolve: (v) => { _circuitRecordSuccess(); resolve(v) },
       reject: (e) => { _circuitRecordFailure(); reject(e) },
+      rawReject: reject,
       timer,
     })
     _socket.write(frame)

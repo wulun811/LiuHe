@@ -139,6 +139,7 @@ export async function handle(args, context) {
 
   const byFile = new Map()
   for (const ref of allRefs) {
+    if (!ref?.path) continue // 脏数据防御（索引缺 path 字段时不崩 handler）
     if (!byFile.has(ref.path)) byFile.set(ref.path, [])
     byFile.get(ref.path).push(ref)
   }

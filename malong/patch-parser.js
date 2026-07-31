@@ -116,7 +116,9 @@ function findFuzzyMatch(content, searchBlock) {
       return { start: candidateIdx, end: candidateIdx + fuzzySearch.length }
     }
   }
-  return { start: idx, end: idx + searchBlock.length }
+  // ±20 窗口内找不到原文位置：fuzzy 空间 idx 与原文偏差过大（如匹配块前有长空白差异）。
+  // 此时用 fuzzy idx + 原文长度硬切会静默篡改文件（递归进化第 5 轮 P0#4），宁可报错
+  return null
 }
 
 function applyBlocks(content, blocks) {

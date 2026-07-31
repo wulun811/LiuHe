@@ -57,6 +57,10 @@ async function ensureParseService() {
       detached: true,
       stdio: ['ignore', 'ignore', 'ignore'],
     })
+    child.on('error', (e) => {
+      // 二进制不可执行（EACCES/损坏 ELF 等）：异步错误，必须监听否则 uncaughtException 崩服务
+      crashLog(`malong-parse spawn error: ${e.message}`)
+    })
     child.unref()
     crashLog(`malong-parse started (pid=${child.pid})`)
 
@@ -237,6 +241,10 @@ function handleRequest(req) {
       break
 
     case 'tools/list':
+      if (!_ready || !registry) {
+        safeRespondError(id, -32000, 'Server still loading modules, please retry in a few seconds')
+        break
+      }
       safeRespond(id, { tools: registry.listTools() })
       break
 
@@ -472,15 +480,18 @@ initModules().then(() => {
           } catch {}
         }
 
-        // 自动软重启（每 5 分钟最多一次，最多 3 次）
+        // 自动软重启：单进程 MCP 无 supervisor，无法真重启自己 —— 诚实地报告并复位可复位状态，
+        // 由外层（opencode）重启进程（递归进化第 5 轮 P1#14：旧实现只打日志谎称已重启）
         const now = Date.now()
         if (now - lastAutoRestart > 300_000 && watchdogRestarts < MAX_AUTO_RESTARTS) {
-          crashLog(`WATCHDOG: auto-restart #${watchdogRestarts + 1} triggered by FAIL checks`)
-          if (typeof global.gc === 'function') {
-            try { global.gc() } catch {}
-          }
           watchdogRestarts++
           lastAutoRestart = now
+          crashLog(`WATCHDOG: restart #${watchdogRestarts}/${MAX_AUTO_RESTARTS} required (FAIL checks) — no supervisor to self-restart; resetting semaphore and requesting manual restart.`)
+          try {
+            if (semaphore.reset) semaphore.reset()
+          } catch (e) {
+            crashLog(`WATCHDOG: semaphore reset failed: ${e.message}`)
+          }
         }
       }
 
@@ -493,15 +504,16 @@ initModules().then(() => {
       // 检查信号量死锁
       const semCheck = health.checks.find(c => c.name === 'Semaphore')
       if (semCheck && semCheck.status === 'FAIL') {
-        crashLog(`WATCHDOG: semaphore deadlock detected, auto-restart`)
         const now = Date.now()
         if (now - lastAutoRestart > 300_000 && watchdogRestarts < MAX_AUTO_RESTARTS) {
-          crashLog(`WATCHDOG: auto-restart #${watchdogRestarts + 1} triggered by semaphore deadlock`)
-          if (typeof global.gc === 'function') {
-            try { global.gc() } catch {}
-          }
           watchdogRestarts++
           lastAutoRestart = now
+          crashLog(`WATCHDOG: semaphore deadlock — restart #${watchdogRestarts}/${MAX_AUTO_RESTARTS} required (no supervisor; resetting semaphore, manual restart advised)`)
+          try {
+            if (semaphore.reset) semaphore.reset()
+          } catch (e) {
+            crashLog(`WATCHDOG: semaphore reset failed: ${e.message}`)
+          }
         }
       }
     } catch (e) {

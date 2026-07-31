@@ -46,9 +46,9 @@ export class TransactionStore {
 
     const stat = statSync(srcPath)
     if (stat.size > LARGE_FILE_BYTES) {
-      manifest.files[fileRel] = { skipped: true, size: stat.size, hash: this._fastHash(srcPath) }
-      this._writeManifest(txnId, manifest)
-      return { skipped: true, size: stat.size }
+      // 拒绝而非静默 skipped：skipped 无备份 → rollback/undoCommit 无法还原，
+      // 且 files_restored 计数虚假（递归进化第 5 轮 P0#9）
+      return makeError(ErrorCodes.FILE_TOO_LARGE, `File exceeds ${Math.round(LARGE_FILE_BYTES / 1048576)}MB: ${fileRel}`, { file: fileRel, size: stat.size })
     }
 
     const backupName = fileRel.replace(/[/\\]/g, '__')

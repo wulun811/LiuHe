@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { readFileSync, statSync, existsSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import { sha256 } from '../../hash-utils.js'
+import { validateFilePath } from '../../error-codes.js'
 import { checkFileStaleness, attachStalenessWarning } from '../../staleness.js'
 
 const MAX_LIVE_READ = 1024 * 1024
@@ -35,6 +36,10 @@ export async function handle(args, context) {
   }
   if (!filePath) {
     return { error: 'missing_parameter', message: 'locator.file_path is required (or provide a resolvable symbol_id)', trace_id }
+  }
+  const pathCheck = validateFilePath(filePath)
+  if (pathCheck.blocked) {
+    return { error: 'PATH_BLOCKED', code: 'PATH_BLOCKED', message: pathCheck.detail, trace_id }
   }
   const absPath = join(workspaceDir, filePath)
   if (!existsSync(absPath)) {
@@ -185,7 +190,8 @@ export async function handle(args, context) {
   let navigation = null
   if (args?.mode === 'rich' && symbol && codeIndexService) {
     try {
-      const impact = await codeIndexService.getImpactAnalysis(symbol.name)
+      // 签名 (filePath, { symbol })：旧实现把符号名当 filePath → path 查不到 → navigation 恒空
+      const impact = await codeIndexService.getImpactAnalysis(filePath, { symbol: symbol.name })
       navigation = {
         callers_count: impact?.callers?.length || 0,
         callees_count: impact?.callees?.length || 0,

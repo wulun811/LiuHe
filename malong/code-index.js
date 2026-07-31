@@ -216,6 +216,11 @@ class CodeIndex {
     if (this._db && this._currentWorkspace === workspaceDir) {
       return // 已经初始化过
     }
+    if (this.indexing && this._db && this._currentWorkspace !== workspaceDir) {
+      // 后台索引持有共享 _db 句柄：此时切换 workspace 会把 A 的文件写进 B 的库并清掉 B 的记录
+      // （递归进化第 5 轮 P0#8）。fail loud：拒绝切换，等索引完成（或 blocking reindex）
+      throw new Error(`workspace switch to "${workspaceDir}" during background indexing of "${this._currentWorkspace}"; wait for indexing to finish or reindex with blocking=true`)
+    }
     if (this._db) {
       this._db.close()
     }

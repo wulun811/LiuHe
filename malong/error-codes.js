@@ -1,3 +1,5 @@
+import { resolve, sep } from 'node:path'
+
 export const ErrorCodes = {
   FILE_NOT_FOUND: 'FILE_NOT_FOUND',
   OLD_STRING_NOT_FOUND: 'OLD_STRING_NOT_FOUND',
@@ -10,6 +12,7 @@ export const ErrorCodes = {
   PATH_BLOCKED: 'PATH_BLOCKED',
   TIMEOUT: 'TIMEOUT',
   NO_MATCH: 'NO_MATCH',
+  FILE_TOO_LARGE: 'FILE_TOO_LARGE',
 }
 
 export function makeError(code, message, extra = {}) {
@@ -27,13 +30,28 @@ const DENY_PATTERNS = [
   { pattern: /(^|[\/\\])\.ai-transactions([\/\\]|$)/, name: '.ai-transactions' },
 ]
 
-export function validateFilePath(filePath) {
+export function validateFilePath(filePath, workspaceDir) {
   if (!filePath || typeof filePath !== 'string') {
     return { blocked: true, reason: 'invalid_path', detail: 'file path is empty or not a string' }
   }
   const isAbsolute = filePath.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(filePath)
 
-  if (!isAbsolute && filePath.includes('..')) {
+  if (isAbsolute) {
+    // 绝对路径：仅当显式提供 workspaceDir 且路径 resolve 后落在 workspace 内才放行
+    // （batch-edit 反向兼容契约）；否则拒绝——join(ws, abs) 会让绝对路径「胜出」→
+    // 读写工作区外任意文件（递归进化第 5 轮 P0#1）
+    if (workspaceDir) {
+      const resolved = resolve(filePath)
+      const wsResolved = resolve(workspaceDir)
+      if (resolved === wsResolved || resolved.startsWith(wsResolved + sep)) {
+        return { ok: true }
+      }
+      return { blocked: true, reason: 'path_traversal', detail: `absolute path outside workspace: ${filePath}` }
+    }
+    return { blocked: true, reason: 'absolute_path', detail: `absolute path is not allowed (must be workspace-relative): ${filePath}` }
+  }
+
+  if (filePath.includes('..')) {
     return { blocked: true, reason: 'path_traversal', detail: `file path contains "..": ${filePath}` }
   }
 

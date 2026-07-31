@@ -1,6 +1,7 @@
 import { join } from 'node:path'
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { isFunctionName } from '../misuse-helpers.js'
+import { validateFilePath } from '../../error-codes.js'
 import { checkFileStaleness, attachStalenessWarning } from '../../staleness.js'
 
 const SOURCE_EXTS = new Set(['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.mts', '.cts', '.py', '.go', '.rs', '.java', '.rb', '.php'])
@@ -46,6 +47,11 @@ export async function handle(args, context) {
   if (!symbol) return { error: 'missing_parameter', message: 'symbol is required', suggestion: 'Provide a symbol name to trace (e.g. "MAX_RETRY_COUNT")' }
   if (!file) return { error: 'missing_parameter', message: 'file is required', suggestion: 'Provide a file path relative to workspace_dir where the symbol is defined' }
 
+  const pathCheck = validateFilePath(file)
+  if (pathCheck.blocked) {
+    return { error: 'PATH_BLOCKED', code: 'PATH_BLOCKED', message: pathCheck.detail }
+  }
+
   const misuseWarning = detectMisuse(symbol)
 
   const absFilePath = join(workspaceDir, file)
@@ -84,10 +90,12 @@ export async function handle(args, context) {
   }
 
   const refs = await codeIndexService.getReferences(symbol)
+  // getReferences 返回 { path, kind, target_name }（code-index 无行号列）——
+  // 旧映射 r.source_file/r.line 全为 undefined → 引用列表恒为垃圾（递归进化第 5 轮 P1#10）
   result.direct_references = (refs || []).slice(0, maxResults).map(r => ({
-    file: r.source_file || r.file || r.caller_file,
-    line: r.line || 0,
-    context: r.context || null
+    file: r.path,
+    kind: r.kind,
+    target_name: r.target_name,
   }))
   result.truncated = (refs || []).length > maxResults
 

@@ -12,7 +12,9 @@ export async function handle(args, context) {
 
   switch (action) {
     case 'begin': {
-      const name = args?.name || 'unnamed'
+      // name 直接拼进 txnId 目录名：仅允许安全字符（`../` 穿越可写 workspace 外文件）
+      const rawName = args?.name || 'unnamed'
+      const name = String(rawName).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 60) || 'unnamed'
       const txnId = store.begin(name)
       return { status: 'ok', txnId, name }
     }

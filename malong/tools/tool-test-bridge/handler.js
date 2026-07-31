@@ -4,10 +4,13 @@ import { execSync } from 'node:child_process'
 import { parseOutput } from './parsers.js'
 
 const SKIP_DIRS = new Set(['node_modules', '.git', '__pycache__', '.venv', 'venv', 'dist', 'build', '.next'])
-const SAFE_SCOPE_RE = /^[\w\/\.\-:\[\]]+(?:\s+[\w\/\.\-:\[\]]+)*$/
+// 仅允许安全字符与空白分隔（[ \t] 不吞换行——换行可注入多行 shell 命令）
+const SAFE_SCOPE_RE = /^[\w\/\.\-:\[\]]+(?:[ \t]+[\w\/\.\-:\[\]]+)*$/
 
 function sanitizeScope(scope) {
+  if (typeof scope !== 'string') return null
   if (!SAFE_SCOPE_RE.test(scope)) return null
+  if (scope.split(/[ \t]/).some(seg => seg.split('/').includes('..'))) return null
   return scope
 }
 
@@ -147,7 +150,7 @@ async function handleRun(args, context) {
     return { error: 'invalid_input', message: `Unsafe scope: "${scope}". Only alphanumeric, /, ., -, :, spaces allowed.` }
   }
   const timeout = (args.timeout ?? 60) * 1000
-  if (timeout <= 0) {
+  if (typeof args.timeout !== 'number' || !Number.isFinite(timeout) || timeout <= 0) {
     return { error: 'invalid_input', message: 'timeout must be a positive number (seconds)' }
   }
   const framework = args.framework || detectFramework(workspaceDir)

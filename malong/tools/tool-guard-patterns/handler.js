@@ -96,17 +96,25 @@ async function checkRules(file, content, rules, langParser) {
         case 'except_bare': {
           const lines = content.split('\n')
           let inString = false
+          let openDelim = null
           for (let i = 0; i < lines.length; i++) {
             const trimmed = lines[i].trim()
             if (trimmed.startsWith('#')) continue
-            if (trimmed.startsWith('"""') || trimmed.startsWith("'''")) {
-              const delim = trimmed.slice(0, 3)
-              if (trimmed.indexOf(delim, 3) === -1) inString = !inString
-              continue
-            }
-            if (inString) continue
-            if (/^\s*except\s*:/.test(lines[i])) {
-              violations.push(mkViolation(rule, { line: i + 1 }))
+            if (!inString) {
+              // 打开三引号：支持前缀（f"""）与赋值（x = """）——行内任意位置首个三引号
+              // 旧实现只认行首：赋值形式不识别（收尾行被当新打开 → 剩余全漏检）——
+              // 递归进化第 5 轮 P1#12
+              const open = trimmed.match(/(?:[frbu]{0,2})?[^"'#]*?(\"\"\"|''')/)?.[1]
+              if (open) {
+                const rest = trimmed.slice(trimmed.indexOf(open) + open.length)
+                if (!rest.includes(open)) { inString = true; openDelim = open }
+                continue
+              }
+              if (/^\s*except\s*:/.test(lines[i])) {
+                violations.push(mkViolation(rule, { line: i + 1 }))
+              }
+            } else if (trimmed.includes(openDelim)) {
+              inString = false
             }
           }
           break

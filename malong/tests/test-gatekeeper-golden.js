@@ -220,5 +220,57 @@ const recallEnv = r.drifts.filter(d => d.type === 'missing_env_var')
 assert(recallEnv.some(d => d.name === 'REALLY_MISSING_KEY'), `字符串邻域真缺失变量必报（得 ${JSON.stringify(recallEnv)})`)
 assert(!recallEnv.some(d => d.name === 'NODE_ENV'), `字符串里的环境变量名不误报`)
 
+// ═══════════ golden 19：第 5 轮全量审查修复回归（路径安全/注入/模糊补丁/字符串状态机/通配导入） ═══════════
+console.log('── golden 19: 全量审查修复回归 ──')
+// 1. validateFilePath 绝对路径拒绝（旧：放行 → join 胜出 → 越界读写）
+const { validateFilePath } = await import(join(MALONG_DIR, 'error-codes.js'))
+assert(validateFilePath('/etc/passwd').blocked === true, `绝对路径 /etc/passwd 拒绝（得 ${JSON.stringify(validateFilePath('/etc/passwd'))})`)
+assert(validateFilePath('/home/user/../x.txt').blocked === true, `绝对路径含 .. 拒绝`)
+assert(validateFilePath('src/auth.py').ok === true, `相对路径正常放行`)
+assert(validateFilePath('../evil.txt').blocked === true, `相对 .. 拒绝（原逻辑保留）`)
+// 2. test_bridge scope 注入拒绝（换行注入 + .. 越界）
+const safeScopeRe = /^[\w\/\.\-:\[\]]+(?:[ \t]+[\w\/\.\-:\[\]]+)*$/
+const tb = { SAFE_SCOPE_RE: safeScopeRe, sanitizeScope: (s) => { if (typeof s !== 'string') return null; if (!safeScopeRe.test(s)) return null; if (s.split(/[ \t]/).some(seg => seg.split('/').includes('..'))) return null; return s } }
+assert(tb.sanitizeScope('tests/foo.py') === 'tests/foo.py', `合法 scope 通过`)
+assert(tb.sanitizeScope('tests/\nrm -rf /') === null, `换行注入拒绝（旧 \\s+ 吞换行 → 白名单绕过）`)
+assert(tb.sanitizeScope('..') === null, `.. 越界拒绝`)
+assert(tb.sanitizeScope('../x') === null, `相对穿越拒绝`)
+// 3. patch-parser fuzzy 错位不硬切（旧：混用坐标静默篡改文件）
+const ppMod = await import(join(MALONG_DIR, 'patch-parser.js'))
+const ppServices = {}
+const ppCore = { get: () => null, log: () => {}, registerService: (n, s) => { ppServices[n] = s } }
+await ppMod.init(ppCore)
+const pp = ppServices.patchParser
+const fuzzySrc = 'x = 1\n' + ' '.repeat(30) + 'return 42\n\ndef bar():\n    return 1\n'
+const fuzzyR = pp.apply(fuzzySrc, [{ search: 'return 42\n\n\ndef bar()', replace: 'return 43\n\ndef bar()' }])
+assert(fuzzyR.applied.length === 0 && fuzzyR.result === fuzzySrc, `fuzzy 错位不硬切（旧：静默篡改；得 ${JSON.stringify(fuzzyR.applied)}）`)
+// 4. guard-patterns except_bare 三场景（docstring 行内收尾 / 赋值三引号 / 单行 docstring）
+const { handle: guardP } = await import(join(MALONG_DIR, 'tools/tool-guard-patterns/handler.js'))
+// except_bare 分支需要 refs 非空才能到达（checkRules 空 refs 提前返回）——mock langParser 提供假 refs
+const gpCtx = { ...context, langParserService: { extractAllAsync: async () => ({ refs: [{ type: 'call', name: 'x' }], symbols: [{ name: 'x', type: 'function' }] }), hasErrorsAsync: async () => false } }
+writeFileSync(`${WS}/src/gp_a.py`, 'def f():\n    """doc start\n    more doc"""\n    try:\n        pass\n    except:\n        pass\n')
+const gpA = await guardP({ workspace_dir: WS, file: 'src/gp_a.py' }, gpCtx)
+assert((gpA.violations ?? []).length === 1, `docstring 行内收尾后真 except 必报（旧：剩余全漏检；得 ${JSON.stringify(gpA.violations)})`)
+writeFileSync(`${WS}/src/gp_b.py`, 'x = """\nthis is except: not code\n"""\ndef g():\n    try:\n        pass\n    except:\n        pass\n')
+const gpB = await guardP({ workspace_dir: WS, file: 'src/gp_b.py' }, gpCtx)
+assert((gpB.violations ?? []).length === 1, `赋值三引号字符串内 except 不误报 + 真 except 报（得 ${JSON.stringify(gpB.violations)})`)
+// 5. dead-code-sweeper 通配导入 + JSX React 不报、真 unused 仍报
+const { handle: dcsP } = await import(join(MALONG_DIR, 'tools/tool-dead-code-sweeper/handler.js'))
+writeFileSync(`${WS}/src/dcs_a.py`, 'from os import *\nimport sys\n\nprint(sys.version)\n')
+const dcsA = await dcsP({ workspace_dir: WS, file: 'src/dcs_a.py' }, context)
+assert(!(dcsA.dead_code ?? []).some(d => d.symbol === '*'), `通配导入 from x import * 不报 unused（得 ${JSON.stringify(dcsA.dead_code)})`)
+writeFileSync(`${WS}/src/dcs_b.jsx`, 'import React from "react"\nexport const App = () => <div>hi</div>\n')
+const dcsB = await dcsP({ workspace_dir: WS, file: 'src/dcs_b.jsx' }, context)
+assert(!(dcsB.dead_code ?? []).some(d => d.symbol === 'React'), `JSX 文件 default React 不报 unused（得 ${JSON.stringify(dcsB.dead_code)})`)
+writeFileSync(`${WS}/src/dcs_c.js`, 'import unusedThing from "x"\nexport const f = () => 1\n')
+const dcsC = await dcsP({ workspace_dir: WS, file: 'src/dcs_c.js' }, context)
+assert((dcsC.dead_code ?? []).some(d => d.symbol === 'unusedThing'), `真 unused 仍报（得 ${JSON.stringify(dcsC.dead_code)})`)
+// 6. file-collector isIgnored glob 规则（前导 * 不吞全树）
+const { isIgnored } = await import(join(MALONG_DIR, 'file-collector.js'))
+assert(isIgnored('src/a.js', ['*.min.js'], false) === false, `*.min.js 不忽略普通文件`)
+assert(isIgnored('src/a.min.js', ['*.min.js'], false) === true, `*.min.js 忽略 min 文件`)
+assert(isIgnored('src/a.js', ['**/node_modules'], false) === false, `**/node_modules 不忽略普通文件`)
+assert(isIgnored('src/node_modules/x.js', ['**/node_modules'], false) === true, `**/node_modules 忽略任意层 node_modules`)
+
 console.log(`\n=== test-gatekeeper-golden: ${pass} passed, ${fail} failed ===`)
 process.exit(fail ? 1 : 0)

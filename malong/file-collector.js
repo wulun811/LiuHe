@@ -28,8 +28,19 @@ export function parseMalongignore(filePath) {
 export function isIgnored(relPath, rules, isDir) {
   for (const rule of rules) {
     if (rule.includes('*')) {
-      const prefix = rule.split('*')[0]
-      if (relPath.startsWith(prefix)) return true
+      // **/node_modules → 任意层 node_modules；*.min.js → 文件名后缀匹配
+      const post = rule.split('*').pop() || ''
+      if (rule.startsWith('**/') && post.includes('/')) {
+        // **/seg → 任意层级含该段
+        if (relPath.split('/').some(seg => seg.includes(post.replace(/^\//, '')))) return true
+        continue
+      }
+      if (rule.startsWith('*')) {
+        if (!isDir && relPath.split('/').pop().endsWith(post)) return true
+        continue
+      }
+      const pre = rule.split('*')[0]
+      if (relPath.startsWith(pre)) return true
     } else if (rule.endsWith('/')) {
       const ruleDir = rule.slice(0, -1)
       if (relPath === ruleDir || relPath.startsWith(rule)) return true

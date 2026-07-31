@@ -125,7 +125,10 @@ function detectMismatches(signature, mocks) {
     if (mock.mock_type === 'return_value' && signature.return_type) {
       const val = mock.value
       const rt = signature.return_type
-      if (rt !== 'None' && rt !== 'void' && (val.startsWith("'") || val.startsWith('"'))) {
+      // 字符串返回类型（-> str / Optional[str] 等）下字符串 mock 合法；
+      // 旧逻辑任何字符串字面量对非 None/void 类型都报 mismatch（递归进化第 5 轮 P1#16）
+      const isStringReturn = /\bstr\b|String/.test(rt)
+      if (!isStringReturn && rt !== 'None' && rt !== 'void' && (val.startsWith("'") || val.startsWith('"'))) {
         mismatches.push({
           test_file: mock.file, line: mock.line, mock_type: 'return_value',
           issue: 'return type mismatch',

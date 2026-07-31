@@ -49,4 +49,17 @@ export class Semaphore {
       queue: this.queue.map(q => ({ weight: q.weight, waiting: Date.now() - q.waitTime })),
     }
   }
+
+  // watchdog 死锁兜底：清空队列并复位计数（排队中的 acquire 会挂起直到自身超时，
+  // 但信号量账本恢复可让新请求进入）
+  reset() {
+    const drained = this.queue.length
+    for (const item of this.queue) {
+      if (item.timer) clearTimeout(item.timer)
+      item.resolve('timeout')
+    }
+    this.queue = []
+    this.current = 0
+    return { drained }
+  }
 }

@@ -136,10 +136,14 @@ export async function backfillSymbolAnchors(workspaceDir, codeIndexService) {
     const anchors = computeFileAnchors(absPath, f.path, symbols)
     if (!anchors) { failed.push({ file: f.path, reason: 'too_large_or_unreadable' }); continue }
     const upd = db.prepare('UPDATE symbols SET parent_id = ?, signature = ?, stable_id = ?, body_hash = ?, signature_hash = ? WHERE id = ?')
-    for (const a of anchors) {
-      upd.run(a.parentId, a.signature, a.stableId, a.bodyHash, a.signatureHash, a.id)
-      symCount++
-    }
+    // 逐行 UPDATE 无事务 → 崩溃留混合状态（部分符号有锚点部分没有，stable_id 查找半失效）——
+    // 递归进化第 5 轮 P1#18
+    db.transaction(() => {
+      for (const a of anchors) {
+        upd.run(a.parentId, a.signature, a.stableId, a.bodyHash, a.signatureHash, a.id)
+        symCount++
+      }
+    })()
   }
   return { files: files.length, symbols: symCount, failed }
 }

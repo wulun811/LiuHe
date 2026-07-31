@@ -131,7 +131,8 @@ export async function handle(args, context) {
   }
   if (!editsRaw) return { error: 'missing_parameter', message: 'edits is required', suggestion: 'Provide a JSON array of edits: [{"old_string": "...", "new_string": "..."}]' }
 
-  const pathCheck = validateFilePath(filePath)
+  // filePath 是绝对路径（上面 isInsideWorkspace 已校验在 workspace 内）→ 传 workspaceDir 放行
+  const pathCheck = validateFilePath(filePath, workspaceDir)
   if (pathCheck.blocked) {
     return makeError(ErrorCodes.PATH_BLOCKED, pathCheck.detail, { file: filePath, reason: pathCheck.reason })
   }

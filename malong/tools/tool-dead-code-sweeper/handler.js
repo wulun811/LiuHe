@@ -42,6 +42,7 @@ function findUnusedImports(content, ext) {
   let inTemplate = false    // JS 反引号
   let inBlockComment = false // JS /* */
   let inTriple = null        // Py """ / '''
+  const jsxCandidates = new Set()  // default import 大写名：可能仅以 JSX 标签使用
 
   const countBackticks = (line) => {
     let n = 0
@@ -91,7 +92,9 @@ function findUnusedImports(content, ext) {
             return name.includes('.') ? name.split('.')[0] : name
           })
           for (const n of names) {
-            if (n && !n.startsWith('#') && !n.startsWith('\\')) imports.set(n, i + 1)
+            // from x import * 是通配导入，无法静态判定使用 → 永不报 unused（递归进化第 5 轮 P1#13）
+            if (n === '*' || !n || n.startsWith('#') || n.startsWith('\\')) continue
+            imports.set(n, i + 1)
           }
           continue
         }
@@ -100,7 +103,11 @@ function findUnusedImports(content, ext) {
         if (m) {
           const names = m[1] ? m[1].split(',').map(s => s.trim().split(/\s+as\s+/).pop().trim()) : [m[2]]
           for (const n of names) {
-            if (n) imports.set(n, i + 1)
+            if (n) {
+              imports.set(n, i + 1)
+              // default import 且大写开头：可能是仅以 JSX 标签形式使用的组件（React 等）
+              if (!m[1] && /^[A-Z]/.test(n)) jsxCandidates.add(n)
+            }
           }
           continue
         }
@@ -111,8 +118,13 @@ function findUnusedImports(content, ext) {
     for (const id of identifiers) used.add(id)
   }
 
+  // JSX 检测：文件里出现 <Tag 形态（HTML 元素小写 / 组件大写 / 成员表达式）
+  // —— JSX 文件里 default 组件导入即使无标识符引用也合法（递归进化第 5 轮 P1#13）
+  // 误判代价是漏报（安全方向），不误删合法导入
+  const hasJsxSyntax = /<[A-Za-z][\w.]*(?:\s|>|\/)/.test(lines.join('\n'))
   return [...imports.entries()]
     .filter(([name]) => !used.has(name))
+    .filter(([name]) => !(hasJsxSyntax && jsxCandidates.has(name)))
     .map(([name, line]) => ({ type: 'unused_import', line, symbol: name }))
 }
 
