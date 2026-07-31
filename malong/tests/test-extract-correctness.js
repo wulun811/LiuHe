@@ -77,6 +77,21 @@ const { x, y } = point
   assert(r5.symbols.some(s => s.name === 'rest'), 'fixture: 解构 const [first, ...rest]')
   assert(r5.symbols.filter(s => /[{}\[\]]/.test(s.name)).length === 0, 'fixture: 无垃圾符号')
 
+  console.log('\n── 6. 动态 import 补充提取（Rust parser 缺失，JS 侧补） ──')
+  const dynSrc = `export const fn = async () => { await import('./real.js') }
+const doc = "import('./fake.js')"
+const tpl = \`import('./in-template.js')\`
+`
+  const r6 = await extractAll(dynSrc, '.js')
+  const mods6 = r6.refs.filter(r => r.type === 'import').map(r => r.module)
+  assert(mods6.includes('./real.js'), `动态 import 提取: ./real.js（得 ${JSON.stringify(mods6)}）`)
+  assert(!mods6.includes('./fake.js'), '字符串文本 import 不误报')
+  assert(!mods6.includes('./in-template.js'), '模板字符串文本 import 不误报')
+  const realIdx = dynSrc.indexOf("import('./real.js')")
+  const fakeIdx = dynSrc.indexOf("import('./fake.js')")
+  assert(r6.refs.some(r => r.module === './real.js' && r.line === dynSrc.slice(0, realIdx).split('\n').length), `动态 import 行号正确（${r6.refs.find(r => r.module === './real.js')?.line}）`)
+  assert(r6.refs.find(r => r.module === './real.js')?.line === 1, `行号 = 1（得 ${r6.refs.find(r => r.module === './real.js')?.line}）`)
+
   console.log(`\n═══════════════════════════════════════`)
   console.log(`提取正确性: ${passed} passed, ${failed} failed`)
   process.exit(failed > 0 ? 1 : 0)

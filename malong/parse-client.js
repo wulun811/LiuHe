@@ -5,6 +5,7 @@
 import net from 'node:net'
 import { existsSync } from 'node:fs'
 import { spawn } from 'node:child_process'
+import { isInString } from './string-utils.js'
 
 const SOCKET_PATH = `/tmp/malong-parse-${process.getuid()}.sock`
 const CONNECT_TIMEOUT_MS = 3000
@@ -344,6 +345,26 @@ export async function parse(source, ext) {
 export async function extractAll(source, ext, filePath) {
   const params = filePath ? { file_path: filePath, ext } : { source, ext }
   const result = await request('extract_all', params)
+  const refs = result.refs.map(r => ({
+    type: r.kind,
+    name: r.name,
+    line: r.line,
+    module: r.module,
+    symbols: r.symbols,
+  }))
+  // Rust parser 不提取动态 import('...')，JS 侧正则补充
+  // 路径本身是字符串字面量（不能剥），用 isInString 校验匹配点不在字符串文本内
+  if (['js', 'mjs', 'cjs', 'ts', 'jsx', 'tsx'].includes(String(ext).replace(/^\./, ''))) {
+    const dynRe = /import\s*\(\s*['"]([^'"]+)['"]\s*\)/g
+    let dm
+    while ((dm = dynRe.exec(source)) !== null) {
+      if (isInString(source, dm.index)) continue
+      const mod = dm[1]
+      if (refs.some(r => r.type === 'import' && r.module === mod)) continue
+      const lineNo = source.slice(0, dm.index).split('\n').length
+      refs.push({ type: 'import', name: mod, line: lineNo, module: mod, symbols: [] })
+    }
+  }
   return {
     symbols: result.symbols.map(s => ({
       name: s.name,
@@ -351,13 +372,7 @@ export async function extractAll(source, ext, filePath) {
       startLine: s.start_line,
       endLine: s.end_line,
     })),
-    refs: result.refs.map(r => ({
-      type: r.kind,
-      name: r.name,
-      line: r.line,
-      module: r.module,
-      symbols: r.symbols,
-    })),
+    refs,
     hasErrors: result.has_errors,
   }
 }
