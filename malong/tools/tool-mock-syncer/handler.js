@@ -35,7 +35,10 @@ function extractSignature(content, functionName, ext) {
     if (ext === '.py') {
       startRe = new RegExp(`^\\s*(?:async\\s+)?def\\s+${fnEsc}\\s*\\(`)
     } else {
-      startRe = new RegExp(`(?:function\\s+${fnEsc}|(?:const|let|var)\\s+${fnEsc}\\s*=\\s*(?:async\\s+)?(?:function)?\\s*)\\(`)
+      // 11#4：补方法简写分支（class/object method `async NAME(`）——旧正则只认
+      // `function NAME` 与 `const NAME =`，类方法/对象方法恒报 symbol_not_found。
+      // 第三分支锚定行首（^），避免命中 `obj.NAME(` 调用点
+      startRe = new RegExp(`(?:function\\s+${fnEsc}|(?:const|let|var)\\s+${fnEsc}\\s*=\\s*(?:async\\s+)?(?:function)?\\s*)\\(|^\\s*(?:async\\s+)?${fnEsc}\\s*\\(`)
     }
     if (startRe.exec(lines[i])) {
       let sigLine = lines[i]
@@ -178,7 +181,7 @@ export async function handle(args, context) {
   const signature = extractSignature(content, functionName, ext)
 
   if (!signature) {
-    return { error: 'symbol_not_found', message: `Function "${functionName}" not found in ${file}` }
+    return { error: 'symbol_not_found', message: `Function/method "${functionName}" definition not found in ${file}`, suggestion: 'Searches function declarations, function expressions, and class/object method definitions. Check the name and that it is a definition (not just a call site).' }
   }
 
   const testFiles = []

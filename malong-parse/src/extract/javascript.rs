@@ -529,4 +529,22 @@ function f(err) {
         assert!(calls.contains(&"compute"), "compute missing; got {:?}", calls);
         assert!(calls.contains(&"log"), "log missing; got {:?}", calls);
     }
+
+    #[test]
+    fn extract_all_filters_chained_member_calls() {
+        // 11#7：链式成员调用（a.b().c()）的 function 节点跨整个链，含 ( ) 空白——必须被过滤
+        let src = "const x = extname(filePath || '').toLowerCase();\nfoo.bar().baz();\n";
+        let tree = parse_js(src);
+        let result = extract_all(&tree, src);
+        let calls: Vec<&str> = result
+            .refs
+            .iter()
+            .filter(|r| r.kind == "call")
+            .map(|r| r.name.as_str())
+            .collect();
+        for name in &calls {
+            assert!(is_clean_call_name(name), "garbage chained call leaked: {:?}", name);
+            assert!(!name.contains('(') && !name.contains(' '), "chained call not filtered: {:?}", name);
+        }
+    }
 }

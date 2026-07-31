@@ -1,5 +1,5 @@
 import { join, dirname, basename, extname } from 'node:path'
-import { existsSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, statSync, readdirSync } from 'node:fs'
 
 const CONVENTIONS = {
   '.py': (base, dir) => [
@@ -90,6 +90,45 @@ function extractTestNames(filePath, workspaceDir) {
   } catch { return [] }
 }
 
+// 11#6：索引反查 by_import 不可靠——动态 import 存 target_name="import"（丢模块路径），
+// 静态 import 的 target_name 是模块名也常与文件基名对不上 → 测试文件漏找。
+// 文本兜底：有界扫测试文件，行级匹配 import/require 目标基名（静态/动态/require 全覆盖，无回溯风险）。
+const TEST_PATH_RE = /(?:^|\/)(?:tests?|__tests__)\/|\.test\.|\.spec\.|_test\./
+const SKIP_SCAN_DIRS = new Set(['node_modules', '.git', '__pycache__', '.venv', 'venv', 'dist', 'build', 'target', '.ai-cache'])
+
+function findTestImportersByText(workspaceDir, baseName, maxFiles = 800, maxResults = 20) {
+  const results = []
+  let scanned = 0
+  const walk = (dir) => {
+    if (scanned >= maxFiles || results.length >= maxResults) return
+    let entries
+    try { entries = readdirSync(dir, { withFileTypes: true }) } catch { return }
+    for (const e of entries) {
+      if (scanned >= maxFiles || results.length >= maxResults) break
+      if (e.name.startsWith('.') || SKIP_SCAN_DIRS.has(e.name)) continue
+      const full = join(dir, e.name)
+      if (e.isDirectory()) {
+        walk(full)
+      } else if (e.isFile() && TEST_PATH_RE.test(full)) {
+        scanned++
+        try {
+          const lines = readFileSync(full, 'utf-8').split('\n')
+          for (let i = 0; i < lines.length; i++) {
+            const ln = lines[i]
+            if (/(?:\bfrom\b|import\s*\(|require\s*\()\s*['"`]/.test(ln) && ln.includes(baseName)) {
+              const rel = full.startsWith(workspaceDir + '/') ? full.slice(workspaceDir.length + 1) : full
+              results.push({ path: rel, kind: 'import', target_name: baseName, line: i + 1 })
+              break
+            }
+          }
+        } catch {}
+      }
+    }
+  }
+  walk(workspaceDir)
+  return results
+}
+
 export async function handle(args, context) {
   const { codeIndexService, getWorkspaceDir } = context
   const workspaceDir = args?.workspace_dir
@@ -141,6 +180,15 @@ export async function handle(args, context) {
         })
         if (byImport.length > 0) searchMethods.push('import_graph')
       } catch {}
+    }
+  }
+
+  // 11#6：索引反查常漏（动态 import 存 target_name="import" 丢模块路径）→ 文本兜底扫测试文件 import/require
+  if (byImport.length === 0) {
+    const textHits = findTestImportersByText(workspaceDir, basename(file, extname(file)))
+    if (textHits.length > 0) {
+      byImport = textHits
+      searchMethods.push('import_text_fallback')
     }
   }
 

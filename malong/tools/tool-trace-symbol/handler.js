@@ -90,12 +90,13 @@ export async function handle(args, context) {
   }
 
   const refs = await codeIndexService.getReferences(symbol)
-  // getReferences 返回 { path, kind, target_name }（code-index 无行号列）——
-  // 旧映射 r.source_file/r.line 全为 undefined → 引用列表恒为垃圾（递归进化第 5 轮 P1#10）
+  // getReferences 返回 { path, kind, target_name, line }（11#1：SQL 补 r.line，
+  // 此前漏选行号列 → 同文件多处引用无法定位）
   result.direct_references = (refs || []).slice(0, maxResults).map(r => ({
     file: r.path,
     kind: r.kind,
     target_name: r.target_name,
+    line: r.line,
   }))
   result.truncated = (refs || []).length > maxResults
 

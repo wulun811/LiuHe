@@ -816,9 +816,9 @@ class CodeIndex {
         if (filePath) {
           const f = self._db.prepare('SELECT id FROM files WHERE path = ?').get(filePath)
           if (!f) return []
-          return self._db.prepare("SELECT f.path, r.kind, r.target_name FROM refs r JOIN files f ON r.source_file_id = f.id WHERE r.source_file_id = ? AND (r.target_name = ? OR r.target_name LIKE ?)").all(f.id, symbol, `%${symbol}%`)
+          return self._db.prepare("SELECT f.path, r.kind, r.target_name, r.line FROM refs r JOIN files f ON r.source_file_id = f.id WHERE r.source_file_id = ? AND (r.target_name = ? OR r.target_name LIKE ?)").all(f.id, symbol, `%${symbol}%`)
         }
-        return self._db.prepare("SELECT f.path, r.kind, r.target_name FROM refs r JOIN files f ON r.source_file_id = f.id WHERE (r.target_name = ? OR r.target_name LIKE ?)").all(symbol, `%${symbol}%`)
+        return self._db.prepare("SELECT f.path, r.kind, r.target_name, r.line FROM refs r JOIN files f ON r.source_file_id = f.id WHERE (r.target_name = ? OR r.target_name LIKE ?)").all(symbol, `%${symbol}%`)
       },
 
       async getCallGraph(filePath, { timeout = 10000 } = {}) {
@@ -877,9 +877,9 @@ class CodeIndex {
         if (filePath) {
           const f = self._db.prepare('SELECT id FROM files WHERE path = ?').get(filePath)
           if (!f) return []
-          return self._db.prepare("SELECT r.target_name AS callee, r.target_symbol_id, f2.path AS target_file FROM refs r JOIN files f ON r.source_file_id = f.id LEFT JOIN files f2 ON r.target_file_id = f2.id WHERE r.source_file_id = ? AND r.kind = 'call' AND r.target_name = ?").all(f.id, symbolName)
+          return self._db.prepare("SELECT r.target_name AS callee, r.target_symbol_id, f2.path AS target_file, r.line FROM refs r JOIN files f ON r.source_file_id = f.id LEFT JOIN files f2 ON r.target_file_id = f2.id WHERE r.source_file_id = ? AND r.kind = 'call' AND r.target_name = ?").all(f.id, symbolName)
         }
-        return self._db.prepare("SELECT f.path AS caller_file, r.target_name AS callee FROM refs r JOIN files f ON r.source_file_id = f.id WHERE r.kind = 'call' AND r.target_name = ?").all(symbolName)
+        return self._db.prepare("SELECT f.path AS caller_file, r.target_name AS callee, r.line FROM refs r JOIN files f ON r.source_file_id = f.id WHERE r.kind = 'call' AND r.target_name = ?").all(symbolName)
       },
 
       async getCallees(symbolName, { filePath } = {}) {

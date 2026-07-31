@@ -610,9 +610,11 @@ export async function writeSymbols(args, context) {
   // 按 file_path 分组（保输入序），组按 workspace-relative 路径字典序排序（§16.4 锁序防死锁）
   const groups = new Map()
   for (const w of writes) {
-    const fp = w?.file_path
+    // 11#3：兼容 schema 文档的 locator.file_path——旧实现只认根级 file_path，
+    // 按 schema 传 locator.file_path 会误报 missing_parameter
+    const fp = w?.file_path || w?.locator?.file_path
     if (!fp) {
-      return { success: false, error: { code: 'missing_parameter', message: 'each write requires file_path' }, trace_id }
+      return { success: false, error: { code: 'missing_parameter', message: 'each write requires file_path (root-level or locator.file_path)' }, trace_id }
     }
     const pathCheck = validateFilePath(fp)
     if (!pathCheck.ok) {

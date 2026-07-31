@@ -212,6 +212,14 @@ export async function handle(args, context) {
   }
 
   let hierarchy = Object.create(null)
+  // 11#5：异常层级按目标语言同族过滤——旧实现从整库 searchSymbols 收所有 *Error/*Exception 类，
+  // Python 测试 fixture（auth.py）与 OLD/ 旧码的异常混进来，再建议给 JS 文件（让 JS 的 throw new Error
+  // 改用 Python 的 ValidationError）= 跨语言误报。现：只收同语言族（sameLang）。
+  // 注：不按 fixtures/OLD 路径排除——测试常以 fixtures 为工作区根，路径排除会误伤（p2 A8/T2）；
+  // 跨语言误报由 sameLang 完整解决即可。
+  const JS_EXTS = ['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx']
+  const isPy = ext === '.py'
+  const sameLang = (f) => isPy ? f.endsWith('.py') : JS_EXTS.some(e => f.endsWith(e))
   if (codeIndexService) {
     const dbPath = join(getWorkspaceDir(workspaceDir), 'code-index.db')
     if (existsSync(dbPath)) {
@@ -220,8 +228,8 @@ export async function handle(args, context) {
         const results = await codeIndexService.searchSymbols('Error')
         const results2 = await codeIndexService.searchSymbols('Exception')
         for (const s of [...(results || []), ...(results2 || [])]) {
-          if (s.type === 'class') {
-            hierarchy[s.name] = { base: 'Exception', module: s.file, file: s.file, line: s.start_line }
+          if (s.type === 'class' && sameLang(s.file)) {
+            hierarchy[s.name] = { base: isPy ? 'Exception' : 'Error', module: s.file, file: s.file, line: s.start_line }
           }
         }
       } catch {}
@@ -240,7 +248,7 @@ export async function handle(args, context) {
           const full = join(dir, entry.name)
           if (entry.isDirectory()) {
             walkDir(full, depth + 1)
-          } else if (entry.isFile() && entry.name.endsWith('.py')) {
+          } else if (entry.isFile() && sameLang(full)) {
             dirs.push(full)
           }
         }
@@ -251,7 +259,8 @@ export async function handle(args, context) {
       for (const filePath of dirs) {
         try {
           const c = readFileSync(filePath, 'utf-8')
-          const classRe = /^class\s+(\w+)\s*\((\w+)\)/gm
+          // 11#5：Python `class X(Base)` vs JS `class X extends Base`
+          const classRe = isPy ? /^class\s+(\w+)\s*\((\w+)\)/gm : /^class\s+(\w+)\s+extends\s+(\w+)/gm
           let cm
           while ((cm = classRe.exec(c)) !== null) {
             if (/Error|Exception/.test(cm[2])) {

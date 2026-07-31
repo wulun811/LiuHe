@@ -311,9 +311,11 @@ def detect_unicode_mismatch(content: str, old_string: str) -> Optional[Dict]:
 
 def generate_diff(original: str, modified: str, file_path: str) -> str:
     """生成 unified diff"""
-    original_lines = original.splitlines(keepends=True)
-    modified_lines = modified.splitlines(keepends=True)
-    
+    # 11#2：splitlines() 不带 keepends + '\n'.join——旧实现 keepends=True（内容行带 \n）
+    # 却 lineterm=''（---/+++/@@ 头行不带 \n）再 ''.join，头行挤成一行不可读
+    original_lines = original.splitlines()
+    modified_lines = modified.splitlines()
+
     diff = difflib.unified_diff(
         original_lines,
         modified_lines,
@@ -321,8 +323,8 @@ def generate_diff(original: str, modified: str, file_path: str) -> str:
         tofile=f"b/{os.path.basename(file_path)}",
         lineterm=''
     )
-    
-    return ''.join(diff)
+
+    return '\n'.join(diff)
 
 
 class EditResultEncoder(json.JSONEncoder):
