@@ -278,8 +278,12 @@ class CodeIndex {
     this._outlineCache?.clear()
 
     if (symbols.length > 0) {
+      // 8：Rust parser 产出 const/enum/fn/impl/struct/trait 六种 kind，DB CHECK 约束只认 8 种
+      // → 索引任何 .rs 文件必炸（dogfooding 当场抓到：索引 malong-parse 自身源码）。
+      // 在 parser→storage 边界归一化，schema 保持稳定
+      const KIND_MAP = { fn: 'function', const: 'variable', enum: 'class', impl: 'class', struct: 'class', trait: 'interface' }
       const SYM_BATCH = 180
-      const symRows = symbols.flatMap(s => [fileId, s.name, s.type, s.startLine, s.endLine])
+      const symRows = symbols.flatMap(s => [fileId, s.name, KIND_MAP[s.type] || s.type, s.startLine, s.endLine])
       for (let i = 0; i < symRows.length; i += SYM_BATCH * 5) {
         const batch = symRows.slice(i, i + SYM_BATCH * 5)
         const ph = Array(batch.length / 5).fill('(?,?,?,?,?)').join(',')
