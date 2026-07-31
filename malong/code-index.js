@@ -211,8 +211,32 @@ class CodeIndex {
     return null
   }
 
+  _initWorkspaceDb(workspaceDir) {
+    const wsDir = this._core.getWorkspaceDir(workspaceDir)
+    if (this._db && this._currentWorkspace === workspaceDir) {
+      return // 已经初始化过
+    }
+    if (this._db) {
+      this._db.close()
+    }
+    this._db = initDb(wsDir)
+    this._currentWorkspace = workspaceDir
+    // 写入 metadata
+    const metadataPath = join(wsDir, 'metadata.json')
+    const metadata = {
+      workspace_dir: workspaceDir,
+      created_at: new Date().toISOString(),
+      last_accessed: new Date().toISOString()
+    }
+    writeFileSync(metadataPath, JSON.stringify(metadata, null, 2))
+  }
+
   async indexFile(filePath, repo) {
     if (!CACHED_EXT.has(extname(filePath))) return null
+    if (!this._db) {
+      if (!repo) return null
+      this._initWorkspaceDb(repo)
+    }
     let size = 0
     try { size = statSync(filePath).size } catch { return null }
     if (size > 1024 * 1024) return null
@@ -646,25 +670,9 @@ class CodeIndex {
 
     const self = this
 
-    // 初始化指定 workspace 的数据库
+    // 初始化指定 workspace 的数据库（委托 class 方法，保证 indexFile 懒初始化路径一致）
     function initWorkspaceDb(workspaceDir) {
-      const wsDir = core.getWorkspaceDir(workspaceDir)
-      if (self._db && self._currentWorkspace === workspaceDir) {
-        return // 已经初始化过
-      }
-      if (self._db) {
-        self._db.close()
-      }
-      self._db = initDb(wsDir)
-      self._currentWorkspace = workspaceDir
-      // 写入 metadata
-      const metadataPath = join(wsDir, 'metadata.json')
-      const metadata = {
-        workspace_dir: workspaceDir,
-        created_at: new Date().toISOString(),
-        last_accessed: new Date().toISOString()
-      }
-      writeFileSync(metadataPath, JSON.stringify(metadata, null, 2))
+      self._initWorkspaceDb(workspaceDir)
     }
 
     async function doSyncFileChange(filePath) {

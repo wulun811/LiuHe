@@ -219,5 +219,17 @@ assert(r9.success === false, `body 含签名行被拒（BODY_CONTAINS_SIGNATURE�
 assert(r9.error?.code === 'BODY_CONTAINS_SIGNATURE', `错误码正确（得 ${r9.error?.code}）`)
 assert(readFileSync(`${WS}/src/auth.py`, 'utf-8') === before9, `文件未被写入（整批回滚）`)
 
+// ── 场景 10：MCP 重启后 _db 为 null → indexFile 懒初始化（reindex 静默失败回归） ──
+console.log('── 场景 10: _db 为 null 懒初始化 ──')
+// 模拟 MCP 重启（init 后未调 initWorkspace 的状态）
+codeIndex._db = null
+codeIndex._currentWorkspace = null
+const r10 = await svc.indexFile(`${WS}/src/auth.py`, WS)
+assert(r10 !== null, `_db 为 null 时 indexFile 不再抛错（懒初始化触发，得 ${JSON.stringify(r10)}）`)
+assert(codeIndex._db !== null, `懒初始化后 _db 已打开`)
+assert(codeIndex._currentWorkspace === WS, `_currentWorkspace 已设置（得 ${codeIndex._currentWorkspace}）`)
+const r10b = await svc.getSymbols('src/auth.py')
+assert(Array.isArray(r10b) && r10b.length >= 2, `懒初始化后索引可查询（${r10b.length} 个符号）`)
+
 console.log(`\n=== test-mvp-batch: ${pass} passed, ${fail} failed ===`)
 process.exit(fail ? 1 : 0)
