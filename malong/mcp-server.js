@@ -10,10 +10,13 @@ import os from 'node:os'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
+import { Semaphore } from './semaphore.js'
+
 const REQUEST_TIMEOUT_MS = 120_000
+const SEMAPHORE_TIMEOUT_MS = 60_000
 const RECOMMENDED_HEAP_MB = 512
 const DEFAULT_CONCURRENCY = 3
-const HEAVY_TOOLS = new Set(['reindex', 'repo_map'])
+const HEAVY_TOOLS = new Set(['reindex'])
 const MEMORY_CHECK_INTERVAL_MS = 30_000
 const MEMORY_DANGER_MB = 480
 
@@ -68,44 +71,6 @@ async function ensureParseService() {
     crashLog('malong-parse failed to start within 2s')
   } catch (e) {
     crashLog(`malong-parse spawn error: ${e.message}`)
-  }
-}
-
-class Semaphore {
-  constructor(max) {
-    this.max = max
-    this.current = 0
-    this.queue = []
-  }
-
-  async acquire(weight = 1) {
-    if (this.current + weight <= this.max && this.queue.length === 0) {
-      this.current += weight
-      return
-    }
-    await new Promise(resolve => this.queue.push({ resolve, weight, waitTime: Date.now() }))
-  }
-
-  release(weight = 1) {
-    this.current -= weight
-    while (this.queue.length > 0) {
-      const next = this.queue[0]
-      if (this.current + next.weight <= this.max) {
-        this.queue.shift()
-        this.current += next.weight
-        next.resolve()
-      } else {
-        break
-      }
-    }
-  }
-
-  getStatus() {
-    return {
-      current: this.current,
-      max: this.max,
-      queue: this.queue.map(q => ({ weight: q.weight, waiting: Date.now() - q.waitTime })),
-    }
   }
 }
 
@@ -292,7 +257,12 @@ function handleRequest(req) {
       activeRequests.set(reqId, { name, startTime: Date.now() })
 
       const callTool = async () => {
-        await semaphore.acquire(weight)
+        const lock = await semaphore.acquire(weight, SEMAPHORE_TIMEOUT_MS)
+        if (lock?.timedOut) {
+          activeRequests.delete(reqId)
+          safeRespondError(id, -32603, `Semaphore wait timeout after ${SEMAPHORE_TIMEOUT_MS}ms — queue congestion or a stuck tool. Retry later.`)
+          return
+        }
         let timer
         let timedOut = false
         try {
