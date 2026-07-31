@@ -8,6 +8,7 @@ import { mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const MALONG_DIR = join(__dirname, '..')
 const { handle: fixImports } = await import(join(MALONG_DIR, 'tools/tool-fix-imports/handler.js'))
+const parseClient = await import(join(MALONG_DIR, 'parse-client.js'))
 
 let pass = 0, fail = 0
 function assert(cond, msg) {
@@ -323,6 +324,58 @@ assert(resetR.drained === 1 && sem.current === 0 && sem.queue.length === 0, `res
 const { stripStrings } = await import(join(MALONG_DIR, 'string-utils.js'))
 const su = stripStrings('const t = `x${"}"}y`')
 assert(!su.includes("'") && su.includes('}'), `模板嵌套 ${'{'}${'}'} 不残留引号（得 ${JSON.stringify(su)}）`)
+
+// ═══════════ golden 21：第 8 轮 Rust 支持（fix_imports 消费 parser use refs，只报告不 auto-fix） ═══════════
+console.log('── golden 21: Rust fix_imports（use 提取 + 只报告） ──')
+await parseClient.init({ log: () => {} })
+await parseClient.connect()
+const rustLangParser = { extractAllAsync: (src, ext) => parseClient.extractAll(src, ext) }
+const rustContext = { codeIndexService, getWorkspaceDir: () => DATA, langParserService: rustLangParser }
+const rustSrc = `use std::collections::HashMap;
+use serde::Serialize;
+pub use crate::api::PublicThing;
+use std::io::Read;
+
+fn build() -> HashMap<String, u32> {
+    let mut m = HashMap::new();
+    let mut f = std::fs::File::open("x").unwrap();
+    let mut buf = String::new();
+    f.read_to_string(&mut buf).unwrap();
+    m
+}
+`
+writeFileSync(`${WS}/src/rust_use.rs`, rustSrc)
+let rr = await fixImports({ workspace_dir: WS, file: 'src/rust_use.rs' }, rustContext)
+const unusedNames = rr.issues.filter(i => i.type === 'unused_import').flatMap(i => i.unused)
+assert(unusedNames.includes('Serialize'), `未用 use serde::Serialize 被报告（得 ${JSON.stringify(unusedNames)}）`)
+assert(!unusedNames.includes('HashMap'), `在用 HashMap 不误报（得 ${JSON.stringify(unusedNames)}）`)
+assert(!unusedNames.includes('PublicThing'), `pub use re-export 不报（得 ${JSON.stringify(unusedNames)}）`)
+const readIssue = rr.issues.find(i => i.type === 'unused_import' && (i.unused || []).includes('Read'))
+assert(readIssue && readIssue.confidence === 'heuristic' && readIssue.note, `trait 导入 Read 报告带 heuristic caveat（trait 经方法隐式使用，静态无法判）`)
+assert(rr.issues.filter(i => i.type === 'undefined_symbol').length === 0, 'Rust 不报 undefined_symbol（rustc owns，避免误报）')
+assert(!rr.transaction_ready || rr.transaction_ready.length === 0, 'Rust 不给 transaction_ready 删除补丁（防盲用破坏）')
+const before = readFileSync(`${WS}/src/rust_use.rs`, 'utf-8')
+const rrFix = await fixImports({ workspace_dir: WS, file: 'src/rust_use.rs', auto_fix: true }, rustContext)
+const after = readFileSync(`${WS}/src/rust_use.rs`, 'utf-8')
+assert(before === after, 'Rust auto_fix 不改文件（只报告，绝不 auto-删导入）')
+assert(!rrFix.fixes_applied, 'Rust auto_fix 返回 fixes_applied=null')
+
+// ═══════════ golden 22：第 8 轮 Rust guard_patterns（call_banned 经 refs 生效 + 内置规则不误报） ═══════════
+console.log('── golden 22: Rust guard_patterns ──')
+writeFileSync(`${WS}/src/gp_rust.rs`, `fn process(data: &[u8]) -> usize {
+    let cleaned = sanitize(data);
+    dangerous_eval(cleaned);
+    cleaned.len()
+}
+
+fn sanitize(d: &[u8]) -> Vec<u8> { d.to_vec() }
+fn dangerous_eval(v: Vec<u8>) -> usize { v.len() }
+`)
+writeFileSync(`${WS}/.ai-patterns.json`, JSON.stringify({ rules: [{ id: 'no-dangerous-eval', type: 'call_banned', severity: 'error', banned: ['dangerous_eval'], message: 'dangerous_eval is forbidden' }] }))
+const gpRustCtx = { ...context, langParserService: rustLangParser }
+const gpR = await guardP({ workspace_dir: WS, file: 'src/gp_rust.rs' }, gpRustCtx)
+assert((gpR.violations ?? []).some(v => v.rule === 'no-dangerous-eval' && v.location?.line === 3), `Rust call_banned 经 refs 抓到 dangerous_eval@line3（得 ${JSON.stringify(gpR.violations)}）`)
+assert(!(gpR.violations ?? []).some(v => ['no-bare-except', 'no-debugger', 'no-eval'].includes(v.rule)), `内置 Python/JS 规则对 Rust 零误报（得 ${JSON.stringify(gpR.violations)}）`)
 
 console.log(`\n=== test-gatekeeper-golden: ${pass} passed, ${fail} failed ===`)
 process.exit(fail ? 1 : 0)

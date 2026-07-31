@@ -72,7 +72,14 @@ export async function handle(args, context) {
   const lines = content.split('\n')
   const lang = detectLanguage(file)
 
-  let analysis = await analyzeFileAST(content, lang, file, langParserService) || analyzeFile(content, lang, file)
+  let analysis
+  if (lang === 'rust') {
+    // 8：Rust 走 parser refs（Phase 1 填了 name=绑定名）。只报告不 auto-fix——
+    // trait 导入（use Trait）经方法调用隐式使用、pub use 是 re-export，静态无法判，auto-删会破坏代码
+    analysis = await analyzeRustFile(content, file, langParserService)
+  } else {
+    analysis = await analyzeFileAST(content, lang, file, langParserService) || analyzeFile(content, lang, file)
+  }
 
   for (const sym of analysis.undefinedSymbols) {
     const candidates = await findCandidates(codeIndexService, sym, file, maxCandidates)
@@ -99,6 +106,16 @@ export async function handle(args, context) {
 
   const removals = computeRemovals(analysis.imports, analysis.usedSymbols, lines, content, issues)
 
+  if (lang === 'rust') {
+    // 8：Rust 未用导入只报告（启发式）——trait 隐式使用/re-export 无法静态判，绝不 auto-fix
+    for (const iss of issues) {
+      if (iss.type === 'unused_import') {
+        iss.confidence = 'heuristic'
+        iss.note = 'Rust trait imports (use Trait) may be used implicitly via methods; pub use re-exports are intentional API. Verify before removing — fix_imports never auto-removes Rust imports.'
+      }
+    }
+  }
+
   for (const rel of analysis.relativeImports) {
     issues.push({
       type: 'relative_import',
@@ -110,7 +127,7 @@ export async function handle(args, context) {
   }
 
   let fixesApplied = null
-  if (autoFix && issues.length > 0) {
+  if (autoFix && issues.length > 0 && lang !== 'rust') {
     fixesApplied = { imports_added: 0, imports_removed: 0 }
     const newLines = [...lines]
 
@@ -163,11 +180,14 @@ export async function handle(args, context) {
       }
     }
 
-    for (const r of removals) {
-      if (r.type === 'partial') {
-        transactionReady.push({ file, old_string: r.oldLine, new_string: r.newLine })
-      } else {
-        transactionReady.push({ file, old_string: r.oldLine, new_string: '' })
+    if (lang !== 'rust') {
+      // 8：Rust 只报告不给 transaction_ready 删除补丁——启发式有误报（trait/re-export），防用户盲用破坏代码
+      for (const r of removals) {
+        if (r.type === 'partial') {
+          transactionReady.push({ file, old_string: r.oldLine, new_string: r.newLine })
+        } else {
+          transactionReady.push({ file, old_string: r.oldLine, new_string: '' })
+        }
       }
     }
 
@@ -329,6 +349,41 @@ function applyRemovals(newLines, removals) {
     else { newLines[r.lineIdx] = ''; whole++ }
   }
   return { whole, partial }
+}
+
+async function analyzeRustFile(content, currentFile, langParser) {
+  const lines = content.split('\n')
+  const result = { imports: [], usedSymbols: new Set(), undefinedSymbols: [], symbolLines: Object.create(null), relativeImports: [] }
+  let refs = []
+  if (langParser) {
+    try {
+      const r = await langParser.extractAllAsync(content, '.rs')
+      refs = r?.refs || []
+      for (const s of r?.symbols || []) result.symbolLines[s.name] = s.startLine
+    } catch {}
+  }
+  const useLines = new Set()
+  for (const ref of refs) {
+    if (ref.type !== 'import' || !ref.name) continue
+    const stmt = (lines[ref.line - 1] || '').trim()
+    // 8：pub use 是 re-export（公共 API），不报 unused
+    if (/^pub\s+(?:\([^)]*\)\s+)?use\b/.test(stmt)) continue
+    result.imports.push({ name: ref.name, line: ref.line, statement: stmt, kind: 'rust-use', module: ref.module || '', key: `l${ref.line}` })
+    useLines.add(ref.line)
+  }
+  // usedSymbols：全文标识符扫描（排除 use 行与行注释）。保守方向——宁可多收（少报 unused）。
+  // 块注释内的词不剥 → 只会多收 → 更少误报，安全。undefinedSymbols 恒空（rustc owns 未定义检测，避免误报）。
+  // 注意：不用 BUILTINS_RS 过滤——那会把 HashMap/String 等的「使用」也滤掉，导致在用导入误报未用
+  const idRe = /\b([a-zA-Z_]\w*)\b/g
+  for (let i = 0; i < lines.length; i++) {
+    if (useLines.has(i + 1)) continue
+    const line = lines[i].replace(/\/\/.*$/, '')
+    let m
+    while ((m = idRe.exec(line)) !== null) {
+      result.usedSymbols.add(m[1])
+    }
+  }
+  return result
 }
 
 async function analyzeFileAST(content, lang, currentFile, langParser) {

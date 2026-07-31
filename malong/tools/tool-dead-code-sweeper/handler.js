@@ -111,6 +111,27 @@ function findUnusedImports(content, ext) {
           }
           continue
         }
+      } else if (ext === '.rs') {
+        // 8：Rust use 导入（正则版，与 fix_imports 的 parser 版互补）。绑定=路径末段/as 别名；
+        // 跳过 pub use（re-export）与 glob（*）；只收干净标识符（嵌套 use list 复杂项跳过 → 保守不误报）
+        const trimmed = line.trim()
+        if (!/^pub\s+(?:\([^)]*\)\s+)?use\b/.test(trimmed)) {
+          m = /^use\s+(.+);/.exec(trimmed)
+          if (m) {
+            const body = m[1].trim()
+            const braceIdx = body.indexOf('{')
+            const items = braceIdx !== -1
+              ? body.slice(braceIdx + 1, body.lastIndexOf('}')).split(',').map(s => s.trim()).filter(Boolean)
+              : [body]
+            for (const item of items) {
+              const asM = /\s+as\s+(\w+)\s*$/.exec(item)
+              const binding = asM ? asM[1] : item.split('::').pop().trim()
+              if (!/^\w+$/.test(binding) || binding === '*' || binding === 'self' || binding === 'super') continue
+              imports.set(binding, i + 1)
+            }
+            continue
+          }
+        }
       }
     }
 
@@ -125,7 +146,11 @@ function findUnusedImports(content, ext) {
   return [...imports.entries()]
     .filter(([name]) => !used.has(name))
     .filter(([name]) => !(hasJsxSyntax && jsxCandidates.has(name)))
-    .map(([name, line]) => ({ type: 'unused_import', line, symbol: name }))
+    .map(([name, line]) => ({
+      type: 'unused_import', line, symbol: name,
+      // 8：Rust trait 导入经方法隐式使用，静态无法判 → 启发式，提示人工确认（fix_imports 同此约束）
+      ...(ext === '.rs' ? { confidence: 'heuristic', note: 'Rust trait imports (use Trait) may be used implicitly via methods; verify before removing.' } : {}),
+    }))
 }
 
 export async function handle(args, context) {

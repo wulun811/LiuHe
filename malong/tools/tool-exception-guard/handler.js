@@ -81,6 +81,91 @@ function checkRaises(content, ext) {
   return raises
 }
 
+// 8：Rust panic-family 启发式检查。Rust 无异常层级——错误用 Result/Option + ? 传播，
+// panic!/unwrap/expect 用于不可恢复错误。在库/生产代码里滥用是反模式，但在测试/main/
+// 文档化不变量里是惯用法。故：跳过测试代码与 fn main，其余报告为 heuristic（指向 clippy 精确 lint）。
+function checkRustPanic(content, file) {
+  const lines = content.split('\n')
+  const issues = []
+
+  // 测试文件（路径）整体跳过
+  if (/(^|\/)tests?\//.test(file) || /(^|\/)(test_[^/]+|[^/]+_test)\.rs$/.test(file)) {
+    return {
+      file, paradigm: 'result', issues: [],
+      summary: { panic_family_count: 0, skipped: 'test file' },
+      next_step: 'Test file — panic-family calls are idiomatic in tests; no check needed.',
+    }
+  }
+
+  const braceDelta = (l) => {
+    let d = 0, inStr = null
+    for (let k = 0; k < l.length; k++) {
+      const ch = l[k]
+      if (inStr) { if (ch === '\\') { k++; continue } if (ch === inStr) inStr = null; continue }
+      if (ch === '"' || ch === "'") { inStr = ch; continue }
+      if (ch === '{') d++
+      else if (ch === '}') d--
+    }
+    return d
+  }
+  const findBlockEnd = (startIdx) => {
+    let depth = 0, opened = false
+    for (let j = startIdx; j < lines.length; j++) {
+      const d = braceDelta(lines[j])
+      depth += d
+      if (d > 0) opened = true
+      if (opened && depth <= 0) return j
+    }
+    return lines.length - 1
+  }
+  // 计算跳过的行区间（1-based 闭区间）：#[cfg(test)] mod 块 + fn main 块
+  const skipRanges = []
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim()
+    if (/\bfn\s+main\b/.test(trimmed)) {
+      skipRanges.push([i + 1, findBlockEnd(i) + 1])
+    } else if (/#\[cfg\(test\)\]/.test(trimmed)) {
+      let blockStart = i
+      for (let j = i; j < Math.min(i + 3, lines.length); j++) {
+        if (/\b(mod|fn)\s+\w+/.test(lines[j])) { blockStart = j; break }
+      }
+      skipRanges.push([blockStart + 1, findBlockEnd(blockStart) + 1])
+    }
+  }
+  const inSkip = (lineNo) => skipRanges.some(([a, b]) => lineNo >= a && lineNo <= b)
+
+  const PANIC_RE = /(?:\b(?:panic|unimplemented|todo)!|\.unwrap\(\)|\.expect\()/
+  let count = 0
+  for (let i = 0; i < lines.length; i++) {
+    const lineNo = i + 1
+    if (inSkip(lineNo)) continue
+    const line = lines[i].replace(/\/\/.*$/, '')
+    const m = PANIC_RE.exec(line)
+    if (!m) continue
+    count++
+    // \b 不能锚 .method（. 与前字符均非词字符无边界）——故宏名带 \b，方法形式不带；call 统一清洗
+    const call = m[0].replace(/^\./, '').replace(/[(!].*$/, '')
+    issues.push({
+      type: 'rust_panic_family',
+      line: lineNo,
+      call,
+      confidence: 'heuristic',
+      suggestion: 'In library/production code, prefer returning Result/Option and propagating with ? instead of ' + call,
+      note: 'Heuristic: unwrap/expect/panic are idiomatic for documented invariants and non-library code. clippy lints (unwrap_used/expect_used/panic) give precise, configurable detection.',
+    })
+  }
+
+  return {
+    file,
+    paradigm: 'result',
+    issues,
+    summary: { panic_family_count: count, issues_found: issues.length, language_supported: true },
+    next_step: issues.length > 0
+      ? `Found ${count} panic-family call(s) outside tests/main. Review: propagate errors with Result + ? where appropriate. clippy -W clippy::unwrap_used for precise linting.`
+      : 'No panic-family calls outside tests/main. Error handling looks disciplined.',
+  }
+}
+
 export async function handle(args, context) {
   const { codeIndexService, getWorkspaceDir } = context
   const workspaceDir = args?.workspace_dir
@@ -101,7 +186,7 @@ export async function handle(args, context) {
 
   const content = readFileSync(absPath, 'utf-8')
   const ext = extname(file)
-  const SUPPORTED_EXTS = new Set(['.py', '.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx'])
+  const SUPPORTED_EXTS = new Set(['.py', '.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.rs'])
   const languageSupported = SUPPORTED_EXTS.has(ext)
   if (!languageSupported) {
     return {
@@ -119,6 +204,11 @@ export async function handle(args, context) {
       },
       next_step: `Use exception_guard on a .py/.js/.ts file instead`,
     }
+  }
+
+  // 8：Rust 无异常层级（用 Result/panic 范式）——独立的 panic-family 启发式检查，不复用 Python 层级逻辑
+  if (ext === '.rs') {
+    return checkRustPanic(content, file)
   }
 
   let hierarchy = Object.create(null)

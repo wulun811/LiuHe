@@ -1,5 +1,6 @@
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { mkdirSync, writeFileSync, rmSync } from 'node:fs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const FIXTURES = join(__dirname, 'fixtures')
@@ -48,6 +49,47 @@ console.log('\n═══ T2: exception_guard ═══')
 
   const r2 = await handle({ workspace_dir: FIXTURES, file: 'nonexist.py' }, mockContext)
   assert(r2.error === 'file_not_found', 'T2: missing file returns error')
+}
+
+// ═══════════════════════════════════════════
+console.log('\n═══ T2b: exception_guard Rust panic-family（第 8 轮） ═══')
+{
+  const handle = await loadTool('tool-exception-guard')
+  const RWS = '/tmp/opencode/eg-rust-ws'
+  rmSync(RWS, { recursive: true, force: true })
+  mkdirSync(join(RWS, 'src'), { recursive: true })
+  mkdirSync(join(RWS, 'tests'), { recursive: true })
+  writeFileSync(join(RWS, 'src/lib.rs'), `use std::fs::File;
+
+pub fn load(p: &str) -> String {
+    let mut f = File::open(p).unwrap();
+    let cfg = read_cfg().expect("cfg");
+    if cfg.is_empty() { panic!("empty cfg") }
+    cfg
+}
+
+fn read_cfg() -> String { String::new() }
+
+fn main() {
+    let x = File::open("x").unwrap();
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn t() { let y = File::open("y").unwrap(); }
+}
+`)
+  writeFileSync(join(RWS, 'tests/it.rs'), `#[test]\nfn it() { let z = std::fs::File::open("z").unwrap(); }\n`)
+  const r = await handle({ workspace_dir: RWS, file: 'src/lib.rs' }, mockContext)
+  const lines = r.issues.map(i => i.line)
+  assert(r.paradigm === 'result', 'T2b: Rust 返回 result 范式')
+  assert(lines.includes(4) && lines.includes(5) && lines.includes(6), `T2b: load 内 unwrap/expect/panic 全报告（得 ${JSON.stringify(lines)}）`)
+  assert(!lines.includes(13), `T2b: fn main 内 unwrap 跳过（得 ${JSON.stringify(lines)}）`)
+  assert(!lines.includes(19), `T2b: #[cfg(test)] mod 内 unwrap 跳过（得 ${JSON.stringify(lines)}）`)
+  assert(r.issues.every(i => i.confidence === 'heuristic' && i.note), 'T2b: 全带 heuristic caveat（指向 clippy）')
+  const rt = await handle({ workspace_dir: RWS, file: 'tests/it.rs' }, mockContext)
+  assert(rt.summary.skipped === 'test file' && rt.issues.length === 0, 'T2b: tests/ 文件整体跳过')
 }
 
 // ═══════════════════════════════════════════
@@ -124,6 +166,37 @@ console.log('\n═══ T7: sweep_dead_code ═══')
   const unusedImports = r.dead_code.filter(d => d.type === 'unused_import')
   assert(unusedImports.some(d => d.symbol === 'hashlib'), 'T7: detects unused import hashlib')
   assert(r.summary.unused_imports >= 1, `T7: ${r.summary.unused_imports} unused imports`)
+}
+
+// ═══════════════════════════════════════════
+console.log('\n═══ T7b: sweep_dead_code Rust use（第 8 轮） ═══')
+{
+  const handle = await loadTool('tool-dead-code-sweeper')
+  const RWS = '/tmp/opencode/dc-rust-ws'
+  rmSync(RWS, { recursive: true, force: true })
+  mkdirSync(join(RWS, 'src'), { recursive: true })
+  writeFileSync(join(RWS, 'src/lib.rs'), `use std::collections::HashMap;
+use serde::Serialize;
+pub use crate::api::PublicThing;
+use std::io::Read;
+use std::fmt::Debug as FmtDebug;
+
+fn build() -> HashMap<String, u32> {
+    let mut m = HashMap::new();
+    let mut f = std::fs::File::open("x").unwrap();
+    let mut buf = String::new();
+    f.read_to_string(&mut buf).unwrap();
+    m
+}
+`)
+  const r = await handle({ workspace_dir: RWS, scope: 'src/lib.rs' }, mockContext)
+  const ui = r.dead_code.filter(d => d.type === 'unused_import')
+  const syms = ui.map(d => d.symbol)
+  assert(syms.includes('Serialize'), `T7b: 未用 use Serialize 被报告（得 ${JSON.stringify(syms)}）`)
+  assert(syms.includes('FmtDebug'), `T7b: use as 别名 FmtDebug 未用被报告（得 ${JSON.stringify(syms)}）`)
+  assert(!syms.includes('HashMap'), `T7b: 在用 HashMap 不误报（得 ${JSON.stringify(syms)}）`)
+  assert(!syms.includes('PublicThing'), `T7b: pub use re-export 不报（得 ${JSON.stringify(syms)}）`)
+  assert(ui.every(d => d.confidence === 'heuristic' && d.note), 'T7b: Rust 未用导入带 heuristic caveat（trait 隐式使用）')
 }
 
 // ═══════════════════════════════════════════
