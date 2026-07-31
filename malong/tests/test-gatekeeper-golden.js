@@ -199,5 +199,26 @@ r = await fixImports({ workspace_dir: WS, file: 'src/regex2.js' }, context)
 const regexUndef2 = r.issues.filter(i => i.type === 'undefined_symbol')
 assert(regexUndef2.length === 0, `转义开头正则 /\\d+/g 不误报（得 ${JSON.stringify(regexUndef2)})`)
 
+// ═══════════ golden 18：recall 侧（该报必报 —— 0 误报门禁的单腿修补） ═══════════
+console.log('── golden 18: recall 该报必报 ──')
+// 1. fix_imports：真 undefined 符号必报（含正则行邻域 —— 正则剥离不得连真引用一起剥掉）
+writeFileSync(`${WS}/src/recall1.js`, `const re = /\\w+/g\nexport function run(text) {\n  return helperMissing(text)\n}\n`)
+r = await fixImports({ workspace_dir: WS, file: 'src/recall1.js' }, context)
+const recallUndef = r.issues.filter(i => i.type === 'undefined_symbol')
+assert(recallUndef.some(i => i.symbol === 'helperMissing'), `真未定义符号 helperMissing 必报（得 ${JSON.stringify(recallUndef)})`)
+assert(recallUndef.every(i => i.symbol !== 'text' && i.symbol !== 're' && i.symbol !== 'w'), `参数/正则/字符串符号不漏报混淆（得 ${JSON.stringify(recallUndef)})`)
+// 2. active_todos：不同目录结构下真 TODO 必报、fixtures 仍跳过
+mkdirSync(`${WS}/modules/lib`, { recursive: true })
+writeFileSync(`${WS}/modules/lib/core.js`, '// FIXME: 真待修\nconst x = 1\n')
+r = await activeTodos({ workspace_dir: WS, scope: 'modules' }, {})
+assert(r.todos.some(t => t.file === 'modules/lib/core.js' && t.type === 'FIXME'), `嵌套目录真 FIXME 必报（得 ${JSON.stringify(r.todos)})`)
+assert(r.todos.every(t => !t.file.startsWith('fixtures')), `fixtures 全局仍跳过`)
+// 3. config_drift：多行 + 字符串混合场景真缺失变量必报
+writeFileSync(`${WS}/src/recall2.js`, `export async function run() {\n  const msg = 'default: NODE_ENV not set'\n  const key = process.env.REALLY_MISSING_KEY\n  return { msg, key }\n}\n`)
+r = await configDrift({ workspace_dir: WS, file: 'src/recall2.js' }, {})
+const recallEnv = r.drifts.filter(d => d.type === 'missing_env_var')
+assert(recallEnv.some(d => d.name === 'REALLY_MISSING_KEY'), `字符串邻域真缺失变量必报（得 ${JSON.stringify(recallEnv)})`)
+assert(!recallEnv.some(d => d.name === 'NODE_ENV'), `字符串里的环境变量名不误报`)
+
 console.log(`\n=== test-gatekeeper-golden: ${pass} passed, ${fail} failed ===`)
 process.exit(fail ? 1 : 0)

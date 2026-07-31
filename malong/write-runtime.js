@@ -407,12 +407,6 @@ export async function writeSymbol(args, context) {
       return { success: false, error: { code: 'VALIDATION_FAILED', message: 'validation failed and block_on_validation_error is set', validation }, trace_id }
     }
 
-    // 7) journal（写前建，staged）
-    journal = createJournal(workspaceDir, filePath, absPath, content, {
-      editMode, boundary, state: 'staged', base_file_hash: base?.file?.hash || null,
-    })
-    updateJournalState(journal.dir, { state: 'staged', new_hash: sha256(newContent) })
-
     if (dryRun) {
       lock.release()
       return {
@@ -430,6 +424,13 @@ export async function writeSymbol(args, context) {
         duration_ms: Date.now() - t0,
       }
     }
+
+    // 7) journal（写前建，staged；dryRun 已在上面返回，不产生 staged 残留——
+    //    残留 staged 会被下次 recoverJournals 当崩溃事务回滚，覆盖后来的合法写入）
+    journal = createJournal(workspaceDir, filePath, absPath, content, {
+      editMode, boundary, state: 'staged', base_file_hash: base?.file?.hash || null,
+    })
+    updateJournalState(journal.dir, { state: 'staged', new_hash: sha256(newContent) })
 
     // 8) 原子写：temp + rename（附录 D）
     const tmpPath = `${absPath}.tmp`

@@ -3,6 +3,7 @@
 import { join, basename } from 'node:path'
 import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, renameSync, appendFileSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
+import { sha256 } from './hash-utils.js'
 
 export const JOURNAL_ROOT = '.malong'
 const AUDIT_LOG = 'audit.log'
@@ -40,14 +41,32 @@ export function recoverJournals(workspaceDir) {
     const dir = join(root, txnDir)
     let state = null
     try { state = JSON.parse(readFileSync(join(dir, 'state.json'), 'utf-8')) } catch { continue }
-    if (state.state === 'committed' || state.state === 'rolled_back') continue
+    if (state.state === 'committed' || state.state === 'rolled_back' || state.state === 'abandoned' || state.state === 'needs_review') continue
     // created/staged → 回滚（未 rename 则删除，已 rename 则恢复 backup）
     try {
       const manifest = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf-8'))
       const absPath = join(workspaceDir, manifest.file)
       const backup = join(dir, 'backup', basename(manifest.file))
       if (state.state === 'staged' && existsSync(backup) && existsSync(absPath)) {
-        renameSync(backup, absPath)
+        // 哈希三方判定（防覆盖后来的合法写入）：
+        // 当前 == 写前 → 事务从未落地（dryRun 残留/崩溃在 rename 前）→ 不覆盖，标 abandoned
+        // 当前 == 写后(new_hash) → rename 已成功、崩溃在 committed 前 → 补标 committed
+        // 两者都不是 → 外部修改过 → 绝不覆盖，标 needs_review
+        const curHash = sha256(readFileSync(absPath))
+        const oldHash = sha256(readFileSync(backup))
+        if (curHash === oldHash) {
+          writeFileSync(join(dir, 'state.json'), JSON.stringify({ ...state, state: 'abandoned', abandoned_at: new Date().toISOString() }))
+          recovered.push({ txn_id: txnDir, file: manifest.file, action: 'abandoned' })
+          continue
+        }
+        if (state.new_hash && curHash === state.new_hash) {
+          writeFileSync(join(dir, 'state.json'), JSON.stringify({ ...state, state: 'committed', committed_at: new Date().toISOString() }))
+          recovered.push({ txn_id: txnDir, file: manifest.file, action: 'committed' })
+          continue
+        }
+        writeFileSync(join(dir, 'state.json'), JSON.stringify({ ...state, state: 'needs_review', reason: 'file content differs from both backup and new_hash', needs_review_at: new Date().toISOString() }))
+        recovered.push({ txn_id: txnDir, file: manifest.file, action: 'kept_external_change' })
+        continue
       }
       writeFileSync(join(dir, 'state.json'), JSON.stringify({ ...state, state: 'rolled_back', rolled_back_at: new Date().toISOString() }))
       recovered.push({ txn_id: txnDir, file: manifest.file, action: 'rolled_back' })

@@ -319,9 +319,15 @@ const wDry = await writeSymbol({
 }, wctx)
 assert(wDry.success === true && wDry.dry_run === true, 'P3 dry_run 成功')
 assert(readFileSync(`${WS}/src/auth.py`, 'utf-8') === beforeDry, 'P3 dry_run 不写盘')
-
-// 3.12 undo journal 落盘 + 状态（跳过 dry_run 留下的 staged 目录，找 committed）
+// 3.11b dry_run 不残留 staged journal（残留 staged 会被下次 recoverJournals 当崩溃事务
+// 回滚 → 覆盖后来合法写入，数据丢失 —— 递归进化第 4 轮修复）
 const journalRoot = join(WS, '.malong', 'journal')
+const stagedAfterDry = existsSync(journalRoot) ? readdirSync(journalRoot).filter(d => {
+  try { return JSON.parse(readFileSync(join(journalRoot, d, 'state.json'), 'utf-8')).state === 'staged' } catch { return false }
+}) : []
+assert(stagedAfterDry.length === 0, `P3 dry_run 不残留 staged journal（得 ${stagedAfterDry.length}）`)
+
+// 3.12 undo journal 落盘 + 状态
 assert(existsSync(journalRoot), 'P3 journal 根目录存在')
 const txnDirs = readdirSync(journalRoot)
 assert(txnDirs.length >= 4, `P3 journal txn 目录存在（得 ${txnDirs.length}）`)
@@ -329,6 +335,7 @@ const committedTxns = txnDirs.filter(d => {
   try { return JSON.parse(readFileSync(join(journalRoot, d, 'state.json'), 'utf-8')).state === 'committed' } catch { return false }
 })
 assert(committedTxns.length >= 4, `P3 committed txn 数 >= 4（得 ${committedTxns.length}）`)
+assert(committedTxns.every(d => !stagedAfterDry.includes(d)), 'P3 committed 与 dry_run 残留无交集')
 const lastCommitted = committedTxns[committedTxns.length - 1]
 assert(existsSync(join(journalRoot, lastCommitted, 'backup')), 'P3 journal backup 存在')
 
@@ -355,6 +362,46 @@ unlinkSync(fakeLock)
 // 3.15 写后索引同步：重抽后两个 helper 的 body_hash 都应更新（64 hex）
 const hNow = codeIndex._db.prepare("SELECT body_hash FROM symbols s JOIN files f ON s.file_id = f.id WHERE f.path = 'src/auth.py' AND s.name = 'helper' AND s.type = 'function'").all()
 assert(hNow.length === 2 && hNow.every(h => h.body_hash && h.body_hash.length === 64), `P3 重抽后 helper body_hash 更新（得 ${JSON.stringify(hNow)}）`)
+
+// 3.16 crash recovery 哈希三方判定（staged 不再盲目回滚 —— 递归进化第 4 轮修复）
+const { recoverJournals, createJournal, updateJournalState } = await import(join(MALONG_DIR, 'write-journal.js'))
+const { sha256 } = await import(join(MALONG_DIR, 'hash-utils.js'))
+const recWS = `${WS}/rec`
+rmSync(recWS, { recursive: true, force: true })
+mkdirSync(join(recWS, '.malong', 'journal'), { recursive: true })
+// 场景 A：当前 == 写前（dryRun 残留/崩溃在 rename 前）→ abandoned，文件不动
+writeFileSync(`${recWS}/a.txt`, 'v1')
+const ja = createJournal(recWS, 'a.txt', `${recWS}/a.txt`, 'v1', { editMode: 'patch', state: 'staged' })
+updateJournalState(ja.dir, { state: 'staged', new_hash: sha256('v2') })
+let rec = recoverJournals(recWS)
+assert(rec.some(r => r.txn_id === ja.txnId && r.action === 'abandoned'), `P3 recovery: staged+当前==写前 → abandoned（得 ${JSON.stringify(rec)}）`)
+assert(readFileSync(`${recWS}/a.txt`, 'utf-8') === 'v1', 'P3 recovery: abandoned 不覆盖文件')
+// 场景 B：当前 == new_hash（rename 成功、崩溃在 committed 前）→ 补标 committed，文件不动
+writeFileSync(`${recWS}/b.txt`, 'v2')
+const jb = createJournal(recWS, 'b.txt', `${recWS}/b.txt`, 'v1', { editMode: 'patch', state: 'staged' })
+updateJournalState(jb.dir, { state: 'staged', new_hash: sha256('v2') })
+rec = recoverJournals(recWS)
+assert(rec.some(r => r.txn_id === jb.txnId && r.action === 'committed'), `P3 recovery: staged+当前==写后 → committed（得 ${JSON.stringify(rec)}）`)
+assert(readFileSync(`${recWS}/b.txt`, 'utf-8') === 'v2', 'P3 recovery: committed 不覆盖新内容')
+// 场景 C：当前既非写前也非写后（外部修改过）→ needs_review，绝不覆盖
+writeFileSync(`${recWS}/c.txt`, 'EXTERNAL')
+const jc = createJournal(recWS, 'c.txt', `${recWS}/c.txt`, 'v1', { editMode: 'patch', state: 'staged' })
+updateJournalState(jc.dir, { state: 'staged', new_hash: sha256('v2') })
+rec = recoverJournals(recWS)
+assert(rec.some(r => r.txn_id === jc.txnId && r.action === 'kept_external_change'), `P3 recovery: staged+外部修改 → kept_external_change（得 ${JSON.stringify(rec)}）`)
+assert(readFileSync(`${recWS}/c.txt`, 'utf-8') === 'EXTERNAL', 'P3 recovery: 外部修改不被回滚覆盖')
+// 场景 D：旧语义回归（真实崩溃在 rename 前 → staged + 当前==写前，旧代码会 rename 覆盖；新代码标 abandoned 同样安全）
+assert(recoverJournals(recWS).length === 0, 'P3 recovery: 二次运行无重复处理')
+
+// 3.17 括号平衡校验字符串感知（字符串/注释里的括号不是代码结构 —— 递归进化第 4 轮修复）
+const { checkBracketBalance } = await import(join(MALONG_DIR, 'write-edit.js'))
+assert(checkBracketBalance('print(")")').ok === true, 'P3 字符串含 ) 不误报 unbalanced')
+assert(checkBracketBalance("const s = '(not closed'").ok === true, 'P3 单引号串含 ( 不误报')
+assert(checkBracketBalance('const t = `template with }`').ok === true, 'P3 模板串含 } 不误报')
+assert(checkBracketBalance('// comment with )').ok === true, 'P3 行注释含 ) 不误报')
+assert(checkBracketBalance('/* block ) */ x = 1').ok === true, 'P3 块注释含 ) 不误报')
+assert(checkBracketBalance('function f() { return 1 }').ok === true, 'P3 正常代码仍 pass')
+assert(checkBracketBalance('function f( { return 1 }').ok === false, 'P3 真不平衡仍报')
 
 // ══════════════ 汇总 ══════════════
 console.log(`\n${pass} passed, ${fail} failed`)

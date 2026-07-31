@@ -70,10 +70,22 @@ export function applyInsertAfter(lines, range, newContent) {
   return { lines: [...before, ...newContent.split('\n'), ...after], diff: makeSimpleDiff(lines, [...before, ...newContent.split('\n'), ...after]) }
 }
 
+function stripLiteralsForBracket(text) {
+  // 字符串/注释里的括号不是代码结构：先剥掉再平衡校验（尽力而为，不处理 ${} 内的代码）
+  return text
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/\/\/.*$/gm, ' ')
+    .replace(/#.*$/gm, ' ')
+    .replace(/`(?:[^`\\]|\\.)*`/g, ' ')
+    .replace(/"(?:[^"\\]|\\.)*"/g, ' ')
+    .replace(/'(?:[^'\\]|\\.)*'/g, ' ')
+}
+
 export function checkBracketBalance(text) {
+  const code = stripLiteralsForBracket(text)
   const pairs = { '(': ')', '[': ']', '{': '}' }
   const stack = []
-  for (const ch of text) {
+  for (const ch of code) {
     if (pairs[ch]) stack.push(ch)
     else if (Object.values(pairs).includes(ch)) {
       const open = stack.pop()

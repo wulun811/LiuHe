@@ -1,5 +1,5 @@
 // 提取正确性回归测试：JS/TS 解构绑定 + TS 专属构造
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { connect, extractAll, extractTopLevel, extractSymbols } from '../parse-client.js'
@@ -91,6 +91,39 @@ const tpl = \`import('./in-template.js')\`
   const fakeIdx = dynSrc.indexOf("import('./fake.js')")
   assert(r6.refs.some(r => r.module === './real.js' && r.line === dynSrc.slice(0, realIdx).split('\n').length), `动态 import 行号正确（${r6.refs.find(r => r.module === './real.js')?.line}）`)
   assert(r6.refs.find(r => r.module === './real.js')?.line === 1, `行号 = 1（得 ${r6.refs.find(r => r.module === './real.js')?.line}）`)
+
+  console.log('\n── 7. 中文符号/中文路径/中文注释（多字节行号 + 字符串陷阱） ──')
+  const cjkSrc = [
+    '// 注释一：中文（含括号）',
+    'export const 前缀 = "中文（括号）内容"',
+    'export function 函数甲() {',
+    '  const 局部 = 1',
+    '  return 局部',
+    '}',
+    '',
+    'export class 类乙 {',
+    '  async 方法(参数) {',
+    '    return 参数',
+    '  }',
+    '}',
+    'const doc = "function fake() { return 1 }"',
+  ].join('\n') + '\n'
+  const cjkPath = '/tmp/opencode/cjk/中文固化.js'
+  mkdirSync('/tmp/opencode/cjk', { recursive: true })
+  writeFileSync(cjkPath, cjkSrc)
+  const r7 = await extractAll(cjkSrc, '.js', cjkPath)
+  const names7 = Object.fromEntries(r7.symbols.map(s => [s.name, s.type]))
+  assert(names7['前缀'] === 'variable', `中文变量: 前缀（得 ${JSON.stringify(names7)}）`)
+  assert(names7['函数甲'] === 'function', '中文函数: 函数甲')
+  assert(names7['类乙'] === 'class', '中文类: 类乙')
+  assert(names7['方法'] === 'method', '中文方法: 方法')
+  assert(!r7.symbols.some(s => s.name.startsWith('fake')), '字符串内的 fake 函数不提取')
+  assert(!r7.symbols.some(s => s.name === '局部' && s.type !== 'variable'), '中文参数不误报')
+  const fn7 = r7.symbols.find(s => s.name === '函数甲')
+  assert(fn7 && fn7.startLine === 3 && fn7.endLine === 6, `中文函数行号精确（得 ${JSON.stringify(fn7)}）`)
+  const cls7 = r7.symbols.find(s => s.name === '类乙')
+  assert(cls7 && cls7.startLine === 8 && cls7.endLine === 12, `中文类行号精确（得 ${JSON.stringify(cls7)}）`)
+  assert(r7.symbols.every(s => s.startLine >= 1 && s.endLine >= s.startLine), '全部行号有效')
 
   console.log(`\n═══════════════════════════════════════`)
   console.log(`提取正确性: ${passed} passed, ${failed} failed`)
