@@ -45,8 +45,13 @@ async function buildTree(files, rootDir, relevantFiles, relevantEntities) {
     for (let i = 0; i < parts.length; i++) {
       const isLast = i === parts.length - 1
       if (isLast) {
-        const symbols = file.isCode && readFileSync(file.path, 'utf-8').length < 50000
-          ? await extractTopSymbols(readFileSync(file.path, 'utf-8'), extname(file.path)) : []
+        // 7：先 stat 后整读——巨型生成文件（bundle/vendor）readFileSync 抛 RangeError 毁掉整个 map 工具
+        let src = null
+        try {
+          if (statSync(file.path).size < 50000) src = readFileSync(file.path, 'utf-8')
+        } catch {}
+        const symbols = file.isCode && src != null
+          ? await extractTopSymbols(src, extname(file.path)) : []
         const filtered = entitySet ? symbols.filter(s => entitySet.has(s.name)) : symbols
         const entry = { name: parts[i], type: 'file', symbols: filtered, depth: i + 1 }
         current.children.push(entry)
@@ -98,8 +103,12 @@ async function getFilesByEntities(files, rootDir, entities) {
   let parseCount = 0
   for (const f of files) {
     if (!f.isCode) continue
-    const source = readFileSync(f.path, 'utf-8')
-    if (source.length > 100000) continue
+    // 7：先 stat 后整读（超大文件 RangeError 直接毁掉整个 getFilesByEntities）
+    let source = null
+    try {
+      if (statSync(f.path).size <= 100000) source = readFileSync(f.path, 'utf-8')
+    } catch {}
+    if (source == null) continue
     const syms = await extractTopSymbols(source, extname(f.path))
     if (syms.some(s => entitySet.has(s.name))) {
       result.push(f)

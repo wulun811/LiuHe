@@ -1,4 +1,4 @@
-import { join, extname, basename } from 'node:path'
+import { join, extname, basename, resolve, sep } from 'node:path'
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { execSync } from 'node:child_process'
 import { parseOutput } from './parsers.js'
@@ -11,6 +11,8 @@ function sanitizeScope(scope) {
   if (typeof scope !== 'string') return null
   if (!SAFE_SCOPE_RE.test(scope)) return null
   if (scope.split(/[ \t]/).some(seg => seg.split('/').includes('..'))) return null
+  // 7（T3）：`-` 开头段是 CLI 选项注入面（-p 执行任意模块 / --watch 挂起 / -x 改语义），白名单内但必须拒
+  if (scope.split(/[ \t]/).some(seg => seg.startsWith('-'))) return null
   return scope
 }
 
@@ -80,7 +82,10 @@ function enrichFailures(failures, workspaceDir) {
 
     if (f.file && f.line) {
       try {
-        const absPath = join(workspaceDir, f.file)
+        // 7（T4）：f.file 来自测试输出解析，可被 `../../etc/passwd::x FAILED` 污染 → 任意文件内容泄露
+        const abs = resolve(workspaceDir, f.file)
+        if (!abs.startsWith(resolve(workspaceDir) + sep) && abs !== resolve(workspaceDir)) continue
+        const absPath = abs
         if (existsSync(absPath)) {
           const content = readFileSync(absPath, 'utf-8')
           const lines = content.split('\n')
@@ -150,7 +155,8 @@ async function handleRun(args, context) {
     return { error: 'invalid_input', message: `Unsafe scope: "${scope}". Only alphanumeric, /, ., -, :, spaces allowed.` }
   }
   const timeout = (args.timeout ?? 60) * 1000
-  if (typeof args.timeout !== 'number' || !Number.isFinite(timeout) || timeout <= 0) {
+  // 7（T1）：旧 `typeof args.timeout !== 'number'` 在未传时恒真 → 默认值 60 是死代码，默认路径 100% 报错
+  if (args.timeout !== undefined && (typeof args.timeout !== 'number' || !Number.isFinite(timeout) || timeout <= 0)) {
     return { error: 'invalid_input', message: 'timeout must be a positive number (seconds)' }
   }
   const framework = args.framework || detectFramework(workspaceDir)

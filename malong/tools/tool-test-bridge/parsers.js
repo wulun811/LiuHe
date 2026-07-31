@@ -55,7 +55,9 @@ function extractPytestTraceback(lines, startIdx) {
 
   for (let i = startIdx + 1; i < Math.min(startIdx + 40, lines.length); i++) {
     const l = lines[i]
-    if (/^(PASSED|FAILED|ERROR|=+ )/.test(l) && i > startIdx + 1) break
+    // 7（T2）：旧只认 (PASSED|FAILED|ERROR|=+ ) 开头行——verbose 里下一个测试头是
+    // `path::test FAILED`（路径开头），扫过它后其 E/帧行会覆盖前一个失败的归因
+    if (i > startIdx + 1 && (/^(PASSED|FAILED|ERROR|=+ )/.test(l) || /^\S+::[^\s]+?\s+(PASSED|FAILED|ERROR)\s*$/.test(l))) break
     tbLines.push(l)
 
     const em = /^E\s+(\w+(?:\.\w+)*):\s*(.+)/.exec(l)

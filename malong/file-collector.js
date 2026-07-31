@@ -37,6 +37,13 @@ export function isIgnored(relPath, rules, isDir) {
         if (relPath.split('/').some(seg => seg.includes(post.replace(/^\//, '')))) return true
         continue
       }
+      if (rule.startsWith('**/')) {
+        // 7（T12）：**/dist/** → post='' 且 post 不含 '/'，旧逻辑落到 startsWith('*') 分支
+        // → endsWith('') 恒真 → 整个仓库被忽略（reindex/read-symbol 全链路静默空扫描）
+        const mid = rule.split('**/')[1]?.split('/**')[0] || ''
+        if (mid && relPath.split('/').some(s => s === mid)) return true
+        continue
+      }
       if (rule.startsWith('*')) {
         if (!isDir && relPath.split('/').pop().endsWith(post)) return true
         continue

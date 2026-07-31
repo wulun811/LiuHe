@@ -140,6 +140,7 @@ function _setupHandlers() {
       reject(new Error('connection closed'))
     }
     _pending.clear()
+    _buffer = Buffer.alloc(0) // B2：残留半帧缓冲跨连接污染（帧中断 + 重连 = 边界错位）
     if (_stopped) return // 显式 stop 后不再自愈重连（P2-A4）
     // auto-reconnect after 1s，设置 _reconnectPromise 让后续请求等待
     let reconnectResolve
@@ -147,6 +148,7 @@ function _setupHandlers() {
       reconnectResolve = resolve
     })
     setTimeout(async () => {
+      if (_stopped) return // B6：disconnect 后已调度的重连不得复活（连接会照常建立 → 僵尸连接）
       _core?.log('info', '[parse-client] attempting reconnect...')
       _reconnectPromise = null  // 清除 promise，让 connect() 执行实际连接
       const ok = await connect()
@@ -167,7 +169,8 @@ function _startHeartbeat() {
   _stopHeartbeat()
   _heartbeatTimer = setInterval(() => {
     if (!_connected) return
-    request('health', {}, 5000).catch(() => {
+    // B7：heartbeat 不计熔断——高负载排队 >5s 是服务活着只是慢，KILL 健康进程会连带全部在途请求失败
+    request('health', {}, 5000, 0, true).catch(() => {
       _core?.log('warn', '[parse-client] heartbeat failed')
     })
   }, HEARTBEAT_INTERVAL_MS)
@@ -235,6 +238,7 @@ async function _preheat() {
 }
 
 function _circuitRecordFailure() {
+  if (_circuitOpen) return // B3：open 后不再递增/重入重启（在途请求超时反复 kill 进程）
   _circuitFailures++
   if (_circuitFailures >= CIRCUIT_BREAKER_THRESHOLD) {
     _circuitOpen = true
@@ -260,17 +264,32 @@ function _circuitRecordSuccess() {
   _circuitFailures = 0
 }
 
+let _restarting = false
 async function _restartProcess() {
-  if (_childPid) {
-    try { process.kill(_childPid, 'SIGKILL') } catch {}
-    _childPid = null
-  }
-  try { unlinkSync(SOCKET_PATH) } catch {}
-  const ok = await _startProcess()
-  if (ok) {
-    _circuitOpen = false
-    _circuitFailures = 0
-    connect().catch(() => {})
+  if (_restarting) return // B5：并发触发互斥（两个 daemon 抢同一 socket，孤儿进程泄漏）
+  _restarting = true
+  try {
+    if (_childPid) {
+      try { process.kill(_childPid, 'SIGKILL') } catch {}
+      _childPid = null
+    }
+    try { unlinkSync(SOCKET_PATH) } catch {}
+    const ok = await _startProcess()
+    if (ok) {
+      _circuitOpen = false
+      _circuitFailures = 0
+      connect().catch(() => {})
+    } else {
+      // B3：重启失败也要调度 half-open——旧：open 后无任何路径能重置，解析功能永久不可用
+      setTimeout(() => {
+        _circuitOpen = false
+        _circuitFailures = 0
+        _core?.log('info', '[parse-client] circuit breaker half-open after failed restart, retrying...')
+        connect().catch(() => {})
+      }, 60000)
+    }
+  } finally {
+    _restarting = false
   }
 }
 
@@ -309,7 +328,7 @@ function _processBuffer() {
   }
 }
 
-async function request(method, params, timeoutMs = REQUEST_TIMEOUT_MS, priority = 0) {
+async function request(method, params, timeoutMs = REQUEST_TIMEOUT_MS, priority = 0, noCircuitFailure = false) {
   if (_circuitOpen) {
     throw new Error('circuit breaker open')
   }
@@ -356,7 +375,7 @@ async function request(method, params, timeoutMs = REQUEST_TIMEOUT_MS, priority 
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       _pending.delete(id)
-      _circuitRecordFailure()
+      if (!noCircuitFailure) _circuitRecordFailure()
       reject(new Error(`request timeout after ${timeoutMs}ms`))
     }, timeoutMs)
 
@@ -368,7 +387,7 @@ async function request(method, params, timeoutMs = REQUEST_TIMEOUT_MS, priority 
 
     _pending.set(id, {
       resolve: (v) => { _circuitRecordSuccess(); resolve(v) },
-      reject: (e) => { _circuitRecordFailure(); reject(e) },
+      reject: (e) => { if (!noCircuitFailure) _circuitRecordFailure(); reject(e) },
       rawReject: reject,
       timer,
     })

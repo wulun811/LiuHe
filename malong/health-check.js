@@ -1,4 +1,5 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync, accessSync, constants, unlinkSync, statSync } from 'node:fs'
+import net from 'node:net'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { homedir } from 'node:os'
@@ -156,7 +157,9 @@ export async function runHealthCheck({ stateDir, toolsDir, workspacesDir, regist
           databases.push({ workspace: e.name, size_mb: sizeMB, last_access: lastAccess })
           if (Database) {
             try {
-              const db = new Database(dbPath)
+              // 7（#18）：busy_timeout——恰逢 indexBatch 的 DROP/CREATE INDEX（schema 锁）时
+              // SQLITE_BUSY 被旧实现当损坏计 WARN
+              const db = new Database(dbPath, { timeout: 5000 })
               const r = db.pragma('integrity_check')
               const integrityOk = Array.isArray(r) && r.length === 1 && r[0]?.integrity_check === 'ok'
               db.close()
@@ -223,10 +226,22 @@ export async function runHealthCheck({ stateDir, toolsDir, workspacesDir, regist
     }
   }
 
+  // 7：先探测 socket 是否活着再删——旧：直接 unlinkSync 会把正在监听的 UDS 删掉，
+  // 之后所有新连接 ENOENT 直到重启（stateDir 的 .. 恰好等于 code-index 的 socket 目录）
   const sockPath = join(stateDir, '..', 'code-index.sock')
   if (existsSync(sockPath)) {
-    try { unlinkSync(sockPath); add('Stale socket', 'CLEANED', sockPath) }
-    catch (e) { add('Stale socket', 'WARN', `cannot remove: ${e.message}`) }
+    const alive = await new Promise((resolve) => {
+      const s = net.connect(sockPath)
+      s.once('connect', () => { s.destroy(); resolve(true) })
+      s.once('error', () => resolve(false))
+      setTimeout(() => { s.destroy(); resolve(false) }, 500).unref()
+    })
+    if (alive) {
+      add('Stale socket', 'PASS', `active socket ${sockPath}`)
+    } else {
+      try { unlinkSync(sockPath); add('Stale socket', 'CLEANED', sockPath) }
+      catch (e) { add('Stale socket', 'WARN', `cannot remove: ${e.message}`) }
+    }
   } else {
     add('Stale socket', 'PASS')
   }

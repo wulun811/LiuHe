@@ -104,7 +104,9 @@ async function checkRules(file, content, rules, langParser) {
               // 打开三引号：支持前缀（f"""）与赋值（x = """）——行内任意位置首个三引号
               // 旧实现只认行首：赋值形式不识别（收尾行被当新打开 → 剩余全漏检）——
               // 递归进化第 5 轮 P1#12
-              const open = trimmed.match(/(?:[frbu]{0,2})?[^"'#]*?(\"\"\"|''')/)?.[1]
+              // 7（T14）：[^"'#]*? 可空匹配 → 引擎可从注释内位置重新锚定，`x = 5  # """` 命中注释文本
+              const codePart = trimmed.replace(/#.*$/, '')
+              const open = codePart.match(/(?:[frbu]{0,2})?[^"']*?(\"\"\"|''')/)?.[1]
               if (open) {
                 const rest = trimmed.slice(trimmed.indexOf(open) + open.length)
                 if (!rest.includes(open)) { inString = true; openDelim = open }

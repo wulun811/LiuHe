@@ -163,7 +163,8 @@ function initDb(dir) {
 
 function openHealthy(dbPath) {
   const attempt = () => {
-    const db = new Database(dbPath)
+    // 7：锁冲突≠损坏——busy_timeout 5s 让并发进程的写锁先等再判，SQLITE_BUSY 不删库
+    const db = new Database(dbPath, { timeout: 5000 })
     const r = db.pragma('integrity_check')
     const ok = Array.isArray(r) && r.length === 1 && r[0]?.integrity_check === 'ok'
     if (!ok) { db.close(); throw new Error('integrity_check failed') }
@@ -217,9 +218,9 @@ class CodeIndex {
     if (this._db && this._currentWorkspace === workspaceDir) {
       return // 已经初始化过
     }
-    if (this.indexing && this._db && this._currentWorkspace !== workspaceDir) {
-      // 后台索引持有共享 _db 句柄：此时切换 workspace 会把 A 的文件写进 B 的库并清掉 B 的记录
-      // （递归进化第 5 轮 P0#8）。fail loud：拒绝切换，等索引完成（或 blocking reindex）
+    // 7：后台索引期间切换 workspace 会把 A 的文件写进 B 的库（第五轮 P0#8）。
+    // 注：this._indexing（class 字段）——服务对象上的 indexing 存取器在此处不可见（之前用 this.indexing 恒 undefined，防护死代码）
+    if (this._indexing && this._db && this._currentWorkspace !== workspaceDir) {
       throw new Error(`workspace switch to "${workspaceDir}" during background indexing of "${this._currentWorkspace}"; wait for indexing to finish or reindex with blocking=true`)
     }
     if (this._db) {
@@ -720,7 +721,10 @@ class CodeIndex {
             for (const f of files) {
               const fullPath = join(dir, f)
               if (existsSync(fullPath)) {
-                doSyncFileChange(fullPath)
+                // 7：fire-and-forget 必须 .catch——parse 服务抖动时 unhandled rejection 直接崩整个 MCP 进程
+                doSyncFileChange(fullPath).catch((e) => {
+                  self._core.log('warn', `[code-index] watcher sync failed for ${fullPath}: ${e.message}`)
+                })
               }
             }
           }, WATCHER_DEBOUNCE)
@@ -1080,11 +1084,18 @@ class CodeIndex {
         self._indexing = true
         self._core.log('info', `[code-index] indexing ${rootDir}...`)
         const t0 = Date.now()
-        const results = await self.walkAndIndex(rootDir)
-        self._indexing = false
-        const elapsed = Date.now() - t0
-        self._core.log('info', `[code-index] indexed ${results.length} files in ${elapsed}ms`)
-        return { status: 'done', files: results.length, elapsed }
+        try {
+          const results = await self.walkAndIndex(rootDir)
+          const elapsed = Date.now() - t0
+          self._core.log('info', `[code-index] indexed ${results.length} files in ${elapsed}ms`)
+          return { status: 'done', files: results.length, elapsed }
+        } catch (e) {
+          self._core.log('error', `[code-index] indexProject failed: ${e.message}`)
+          throw e
+        } finally {
+          // 7：失败也必须复位——旧：抛错后 _indexing 永真，所有 reindex 永久返回 already indexing
+          self._indexing = false
+        }
       },
 
       getStats() {
@@ -1092,7 +1103,7 @@ class CodeIndex {
         const symbols = self._db.prepare('SELECT COUNT(*) as cnt FROM symbols').get().cnt
         const refs = self._db.prepare('SELECT COUNT(*) as cnt FROM refs').get().cnt
         const dbPath = self._currentWorkspace ? join(self._core.getWorkspaceDir(self._currentWorkspace), 'code-index.db') : null
-        const fileSize = dbPath && existsSync(dbPath) ? readFileSync(dbPath).length : 0
+        const fileSize = dbPath && existsSync(dbPath) ? statSync(dbPath).size : 0 // 7：整读 DB 只为取字节数 → statSync
         return { files, symbols, refs, dbSize: fileSize, indexing: self._indexing }
       },
 

@@ -334,6 +334,7 @@ function applyRemovals(newLines, removals) {
 async function analyzeFileAST(content, lang, currentFile, langParser) {
   if (!langParser || (lang !== 'javascript' && lang !== 'typescript')) return null
   const ext = lang === 'typescript' ? '.ts' : '.js'
+  const lines = content.split('\n') // 7（T5）：旧引用未定义变量 lines → ReferenceError 被 catch 吞 → AST 分析恒死代码
 
   // async path: try extractAllAsync first
   try {
@@ -494,24 +495,29 @@ export function analyzeFile(content, lang, currentFile = '') {
           const absModule = resolveRelativeImport(module, currentFile)
           relativeImports.push({ relative: module, absolute: absModule, line: i + 1 })
         }
-        if (importMatch[1]) {
-          const names = importMatch[2].split(',').map(s => {
-            const parts = s.trim().split(/\s+as\s+/)
-            return { name: parts[parts.length - 1].trim(), line: i + 1, statement: trimmed }
-          })
-          imports.push(...names)
-        } else {
-          const names = importMatch[2] ? importMatch[2].split(',').map(s => {
-            const parts = s.trim().split(/\s+as\s+/)
-            return { name: parts[parts.length - 1].trim(), line: i + 1, statement: trimmed }
-          }) : []
-          imports.push(...names)
-        }
+        const specText = (importMatch[2] || '').replace(/^\(|\)$/g, '') // 7：from x import (a, b) 括号剥除，否则名含 '(' 报 undefined
+        const names = specText.split(',').map(s => {
+          const parts = s.trim().split(/\s+as\s+/)
+          return { name: parts[parts.length - 1].trim(), line: i + 1, statement: trimmed }
+        }).filter(n => n.name && n.name !== '*') // 7：`from os import *` 通配导入永不 used → 删行 = 运行时 NameError
+        // 7（T8）：`import os.path` 使用判定按首段（代码引用 os）；`import a, b` 逐项取首段
+        const normalized = names.map(n => ({ ...n, name: n.name.split('.')[0] }))
+        imports.push(...normalized)
       }
     } else {
       let jm
-      if ((jm = trimmed.match(/^import\s+\{([^}]+)\}\s+from\s+['"]/))) {
+      if (trimmed.startsWith('import type ')) {
+        // 7（T13）：TS 类型导入跳过——import type { Foo } 捕获 'type' → 恒真误报删除合法导入
+      } else if ((jm = trimmed.match(/^import\s+\{([^}]+)\}\s+from\s+['"]/))) {
         jm[1].split(',').forEach(s => {
+          let name = s.trim().split(/\s+as\s+/).pop().trim()
+          name = name.replace(/^type\s+/, '') // 7：import { type Bar, used } 的内联 type 修饰
+          if (name) imports.push({ name, line: i + 1, statement: trimmed })
+        })
+      } else if ((jm = trimmed.match(/^import\s+(\w+)\s*,\s*\{([^}]+)\}\s+from\s+['"]/))) {
+        // 7（T9）：import React, { useState } from 'react'（默认+命名混合）旧全不匹配 → useState 报 undefined
+        imports.push({ name: jm[1], line: i + 1, statement: trimmed })
+        jm[2].split(',').forEach(s => {
           const name = s.trim().split(/\s+as\s+/).pop().trim()
           if (name) imports.push({ name, line: i + 1, statement: trimmed })
         })
@@ -684,6 +690,22 @@ function stripCommentsAndStrings(content, lang) {
     s = s.replace(/"""[\s\S]*?"""/g, ' ')
     s = s.replace(/'''[\s\S]*?'''/g, ' ')
     s = s.replace(/#.*$/gm, ' ')
+    // 7（T10）：f-string 整体被剥 → {config.timeout} 的引用丢失 → 在用导入被删（运行时 NameError）。
+    // f-string 先处理：保留 {expr} 内标识符（config.timeout → config；"key" 字面量弃掉）
+    s = s.replace(/f("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')/g, (m, str) => {
+      const inner = str.slice(1, -1)
+      let out = ''
+      const re = /\{([^{}]*)\}/g
+      let mm
+      while ((mm = re.exec(inner)) !== null) {
+        const expr = mm[1]
+          .replace(/['"][^'"]*['"]/g, ' ')
+          .replace(/\s*\.\s*\w+(?:\s*\([^)]*\))?/g, '') // 属性访问/方法调用 → 只留对象名
+          .replace(/[^\w\s_]/g, ' ')
+        out += ' ' + expr + ' '
+      }
+      return out || ' '
+    })
     s = s.replace(/"(?:[^"\\]|\\.)*"/g, ' ')
     s = s.replace(/'(?:[^'\\]|\\.)*'/g, ' ')
   } else {
@@ -700,9 +722,10 @@ function stripCommentsAndStrings(content, lang) {
       }
       return ' ' + parts.join(' ') + ' '
     })
-    // 正则字面量（含 flags）：体与 flag 都不是标识符引用，整体剥掉（先于引号剥离，体可能含引号）。
-    // body 首字符非空格：`a / b / c` 除法链的 body 必以空格开头，正则 body 一般不以空格开头（除法安全）
-    s = s.replace(/\/((?:\\.|[^\\/\n ])(?:(?:[^\\/\n]|\\.)*?))\/([gimsuy]*)/g, ' ')
+    // 7（T11）：旧正则剥除只看 body 首字符非空格——`a/b/c` 除法链 body 首字符 'a' 也非空格 → 误剥。
+    // 正则字面量只在前置字符是「表达式开符」（=([{:;,!&|? 或行首）时剥除；return /re/ 等场景
+    // 转为不剥（安全方向：漏剥最多误报 undefined，误剥会删在用导入）
+    s = s.replace(/(^|[=([{:;,!&|?])\s*\/((?:\\.|[^\\/\n])(?:(?:[^\\/\n]|\\.)*?))\/([gimsuy]*)/g, '$1 ')
     s = s.replace(/"(?:[^"\\]|\\.)*"/g, ' ')
     s = s.replace(/'(?:[^'\\]|\\.)*'/g, ' ')
   }

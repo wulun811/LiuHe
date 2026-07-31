@@ -16,7 +16,7 @@ import { countOccurrences, makeSimpleDiff, applyReplace, applyBodyEdit, applyIns
 import { createJournal, updateJournalState, auditLog, recoverJournals, JOURNAL_ROOT } from './write-journal.js'
 
 const LOCK_TIMEOUT_MS = 2000
-const STALE_LOCK_MS = 10000
+const STALE_LOCK_MS = 30000 // 7：10s 太短——锁内 await validateSyntax 异步解析可能 >10s，第二进程盗锁 → 双写覆盖
 const MAX_LIVE_READ = 1024 * 1024
 
 export function traceId() {
@@ -38,7 +38,18 @@ export async function acquireLock(absPath, timeoutMs = LOCK_TIMEOUT_MS) {
         release() {
           if (released) return
           released = true
-          try { unlinkSync(lockPath) } catch {}
+          // 7：锁归属校验——锁文件写了 pid 却从不校验，陈旧重建后 release 会删掉新所有者的锁
+          // → 三方并发 rename，后写胜出，静默覆盖。release 只删「自己还持有」的锁
+          try {
+            const st = statSync(lockPath)
+            if (Date.now() - st.mtimeMs > STALE_LOCK_MS) return // 已被判陈旧重建，锁已属于他人
+            const content = readFileSync(lockPath, 'utf-8')
+            const holderPid = JSON.parse(content).pid
+            if (holderPid !== process.pid) return // 他人持有，不删
+            unlinkSync(lockPath)
+          } catch {
+            try { unlinkSync(lockPath) } catch {}
+          }
         },
       }
     } catch (e) {
@@ -158,6 +169,10 @@ export async function writeSymbol(args, context) {
 
   if (editMode !== 'patch' && !locator?.name && !locator?.symbol_id) {
     return { success: false, error: { code: 'missing_parameter', message: 'replace_symbol requires locator.name or locator.symbol_id; for non-code files use edit_mode=patch.' }, trace_id }
+  }
+  if (editMode !== 'patch' && typeof args.content !== 'string') {
+    // 7（F8）：content 缺失旧实现 TypeError 逃逸（undefined.split），调用方收到 throw 而非结构化错误
+    return { success: false, error: { code: 'missing_parameter', message: `content is required for edit_mode=${editMode}` }, trace_id }
   }
 
   const t0 = Date.now()
@@ -434,8 +449,9 @@ export async function writeSymbol(args, context) {
 
     // 8) 原子写：temp + rename（附录 D）
     const tmpPath = `${absPath}.tmp`
-    writeFileSync(tmpPath, newContent)
     try {
+      // 7（F7）：旧 writeFileSync 在 try 外——磁盘满/权限错误裸异常逃逸，tmp 半写残留，错误契约破坏
+      writeFileSync(tmpPath, newContent)
       renameSync(tmpPath, absPath)
     } catch (e) {
       try { unlinkSync(tmpPath) } catch {}
@@ -620,7 +636,7 @@ export async function writeSymbols(args, context) {
         break
       }
       let lines = content.split('\n')
-      let offset = 0
+      const appliedEdits = [] // {endLine(原文件坐标), delta}——偏移只对位于先前编辑点之后的符号生效
       let firstReal = true
       const groupItems = groups.get(fp)
       const groupResults = []
@@ -645,6 +661,17 @@ export async function writeSymbols(args, context) {
           const rs = resolveBatchSymbol(codeIndexService, fp, w.locator)
           if (rs.error) { failed = { file: fp, itemIndex: idx, error: rs.error }; break }
           symbol = rs
+        }
+        // 7（F1）：旧实现全局 offset 累加——批内后项目标在先前编辑点之前时位置错移 → 负 range 静默丢行/重复。
+        // 偏移只累计「编辑结束于本目标之前」的项；无符号的文件级 patch 位置未知，按旧行为全量偏移
+        let offset = 0
+        if (symbol) {
+          for (const ae of appliedEdits) {
+            if (ae.endLine != null && ae.endLine < symbol.start_line) offset += ae.delta
+            else if (ae.endLine == null) offset += ae.delta
+          }
+        } else {
+          for (const ae of appliedEdits) offset += ae.delta
         }
         const range = symbol ? [symbol.start_line + offset, Math.max(symbol.start_line + offset, symbol.end_line + offset)] : null
 
@@ -702,7 +729,7 @@ export async function writeSymbols(args, context) {
         if (itemResult.error) { failed = { file: fp, itemIndex: idx, error: itemResult.error }; break }
         firstReal = false
         lines = itemResult.lines
-        if (itemResult.delta) offset += itemResult.delta
+        if (itemResult.delta) appliedEdits.push({ endLine: symbol ? symbol.end_line : null, delta: itemResult.delta })
         if (itemResult.diff) allDiffs.push({ file: fp, diff: itemResult.diff })
         groupResults.push({ file_path: fp, symbol_id: symbol?.stable_id || null, edit_mode: editMode, status: itemResult.status, content: w.content })
       }
@@ -729,8 +756,9 @@ export async function writeSymbols(args, context) {
       const journal = createJournal(workspaceDir, fp, absPath, content, { editMode: 'write_symbols', state: 'staged', base_file_hash: groupItems[0]?.base_version?.file?.hash || null })
       updateJournalState(journal.dir, { state: 'staged', new_hash: sha256(newContent) })
       const tmpPath = `${absPath}.tmp`
-      writeFileSync(tmpPath, newContent)
       try {
+        // 7（F7）：writeFileSync 在 try 外——异常逃逸跳过 failed 分支与回滚
+        writeFileSync(tmpPath, newContent)
         renameSync(tmpPath, absPath)
       } catch (e) {
         try { unlinkSync(tmpPath) } catch {}
@@ -755,7 +783,8 @@ export async function writeSymbols(args, context) {
       try {
         const backup = join(wf.journalDir, 'backup', basename(wf.filePath))
         if (existsSync(backup)) {
-          writeFileSync(wf.absPath, readFileSync(backup))
+          writeFileSync(`${wf.absPath}.rollback-tmp`, readFileSync(backup))
+          renameSync(`${wf.absPath}.rollback-tmp`, wf.absPath)
           updateJournalState(wf.journalDir, { state: 'rolled_back', rolled_back_at: new Date().toISOString() })
           rolledBack.push(wf.filePath)
           auditLog(workspaceDir, { event: 'batch_rollback', file: wf.filePath, reason: failed.error?.code })
@@ -822,6 +851,11 @@ export async function writeSymbols(args, context) {
 }
 
 function applyBatchItem(lines, range, w, symbol, editMode, boundary, preserveDecorators) {
+  if (editMode !== 'patch' && typeof w?.content !== 'string') {
+    // 7（F8）：content 缺失时 TypeError 逃逸——批量场景组循环无 catch，回滚段不可达，
+    // 已写文件 journal 保持 committed，all_or_nothing 契约被静默破坏
+    return { error: { code: 'missing_parameter', message: `content is required for edit_mode=${editMode}` } }
+  }
   const scopeContent = symbol && range ? lines.slice(range[0] - 1, range[1]).join('\n') : lines.join('\n')
   if (editMode === 'patch') {
     const oldString = w?.patch?.old_string

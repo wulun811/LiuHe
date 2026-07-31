@@ -292,18 +292,19 @@ function handleRequest(req) {
           const toolPromise = registry.callTool(name, toolArgs, context)
           toolPromise.catch(() => {})
 
-          const result = await Promise.race([toolPromise, timeoutPromise])
+          await Promise.race([toolPromise, timeoutPromise])
           if (!timedOut) {
             safeRespond(id, {
-              content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+              content: [{ type: 'text', text: JSON.stringify(await toolPromise, null, 2) }],
             })
-          } else {
-            // P2-A5：超时后客户端收不到任何响应（连错误都不回）——补一个错误响应
-            safeRespondError(id, -32603, `Request timeout after ${REQUEST_TIMEOUT_MS}ms`)
-            crashLog(`tool ${name} completed AFTER timeout (${REQUEST_TIMEOUT_MS}ms) — result discarded`)
           }
         } catch (e) {
-          if (!timedOut) {
+          if (timedOut) {
+            // B1：race 超时必以 rejection 结算，之前 try 内 else 分支不可达 = 超时零响应（A5 死代码）。
+            // 超时响应必须在 catch 里发；工具本身仍在跑（已 .catch 兜住），结果丢弃
+            safeRespondError(id, -32603, `Request timeout after ${REQUEST_TIMEOUT_MS}ms`)
+            crashLog(`tool ${name} completed AFTER timeout (${REQUEST_TIMEOUT_MS}ms) — result discarded`)
+          } else {
             safeRespondError(id, -32603, e.message)
           }
         } finally {
@@ -322,12 +323,15 @@ function handleRequest(req) {
 
     case 'shutdown':
       safeRespond(id, {})
-      process.exit(0)
+      // B8：等 stdout 排空再退出（旧：立即 exit 丢弃未写完缓冲 → 响应半帧 JSON）
+      process.stdout.end(() => process.exit(0))
+      setTimeout(() => process.exit(0), 1000).unref()
       break
 
     default:
       if (method.startsWith('notifications/')) break
-      safeRespond(id, null)
+      // B10：未知方法必须回 JSON-RPC -32601（旧：safeRespond(id, null) 把失败当成功）
+      safeRespondError(id, -32601, `Method not found: ${method}`)
   }
 }
 
@@ -349,15 +353,16 @@ process.on('SIGPIPE', () => {
 process.on('SIGTERM', () => {
   crashLog('SIGTERM received, shutting down')
   writeCrashDump('SIGTERM')
-  process.stderr.end(() => process.exit(0))
-  setTimeout(() => process.exit(0), 500).unref()
+  // B8：stdout 先排空再退出，防响应半帧
+  process.stdout.end(() => process.exit(0))
+  setTimeout(() => process.exit(0), 1000).unref()
 })
 
 process.on('SIGINT', () => {
   crashLog('SIGINT received, shutting down')
   writeCrashDump('SIGINT')
-  process.stderr.end(() => process.exit(0))
-  setTimeout(() => process.exit(0), 500).unref()
+  process.stdout.end(() => process.exit(0))
+  setTimeout(() => process.exit(0), 1000).unref()
 })
 
 process.on('exit', (code) => {
@@ -429,6 +434,11 @@ process.stdin.on('end', () => {
     writeCrashDump('stdin_end')
     process.stderr.end(() => process.exit(0))
     setTimeout(() => process.exit(0), 500).unref()
+  } else if (!_initialized && !_stdinClosed) {
+    // B9：握手前客户端断开 → 之前永不退出（watchdog interval 保活事件循环）→ 僵尸进程 + 孤儿 parse daemon。
+    // 留 2s 握手窗口，窗口内无 initialize 则退出
+    _stdinClosed = true
+    setTimeout(() => process.exit(0), 2000).unref()
   }
 })
 
@@ -439,6 +449,9 @@ process.stdin.on('close', () => {
     writeCrashDump('stdin_close')
     process.stderr.end(() => process.exit(0))
     setTimeout(() => process.exit(0), 500).unref()
+  } else if (!_initialized && !_stdinClosed) {
+    _stdinClosed = true
+    setTimeout(() => process.exit(0), 2000).unref()
   }
 })
 

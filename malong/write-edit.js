@@ -47,7 +47,9 @@ export function applyReplace(lines, range, newContent) {
 
 export function applyBodyEdit(lines, range, newContent, preserveSignature) {
   const [a, b] = range
-  if (b === a) {
+  if (b < a) {
+    // 7：调用方传 [start+1, end]，单行符号 → [L+1, L]（b < a）——旧守卫 b === a 永不成立，
+    // 单行 body 编辑静默插入到符号行之后且返回成功
     return { error: { code: 'SINGLE_LINE_SYMBOL', message: 'Single-line symbol: use boundary=full or patch mode.' } }
   }
   // 护栏：body 模式误传完整符号（含签名行）→ 拒绝。典型误用是把整个符号文本贴进 content
