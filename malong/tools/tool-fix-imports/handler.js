@@ -87,7 +87,7 @@ export async function handle(args, context) {
       type: 'undefined_symbol',
       symbol: sym,
       line: analysis.symbolLines[sym] || 0,
-      suggestion: candidates.length > 0 ? `from ${candidates[0].module} import ${sym}` : `Define "${sym}" or add the appropriate import`,
+      suggestion: candidates.length > 0 ? importSuggestion(lang, candidates[0].module, sym) : `Define "${sym}" or add the appropriate import`,
       candidates: candidates.slice(0, maxCandidates)
     })
   }
@@ -116,7 +116,8 @@ export async function handle(args, context) {
     }
   }
 
-  for (const rel of analysis.relativeImports) {
+  // 10（F1）：JS/TS 相对导入是 ESM 常态，不当问题报；旧实现恒报且建议 Python 点分路径（乱码）
+  if (lang !== 'javascript' && lang !== 'typescript') for (const rel of analysis.relativeImports) {
     issues.push({
       type: 'relative_import',
       relative: rel.relative,
@@ -131,14 +132,14 @@ export async function handle(args, context) {
     fixesApplied = { imports_added: 0, imports_removed: 0 }
     const newLines = [...lines]
 
-    const undefinedIssues = issues.filter(i => i.type === 'undefined_symbol' && i.candidates.length > 0)
+    const undefinedIssues = issues.filter(i => i.type === 'undefined_symbol' && i.candidates.length > 0 && i.candidates[0].module) // 10（F1）：空模块候选不给导入补丁，防插入 `from  import X` 腐蚀文件
     if (undefinedIssues.length > 0) {
       const seenModules = new Set()
       const stmts = undefinedIssues.map(i => {
         const c = i.candidates[0]
         if (seenModules.has(c.module)) return null
         seenModules.add(c.module)
-        return `from ${c.module} import ${i.symbol}`
+        return importSuggestion(lang, c.module, i.symbol)
       }).filter(Boolean)
       if (stmts.length > 0) {
         const insertLine = findImportInsertLine(newLines) || 0
@@ -163,14 +164,14 @@ export async function handle(args, context) {
 
   const transactionReady = []
   if (!autoFix) {
-    const undefinedIssues = issues.filter(i => i.type === 'undefined_symbol' && i.candidates.length > 0)
+    const undefinedIssues = issues.filter(i => i.type === 'undefined_symbol' && i.candidates.length > 0 && i.candidates[0].module) // 10（F1）：空模块候选不给导入补丁，防插入 `from  import X` 腐蚀文件
     if (undefinedIssues.length > 0) {
       const seenModules = new Set()
       const stmts = undefinedIssues.map(i => {
         const c = i.candidates[0]
         if (seenModules.has(c.module)) return null
         seenModules.add(c.module)
-        return `from ${c.module} import ${i.symbol}`
+        return importSuggestion(lang, c.module, i.symbol)
       }).filter(Boolean)
       if (stmts.length > 0) {
         const insertLine = findImportInsertLine(lines) || 0
@@ -234,9 +235,13 @@ export async function handle(args, context) {
 
 function computeRemovals(imports, usedSymbols, lines, content, issues) {
   const groups = new Map()
+  // 10（F1）：导入行号集——usage 文本扫描排除 import 行本身，否则导入名在自己那行恒「被用」
+  const importLineSet = new Set(imports.map(i => i.line))
   for (const imp of imports) {
     if (imp.kind === 'side-effect' || !imp.name) continue
-    const isUnused = !usedSymbols.has(imp.name) && !imp.name.startsWith('_')
+    // 10（F1）：unused 判定加文本扫描——捕获 net.createConnection / new X() / 值传递等非调用用法。
+    // 旧实现只看 usedSymbols（仅 call）→ default/namespace 导入经成员访问被误报 unused（如 net）
+    const isUnused = !usedSymbols.has(imp.name) && !isImportNameUsed(imp.name, lines, importLineSet) && !imp.name.startsWith('_')
     if (!isUnused) continue
     const key = imp.key || `l${imp.line}`
     if (!groups.has(key)) groups.set(key, { line: imp.line, statement: imp.statement, stmtStart: imp.stmtStart, stmtEnd: imp.stmtEnd, specs: [], total: 0 })
@@ -386,6 +391,72 @@ async function analyzeRustFile(content, currentFile, langParser) {
   return result
 }
 
+// 10（F1）：按语言生成导入建议语法——旧实现恒 Python `from X import Y`，对 JS/TS/Go/Rust 是乱码
+function importSuggestion(lang, module, sym) {
+  const mod = module || '...'
+  if (lang === 'javascript' || lang === 'typescript') return `import { ${sym} } from '${mod}'`
+  if (lang === 'go') return `import "${mod}" // ${sym}`
+  if (lang === 'rust') return `use ${mod}::${sym};`
+  return `from ${mod} import ${sym}`
+}
+
+// 10（F1）：导入名是否真被使用——全文标识符扫描（排除 import 行），捕获成员访问/构造/值传递等非调用用法
+function isImportNameUsed(name, lines, importLineSet) {
+  const re = new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`)
+  for (let i = 0; i < lines.length; i++) {
+    if (importLineSet.has(i + 1)) continue
+    if (re.test(lines[i])) return true
+  }
+  return false
+}
+
+// 10（F1）：JS/TS 局部作用域收集（参数/局部声明/解构/catch）——与 regex 路径同源逻辑，parser 路径补齐用，
+// 消除对局部量（resolve/reject/done 等）调用的 undefined_symbol 误报
+function collectJsScope(content) {
+  const locals = new Set()
+  for (const line of content.split('\n')) {
+    const trimmed = line.trim()
+    const msMatch = trimmed.match(/^(?:async\s+)?(\w+)\s*\(([^)]*)\)\s*\{/)
+    if (msMatch && !KEYWORDS.has(msMatch[1])) {
+      locals.add(msMatch[1])
+      for (const p of msMatch[2].split(',')) {
+        const pname = p.trim().split(/[\s=]/)[0]
+        if (pname && /^[a-zA-Z_]\w*$/.test(pname)) locals.add(pname)
+      }
+    }
+    const destructMatch = trimmed.match(/^(?:const|let|var)\s+\{([^}]+)\}\s*=/)
+    if (destructMatch) destructMatch[1].split(',').forEach(s => {
+      const parts = s.trim().split(/\s*:\s*/); const name = (parts.length > 1 ? parts[1] : parts[0]).split(/[\s=]/)[0]
+      if (name && /^[a-zA-Z_]\w*$/.test(name)) locals.add(name)
+    })
+    const arrDestructMatch = trimmed.match(/^(?:const|let|var)\s+\[([^\]]+)\]\s*=/)
+    if (arrDestructMatch) arrDestructMatch[1].split(',').forEach(s => {
+      const n = s.trim().split(/[\s=]/)[0]; if (n && /^[a-zA-Z_]\w*$/.test(n)) locals.add(n)
+    })
+    const declAssign = trimmed.match(/^(?:export\s+)?(?:const|let|var)\s+([a-zA-Z_$][\w$]*)\s*=/)
+    if (declAssign) locals.add(declAssign[1])
+    const bareDeclMatch = trimmed.match(/^(?:let|var)\s+([a-zA-Z_$][\w$]*(?:\s*,\s*[a-zA-Z_$][\w$]*)*)\s*$/)
+    if (bareDeclMatch) bareDeclMatch[1].split(',').forEach(s => { const n = s.trim(); if (n) locals.add(n) })
+    const forOfMatch = trimmed.match(/for\s+\((?:const|let|var)\s+(\w+)\s+(?:of|in)\s/)
+    if (forOfMatch) locals.add(forOfMatch[1])
+    const cForMatch = trimmed.match(/for\s*\(\s*(?:let|const|var)\s+(\w+)\s*=/)
+    if (cForMatch) locals.add(cForMatch[1])
+    const arrowParamRe = /(?:,\s*|\(\s*)(\w+(?:\s*,\s*\w+)*)\s*\)?\s*=>/g
+    let apm
+    while ((apm = arrowParamRe.exec(trimmed)) !== null) apm[1].split(',').forEach(s => { const n = s.trim(); if (n && /^[a-zA-Z_]\w*$/.test(n)) locals.add(n) })
+    const arrowSingleRe = /([a-zA-Z_$][\w$]*)\s*=>/g
+    let asm
+    while ((asm = arrowSingleRe.exec(trimmed)) !== null) {
+      const prev = trimmed[asm.index - 1] || ''
+      if (prev !== '.' && !/[\w$]/.test(prev)) locals.add(asm[1])
+    }
+    const catchMatch = trimmed.match(/\bcatch\s*\(\s*([a-zA-Z_$][\w$]*)/)
+    if (catchMatch) locals.add(catchMatch[1])
+  }
+  for (const kw of KEYWORDS) locals.delete(kw)
+  return locals
+}
+
 async function analyzeFileAST(content, lang, currentFile, langParser) {
   if (!langParser || (lang !== 'javascript' && lang !== 'typescript')) return null
   const ext = lang === 'typescript' ? '.ts' : '.js'
@@ -405,6 +476,9 @@ async function analyzeFileAST(content, lang, currentFile, langParser) {
         definedSymbols.add(sym.name)
         symbolLines[sym.name] = sym.startLine
       }
+      // 10（F1）：parser 路径补 JS 局部作用域——旧实现只有顶层符号+导入，对 resolve/reject/done 等局部量
+      // 的调用被误报 undefined_symbol（regex 路径早有此分析，parser 路径漏了）
+      if (lang === 'javascript' || lang === 'typescript') for (const n of collectJsScope(content)) definedSymbols.add(n)
       for (const ref of asyncResult.refs || []) {
         if (ref.type === 'call') usedSymbols.add(ref.name)
         if (ref.type === 'import') {

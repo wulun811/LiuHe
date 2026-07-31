@@ -917,17 +917,19 @@ class CodeIndex {
 
         let refs
         if (symbol) {
+          // 10（F4）：不再排除同文件 caller——旧 `source_file_id != ?` 令同文件调用者（如 writeSymbols 调
+          // applyBatchItem）全漏，blast radius 严重低估。同文件调用者同样是真实受影响方
           refs = self._db.prepare(
             "SELECT r.id, r.source_file_id, f.path AS source_file_path, r.target_name, r.kind, r.source_symbol_id, r.target_symbol_id, r.line, r.call_expr " +
             "FROM refs r JOIN files f ON r.source_file_id = f.id " +
-            "WHERE r.target_name = ? AND r.source_file_id != ?"
-          ).all(symbol, f.id)
+            "WHERE r.target_name = ?"
+          ).all(symbol)
         } else {
           refs = self._db.prepare(
             "SELECT r.id, r.source_file_id, f.path AS source_file_path, r.target_name, r.kind, r.source_symbol_id, r.target_symbol_id, r.line, r.call_expr " +
             "FROM refs r JOIN files f ON r.source_file_id = f.id " +
-            "WHERE r.target_name IN (SELECT name FROM symbols WHERE file_id = ?) AND r.source_file_id != ?"
-          ).all(f.id, f.id)
+            "WHERE r.target_name IN (SELECT name FROM symbols WHERE file_id = ?)"
+          ).all(f.id)
         }
 
         const defFamily = langFamily(langOf(filePath))

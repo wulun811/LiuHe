@@ -41,6 +41,9 @@ writeFileSync(`${WS}/src/reader.rs`, `pub fn lookup(token: &str) -> Result<u32, 
     let block = format::read_block(&[]).ok_or("bad block")?;
     Ok(block)
 }
+pub fn lookup_wrapper(token: &str) -> Result<u32, String> {
+    lookup(token)
+}
 `)
 writeFileSync(`${WS}/src/main.rs`, `pub fn run() {
     let r = crate::reader::lookup("python");
@@ -124,12 +127,13 @@ const impact = await svc.getImpactAnalysis('src/reader.rs', { symbol: 'lookup', 
 const callerFiles = impact.callers.map(c => c.file)
 const crossFiles = (impact.cross_language_matches || []).map(c => c.file)
 assert(callerFiles.includes('src/main.rs'), `② 同语言调用者 main.rs 在 callers（得 ${callerFiles.join(',')}）`)
+assert(callerFiles.includes('src/reader.rs'), `②/10 同文件调用者 reader.rs(lookup_wrapper) 应在 callers（得 ${callerFiles.join(',')}）`)
 assert(!callerFiles.some(f => f.endsWith('.py')), `② Python 调用者不应在 callers（得 ${callerFiles.join(',')}）`)
 assert(crossFiles.includes('py/registry.py'), `② Python 调用者应在 cross_language_matches（得 ${crossFiles.join(',')}）`)
-assert(impact.caller_count.direct === 1, `② caller_count.direct 只算同语言=1（得 ${impact.caller_count.direct}）`)
+assert(impact.caller_count.direct === 2, `②/10 caller_count.direct 同语言=2（main.rs + 同文件 lookup_wrapper，得 ${impact.caller_count.direct}）`)
 assert(impact.cross_language_count === 1, `② cross_language_count=1（得 ${impact.cross_language_count}）`)
 assert(impact.callers.every(c => c.confidence === 'high'), '② 同语言 callers 全 confidence=high')
-assert(impact.risk_level === 'low', `② risk 由同语言计数 -> low（得 ${impact.risk_level}）`)
+assert(impact.risk_level === 'medium', `②/10 risk 由同语言计数 direct=2 -> medium（得 ${impact.risk_level}）`)
 assert(impact.limitations.includes('cross_language_segregated'), '② limitations 标注 cross_language_segregated')
 
 // ── ③ Rust 路径 callee 解析 ──

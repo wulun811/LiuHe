@@ -16,12 +16,7 @@ function sanitizeScope(scope) {
   return scope
 }
 
-function detectFramework(workspaceDir) {
-  if (existsSync(join(workspaceDir, 'pytest.ini')) ||
-      existsSync(join(workspaceDir, 'pyproject.toml')) ||
-      existsSync(join(workspaceDir, 'setup.cfg')) ||
-      existsSync(join(workspaceDir, 'tox.ini'))) return 'pytest'
-
+function detectJsFramework(workspaceDir) {
   const pkgPath = join(workspaceDir, 'package.json')
   if (existsSync(pkgPath)) {
     try {
@@ -33,6 +28,27 @@ function detectFramework(workspaceDir) {
       if (deps.mocha || testScript.includes('mocha')) return 'mocha'
     } catch {}
   }
+  return null
+}
+
+function detectFramework(workspaceDir, file) {
+  // 10（F2）：有目标文件时按扩展名锁定语言族——旧实现纯按 workspace 根判定，根目录有 pyproject/.venv 时
+  // 对 .js 文件也判 pytest → 建议 `python -m pytest x.js`（胡来）。文件扩展名优先于 workspace 探测
+  if (file) {
+    const ext = extname(file).toLowerCase()
+    if (ext === '.py') return 'pytest'
+    if (ext === '.go') return 'go_test'
+    if (ext === '.rs') return 'cargo_test'
+    if (['.js', '.jsx', '.mjs', '.cjs', '.ts', '.tsx'].includes(ext)) return detectJsFramework(workspaceDir) || 'jest'
+    if (ext === '.java' || ext === '.kt') return existsSync(join(workspaceDir, 'pom.xml')) ? 'maven' : 'gradle'
+  }
+  if (existsSync(join(workspaceDir, 'pytest.ini')) ||
+      existsSync(join(workspaceDir, 'pyproject.toml')) ||
+      existsSync(join(workspaceDir, 'setup.cfg')) ||
+      existsSync(join(workspaceDir, 'tox.ini'))) return 'pytest'
+
+  const jsFw = detectJsFramework(workspaceDir)
+  if (jsFw) return jsFw
 
   if (existsSync(join(workspaceDir, 'go.mod'))) return 'go_test'
   if (existsSync(join(workspaceDir, 'Cargo.toml'))) return 'cargo_test'
@@ -159,7 +175,7 @@ async function handleRun(args, context) {
   if (args.timeout !== undefined && (typeof args.timeout !== 'number' || !Number.isFinite(timeout) || timeout <= 0)) {
     return { error: 'invalid_input', message: 'timeout must be a positive number (seconds)' }
   }
-  const framework = args.framework || detectFramework(workspaceDir)
+  const framework = args.framework || detectFramework(workspaceDir, args.scope)
 
   if (framework === 'unknown') {
     return {
@@ -247,7 +263,7 @@ async function handleSuggest(args, context) {
     }
   }
 
-  const framework = args.framework || detectFramework(workspaceDir)
+  const framework = args.framework || detectFramework(workspaceDir, args.file)
   const affectedTests = []
   const seen = new Set()
 
@@ -344,7 +360,7 @@ async function handleDiscover(args, context) {
     }
   }
 
-  const framework = args.framework || detectFramework(workspaceDir)
+  const framework = args.framework || detectFramework(workspaceDir, args.file)
   const tests = []
   const seen = new Set()
 

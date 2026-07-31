@@ -377,5 +377,29 @@ const gpR = await guardP({ workspace_dir: WS, file: 'src/gp_rust.rs' }, gpRustCt
 assert((gpR.violations ?? []).some(v => v.rule === 'no-dangerous-eval' && v.location?.line === 3), `Rust call_banned 经 refs 抓到 dangerous_eval@line3（得 ${JSON.stringify(gpR.violations)}）`)
 assert(!(gpR.violations ?? []).some(v => ['no-bare-except', 'no-debugger', 'no-eval'].includes(v.rule)), `内置 Python/JS 规则对 Rust 零误报（得 ${JSON.stringify(gpR.violations)}）`)
 
+// ═══════════ golden 23：第 10 轮 JS parser 路径 fix_imports（生产路径——补局部作用域前的重灾区） ═══════════
+// 旧实现 analyzeFileAST（parser 路径）只有顶层符号+导入，无局部作用域 → resolve/reject 等参数、
+// net.createConnection 的成员用法全误报；建议恒 Python 语法、transaction_ready 会腐蚀 JS 文件
+console.log('── golden 23: JS parser 路径 fix_imports（生产路径 0 误报） ──')
+const jsParserCtx = { codeIndexService, getWorkspaceDir: () => DATA, langParserService: rustLangParser }
+writeFileSync(`${WS}/src/js_scope.js`, `import net from 'node:net'
+import { existsSync, readFileSync } from 'node:fs'
+import { helper } from './util.js'
+
+export function connect(sockPath) {
+  return new Promise((resolve, reject) => {
+    const sock = net.createConnection(sockPath)
+    sock.on('error', () => reject(new Error('fail')))
+    if (existsSync(sockPath)) resolve(sock)
+  })
+}
+export function read(p) { return readFileSync(p, 'utf-8') + helper() }
+`)
+r = await fixImports({ workspace_dir: WS, file: 'src/js_scope.js' }, jsParserCtx)
+assert(r.issues.filter(i => i.type === 'undefined_symbol').length === 0, `JS parser 路径无 undefined 误报（resolve/reject 是参数、sock 是局部量）（得 ${JSON.stringify(r.issues.filter(i => i.type === 'undefined_symbol').map(i => i.symbol))}）`)
+assert(r.issues.filter(i => i.type === 'unused_import').length === 0, `JS parser 路径无 unused 误报（net 经 net.createConnection 在用）（得 ${JSON.stringify(r.issues.filter(i => i.type === 'unused_import'))}）`)
+assert(r.issues.filter(i => i.type === 'relative_import').length === 0, `JS 相对导入是 ESM 常态不当问题报（得 ${JSON.stringify(r.issues.filter(i => i.type === 'relative_import'))}）`)
+assert(!r.transaction_ready || r.transaction_ready.length === 0, `JS parser 路径无破坏性 transaction_ready（旧实现插 \`from  import X\` + 删在用 import）（得 ${JSON.stringify(r.transaction_ready)}）`)
+
 console.log(`\n=== test-gatekeeper-golden: ${pass} passed, ${fail} failed ===`)
 process.exit(fail ? 1 : 0)

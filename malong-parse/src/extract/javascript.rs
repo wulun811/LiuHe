@@ -123,13 +123,17 @@ pub fn extract_all(tree: &Tree, source: &str) -> super::ExtractResult {
             }
             "call_expression" => {
                 if let Some(fn_node) = node.child_by_field_name("function") {
-                    refs.push(Reference {
-                        kind: "call".to_string(),
-                        name: source[fn_node.byte_range()].to_string(),
-                        line: node.start_position().row as u32 + 1,
-                        module: None,
-                        symbols: None,
-                    });
+                    let cname = source[fn_node.byte_range()].to_string();
+                    // 10（F5）：过滤解析伪影——错误恢复/模板串 ${} 边界令 function 节点跨多行、含 } ) 空白等
+                    if is_clean_call_name(&cname) {
+                        refs.push(Reference {
+                            kind: "call".to_string(),
+                            name: cname,
+                            line: node.start_position().row as u32 + 1,
+                            module: None,
+                            symbols: None,
+                        });
+                    }
                 }
             }
             "import_statement" => {
@@ -384,19 +388,36 @@ pub fn extract_top_level(tree: &Tree, source: &str) -> Vec<Symbol> {
     syms
 }
 
+// 10（F5）：合法调用名是标识符或成员/可选链（foo、a.b、a?.b、a[0]），单行、无空白/括号/引号。
+// 解析错误恢复或模板串 ${} 边界会让 function 节点 byte_range 跨界，产出 "message}`)\n resolve..." 之类伪影
+fn is_clean_call_name(name: &str) -> bool {
+    if name.is_empty() || name.len() > 200 || name.contains('\n') || name.contains(' ') || name.contains('\t') {
+        return false;
+    }
+    if name.contains('}') || name.contains('{') || name.contains(')') || name.contains('(')
+        || name.contains('"') || name.contains('\'') || name.contains('`') || name.contains(',') {
+        return false;
+    }
+    name.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '$' || c == '.' || c == '?' || c == '[' || c == ']')
+}
+
 pub fn extract_references(tree: &Tree, source: &str) -> Vec<Reference> {
     let mut refs = Vec::with_capacity(128);
 
     fn walk(node: Node, source: &str, refs: &mut Vec<Reference>) {
         if node.kind() == "call_expression" {
             if let Some(fn_node) = node.child_by_field_name("function") {
-                refs.push(Reference {
-                    kind: "call".to_string(),
-                    name: source[fn_node.byte_range()].to_string(),
-                    line: node.start_position().row as u32 + 1,
-                    module: None,
-                    symbols: None,
-                });
+                let cname = source[fn_node.byte_range()].to_string();
+                // 10（F5）：过滤解析伪影（同 extract_all）
+                if is_clean_call_name(&cname) {
+                    refs.push(Reference {
+                        kind: "call".to_string(),
+                        name: cname,
+                        line: node.start_position().row as u32 + 1,
+                        module: None,
+                        symbols: None,
+                    });
+                }
             }
         } else if node.kind() == "import_statement" {
             let source_node = node.child_by_field_name("source");
@@ -431,4 +452,81 @@ pub fn extract_references(tree: &Tree, source: &str) -> Vec<Reference> {
 
     walk(tree.root_node(), source, &mut refs);
     refs
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse_js(src: &str) -> Tree {
+        let mut parser = tree_sitter::Parser::new();
+        let lang: tree_sitter::Language = tree_sitter_javascript::LANGUAGE.into();
+        parser.set_language(&lang).expect("set js language");
+        parser.parse(src, None).expect("parse js")
+    }
+
+    #[test]
+    fn clean_call_name_accepts_valid() {
+        assert!(is_clean_call_name("foo"));
+        assert!(is_clean_call_name("a.b.c"));
+        assert!(is_clean_call_name("_core?.log"));
+        assert!(is_clean_call_name("arr[0]"));
+        assert!(is_clean_call_name("$x"));
+        assert!(is_clean_call_name("CamelCase"));
+    }
+
+    #[test]
+    fn clean_call_name_rejects_artifacts() {
+        assert!(!is_clean_call_name(""));
+        assert!(!is_clean_call_name("message}`)\n resolve(false)"));
+        assert!(!is_clean_call_name("a b"));
+        assert!(!is_clean_call_name("foo()"));
+        assert!(!is_clean_call_name("a}"));
+        assert!(!is_clean_call_name("a{b"));
+        assert!(!is_clean_call_name("`tpl`"));
+        assert!(!is_clean_call_name("a,b"));
+        assert!(!is_clean_call_name("a\tb"));
+        assert!(!is_clean_call_name(&"x".repeat(201)));
+    }
+
+    #[test]
+    fn extract_all_no_garbage_call_names() {
+        let src = r#"
+function f(err) {
+    log(`failed: ${err.message}`);
+    return helper(err);
+}
+"#;
+        let tree = parse_js(src);
+        let result = extract_all(&tree, src);
+        let calls: Vec<&str> = result
+            .refs
+            .iter()
+            .filter(|r| r.kind == "call")
+            .map(|r| r.name.as_str())
+            .collect();
+        for name in &calls {
+            assert!(is_clean_call_name(name), "garbage call name leaked: {:?}", name);
+            assert!(!name.contains('\n'), "multiline call name: {:?}", name);
+        }
+        assert!(calls.contains(&"log"), "log call missing; got {:?}", calls);
+        assert!(calls.contains(&"helper"), "helper call missing; got {:?}", calls);
+    }
+
+    #[test]
+    fn extract_references_no_garbage_call_names() {
+        let src = "const x = compute(a);\nlog(`v=${x}`);\n";
+        let tree = parse_js(src);
+        let refs = extract_references(&tree, src);
+        let calls: Vec<&str> = refs
+            .iter()
+            .filter(|r| r.kind == "call")
+            .map(|r| r.name.as_str())
+            .collect();
+        for name in &calls {
+            assert!(is_clean_call_name(name), "garbage call name leaked: {:?}", name);
+        }
+        assert!(calls.contains(&"compute"), "compute missing; got {:?}", calls);
+        assert!(calls.contains(&"log"), "log missing; got {:?}", calls);
+    }
 }
