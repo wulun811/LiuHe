@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { readFileSync, statSync, existsSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import { sha256 } from '../../hash-utils.js'
-import { checkFileStaleness, attachStalenessWarning, ensureIndexed } from '../../staleness.js'
+import { checkFileStaleness, attachStalenessWarning } from '../../staleness.js'
 
 const MAX_LIVE_READ = 1024 * 1024
 
