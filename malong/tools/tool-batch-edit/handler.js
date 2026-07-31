@@ -5,7 +5,7 @@
 //     + 原子写（temp+rename）+ 写后同步重抽 + undo journal（可选 workspace_dir）
 
 import { execFileSync } from 'node:child_process'
-import { join, dirname } from 'node:path'
+import { join, dirname, relative, isAbsolute } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { writeFileSync, unlinkSync, statSync, appendFileSync, readFileSync, existsSync, renameSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -15,6 +15,12 @@ import { createJournal, updateJournalState } from '../../write-journal.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const STATS_FILE = join(homedir(), '.config', 'opencode', 'edit-batch-stats.jsonl')
+
+// 契约统一（合契）：file（workspace-relative）为主；file_path（绝对）兼容别名，须在 workspace 内
+function isInsideWorkspace(ws, abs) {
+  const rel = relative(ws, abs)
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
+}
 
 function recordStats(fileSize, numEdits) {
   const record = {
@@ -102,11 +108,27 @@ async function delegateWrite({ absPath, filePath, workspaceDir, originalContent,
 }
 
 export async function handle(args, context) {
-  const filePath = args?.file_path || ''
+  const workspaceDir = args?.workspace_dir || null
+  const fileRel = args?.file || ''
+  const filePathAbs = args?.file_path || ''
   const editsRaw = args?.edits || ''
   const dryRun = !!args?.dry_run
+  const verbose = !!args?.verbose
 
-  if (!filePath) return { error: 'missing_parameter', message: 'file_path is required', suggestion: 'Provide the absolute path to the file to edit' }
+  // 契约统一：file（相对）+ workspace_dir 为主；file_path（绝对）为兼容别名（deprecated）
+  let filePath = ''
+  if (fileRel) {
+    if (!workspaceDir) return { error: 'missing_parameter', message: 'file requires workspace_dir', suggestion: 'Provide workspace_dir + file (relative), e.g. workspace_dir="/repo", file="src/auth.py"' }
+    const abs = join(workspaceDir, fileRel)
+    if (!isInsideWorkspace(workspaceDir, abs)) return makeError(ErrorCodes.PATH_BLOCKED, `file escapes workspace: ${abs}`, { file: fileRel, reason: 'outside_workspace' })
+    filePath = abs
+  } else if (filePathAbs) {
+    // 宽容输入：绝对路径可用，但 workspace_dir 提供时必须在其内（防越界写）
+    if (workspaceDir && !isInsideWorkspace(workspaceDir, filePathAbs)) return makeError(ErrorCodes.PATH_BLOCKED, `file_path outside workspace_dir: ${filePathAbs}`, { file: filePathAbs, reason: 'outside_workspace' })
+    filePath = filePathAbs
+  } else {
+    return { error: 'missing_parameter', message: 'file or file_path is required', suggestion: 'Prefer file (workspace-relative) + workspace_dir, e.g. { workspace_dir: "/repo", file: "src/auth.py" }; file_path (absolute) kept as deprecated alias' }
+  }
   if (!editsRaw) return { error: 'missing_parameter', message: 'edits is required', suggestion: 'Provide a JSON array of edits: [{"old_string": "...", "new_string": "..."}]' }
 
   const pathCheck = validateFilePath(filePath)
@@ -131,20 +153,18 @@ export async function handle(args, context) {
       timeout: 30_000,
     })
 
-    const delimiter = '---MALONG_BATCH_EDIT_JSON_END---'
-    const delimIdx = stdout.indexOf(delimiter)
-    const jsonStr = delimIdx >= 0 ? stdout.slice(0, delimIdx).trim() : stdout.trim()
-
+    // 协议：Python 只输出 JSON 到 stdout。不做 indexOf(delimiter) 截断——
+    // 分隔符字符串可能恰好出现在被编辑文件内容里（自指冲突，2026-07-31 实测踩坑），
+    // 直接 trim 后 parse；失败则提取诊断信息，绝不静默吞掉成功结果。
     let result
     try {
-      result = JSON.parse(jsonStr)
-    } catch {
-      return { result: stdout.trim() }
+      result = JSON.parse(stdout.trim())
+    } catch (e) {
+      return { error: 'parse_failed', message: `Failed to parse batch_edit output: ${e.message}`, stdout_snippet: stdout.slice(0, 300), suggestion: 'Check batch_edit_mvp.py stdout protocol (JSON only).' }
     }
 
     // ── P5 委托：写入改道 write runtime（锁 + TOCTOU + 原子写 + 同步重抽） ──
     if (result.success && !dryRun && typeof result.final_content === 'string') {
-      const workspaceDir = args?.workspace_dir || null
       const dw = await delegateWrite({
         absPath: filePath,
         filePath,
@@ -173,6 +193,12 @@ export async function handle(args, context) {
     const stats = getCumulativeStats()
     result.cumulative_stats = stats
 
+    // 合俭：默认不返回全文（original/final_content 可达 10 万字符），verbose 才带
+    if (!verbose) {
+      delete result.final_content
+      delete result.original_content
+    }
+
     if (result.success && !dryRun) {
       result.next_step = 'Verify: fix_imports. Run tests: test_bridge(action="run").'
     }
@@ -182,13 +208,11 @@ export async function handle(args, context) {
   } catch (e) {
     if (e.stdout) {
       const out = typeof e.stdout === 'string' ? e.stdout : e.stdout.toString('utf-8')
-      const delimIdx = out.indexOf('---MALONG_BATCH_EDIT_JSON_END---')
-      const jsonStr = delimIdx >= 0 ? out.slice(0, delimIdx).trim() : out.trim()
       try {
-        return JSON.parse(jsonStr)
+        return JSON.parse(out.trim())
       } catch {}
     }
-    return { error: e.message || String(e) }
+    return { error: e.message || String(e), suggestion: 'Check batch_edit_mvp.py stderr for details.' }
   } finally {
     try { unlinkSync(tmpFile) } catch {}
   }

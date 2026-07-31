@@ -1,6 +1,9 @@
 import { join } from 'node:path'
-import { existsSync, readFileSync, writeFileSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, statSync, unlinkSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import os from 'node:os'
 import { validateFilePath, ErrorCodes, makeError } from '../../error-codes.js'
+import { checkBracketBalance } from '../../write-edit.js'
 import { checkFileStaleness, attachStalenessWarning } from '../../staleness.js'
 
 const BUILTINS_PY = new Set(['abs', 'all', 'any', 'bin', 'bool', 'bytearray', 'bytes', 'callable', 'chr', 'classmethod', 'compile', 'complex', 'delattr', 'dict', 'dir', 'divmod', 'enumerate', 'eval', 'exec', 'filter', 'float', 'format', 'frozenset', 'getattr', 'globals', 'hasattr', 'hash', 'hex', 'id', 'input', 'int', 'isinstance', 'issubclass', 'iter', 'len', 'list', 'locals', 'map', 'max', 'memoryview', 'min', 'next', 'object', 'oct', 'open', 'ord', 'pow', 'print', 'property', 'range', 'repr', 'reversed', 'round', 'set', 'setattr', 'slice', 'sorted', 'staticmethod', 'str', 'sum', 'super', 'tuple', 'type', 'vars', 'zip', '__import__', 'Exception', 'BaseException', 'ValueError', 'TypeError', 'KeyError', 'IndexError', 'RuntimeError', 'StopIteration', 'ArithmeticError', 'AttributeError', 'EOFError', 'ImportError', 'LookupError', 'NameError', 'OSError', 'SyntaxError', 'SystemError', 'UnboundLocalError', 'ZeroDivisionError', 'self', 'cls', 'None', 'True', 'False', 'NotImplemented', 'Ellipsis'])
@@ -131,7 +134,14 @@ export async function handle(args, context) {
     fixesApplied.imports_removed = applied.whole
     fixesApplied.imports_trimmed = applied.partial
 
-    writeFileSync(absPath, newLines.join('\n'), 'utf-8')
+    // 合防护栏：写盘前语法验证，失败则不写（防误报转破坏）
+    const guard = verifySyntax(newLines.join('\n'), lang)
+    if (guard.ok) {
+      writeFileSync(absPath, newLines.join('\n'), 'utf-8')
+    } else {
+      fixesApplied = null
+      issues.push({ type: 'syntax_guard_blocked', message: `auto-fix would break syntax: ${guard.detail}` })
+    }
   }
 
   const transactionReady = []
@@ -158,6 +168,21 @@ export async function handle(args, context) {
         transactionReady.push({ file, old_string: r.oldLine, new_string: r.newLine })
       } else {
         transactionReady.push({ file, old_string: r.oldLine, new_string: '' })
+      }
+    }
+
+    // 合防护栏：补丁集应用后的语法验证，失败则整体丢弃（防误报转破坏）
+    if (transactionReady.length > 0) {
+      const patched = [...lines]
+      for (const r of removals) {
+        if (r.lineIdx < 0 || r.lineIdx >= patched.length) continue
+        patched[r.lineIdx] = r.type === 'partial' ? r.newLine : ''
+      }
+      const insertStmts = transactionReady.filter(t => t.new_string.startsWith('from ') || t.new_string.startsWith('import '))
+      const guard = verifySyntax(patched.join('\n'), lang)
+      if (!guard.ok) {
+        transactionReady.length = 0
+        issues.push({ type: 'syntax_guard_blocked', message: `proposed fixes would break syntax: ${guard.detail}` })
       }
     }
   }
@@ -190,6 +215,7 @@ export async function handle(args, context) {
 function computeRemovals(imports, usedSymbols, lines, content, issues) {
   const groups = new Map()
   for (const imp of imports) {
+    if (imp.kind === 'side-effect' || !imp.name) continue
     const isUnused = !usedSymbols.has(imp.name) && !imp.name.startsWith('_')
     if (!isUnused) continue
     const key = imp.key || `l${imp.line}`
@@ -198,6 +224,7 @@ function computeRemovals(imports, usedSymbols, lines, content, issues) {
     g.specs.push({ name: imp.name, kind: imp.kind, specStart: imp.specStart, specEnd: imp.specEnd })
   }
   for (const imp of imports) {
+    if (imp.kind === 'side-effect' || !imp.name) continue
     const key = imp.key || `l${imp.line}`
     if (groups.has(key)) groups.get(key).total++
   }
@@ -226,10 +253,26 @@ function computeRemovals(imports, usedSymbols, lines, content, issues) {
         removals.push({ type: 'partial', lineIdx, oldLine: lineText, newLine })
       }
     } else {
+      const lineText = lines[g.line - 1]
+      if (lineText == null) continue
+      // 单行 named import 部分未用 → 修剪而非整行删（防误删在用成员）
+      if (g.specs.length < g.total && lineText.includes('} from')) {
+        const pruned = pruneNamedImportLine(lineText, unusedNames)
+        if (pruned !== null && pruned !== lineText) {
+          issues.push({ type: 'unused_import', import: g.statement, unused: unusedNames, line: g.line, partial: true })
+          removals.push({ type: 'partial', lineIdx: g.line - 1, oldLine: lineText, newLine: pruned })
+          continue
+        }
+      }
+      // 多行 import 部分未用：不自动删（跨行重写风险），提示人工
+      if (g.specs.length < g.total && g.statement.includes('} from')) {
+        issues.push({ type: 'unused_import', import: g.statement, unused: unusedNames, line: g.line, partial: true, skipped: 'multi-line import: manual fix required' })
+        continue
+      }
       for (const s of g.specs) {
         issues.push({ type: 'unused_import', import: g.statement, unused: [s.name], line: g.line })
       }
-      removals.push({ type: 'whole', lineIdx: g.line - 1, oldLine: lines[g.line - 1] })
+      removals.push({ type: 'whole', lineIdx: g.line - 1, oldLine: lineText })
     }
   }
 
@@ -263,6 +306,21 @@ function removeNamedFromStatement(lineText, stmtStart, unusedSpecs) {
   return lineText.slice(0, open) + '{ ' + keptText + ' }' + lineText.slice(close + 1)
 }
 
+// 无位置信息时的行文本修剪（正则路径）：按成员名匹配，保留在用成员
+function pruneNamedImportLine(lineText, unusedNames) {
+  const open = lineText.indexOf('{')
+  const close = lineText.lastIndexOf('}')
+  if (open === -1 || close === -1 || close < open) return null
+  const inner = lineText.slice(open + 1, close)
+  const items = inner.split(',').map(s => s.trim()).filter(Boolean)
+  const kept = items.filter(s => {
+    const n = s.split(/\s+as\s+/).pop().trim()
+    return !unusedNames.includes(n)
+  })
+  if (kept.length === 0) return null
+  return lineText.slice(0, open) + '{ ' + kept.join(', ') + ' }' + lineText.slice(close + 1)
+}
+
 function applyRemovals(newLines, removals) {
   let whole = 0, partial = 0
   for (const r of removals) {
@@ -294,11 +352,33 @@ async function analyzeFileAST(content, lang, currentFile, langParser) {
       for (const ref of asyncResult.refs || []) {
         if (ref.type === 'call') usedSymbols.add(ref.name)
         if (ref.type === 'import') {
-          imports.push({ name: ref.symbols?.[0] || ref.module || '', line: ref.line, statement: `import ${ref.module || ''}`, key: `l${ref.line}`, kind: 'named', stmtStart: -1, stmtEnd: -1 })
-          if (ref.module?.startsWith('.')) {
-            relativeImports.push({ module: ref.module, line: ref.line, relative: ref.module, absolute: resolveRelativeImport(ref.module, currentFile) || ref.module })
+          const lineText = lines[ref.line - 1] || ''
+          let members = ref.symbols || []
+          // 兜底：parser 对 node:/裸导入不给 symbols 时，从行文本提取 {..} 成员（ESM named import）
+          if (members.length === 0) {
+            const bm = lineText.match(/^import\s+\{([^}]+)\}\s+from\s+['"]/)
+            if (bm) members = bm[1].split(',').map(s => s.trim().split(/\s+as\s+/).pop().trim()).filter(Boolean)
           }
-          for (const symName of ref.symbols || []) definedSymbols.add(symName)
+          const module = ref.module || ''
+          // 副作用导入（import 'x.css' / import 'module' 无成员）：不参与 unused/undefined 判定
+          if (!module && members.length === 0) {
+            imports.push({ name: '', line: ref.line, statement: lineText, key: `l${ref.line}`, kind: 'side-effect', stmtStart: -1, stmtEnd: -1 })
+            continue
+          }
+          const nsMatch = lineText.match(/^import\s+\*\s+as\s+(\w+)\s+from\s+['"]/)
+          const dmatch = lineText.match(/^import\s+(\w+)\s+from\s+['"]/)
+          const namespaceName = nsMatch?.[1] || ''
+          const defaultName = dmatch?.[1] || ''
+          const importNames = members.length > 0
+            ? members
+            : (namespaceName ? [namespaceName] : (defaultName ? [defaultName] : []))
+          for (const symName of importNames) {
+            definedSymbols.add(symName)
+            imports.push({ name: symName, line: ref.line, statement: lineText, key: `l${ref.line}`, kind: 'named', stmtStart: -1, stmtEnd: -1 })
+          }
+          if (module.startsWith('.')) {
+            relativeImports.push({ module, line: ref.line, relative: module, absolute: resolveRelativeImport(module, currentFile) || module })
+          }
         }
       }
 
@@ -315,6 +395,65 @@ async function analyzeFileAST(content, lang, currentFile, langParser) {
   } catch {}
 
   return null
+}
+
+// 合防护栏：补丁集应用后的真实语法验证（node --check / python ast.parse），失败即弃
+function verifySyntax(text, lang) {
+  if (lang === 'python') {
+    const tmp = join(os.tmpdir(), `fiximports-${process.pid}-${Date.now()}.py`)
+    writeFileSync(tmp, text)
+    try {
+      const r = spawnSync('python3', ['-c', `import ast; ast.parse(open(${JSON.stringify(tmp)}).read())`], { timeout: 8000 })
+      return r.status === 0 ? { ok: true } : { ok: false, detail: (r.stderr?.toString() || 'python syntax error').split('\n')[0] }
+    } finally {
+      try { unlinkSync(tmp) } catch {}
+    }
+  }
+  if (lang === 'javascript') {
+    const tmp = join(os.tmpdir(), `fiximports-${process.pid}-${Date.now()}.js`)
+    writeFileSync(tmp, text)
+    try {
+      const r = spawnSync(process.execPath, ['--check', tmp], { timeout: 8000 })
+      return r.status === 0 ? { ok: true } : { ok: false, detail: (r.stderr?.toString() || 'js syntax error').split('\n')[0] }
+    } finally {
+      try { unlinkSync(tmp) } catch {}
+    }
+  }
+  if (lang === 'typescript') {
+    // node --check 不认 TS 语法：括号平衡兜底
+    const b = checkBracketBalance(text)
+    return b.ok ? { ok: true } : { ok: false, detail: b.detail }
+  }
+  return { ok: true }
+}
+
+// 多行 import 块（import {\n  a,\n  b\n} from 'x'）压平解析（行号 = 起始行）
+function extractMultiLineImports(lines, lang) {
+  const result = []
+  if (lang === 'python') return result
+  for (let i = 0; i < lines.length; i++) {
+    const t = lines[i].trim()
+    if (t.startsWith('import {') && !t.includes('} from')) {
+      const block = [t]
+      let j = i + 1
+      while (j < lines.length && !lines[j].includes('} from')) {
+        block.push(lines[j])
+        j++
+      }
+      if (j < lines.length) {
+        const flat = [...block, lines[j]].join(' ').replace(/\s+/g, ' ')
+        const m = flat.match(/^import\s+\{([^}]+)\}\s+from\s+['"][^'"]+['"]\s*;?\s*$/)
+        if (m) {
+          m[1].split(',').forEach(s => {
+            const name = s.trim().split(/\s+as\s+/).pop().trim()
+            if (name) result.push({ name, line: i + 1, statement: flat })
+          })
+        }
+        i = j
+      }
+    }
+  }
+  return result
 }
 
 function detectLanguage(filePath) {
@@ -334,6 +473,7 @@ function analyzeFile(content, lang, currentFile = '') {
   const undefinedSymbols = []
   const symbolLines = Object.create(null)
   const relativeImports = []
+  const multiLineImports = extractMultiLineImports(lines, lang)
 
   const pyImportRe = /^(?:from\s+(\S+)\s+)?import\s+(.+)$/
   const importLineRe = lang === 'python'
@@ -397,7 +537,7 @@ function analyzeFile(content, lang, currentFile = '') {
       if (name) { definedSymbols.add(name); symbolLines[name] = i + 1 }
     }
 
-    const strippedDef = trimmed.replace(/^(?:export|async)\s+/, '')
+    const strippedDef = trimmed.replace(/^(?:export|async)\s+(?:export|async)\s+/, '').replace(/^(?:export|async)\s+/, '')
     if (strippedDef.startsWith('def ') || strippedDef.startsWith('function ') || strippedDef.startsWith('class ')) {
       const parts = strippedDef.split(/[\s(]/)
       const name = parts[1]?.replace(/[:{(].*$/, '')
@@ -421,12 +561,21 @@ function analyzeFile(content, lang, currentFile = '') {
           if (name && /^[a-zA-Z_]\w*$/.test(name)) definedSymbols.add(name)
         })
       }
+      const arrDestructMatch = trimmed.match(/^(?:const|let|var)\s+\[([^\]]+)\]\s*=/)
+      if (arrDestructMatch) {
+        arrDestructMatch[1].split(',').forEach(s => {
+          const n = s.trim().split(/[\s=]/)[0]
+          if (n && /^[a-zA-Z_]\w*$/.test(n)) definedSymbols.add(n)
+        })
+      }
       const bareDeclMatch = trimmed.match(/^(?:let|var)\s+([a-zA-Z_$][\w$]*(?:\s*,\s*[a-zA-Z_$][\w$]*)*)\s*$/)
       if (bareDeclMatch) {
         bareDeclMatch[1].split(',').forEach(s => { const n = s.trim(); if (n) definedSymbols.add(n) })
       }
       const forOfMatch = trimmed.match(/for\s+\((?:const|let|var)\s+(\w+)\s+(?:of|in)\s/)
       if (forOfMatch) definedSymbols.add(forOfMatch[1])
+      const cForMatch = trimmed.match(/for\s*\(\s*(?:let|const|var)\s+(\w+)\s*=/)
+      if (cForMatch) definedSymbols.add(cForMatch[1])
       const arrowParamRe = /(?:,\s*|\(\s*)(\w+(?:\s*,\s*\w+)*)\s*\)?\s*=>/g
       let apm
       while ((apm = arrowParamRe.exec(trimmed)) !== null) {
@@ -507,10 +656,11 @@ function analyzeFile(content, lang, currentFile = '') {
     }
   }
 
+  imports.push(...multiLineImports)
   imports.forEach(imp => definedSymbols.add(imp.name))
 
   for (const sym of usedSymbols) {
-    if (KEYWORDS.has(sym) || SPECIAL.has(sym) || builtins.has(sym) || sym.startsWith('__')) continue
+    if (KEYWORDS.has(sym) || SPECIAL.has(sym) || builtins.has(sym) || sym.startsWith('__') || sym === '_') continue
     if (sym === sym.toUpperCase() && sym.length > 2) continue
     if (sym.includes('.')) continue
     if (!definedSymbols.has(sym)) {
@@ -532,7 +682,17 @@ function stripCommentsAndStrings(content, lang) {
   } else {
     s = s.replace(/\/\*[\s\S]*?\*\//g, ' ')
     s = s.replace(/\/\/.*$/gm, ' ')
-    s = s.replace(/`(?:[^`\\]|\\.)*`/g, ' ')
+    s = s.replace(/`(?:[^`\\]|\\.)*`/g, m => {
+      // 模板字符串：只保留 ${expr} 表达式中的标识符（剥掉字符串字面量），普通文本弃掉
+      let rest = m
+      const parts = []
+      let mm
+      while ((mm = /\$\{([^{}]*)\}/.exec(rest)) !== null) {
+        parts.push(mm[1].replace(/['"][^'"]*['"]/g, ' '))
+        rest = rest.slice(mm.index + mm[0].length)
+      }
+      return ' ' + parts.join(' ') + ' '
+    })
     s = s.replace(/"(?:[^"\\]|\\.)*"/g, ' ')
     s = s.replace(/'(?:[^'\\]|\\.)*'/g, ' ')
   }

@@ -1,13 +1,25 @@
 {
   "name": "edit_batch",
   "version": "1.0.0",
-  "description": "Apply multiple edits to one file atomically. dry_run previews diff. Prefer over repeated edit calls. After editing: fix_imports + test_bridge.",
+  "description": "Apply multiple edits to one file atomically. dry_run previews diff. Prefer over repeated edit calls. After editing: fix_imports + test_bridge. Use file (workspace-relative) + workspace_dir.",
   "inputSchema": {
     "type": "object",
     "properties": {
+      "file": {
+        "type": "string",
+        "description": "Path to the file to edit, relative to workspace_dir (e.g. \"src/auth.py\")"
+      },
+      "workspace_dir": {
+        "type": "string",
+        "description": "Project root; required when using file (relative)"
+      },
       "file_path": {
         "type": "string",
-        "description": "Absolute path to the file to edit"
+        "description": "DEPRECATED alias: absolute path to the file. Allowed only inside workspace_dir when provided."
+      },
+      "verbose": {
+        "type": "boolean",
+        "description": "Return original_content/final_content full text (default: false — diff only)"
       },
       "edits": {
         "type": "array",
@@ -56,5 +68,9 @@
     "atomic",
     "whitespace-tolerant"
   ],
-  "dependencies": []
+  "dependencies": [],
+  "required": [
+    "file",
+    "edits"
+  ]
 }
