@@ -1,12 +1,13 @@
 {
   "name": "reindex",
-  "version": "0.0.4",
-  "description": "Index workspace for all malong analysis tools. MUST call first for new workspaces. blocking=true waits. Responses include done:true|false.",
+  "version": "0.0.5",
+  "description": "Index workspace for all malong analysis tools. MUST call first for new workspaces. blocking=true waits. force=true re-extracts ALL files (ignores mtime) to purge stale/corrupt index data. Responses include done:true|false.",
   "inputSchema": {
     "type": "object",
     "properties": {
       "workspace_dir": { "type": "string", "description": "Absolute path to the project root directory. Omit this to check current indexing status / progress." },
       "blocking": { "type": "boolean", "description": "If true, wait for indexing to complete before returning (default false = async)." },
+      "force": { "type": "boolean", "description": "If true, mark ALL files dirty and re-extract regardless of mtime. Use to purge stale index data (e.g. after an extractor/binary upgrade, or when results look wrong). Default false (incremental by mtime)." },
       "maxFiles": { "type": "number", "description": "Max files to index (default 5000, 0=unlimited). Increase if project has many files." },
       "skipDirs": { "type": "array", "items": { "type": "string" }, "description": "Skip specific directories by relative path, e.g. [\"runtime1\", \"0通天/eval-cases\"]. Useful when pre-check says too many files." },
       "ignoreDirs": { "type": "array", "items": { "type": "string" }, "description": "Additional directory names to skip globally (e.g. [\"deps\", \"archive\"]). Combined with built-in defaults." },

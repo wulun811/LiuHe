@@ -3,12 +3,31 @@
 // 详见：通天计划 §六 码龙
 
 import Database from 'better-sqlite3'
-import { join, relative, extname, resolve } from 'node:path'
+import { join, relative, extname, resolve, dirname } from 'node:path'
 import { readFileSync, writeFileSync, existsSync, unlinkSync, watch, chmodSync, statSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import os from 'node:os'
 import { createServer } from 'node:http'
 import { DEFAULT_IGNORE_DIRS } from './file-collector.js'
 import { sha256 } from './hash-utils.js'
 import { computeFileAnchors } from './symbol-anchors.js'
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
+
+// 13#1：提取器版本戳 = 二进制文件 sha256。二进制内容变（重新部署）→ 版本变 → 触发索引自愈。
+// 路径解析与 mcp-server.js 的 PARSE_SERVICE_BIN / _ALT 对齐（primary 优先，dev 回退 target/release）。
+export function resolveExtractorBin() {
+  const primary = join(os.homedir(), '.local', 'bin', 'malong-parse')
+  if (existsSync(primary)) return primary
+  const alt = join(__dirname, '..', '..', '..', 'malong-parse', 'target', 'release', 'malong-parse')
+  if (existsSync(alt)) return alt
+  return null
+}
+
+export function extractorVersion(binPath = resolveExtractorBin()) {
+  if (!binPath || !existsSync(binPath)) return 'unknown'
+  try { return sha256(readFileSync(binPath)) } catch { return 'unknown' }
+}
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS files (
@@ -48,6 +67,10 @@ CREATE INDEX IF NOT EXISTS idx_ref_source ON refs(source_symbol_id);
 CREATE INDEX IF NOT EXISTS idx_ref_target ON refs(target_symbol_id);
 CREATE INDEX IF NOT EXISTS idx_ref_file ON refs(source_file_id);
 CREATE INDEX IF NOT EXISTS idx_ref_name ON refs(target_name);
+CREATE TABLE IF NOT EXISTS meta (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
 `
 
 // P2-C1：与 file-collector 的 DEFAULT_CACHED_EXT 对齐（旧缺 .ts/.tsx → outline-reader 对 .ts 永久 not_indexed）
@@ -228,6 +251,8 @@ class CodeIndex {
     }
     this._db = initDb(wsDir)
     this._currentWorkspace = workspaceDir
+    // 13#4：开库自检提取器版本戳，陈旧（含首次无戳的既有库）→ 全量标 dirty，下次 reindex 自动重抽
+    this._reconcileExtractorVersion()
     // 写入 metadata
     const metadataPath = join(wsDir, 'metadata.json')
     const metadata = {
@@ -568,7 +593,7 @@ class CodeIndex {
     const validFiles = filePaths.filter(fp => CACHED_EXT.has(extname(fp)))
     if (!validFiles.length) return []
 
-    const existingFiles = new Map(this._db.prepare('SELECT path, mtime FROM files').all().map(f => [f.path, f.mtime]))
+    const existingFiles = new Map(this._db.prepare('SELECT path, mtime, index_state FROM files').all().map(f => [f.path, { mtime: f.mtime, state: f.index_state }]))
     const changedFiles = []
     const mtimeMap = new Map()
     const currentPaths = new Set()
@@ -577,8 +602,9 @@ class CodeIndex {
       currentPaths.add(relPath)
       let st
       try { st = statSync(fp) } catch { continue }
-      const oldMtime = existingFiles.get(relPath)
-      if (oldMtime !== undefined && oldMtime >= st.mtimeMs) continue
+      const old = existingFiles.get(relPath)
+      // 13#3：dirty 文件（提取器升级自检标记 / force 重抽）无视 mtime 必重抽；否则按 mtime 增量
+      if (old && old.state !== 'dirty' && old.mtime >= st.mtimeMs) continue
       changedFiles.push(fp)
       mtimeMap.set(relPath, st.mtimeMs)
     }
@@ -767,6 +793,16 @@ class CodeIndex {
 
       async indexBatch(filePaths, repo, onProgress) {
         return self.indexBatch(filePaths, repo, onProgress)
+      },
+
+      // 13#5：force 重抽——全量标 dirty（供 reindex force=true 调用）
+      markAllDirty() {
+        return self.markAllDirty()
+      },
+
+      // 13#4：手动触发提取器版本自检（currentVer 可注入；默认当前二进制 sha256）
+      reconcileExtractorVersion(currentVer) {
+        return self._reconcileExtractorVersion(currentVer)
       },
 
       // 索引状态（供 reindex handler 调用）
@@ -1338,6 +1374,31 @@ class CodeIndex {
     this._db.prepare("UPDATE files SET index_state = 'dirty', content_hash = '' WHERE path = ?").run(filePath)
     if (reason) this._core?.log?.('warn', `[code-index] index dirty: ${filePath} (${reason})`)
     this.clearCachesForFile(filePath)
+  }
+
+  // 13#5：force 重抽入口——全量标 dirty，下次 indexBatch 无视 mtime 重抽所有文件（清陈旧/可疑数据）
+  markAllDirty() {
+    if (!this._db) return 0
+    const r = this._db.prepare("UPDATE files SET index_state = 'dirty', content_hash = ''").run()
+    this._core?.log?.('info', `[code-index] marked ${r.changes} files dirty (force re-extract on next reindex)`)
+    return r.changes
+  }
+
+  // 13#4：开库自检——比对 DB 存的提取器版本戳 vs 当前二进制 sha256。
+  // 不一致（含首次无戳的既有库）→ 全量标 dirty，下次 reindex 自动重抽清陈旧数据（懒清理，不阻塞）。
+  // currentVer 可注入（测试用）；默认取 extractorVersion()。binary 不可解析（'unknown'）时跳过，避免误标。
+  _reconcileExtractorVersion(currentVer = extractorVersion()) {
+    if (!this._db) return { changed: false, markedDirty: 0, skipped: 'no_db' }
+    if (currentVer === 'unknown') return { changed: false, markedDirty: 0, skipped: 'binary_not_resolvable' }
+    const stored = this._db.prepare('SELECT value FROM meta WHERE key = ?').get('extractor_version')?.value
+    const changed = stored !== currentVer
+    let markedDirty = 0
+    if (changed) {
+      markedDirty = this._db.prepare("UPDATE files SET index_state = 'dirty', content_hash = ''").run().changes
+      this._core?.log?.('info', `[code-index] extractor ${stored ? stored.slice(0, 8) : '(none)'} → ${currentVer.slice(0, 8)}: marked ${markedDirty} files dirty; run reindex to re-extract`)
+    }
+    this._db.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run('extractor_version', currentVer)
+    return { changed, markedDirty, stored: stored || null, current: currentVer }
   }
 
   async start() {

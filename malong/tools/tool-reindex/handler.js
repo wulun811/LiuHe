@@ -125,6 +125,13 @@ export async function handle(args, context) {
   codeIndexService.indexing = true
   codeIndexService.indexProgress = { workspaceDir, total: totalFiles, indexed: 0, startTime }
 
+  // 13#5：force=true → 全量标 dirty，indexBatch 无视 mtime 重抽所有文件（清陈旧/可疑索引数据）
+  let forceMarked = 0
+  if (args?.force === true) {
+    forceMarked = codeIndexService.markAllDirty()
+    log('info', `[reindex] force=true: marked ${forceMarked} files dirty for full re-extract`)
+  }
+
   const blocking = args?.blocking === true
 
   if (blocking) {
@@ -145,6 +152,7 @@ export async function handle(args, context) {
         symbols: last.symbols,
         refs: last.refs,
         duration_seconds: Math.round(durationMs / 1000),
+        force_marked_dirty: forceMarked,
       }
     } catch (e) {
       codeIndexService.indexing = false
@@ -172,6 +180,7 @@ export async function handle(args, context) {
     workspace_dir: workspaceDir,
     total_files: totalFiles,
     estimated_time_seconds: estimatedTimeSeconds,
+    force_marked_dirty: forceMarked,
     next_action: 'Call reindex() to check progress, or pass blocking=true to wait for completion',
     note: `Indexing ${totalFiles} files in background. You can continue with other tasks.`,
   }
