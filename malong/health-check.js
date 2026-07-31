@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, writeFileSync, accessSync, constants, unlinkSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, writeFileSync, accessSync, constants, unlinkSync, statSync, rmSync } from 'node:fs'
 import net from 'node:net'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -252,4 +252,70 @@ export async function runHealthCheck({ stateDir, toolsDir, workspacesDir, regist
   }
 
   return { status: ok ? 'ok' : 'warn', checks, timestamp: Date.now() }
+}
+
+/**
+ * 工作区索引库自清理（治本 B）：按 last activity 超 maxAgeDays 删除 stale 工作区缓存。
+ * 索引库是可重建缓存（删了下次 reindex 即恢复），故 prune 安全——源码不受影响。
+ * 判据取多信号最新值：目录内所有文件 mtime + metadata.json 的 last_accessed 字段，
+ * 避免误删「只读查询、未重新索引」的活跃库；无法判定时间一律保守保留。
+ * @param {string} workspacesDir - stateDir/workspaces
+ * @param {object} [opts]
+ * @param {number} [opts.maxAgeDays=14] - 超期阈值（天）
+ * @param {boolean} [opts.dryRun=false] - 只报告不删
+ * @param {string[]} [opts.protect=[]] - 永不删除的工作区 hash 列表
+ */
+export function cleanupStaleWorkspaces(workspacesDir, opts = {}) {
+  const { maxAgeDays = 14, dryRun = false, protect = [] } = opts
+  if (!workspacesDir || !existsSync(workspacesDir)) {
+    return { status: 'no_workspaces_dir', max_age_days: maxAgeDays, deleted_count: 0, freed_mb: 0, deleted: [], kept_count: 0 }
+  }
+  const maxAgeMs = maxAgeDays * 86400000
+  const now = Date.now()
+  const deleted = []
+  let keptCount = 0
+  let freedBytes = 0
+  for (const e of readdirSync(workspacesDir, { withFileTypes: true })) {
+    if (!e.isDirectory()) continue
+    if (protect.includes(e.name)) { keptCount++; continue }
+    const wsDir = join(workspacesDir, e.name)
+    let files
+    try { files = readdirSync(wsDir) } catch { keptCount++; continue }
+    let lastActivity = 0
+    let sizeBytes = 0
+    for (const f of files) {
+      try {
+        const st = statSync(join(wsDir, f))
+        if (st.mtimeMs > lastActivity) lastActivity = st.mtimeMs
+        sizeBytes += st.size
+      } catch {}
+    }
+    try {
+      const meta = JSON.parse(readFileSync(join(wsDir, 'metadata.json'), 'utf-8'))
+      if (meta.last_accessed) {
+        const t = new Date(meta.last_accessed).getTime()
+        if (Number.isFinite(t) && t > lastActivity) lastActivity = t
+      }
+    } catch {}
+    if (lastActivity === 0) { keptCount++; continue }
+    const ageMs = now - lastActivity
+    if (ageMs > maxAgeMs) {
+      const sizeMB = Math.round(sizeBytes / 1048576 * 10) / 10
+      if (!dryRun) {
+        try { rmSync(wsDir, { recursive: true, force: true }) } catch { keptCount++; continue }
+      }
+      deleted.push({ workspace: e.name, age_days: Math.round(ageMs / 86400000 * 10) / 10, size_mb: sizeMB })
+      freedBytes += sizeBytes
+    } else {
+      keptCount++
+    }
+  }
+  return {
+    status: dryRun ? 'dry_run' : 'cleaned',
+    max_age_days: maxAgeDays,
+    deleted_count: deleted.length,
+    freed_mb: Math.round(freedBytes / 1048576 * 10) / 10,
+    deleted,
+    kept_count: keptCount,
+  }
 }

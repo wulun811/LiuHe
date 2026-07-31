@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { spawn } from 'node:child_process'
 import net from 'node:net'
 import ToolRegistry from './tool-registry.js'
-import { runHealthCheck } from './health-check.js'
+import { runHealthCheck, cleanupStaleWorkspaces } from './health-check.js'
 import crypto from 'node:crypto'
 import os from 'node:os'
 
@@ -189,6 +189,18 @@ async function initModules() {
   }
   if (health.status !== 'ok') {
     safeLog(`[health] ${health.checks.filter(c => c.status === 'FAIL').length} failure(s) detected`)
+  }
+
+  // 工作区索引库自清理（治本 B）：启动时按 last activity 清 stale 缓存（可重建，删了下次 reindex 恢复）。
+  // env MALONG_WS_GC_DAYS 控制阈值（默认 14 天，设 0 禁用）。
+  const gcDays = Number(process.env.MALONG_WS_GC_DAYS ?? 14)
+  if (gcDays > 0) {
+    try {
+      const gc = cleanupStaleWorkspaces(workspacesDir, { maxAgeDays: gcDays })
+      if (gc.deleted_count > 0) crashLog(`workspace GC: pruned ${gc.deleted_count} stale workspace cache(s), freed ${gc.freed_mb}MB (max_age=${gcDays}d)`)
+    } catch (e) {
+      safeLog(`[gc] workspace cleanup failed (non-fatal): ${e.message}`)
+    }
   }
 }
 

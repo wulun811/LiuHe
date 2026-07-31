@@ -1,4 +1,4 @@
-import { readUsageStats } from '../../health-check.js'
+import { readUsageStats, cleanupStaleWorkspaces } from '../../health-check.js'
 import { appendFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -62,6 +62,16 @@ export async function handle(args, context) {
         message: 'Soft restart failed. Consider restarting opencode.',
       }
     }
+  }
+
+  if (action === 'cleanup') {
+    const maxAgeDays = Number(args?.max_age_days) > 0 ? Number(args.max_age_days) : 14
+    const dryRun = args?.dry_run === true
+    const result = cleanupStaleWorkspaces(context.workspacesDir, { maxAgeDays, dryRun })
+    result.next_step = dryRun
+      ? 'Dry run only — re-run with dry_run=false to actually prune stale workspace caches.'
+      : 'Deleted caches are rebuildable: next access to a pruned workspace reindexes automatically.'
+    return result
   }
 
   // 默认：健康检查

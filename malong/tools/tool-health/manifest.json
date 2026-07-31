@@ -1,18 +1,26 @@
 {
   "name": "health",
-  "version": "1.1.0",
-  "description": "System health check + self-healing. action='check' (default): DB integrity, tool manifests, memory, semaphore, active requests. action='restart': soft-restart services without killing process. Set stats=true for usage statistics.",
+  "version": "1.2.0",
+  "description": "System health check + self-healing. action='check' (default): DB integrity, tool manifests, memory, semaphore, active requests. action='restart': soft-restart services without killing process. action='cleanup': prune stale workspace index caches older than max_age_days (rebuildable via reindex). Set stats=true for usage statistics.",
   "inputSchema": {
     "type": "object",
     "properties": {
       "action": {
         "type": "string",
-        "enum": ["check", "restart"],
-        "description": "check: run health checks. restart: soft-restart services (GC + reinit) to recover from bad state."
+        "enum": ["check", "restart", "cleanup"],
+        "description": "check: run health checks. restart: soft-restart services (GC + reinit) to recover from bad state. cleanup: prune stale workspace index caches (rebuildable) older than max_age_days."
       },
       "stats": {
         "type": "boolean",
         "description": "Include usage statistics: per-tool call counts, success rate, tokens saved, issues caught"
+      },
+      "max_age_days": {
+        "type": "number",
+        "description": "For action='cleanup': prune workspace caches not accessed within this many days (default 14)."
+      },
+      "dry_run": {
+        "type": "boolean",
+        "description": "For action='cleanup': report what would be pruned without deleting (default false)."
       }
     },
     "required": []
