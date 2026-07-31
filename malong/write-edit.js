@@ -50,6 +50,13 @@ export function applyBodyEdit(lines, range, newContent, preserveSignature) {
   if (b === a) {
     return { error: { code: 'SINGLE_LINE_SYMBOL', message: 'Single-line symbol: use boundary=full or patch mode.' } }
   }
+  // 护栏：body 模式误传完整符号（含签名行）→ 拒绝。典型误用是把整个符号文本贴进 content
+  // 判定：content 任意一行 trim 后与签名行一致（嵌套同名定义几乎不可能，零误伤）
+  // 注意：调用方传入的 range 已 +1 偏移（[range[0]+1, range[1]]），签名行是 lines[a-2]
+  const sigTrim = lines[a - 2]?.trim() || ''
+  if (sigTrim && newContent.split('\n').some(l => l.trim() === sigTrim)) {
+    return { error: { code: 'BODY_CONTAINS_SIGNATURE', message: 'boundary=body content must not contain the signature line; pass only the method body, or use boundary=full for the whole symbol.' } }
+  }
   const before = lines.slice(0, a - 1)
   const after = lines.slice(b)
   const newLines = newContent.split('\n')

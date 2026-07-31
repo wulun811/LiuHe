@@ -205,5 +205,19 @@ const r8b = await writeSymbols({ workspace_dir: WS, writes: [
 ] }, wctx)
 assert(r8b.success === true, `重读后整批重试成功（冲突恢复闭环）`)
 
+// ── 场景 9：body 模式误传签名行 → BODY_CONTAINS_SIGNATURE 拒 + 整批回滚 ──
+console.log('── 场景 9: body 模式误传签名行 ──')
+const before9 = readFileSync(`${WS}/src/auth.py`, 'utf-8')
+const v9 = await currentVersion('src/auth.py')
+const wrongBody = `    def login(self, username, password):
+        token = self._hash(username, password)
+        return token + 'x'`
+const r9 = await writeSymbols({ workspace_dir: WS, writes: [
+  { file_path: 'src/auth.py', locator: { symbol_id: authLogin.stable_id }, base_version: v9, content: wrongBody, edit_mode: 'replace_symbol', boundary: 'body' },
+] }, wctx)
+assert(r9.success === false, `body 含签名行被拒（BODY_CONTAINS_SIGNATURE）`)
+assert(r9.error?.code === 'BODY_CONTAINS_SIGNATURE', `错误码正确（得 ${r9.error?.code}）`)
+assert(readFileSync(`${WS}/src/auth.py`, 'utf-8') === before9, `文件未被写入（整批回滚）`)
+
 console.log(`\n=== test-mvp-batch: ${pass} passed, ${fail} failed ===`)
 process.exit(fail ? 1 : 0)
