@@ -72,14 +72,19 @@ function register(core) {
 
     async _dockerExec(command, dir, tmpDir, timeout, env) {
       const envArgs = Object.entries(env).map(([k, v]) => ['-e', `${k}=${v}`]).flat()
+      // P2-C4：--name 唯一容器名，超时（CLI 被杀容器仍跑）后 docker rm -f 清理孤儿
+      const name = `sandbox-${process.pid}-${Date.now()}`
       const result = await exec('docker', [
-        'run', '--rm',
+        'run', '--rm', '--name', name,
         '-v', `${dir}:/workspace:rw`,
         '-v', `${tmpDir}:/tmp:rw`,
         ...envArgs,
         DOCKER_IMAGE,
         'sh', '-c', `cd /workspace && ${command}`,
       ], process.cwd(), timeout)
+      if (result.signal || result.exitCode === 124) {
+        try { await exec('docker', ['rm', '-f', name], process.cwd(), 5000) } catch {}
+      }
       return result
     },
 

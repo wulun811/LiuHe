@@ -29,7 +29,9 @@ export async function handle(args, context) {
   codeIndexService.initWorkspace(workspaceDir)
 
   const query = args?.query || ''
-  const limit = args?.limit || 30
+  // P2-B2：limit 负值 → SQL LIMIT -1 返回全表（几万条全量返回）；钳制到 [1, 500]
+  const rawLimit = parseInt(args?.limit)
+  const limit = Number.isNaN(rawLimit) ? 30 : Math.min(500, Math.max(1, rawLimit))
 
   if (!query) {
     return { error: 'missing_parameter', message: 'query is required', suggestion: 'Provide a symbol name substring to search (case-sensitive)' }

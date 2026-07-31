@@ -77,8 +77,10 @@ function extractTestNames(filePath, workspaceDir) {
       if (ext === '.py') {
         m = /^\s*(?:async\s+)?def\s+(test_\w+)/.exec(lines[i])
       } else if (['.js', '.mjs', '.ts', '.tsx'].includes(ext)) {
-        m = /(?:it|test)\s*\(\s*['"`](.+?)['"`]/.exec(lines[i])
-        if (!m) m = /(?:describe)\s*\(\s*['"`](.+?)['"`]/.exec(lines[i])
+        // P2-B6：锚定行首 + 剥注释/字符串——// it('x')、字符串 "it('y')" 不再假报测试名
+        const code = lines[i].replace(/\/\/.*$/, '').replace(/"(?:[^"\\]|\\.)*"/g, ' ').replace(/'(?:[^'\\]|\\.)*'/g, ' ').replace(/`(?:[^`\\]|\\.)*`/g, ' ')
+        m = /^\s*(?:it|test)(?:\.(?:only|skip))?\s*\(\s*['"`](.+?)['"`]/.exec(code)
+        if (!m) m = /^\s*describe\s*\(\s*['"`](.+?)['"`]/.exec(code)
       } else if (ext === '.go') {
         m = /^func\s+(Test\w+)/.exec(lines[i])
       }

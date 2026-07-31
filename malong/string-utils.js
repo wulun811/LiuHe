@@ -39,11 +39,21 @@ export function stripStrings(line) {
       if (ch === '\\') { i += 2; continue }
       if (ch === quote) { quote = null; i++; continue }
       if (quote === '`' && ch === '$' && line[i + 1] === '{') {
+        // ${...} 表达式：花括号计数须跳过字符串字面量里的 {/}（`${'}'}` 嵌套 —— P2-C7）
         let depth = 1
         let j = i + 2
+        let innerQuote = null
         while (j < line.length && depth > 0) {
-          if (line[j] === '{') depth++
-          else if (line[j] === '}') depth--
+          const c = line[j]
+          if (innerQuote) {
+            if (c === '\\') { j += 2; continue }
+            if (c === innerQuote) innerQuote = null
+            j++
+            continue
+          }
+          if (c === '"' || c === "'") { innerQuote = c; j++; continue }
+          if (c === '{') depth++
+          else if (c === '}') depth--
           j++
         }
         out += line.slice(i, j)

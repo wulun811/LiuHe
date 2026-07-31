@@ -5,7 +5,7 @@
 // P4.3.1: 失败事件采集 — 每次失败发射标准化 failure 事件
 
 import { execFile } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 export const name = 'malong-verify-pipeline'
@@ -186,8 +186,10 @@ function register(core) {
     async runTest(dir = process.cwd(), { timeout = DEFAULT_TIMEOUT, testCommand = null } = {}) {
       const scripts = detectScripts(dir)
       const pm = testCommand ? null : detectPkgManager(dir)
-      const cmd = testCommand || (scripts.test ? (pm || 'npm') : 'node')
-      const args = testCommand ? splitCommand(testCommand) : ['test']
+      // P2：testCommand 是完整命令串（"npm run test -- --watch"），execFile 需要拆成可执行文件 + args；
+      // 旧实现 cmd=testCommand 且 args=splitCommand(testCommand) → ENOENT 恒失败
+      const cmd = testCommand ? splitCommand(testCommand)[0] : (testCommand ? null : (scripts.test ? (pm || 'npm') : 'node'))
+      const args = testCommand ? splitCommand(testCommand).slice(1) : ['test']
       const result = await exec(cmd, args, dir, timeout)
       const testStats = parseTestOutput(result.stdout, result.stderr)
       if (result.exitCode !== 0) _emitFailure('test', result)
@@ -223,7 +225,30 @@ function register(core) {
       if (scripts.lint) results.lint = await this.runLint(dir, { timeout })
       if (scripts.test) results.test = await this.runTest(dir, { timeout })
       if (Object.keys(results).length === 0) {
-        results.syntax = await this.runCommand('node --check', dir, { timeout })
+        // P2：node --check 不带文件参数检查的是空 stdin → 空脚本合法 → 恒 pass（虚假结论）。
+        // 改成对目录下实际 .js 文件逐个检查
+        const jsFiles = []
+        const walk = (d) => {
+          for (const e of readdirSync(d, { withFileTypes: true })) {
+            if (e.name.startsWith('.') || e.name === 'node_modules') continue
+            const p = join(d, e.name)
+            if (e.isDirectory()) walk(p)
+            else if (e.name.endsWith('.js')) jsFiles.push(p)
+          }
+        }
+        try { walk(dir) } catch {}
+        if (jsFiles.length > 0) {
+          let failCount = 0
+          for (const f of jsFiles.slice(0, 50)) {
+            const r = await this.runCommand(`node --check ${JSON.stringify(f)}`, dir, { timeout })
+            if (r.exitCode !== 0) { failCount++; results.syntax = r; break }
+          }
+          if (!results.syntax) {
+            results.syntax = { status: 'pass', exitCode: 0, checked_files: jsFiles.slice(0, 50).length }
+          }
+        } else {
+          results.syntax = { status: 'skip', reason: 'no js files found' }
+        }
       }
       return {
         status: Object.values(results).every(r => r.status === 'pass') ? 'pass' : 'fail',

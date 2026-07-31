@@ -135,6 +135,7 @@ function getWorkspaceDir(workspaceDir) {
   return wsDir
 }
 
+const _configWarned = new Set()
 const core = {
   stateDir,
   services,
@@ -142,7 +143,14 @@ const core = {
   emit() {},
   on() {},
   off() {},
-  get(_, def) { return def },
+  get(key, def) {
+    // P2-A7：core.get 恒返回默认值 → 配置项丢失无感知。未知键只警告一次
+    if (key && !_configWarned.has(key)) {
+      _configWarned.add(key)
+      safeLog(`WARNING: config key "${key}" not set — using default: ${typeof def === 'string' && def.length > 40 ? def.slice(0, 40) + '...' : JSON.stringify(def)}`)
+    }
+    return def
+  },
   registerService(name, svc) { services[name] = svc },
   getService(name) { return services[name] },
   getWorkspaceDir,
@@ -290,6 +298,8 @@ function handleRequest(req) {
               content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
             })
           } else {
+            // P2-A5：超时后客户端收不到任何响应（连错误都不回）——补一个错误响应
+            safeRespondError(id, -32603, `Request timeout after ${REQUEST_TIMEOUT_MS}ms`)
             crashLog(`tool ${name} completed AFTER timeout (${REQUEST_TIMEOUT_MS}ms) — result discarded`)
           }
         } catch (e) {
@@ -458,8 +468,11 @@ initModules().then(() => {
   let watchdogRestarts = 0
   const MAX_AUTO_RESTARTS = 3
   let lastAutoRestart = 0
+  let watchdogRunning = false
 
   setInterval(async () => {
+    if (watchdogRunning) return // P2-A6：健康检查（含 DB integrity_check）超过间隔时不重叠
+    watchdogRunning = true
     try {
       const health = await runHealthCheck({
         stateDir, toolsDir: join(__dirname, 'tools'), workspacesDir, registry, log: core.log, semaphore, activeRequests
@@ -518,6 +531,8 @@ initModules().then(() => {
       }
     } catch (e) {
       crashLog(`WATCHDOG error: ${e.message}`)
+    } finally {
+      watchdogRunning = false
     }
   }, 30_000)
 }).catch(e => {

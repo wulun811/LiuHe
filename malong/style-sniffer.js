@@ -33,7 +33,8 @@ function collectCodeFiles(dir) {
     }
   }
   walk(dir)
-  return files.sort(() => Math.random() - 0.5).slice(0, MAX_SCAN_FILES)
+  // P2-B8：确定性抽样（旧实现 Math.random() shuffle——结果随运行批次漂移）
+  return files.sort((a, b) => a.path.localeCompare(b.path)).slice(0, MAX_SCAN_FILES)
 }
 
 function sniffIndent(source) {
@@ -78,8 +79,16 @@ function sniffSemicolons(source) {
 
 function sniffNaming(source) {
   const result = { camelCase: 0, PascalCase: 0, snake_case: 0, UPPER_CASE: 0, kebabCase: 0 }
+  // P2-B8：先剥字符串/注释——字符串里的 "const foo" 文本不污染统计
+  const code = source
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/\/\/.*$/gm, ' ')
+    .replace(/#.*$/gm, ' ')
+    .replace(/`(?:[^`\\]|\\.)*`/g, ' ')
+    .replace(/"(?:[^"\\]|\\.)*"/g, ' ')
+    .replace(/'(?:[^'\\]|\\.)*'/g, ' ')
   // Function names and variable names
-  for (const match of source.matchAll(/(?:function|const|let|var)\s+(\w+)/g)) {
+  for (const match of code.matchAll(/(?:function|const|let|var)\s+(\w+)/g)) {
     const name = match[1]
     if (/^[a-z][a-zA-Z0-9]*$/.test(name)) result.camelCase++
     else if (/^[A-Z][a-zA-Z0-9]*$/.test(name)) result.PascalCase++
@@ -87,7 +96,7 @@ function sniffNaming(source) {
     else if (/^[A-Z][A-Z0-9_]*$/.test(name)) result.UPPER_CASE++
   }
   // Class names
-  for (const match of source.matchAll(/class\s+(\w+)/g)) {
+  for (const match of code.matchAll(/class\s+(\w+)/g)) {
     const name = match[1]
     if (/^[A-Z][a-zA-Z0-9]*$/.test(name)) result.PascalCase++
   }
@@ -149,7 +158,7 @@ export async function init(core) {
       }
 
       const styles = {
-        indent: null, quotes: null, semicolons: null, trailingCommas: null,
+        indent: [], quotes: [], semicolons: [], trailingCommas: [],
         naming: { camelCase: 0, PascalCase: 0, snake_case: 0, UPPER_CASE: 0, kebabCase: 0 },
       }
 
@@ -157,18 +166,18 @@ export async function init(core) {
       for (const file of files) {
         count++
         const indent = sniffIndent(file.source)
-        if (indent) styles.indent = styles.indent || indent
+        if (indent) styles.indent.push(indent)
         const quotes = sniffQuotes(file.source)
-        if (quotes) styles.quotes = styles.quotes || quotes
+        if (quotes) styles.quotes.push(quotes)
         const semicolons = sniffSemicolons(file.source)
-        if (semicolons) styles.semicolons = styles.semicolons || semicolons
+        if (semicolons) styles.semicolons.push(semicolons)
         const trailingCommas = sniffTrailingCommas(file.source)
-        if (trailingCommas) styles.trailingCommas = styles.trailingCommas || trailingCommas
+        if (trailingCommas) styles.trailingCommas.push(trailingCommas)
         const naming = sniffNaming(file.source)
         for (const [k, v] of Object.entries(naming)) styles.naming[k] += v
       }
 
-      // Consensus: pick most common
+      // P2-B8：Consensus = 众数（旧实现是「第一个非空胜出」——文件顺序决定项目风格）
       styles.indent = _consensus(styles.indent)
       styles.quotes = _consensus(styles.quotes)
       styles.semicolons = _consensus(styles.semicolons)
@@ -203,9 +212,17 @@ export async function init(core) {
   })
 }
 
-function _consensus(value) {
-  if (typeof value === 'object' && value !== null && 'style' in value) return value
-  return value
+function _consensus(values) {
+  // P2-B8：众数（平局取先出现者）；空数组 → null
+  if (!Array.isArray(values) || values.length === 0) return null
+  const counts = new Map()
+  for (const v of values) counts.set(v, (counts.get(v) || 0) + 1)
+  let best = values[0]
+  let bestN = 0
+  for (const [v, n] of counts) {
+    if (n > bestN) { best = v; bestN = n }
+  }
+  return best
 }
 
 export async function start() {

@@ -80,20 +80,27 @@ function collectChanges(workspaceDir, txnRoot, txn) {
 }
 
 function diffLines(before, after) {
+  // P2-B5：逐行对齐在插入一行后后续全部错位（added/removed 虚高）——
+  // 改最长公共前后缀（同 write-edit 的 makeSimpleDiff 思路）
   const bLines = before.split('\n')
   const aLines = after.split('\n')
-  let added = 0, removed = 0
-  const maxLen = Math.max(bLines.length, aLines.length)
-  for (let i = 0; i < maxLen; i++) {
-    if (i >= bLines.length) added++
-    else if (i >= aLines.length) removed++
-    else if (bLines[i] !== aLines[i]) { added++; removed++ }
+  let prefix = 0
+  const maxP = Math.min(bLines.length, aLines.length)
+  while (prefix < maxP && bLines[prefix] === aLines[prefix]) prefix++
+  let suffix = 0
+  while (
+    suffix < bLines.length - prefix &&
+    suffix < aLines.length - prefix &&
+    bLines[bLines.length - 1 - suffix] === aLines[aLines.length - 1 - suffix]
+  ) suffix++
+  return {
+    added: aLines.length - prefix - suffix,
+    removed: bLines.length - prefix - suffix,
   }
-  return { added, removed }
 }
 
 const SYMBOL_PATTERNS = [
-  { re: /^\s*def\s+(\w+)\s*\(/, type: 'function' },
+  { re: /^\s*(?:async\s+)?def\s+(\w+)\s*\(/, type: 'function' }, // P2-B5：async def 漏检
   { re: /^\s*class\s+(\w+)/, type: 'class' },
   { re: /^\s*(?:async\s+)?function\s+(\w+)\s*\(/, type: 'function' },
   { re: /^\s*(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?(?:\([^)]*\)|[^=])\s*=>/, type: 'function' },

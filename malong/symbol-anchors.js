@@ -22,8 +22,13 @@ export function buildParentMap(symbols) {
   const parents = new Map()
   const stack = []
   for (const s of sorted) {
+    // pop 用 <（end 相同不算结束：子符号可结束于父的同一行，如 __init__ 体首行 self 与 __init__ 同 end 行）
+    // 同起始行才是「并行定义」（def a(): x=1; def b(): y=2 内联）——不互为 parent（P2-C13）
     while (stack.length && stack[stack.length - 1].end_line < s.start_line) stack.pop()
-    if (stack.length) parents.set(s.id, stack[stack.length - 1].id)
+    if (stack.length) {
+      const top = stack[stack.length - 1]
+      if (top.start_line !== s.start_line) parents.set(s.id, top.id)
+    }
     stack.push(s)
   }
   return parents

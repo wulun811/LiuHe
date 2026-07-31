@@ -140,8 +140,14 @@ function getStdlib(ext) {
 
 function resolvePackage(importName, ext) {
   if (IMPORT_TO_PACKAGE[importName]) return { pkg: IMPORT_TO_PACKAGE[importName], confident: true }
-  if (ext === '.go') return { pkg: importName, confident: false }
-  if (ext === '.rs') return { pkg: importName, confident: false }
+  if (ext === '.go' || ext === '.rs') {
+    // P2-B4：Go/Rust 导入是完整模块路径（github.com/gin-gonic/gin），映射表键是裸名——
+    // 旧实现把完整路径当 pkg 永不可命中 → 全部 unknown_mapping（映射表死代码）。
+    // 取末段映射，命中则 confident
+    const short = importName.split('/').pop()
+    if (IMPORT_TO_PACKAGE[short]) return { pkg: IMPORT_TO_PACKAGE[short], confident: true }
+    return { pkg: importName, confident: false }
+  }
   return { pkg: importName.replace(/_/g, '-'), confident: false }
 }
 
@@ -215,8 +221,11 @@ function parsePyprojectToml(path, deps) {
     }
 
     if (!inDeps) continue
+    // P2-B4：key=value 分支只收 dependencies 相关键——旧实现把 [project] 段的
+    // name/version/requires-python/keywords 等元数据全部当依赖（declared_deps 虚高）
+    if (!trimmed.startsWith('dependencies')) continue
     const m = trimmed.match(/^["']?([a-zA-Z0-9_-]+)["']?\s*=\s*(.+)$/)
-    if (m && !m[1].startsWith('dependencies')) {
+    if (m && m[1].startsWith('dependencies')) {
       deps[m[1]] = { required: m[2].trim().replace(/["',]/g, '') }
     }
   }
@@ -334,7 +343,10 @@ async function extractImports(file, content, langParser) {
   if (['.js', '.mjs', '.cjs', '.ts', '.tsx'].includes(ext)) {
     const lines = content.split('\n')
     for (let i = 0; i < lines.length; i++) {
-      for (const m of lines[i].matchAll(/require\(\s*['"]([^'"]+)['"]\s*\)/g)) {
+      // P2-B4：require() 行级正则不感知注释/字符串 → 注释里 // require('x') 假报 missing_dependency。
+      // 剥单行注释后匹配；字符串里的 require( 文本用引号剥离兜底
+      const code = lines[i].replace(/\/\/.*$/, '').replace(/"(?:[^"\\]|\\.)*"/g, ' ').replace(/'(?:[^'\\]|\\.)*'/g, ' ')
+      for (const m of code.matchAll(/require\(\s*['"]([^'"]+)['"]\s*\)/g)) {
         const raw = m[1]
         if (imports.some(imp => imp.raw === raw)) continue
         if (raw.startsWith('.')) { imports.push({ module: raw, raw, line: i + 1, isRelative: true }); continue }

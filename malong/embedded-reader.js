@@ -2,8 +2,8 @@
 // 形态：better-sqlite3 readonly + 安全文件读取。不 import parse-client、不起 socket/watcher/server。
 // 快路径：图查询（find/callers/callees/outline）纯 SQLite；正文读取按索引 range 切片（§16.2 不 parse）。
 // 诚实边界：遇 dirty/stale 索引返回 INDEX_STALE（附录 D：不装对）；正文 hash 按需计算。
-import { join, resolve, extname } from 'node:path'
-import { readFileSync, statSync } from 'node:fs'
+import { join, resolve, extname, sep } from 'node:path'
+import { readFileSync, statSync, realpathSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import Database from 'better-sqlite3'
 
@@ -82,11 +82,25 @@ export class EmbeddedReader {
   readSymbol(locator, opts = {}) {
     const filePath = locator?.file_path
     if (!filePath) return { error: 'missing_parameter', message: 'file_path is required' }
-    // 路径安全（§7：workspace 边界，防 ../../ 穿越）
+    // 路径安全（§7：workspace 边界，防 ../../ 穿越 + P2-C2：符号链接指向外部）
     const wsRoot = this.workspaceDir.endsWith('/') ? this.workspaceDir : this.workspaceDir + '/'
     const resolved = resolve(wsRoot, filePath)
     if (!resolved.startsWith(wsRoot)) {
       return { error: 'PATH_BLOCKED', message: `Path escapes workspace: ${filePath}` }
+    }
+    let st = null
+    try { st = statSync(resolved) } catch { /* 文件不存在：交给下方 getFileStatus 的 not_indexed 语义 */ }
+    if (st) {
+      try {
+        // symlink 解析后仍须在 workspace 内（旧：startsWith 检查可被工作区内软链指向 /etc 绕过）
+        const real = realpathSync(resolved)
+        const realRoot = realpathSync(this.workspaceDir)
+        if (!real.startsWith(realRoot + sep) && real !== realRoot) {
+          return { error: 'PATH_BLOCKED', message: `Symlink target escapes workspace: ${filePath} → ${real}` }
+        }
+      } catch {
+        return { error: 'PATH_BLOCKED', message: `Cannot resolve path: ${filePath}` }
+      }
     }
 
     // 索引状态（附录 D：embedded reader 遇 dirty/stale 返 INDEX_STALE 不装对）

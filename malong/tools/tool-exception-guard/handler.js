@@ -38,12 +38,28 @@ function checkRaises(content, ext) {
 
   const isPython = ext === '.py'
   const isJS = ['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx'].includes(ext)
+  let inString = false
+  let openDelim = null
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
     let m
 
     if (isPython) {
+      // P2-B3：三引号字符串里的 raise 示例文本不误报（状态机同 guard-patterns）
+      const trimmed = line.trim()
+      if (trimmed.startsWith('#')) continue
+      if (!inString) {
+        const open = trimmed.match(/(?:[frbu]{0,2})?[^"'#]*?("""|''')/)?.[1]
+        if (open) {
+          const rest = trimmed.slice(trimmed.indexOf(open) + open.length)
+          if (!rest.includes(open)) { inString = true; openDelim = open }
+          continue
+        }
+      } else {
+        if (trimmed.includes(openDelim)) inString = false
+        continue
+      }
       m = /^\s*raise\s+(\w+)/.exec(line)
       if (m) {
         let fullLine = line
@@ -164,6 +180,8 @@ export async function handle(args, context) {
 
   for (const r of raises) {
     if (!BUILTIN_EXCEPTIONS.has(r.exception)) continue
+    // P2-B3：项目无自定义异常时不再静默跳过 —— 在 warnings 里说明检查被跳过，
+    // 避免「Exception usage is clean」的虚假结论
     if (projectExcNames.length === 0) continue
 
     const category = classifyMessage(r.message)
@@ -201,6 +219,8 @@ export async function handle(args, context) {
   let nextStep = null
   if (issues.length > 0) {
     nextStep = `Fix issues via edit_transaction, then verify: test_bridge(action="run")`
+  } else if (projectExcNames.length === 0 && raises.some(r => BUILTIN_EXCEPTIONS.has(r.exception))) {
+    nextStep = `Project has no custom exceptions — builtin-usage check skipped (raise statements found: ${raises.length}).`
   } else {
     nextStep = `Exception usage is clean.`
   }

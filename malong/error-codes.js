@@ -20,13 +20,13 @@ export function makeError(code, message, extra = {}) {
 }
 
 const DENY_PATTERNS = [
-  { pattern: /(^|[\/\\])\.git([\/\\]|$)/, name: '.git' },
-  { pattern: /(^|[\/\\])\.env(\.|$)/, name: '.env' },
+  { pattern: /(^|[\/\\])\.git([\/\\]|$)/i, name: '.git' },
+  { pattern: /(^|[\/\\])\.env(\.|$)/i, name: '.env' }, // P2-C3：大小写变体（.ENV / .Env）同样拦截
   { pattern: /\.pem$/i, name: '.pem' },
   { pattern: /\.key$/i, name: '.key' },
   { pattern: /(^|[\/\\])node_modules([\/\\]|$)/, name: 'node_modules' },
-  { pattern: /(^|[\/\\])(\.?venv)([\/\\]|$)/, name: 'venv' },
-  { pattern: /(^|[\/\\])__pycache__([\/\\]|$)/, name: '__pycache__' },
+  { pattern: /(^|[\/\\])(\.?venv)([\/\\]|$)/i, name: 'venv' },
+  { pattern: /(^|[\/\\])__pycache__([\/\\]|$)/i, name: '__pycache__' },
   { pattern: /(^|[\/\\])\.ai-transactions([\/\\]|$)/, name: '.ai-transactions' },
 ]
 

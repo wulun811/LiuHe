@@ -26,6 +26,15 @@ export async function handle(args, context) {
     return { error: 'service_unavailable', message: 'repoMap service not available', suggestion: 'Check MCP server configuration and ensure repo-map.js is loaded' }
   }
 
+  // P2-C12：args.dir 必须落在 workspace 内（旧：可映射任意目录 /etc）
+  let scanDir = args.dir || workspaceDir
+  const { resolve, sep } = await import('node:path')
+  const resolvedDir = resolve(scanDir)
+  const resolvedWs = resolve(workspaceDir)
+  if (resolvedDir !== resolvedWs && !resolvedDir.startsWith(resolvedWs + sep)) {
+    return { error: 'PATH_BLOCKED', message: `dir escapes workspace: ${scanDir}` }
+  }
+
   const malongignorePath = join(workspaceDir, '.malongignore')
   const ignoreRules = existsSync(malongignorePath) ? parseMalongignore(malongignorePath) : []
 
@@ -36,7 +45,7 @@ export async function handle(args, context) {
   }
 
   if (args?.focused) {
-    return await repoMapService.generateFocused(args.dir || workspaceDir, opts)
+    return await repoMapService.generateFocused(scanDir, opts)
   }
-  return await repoMapService.generate(args.dir || workspaceDir, opts)
+  return await repoMapService.generate(scanDir, opts)
 }

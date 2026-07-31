@@ -50,7 +50,13 @@ function parseBlocks(text) {
     if (trimmed === SEARCH_MARKER || trimmed === '<<<<<<< SEARCH') {
       const searchLines = []
       i++
-      while (i < lines.length && lines[i].trim() !== SEPARATOR) {
+      while (i < lines.length) {
+        // P2-C9：SEARCH 块内的整行 =======（如被 patch 的 markdown 表格分隔行）不是分隔符——
+        // 仅当后随 REPLACE_MARKER 时才作为分隔符结束 SEARCH（lookahead）
+        if (lines[i].trim() === SEPARATOR) {
+          const next = lines[i + 1]?.trim() || ''
+          if (next === REPLACE_MARKER || next.startsWith('>>>>>>>')) break
+        }
         searchLines.push(lines[i])
         i++
       }

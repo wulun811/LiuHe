@@ -184,10 +184,12 @@ export async function handle(args, context) {
         recordStats(fileStats.size, result.edits_applied || 0)
       } catch {}
     } else if (result.success && !dryRun) {
-      // final_content 缺失（脚本直接写盘路径，兼容旧脚本）
+      // P2-C10：final_content 缺失（脚本直接写盘路径，兼容旧脚本）——旧实现静默当成功，
+      // 若脚本尊重 --no-write 却漏输出 final_content，编辑被丢弃仍报成功。显式警告
       try {
         const fileStats = statSync(filePath)
         recordStats(fileStats.size, result.edits_applied || 0)
+        result.warning = 'final_content missing in script response (compat path); edits may not have been applied to disk'
       } catch {}
     }
 

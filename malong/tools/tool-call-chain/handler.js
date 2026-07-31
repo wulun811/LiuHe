@@ -81,18 +81,17 @@ export async function handle(args, context) {
     },
     callers: formatCallers(impact, 'callers'),
     truncated_callers: impact.truncated_callers || false,
-    callees: formatCallees(impact),
-    truncated_callees: impact.truncated_callees || false,
+    callees: formatCallees(impact, maxCallees),
+    truncated_callees: impact.truncated_callees || (impact.callees || []).length > maxCallees,
     test_references: formatTestRefs(impact),
     recently_modified: checkRecentModifications(workspaceDir, impact),
     next_step: `For full blast radius + risk level + test references, use impact_analysis(symbol="${impact.target_symbol || symbol}")`,
     metadata: {
       parse_time_ms: Date.now() - startTime,
       cache_hit: !!impact._fromCache,
-      ...(impact.summary ? {
-        total_callers: impact.summary.direct_callers + impact.summary.indirect_callers,
-        total_callees: impact.summary.total_callees || 0
-      } : {})
+      // P2-B1：旧代码引用不存在的 impact.summary（恒 undefined）→ 改用 caller_count
+      total_callers: impact.caller_count ? impact.caller_count.direct + impact.caller_count.indirect : (impact.callers || []).length,
+      total_callees: (impact.callees || []).length
     }
   }
 
@@ -117,11 +116,12 @@ function formatCallers(impact, key) {
   }))
 }
 
-function formatCallees(impact) {
+function formatCallees(impact, maxCallees = 20) {
   const callees = impact.callees || []
   const seen = new Set()
   const result = []
   for (const c of callees) {
+    if (maxCallees > 0 && result.length >= maxCallees) break // P2-B1：max_callees 生效
     const entry = {
       file: c.callee_file || c.file,
       line: c.callee_line || c.line,

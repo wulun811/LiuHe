@@ -34,6 +34,7 @@ export class Semaphore {
       const next = this.queue[0]
       if (this.current + next.weight <= this.max) {
         this.queue.shift()
+        if (next.timer) clearTimeout(next.timer) // P2-C6：授予后清 timer，防超时回调晚到空转
         this.current += next.weight
         next.resolve()
       } else {

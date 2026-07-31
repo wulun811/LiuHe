@@ -50,7 +50,8 @@ CREATE INDEX IF NOT EXISTS idx_ref_file ON refs(source_file_id);
 CREATE INDEX IF NOT EXISTS idx_ref_name ON refs(target_name);
 `
 
-const CACHED_EXT = new Set(['.js', '.mjs', '.cjs', '.py', '.go', '.rs'])
+// P2-C1：与 file-collector 的 DEFAULT_CACHED_EXT 对齐（旧缺 .ts/.tsx → outline-reader 对 .ts 永久 not_indexed）
+const CACHED_EXT = new Set(['.js', '.mjs', '.cjs', '.ts', '.tsx', '.py', '.go', '.rs'])
 const WATCHER_DEBOUNCE = 300
 
 // Rust stdlib/prelude/方法链噪声 callee（与 malong-parse rust_lang.rs 的 NOISE_CALLEES 对齐）。

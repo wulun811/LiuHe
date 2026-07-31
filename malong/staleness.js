@@ -7,7 +7,9 @@ export async function checkFileStaleness(codeIndexService, workspaceDir, filePat
   try {
     const diskMtime = statSync(absPath).mtimeMs
     const indexedMtime = codeIndexService.getFileMtime(filePath)
-    if (diskMtime > indexedMtime) {
+    if (diskMtime !== indexedMtime) {
+      // P2-C8：!= 而非 >——mtime 回退（checkout/快照恢复）同样触发重索引；
+      // 未索引（indexedMtime=0）同样触发（auto_index 语义）；旧实现 diskMtime > indexedMtime 覆盖不到这两类
       codeIndexService.clearCachesForFile(filePath)
       const result = await codeIndexService.indexFile(absPath, workspaceDir)
       if (result) {

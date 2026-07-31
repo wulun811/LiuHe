@@ -35,14 +35,21 @@ export async function handle(args, context) {
   try { codeIndexService.initWorkspace(workspaceDir) } catch {}
   const t0 = Date.now()
 
-  const [outline, refs, chain] = await Promise.all([
-    includeOutline ? codeIndexService.getSymbols(file) : null,
-    includeRefs ? codeIndexService.getReferences(symbol) : null,
-    includeChain ? Promise.all([
+  // P2-C11：allSettled——任一子查询失败（并发 reindex 的 DROP/CREATE INDEX 窗口等）
+  // 不再丢弃已完成的 outline/refs
+  const settle = (p) => (p ?? Promise.resolve(null)).then(v => ({ ok: true, v })).catch(e => ({ ok: false, v: null, reason: e.message }))
+  const [outlineR, refsR, chainR] = await Promise.all([
+    settle(includeOutline ? codeIndexService.getSymbols(file) : null),
+    settle(includeRefs ? codeIndexService.getReferences(symbol) : null),
+    settle(includeChain ? Promise.all([
       codeIndexService.getCallers(symbol),
       codeIndexService.getCallees(symbol),
-    ]) : null,
+    ]) : null),
   ])
+  const outline = outlineR?.ok ? outlineR.v : null
+  const refs = refsR?.ok ? refsR.v : null
+  const chain = chainR?.ok ? chainR.v : null
+  const partialFailures = [outlineR, refsR, chainR].filter(r => r && !r.ok && r.reason)
 
   const result = { symbol, file }
   const sections = []
@@ -84,6 +91,9 @@ export async function handle(args, context) {
   }
 
   result.metadata = { sections_included: sections, parse_time_ms: Date.now() - t0 }
+  if (partialFailures.length > 0) {
+    result.partial_failures = partialFailures.map(f => f.reason)
+  }
   result.next_step = `Before modifying: impact_analysis(symbol="${symbol}", file="${file}"). After modifying: test_bridge(action="run")`
   return result
 }

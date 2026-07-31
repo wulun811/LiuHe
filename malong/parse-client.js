@@ -3,11 +3,12 @@
 // 详见：docs/六合工具集/docs/P3-rust-parser-service.md
 
 import net from 'node:net'
-import { existsSync } from 'node:fs'
+import { existsSync, unlinkSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { isInString } from './string-utils.js'
 
 const SOCKET_PATH = `/tmp/malong-parse-${process.getuid()}.sock`
+const MAX_FRAME_SIZE = 64 * 1024 * 1024
 const CONNECT_TIMEOUT_MS = 3000
 const REQUEST_TIMEOUT_MS = 30000
 const MAX_RETRIES = 2
@@ -16,11 +17,13 @@ const CIRCUIT_BREAKER_THRESHOLD = 3
 const BINARY_PATH = `${process.env.HOME || '/home'}/.local/bin/malong-parse`
 const MAX_RESTART_ATTEMPTS = 3
 const RESTART_COOLDOWN_MS = 10000
+const RESTART_ATTEMPTS_DECAY_MS = 60000
 
 let _core = null
 let _socket = null
 let _connected = false
 let _connecting = false
+let _stopped = false
 let _pending = new Map()
 let _reqId = 0
 let _buffer = Buffer.alloc(0)
@@ -137,6 +140,7 @@ function _setupHandlers() {
       reject(new Error('connection closed'))
     }
     _pending.clear()
+    if (_stopped) return // 显式 stop 后不再自愈重连（P2-A4）
     // auto-reconnect after 1s，设置 _reconnectPromise 让后续请求等待
     let reconnectResolve
     _reconnectPromise = new Promise((resolve) => {
@@ -179,10 +183,13 @@ function _stopHeartbeat() {
 
 let _restartAttempts = 0
 let _lastRestartTime = 0
+let _childPid = null
 
 async function _startProcess() {
   const now = Date.now()
   if (now - _lastRestartTime < RESTART_COOLDOWN_MS) return false
+  // 尝试计数时间衰减：RESTART_ATTEMPTS_DECAY_MS 无尝试后清零（A3：旧实现 3 次失败后进程存活期内永不重试）
+  if (now - _lastRestartTime > RESTART_ATTEMPTS_DECAY_MS) _restartAttempts = 0
   if (_restartAttempts >= MAX_RESTART_ATTEMPTS) {
     _core?.log('error', `[parse-client] max restart attempts (${MAX_RESTART_ATTEMPTS}) reached, giving up`)
     return false
@@ -198,6 +205,7 @@ async function _startProcess() {
     stdio: 'ignore',
     detached: true,
   })
+  _childPid = child.pid
   child.on('error', (e) => {
     // 二进制不可执行（EACCES/损坏 ELF 等）：异步错误，必须监听否则 uncaughtException 崩服务
     _core?.log('error', `[parse-client] spawn error: ${e.message}`)
@@ -231,13 +239,20 @@ function _circuitRecordFailure() {
   if (_circuitFailures >= CIRCUIT_BREAKER_THRESHOLD) {
     _circuitOpen = true
     _core?.log('error', `[parse-client] circuit breaker OPEN after ${_circuitFailures} failures, malong-parse unavailable`)
-    // try half-open after 60s
-    setTimeout(() => {
-      _circuitOpen = false
-      _circuitFailures = 0
-      _core?.log('info', '[parse-client] circuit breaker half-open, retrying...')
-      connect().catch(() => {})
-    }, 60000)
+    if (existsSync(SOCKET_PATH)) {
+      // socket 文件还在但服务持续失败 → 进程挂死（活着但不响应）。
+      // half-open 只重连同一个挂死进程 → 死循环，必须 force 重启（P2-A1）
+      _core?.log('error', '[parse-client] socket exists but service unresponsive — restarting process')
+      _restartProcess().catch(() => {})
+    } else {
+      // try half-open after 60s
+      setTimeout(() => {
+        _circuitOpen = false
+        _circuitFailures = 0
+        _core?.log('info', '[parse-client] circuit breaker half-open, retrying...')
+        connect().catch(() => {})
+      }, 60000)
+    }
   }
 }
 
@@ -245,9 +260,29 @@ function _circuitRecordSuccess() {
   _circuitFailures = 0
 }
 
+async function _restartProcess() {
+  if (_childPid) {
+    try { process.kill(_childPid, 'SIGKILL') } catch {}
+    _childPid = null
+  }
+  try { unlinkSync(SOCKET_PATH) } catch {}
+  const ok = await _startProcess()
+  if (ok) {
+    _circuitOpen = false
+    _circuitFailures = 0
+    connect().catch(() => {})
+  }
+}
+
 function _processBuffer() {
   while (_buffer.length >= 4) {
     const frameLen = _buffer.readUInt32BE(0)
+    // 帧长度防护（A2：损坏的超大 frameLen 会让缓冲永远等不满 → 卡死整个连接）
+    if (frameLen > MAX_FRAME_SIZE) {
+      _core?.log('error', `[parse-client] frame too large (${frameLen} > ${MAX_FRAME_SIZE}), resetting buffer`)
+      _buffer = Buffer.alloc(0)
+      return
+    }
     if (_buffer.length < 4 + frameLen) break
 
     const payload = _buffer.slice(4, 4 + frameLen)
@@ -479,6 +514,7 @@ export function isConnected() {
 }
 
 export async function disconnect() {
+  _stopped = true
   if (_socket) {
     _socket.end()
     _socket = null

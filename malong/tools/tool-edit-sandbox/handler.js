@@ -135,7 +135,14 @@ function checkSymbolRefs(newContent, ext, codeIndexService) {
       }
     }
 
-    const ids = line.match(/\b[A-Z]\w+\b/g) || []
+    // P2-C4：\b[A-Z]\w+\b 不剥字符串/注释 → 字符串/注释里的 HttpRequest 假报 possibly undefined
+    const code = line
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .replace(/\/\/.*$|#.*$/g, ' ')
+      .replace(/`(?:[^`\\]|\\.)*`/g, ' ')
+      .replace(/"(?:[^"\\]|\\.)*"/g, ' ')
+      .replace(/'(?:[^'\\]|\\.)*'/g, ' ')
+    const ids = code.match(/\b[A-Z]\w+\b/g) || []
     for (const id of ids) used.add(id)
   }
 

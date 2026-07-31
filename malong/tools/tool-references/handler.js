@@ -101,10 +101,18 @@ function walkRefs(baseDir, currentDir, re, excludeFile, results, scanned, maxFil
         const content = readFileSync(fullPath, 'utf-8')
         const lines = content.split('\n')
         for (let i = 0; i < lines.length; i++) {
-          if (re.test(lines[i])) {
-            results.push({ path: relPath, kind: 'reference', target_name: re.source.replace(/\\b/g, ''), line: i + 1 })
-            if (results.length >= maxResults) break
-          }
+          if (!re.test(lines[i])) continue
+          // P2-B7：回退路径的 \bsymbol\b 会命中字符串/注释里的假引用（console.log('max')）
+          // —— 行级剥字符串与注释后再确认，字符串内命中不算真引用
+          const code = lines[i]
+            .replace(/\/\*[\s\S]*?\*\//g, ' ')
+            .replace(/\/\/.*$|#.*$/g, ' ')
+            .replace(/`(?:[^`\\]|\\.)*`/g, ' ')
+            .replace(/"(?:[^"\\]|\\.)*"/g, ' ')
+            .replace(/'(?:[^'\\]|\\.)*'/g, ' ')
+          if (!re.test(code)) continue
+          results.push({ path: relPath, kind: 'reference', target_name: re.source.replace(/\\b/g, ''), line: i + 1 })
+          if (results.length >= maxResults) break
         }
       } catch {}
     }

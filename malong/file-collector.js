@@ -7,7 +7,9 @@ export const DEFAULT_IGNORE_DIRS = new Set([
   '__pycache__', '.venv', 'venv', '.env', 'site-packages', '.tox', '.mypy_cache', '.pytest_cache', '.ruff_cache',
   '.next', '.nuxt', '.cache', '.parcel-cache', '.turbo', '.svelte-kit', '.output',
   '.gradle', '.idea', '.vscode',
-  '.tusunsun', 'vendor', 'third_party', 'third-party', 'runtime', 'external', 'deps', 'lib',
+  '.tusunsun', 'vendor', 'third_party', 'third-party',
+  // P2-C5：去掉 lib/deps/runtime/external——通用目录名误伤用户自有源码
+  // （本仓库 runtime1 曾被 runtime 规则静默排除）。第三方依赖用 .malongignore 显式声明
 ])
 const DEFAULT_CACHED_EXT = new Set(['.js', '.mjs', '.cjs', '.ts', '.tsx', '.py', '.go', '.rs'])
 const MAX_RULES = 100

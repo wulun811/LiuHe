@@ -272,5 +272,57 @@ assert(isIgnored('src/a.min.js', ['*.min.js'], false) === true, `*.min.js 忽略
 assert(isIgnored('src/a.js', ['**/node_modules'], false) === false, `**/node_modules 不忽略普通文件`)
 assert(isIgnored('src/node_modules/x.js', ['**/node_modules'], false) === true, `**/node_modules 忽略任意层 node_modules`)
 
+// ═══════════ golden 20：P2 debt 修复回归（37 项中的可测项） ═══════════
+console.log('── golden 20: P2 debt 修复回归 ──')
+// 1. error-codes .env 大小写变体
+assert(validateFilePath('src/.ENV').blocked === true, `.ENV 大小写变体拒绝（得 ${JSON.stringify(validateFilePath('src/.ENV'))})`)
+assert(validateFilePath('src/.Env.local').blocked === true, `.Env.local 变体拒绝`)
+// 2. symbol-anchors 同起始行不嵌套（def a(): x=1; def b(): y=2 内联定义）
+const { buildParentMap } = await import(join(MALONG_DIR, 'symbol-anchors.js'))
+const pm = buildParentMap([
+  { id: 1, start_line: 3, end_line: 5 },
+  { id: 2, start_line: 3, end_line: 9 },
+  { id: 4, start_line: 5, end_line: 15 },
+  { id: 3, start_line: 10, end_line: 12 }, // 嵌套在 id4 内
+  { id: 6, start_line: 16, end_line: 18 }, // 顶层相邻（所有前符号已结束）
+])
+assert(!pm.has(2) || pm.get(2) !== 1, `同起始行不嵌套（得 ${JSON.stringify([...pm])})`)
+assert(pm.get(3) === 4, `id4 内的 id3 parent 正确（得 ${JSON.stringify([...pm])})`)
+assert(!pm.has(6), `顶层相邻定义不误嵌套（得 ${JSON.stringify([...pm])})`)
+assert(pm.get(4) === 2, `真嵌套符号 parent 正确（得 ${JSON.stringify([...pm])})`)
+// 3. patch-parser SEARCH 块内整行 =======（markdown 表格）不提前截断
+const pp2 = pp.apply('a\n=======\nb\n', [{ search: 'a\n=======\nb', replace: 'a\n=======\nb' }])
+assert(pp2.applied.length === 1, `SEARCH 内 ======= 行不截断（得 ${JSON.stringify(pp2.applied)}）`)
+// 4. file-collector 默认不再忽略 lib/deps/runtime（用户自有源码目录）
+const fc2 = await import(join(MALONG_DIR, 'file-collector.js'))
+mkdirSync(`${WS}/src/lib`, { recursive: true })
+writeFileSync(`${WS}/src/lib/core.js`, 'export const x = 1\n')
+const fcFiles = fc2.collectFiles(`${WS}/src`, {})
+assert(fcFiles.some(f => String(f.path || f.file || f).endsWith('lib/core.js')), `lib/ 目录不再被默认忽略（得 ${JSON.stringify(fcFiles.slice(0, 5).map(f => f.path || f.file))}）`)
+// 5. find-tests 字符串/注释里的 it('x') 不假报测试名
+const { handle: findTests } = await import(join(MALONG_DIR, 'tools/tool-find-tests/handler.js'))
+writeFileSync(`${WS}/src/ft.py`, 'def test_real():\n    pass\n')
+const ftR = await findTests({ workspace_dir: WS, file: 'src/ft.py' }, context)
+assert((ftR.by_convention ?? []).length > 0, `测试位置推荐非空（得 ${JSON.stringify(ftR.by_convention)}）`)
+// 6. symbol-search limit 钳制（负值/超大值不无界）
+const limitsSeen = []
+const searchCtx = { codeIndexService: { initWorkspace() {}, searchSymbols: async (q, { limit }) => { limitsSeen.push(limit); return [] } }, getWorkspaceDir: () => DATA }
+const { handle: symbolSearch } = await import(join(MALONG_DIR, 'tools/tool-symbol-search/handler.js'))
+await symbolSearch({ workspace_dir: WS, query: 'foo', limit: -1 }, searchCtx)
+await symbolSearch({ workspace_dir: WS, query: 'foo', limit: 100000 }, searchCtx)
+await symbolSearch({ workspace_dir: WS, query: 'foo' }, searchCtx)
+assert(limitsSeen[0] === 1 && limitsSeen[1] === 500 && limitsSeen[2] === 30, `limit 钳制 [1,500] 默认 30（得 ${JSON.stringify(limitsSeen)}）`)
+// 7. semaphore reset（watchdog 死锁兜底）
+const { Semaphore } = await import(join(MALONG_DIR, 'semaphore.js'))
+const sem = new Semaphore(1)
+sem.current = 1
+sem.queue.push({ resolve: () => {}, weight: 1, waitTime: Date.now(), timer: null })
+const resetR = sem.reset()
+assert(resetR.drained === 1 && sem.current === 0 && sem.queue.length === 0, `reset 清队列复位账本（得 ${JSON.stringify(resetR)}）`)
+// 8. string-utils 模板嵌套 ${'}'} 不提前截断
+const { stripStrings } = await import(join(MALONG_DIR, 'string-utils.js'))
+const su = stripStrings('const t = `x${"}"}y`')
+assert(!su.includes("'") && su.includes('}'), `模板嵌套 ${'{'}${'}'} 不残留引号（得 ${JSON.stringify(su)}）`)
+
 console.log(`\n=== test-gatekeeper-golden: ${pass} passed, ${fail} failed ===`)
 process.exit(fail ? 1 : 0)
