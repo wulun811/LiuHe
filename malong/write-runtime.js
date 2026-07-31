@@ -12,12 +12,12 @@ import { sha256 } from './hash-utils.js'
 import { validateFilePath } from './error-codes.js'
 import { extractSignatureLine, langOf } from './symbol-anchors.js'
 import { checkFileStaleness } from './staleness.js'
+import { countOccurrences, makeSimpleDiff, applyReplace, applyBodyEdit, applyInsertAfter, checkBracketBalance } from './write-edit.js'
+import { createJournal, updateJournalState, auditLog, recoverJournals, JOURNAL_ROOT } from './write-journal.js'
 
 const LOCK_TIMEOUT_MS = 2000
 const STALE_LOCK_MS = 10000
 const MAX_LIVE_READ = 1024 * 1024
-const JOURNAL_ROOT = '.malong'
-const AUDIT_LOG = 'audit.log'
 
 export function traceId() {
   return `trc_${Date.now()}_${randomBytes(3).toString('hex')}`
@@ -58,32 +58,6 @@ export async function acquireLock(absPath, timeoutMs = LOCK_TIMEOUT_MS) {
 
 // ---------- crash recovery（附录 D：启动扫 journal，未完成 txn 按 state 回滚） ----------
 
-export function recoverJournals(workspaceDir) {
-  const root = join(workspaceDir, JOURNAL_ROOT, 'journal')
-  if (!existsSync(root)) return []
-  const recovered = []
-  for (const txnDir of readdirSync(root)) {
-    const dir = join(root, txnDir)
-    let state = null
-    try { state = JSON.parse(readFileSync(join(dir, 'state.json'), 'utf-8')) } catch { continue }
-    if (state.state === 'committed' || state.state === 'rolled_back') continue
-    // created/staged → 回滚（未 rename 则删除，已 rename 则恢复 backup）
-    try {
-      const manifest = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf-8'))
-      const absPath = join(workspaceDir, manifest.file)
-      const backup = join(dir, 'backup', basename(manifest.file))
-      if (state.state === 'staged' && existsSync(backup) && existsSync(absPath)) {
-        renameSync(backup, absPath)
-      }
-      writeFileSync(join(dir, 'state.json'), JSON.stringify({ ...state, state: 'rolled_back', rolled_back_at: new Date().toISOString() }))
-      recovered.push({ txn_id: txnDir, file: manifest.file, action: 'rolled_back' })
-    } catch (e) {
-      writeFileSync(join(dir, 'state.json'), JSON.stringify({ ...state, state: 'failed', reason: e.message }))
-      recovered.push({ txn_id: txnDir, file: null, action: 'rollback_failed', reason: e.message })
-    }
-  }
-  return recovered
-}
 
 // ---------- 冲突状态机（附录 C） ----------
 
@@ -121,109 +95,12 @@ const CONFLICT_POLICY = {
 
 // ---------- 编辑应用 ----------
 
-function countOccurrences(haystack, needle) {
-  let n = 0
-  let idx = 0
-  for (;;) {
-    idx = haystack.indexOf(needle, idx)
-    if (idx === -1) break
-    n++
-    idx += needle.length
-  }
-  return n
-}
-
-function makeSimpleDiff(oldLines, newLines) {
-  // 最长公共前后缀 → 变更区间 + 统一 diff 头
-  let prefix = 0
-  const maxP = Math.min(oldLines.length, newLines.length)
-  while (prefix < maxP && oldLines[prefix] === newLines[prefix]) prefix++
-  let suffix = 0
-  while (
-    suffix < oldLines.length - prefix &&
-    suffix < newLines.length - prefix &&
-    oldLines[oldLines.length - 1 - suffix] === newLines[newLines.length - 1 - suffix]
-  ) suffix++
-  const oldChanged = oldLines.slice(prefix, oldLines.length - suffix)
-  const newChanged = newLines.slice(prefix, newLines.length - suffix)
-  const hunk = []
-  for (const l of oldChanged) hunk.push(`-${l}`)
-  for (const l of newChanged) hunk.push(`+${l}`)
-  const oldStart = prefix + 1
-  const newStart = prefix + 1
-  return {
-    patch: `@@ -${oldStart},${oldChanged.length} +${newStart},${newChanged.length} @@\n${hunk.join('\n')}`,
-    lines_changed: Math.max(oldChanged.length, newChanged.length),
-  }
-}
-
-function applyReplace(lines, range, newContent) {
-  const [a, b] = range
-  const before = lines.slice(0, a - 1)
-  const after = lines.slice(b)
-  const newLines = newContent.split('\n')
-  return { lines: [...before, ...newLines, ...after], diff: makeSimpleDiff(lines, [...before, ...newLines, ...after]) }
-}
-
-function applyBodyEdit(lines, range, newContent, preserveSignature) {
-  const [a, b] = range
-  if (b === a) {
-    return { error: { code: 'SINGLE_LINE_SYMBOL', message: 'Single-line symbol: use boundary=full or patch mode.' } }
-  }
-  const before = lines.slice(0, a - 1)
-  const after = lines.slice(b)
-  const newLines = newContent.split('\n')
-  return { lines: [...before, ...newLines, ...after], diff: makeSimpleDiff(lines, [...before, ...newLines, ...after]) }
-}
-
-function applyInsertAfter(lines, range, newContent) {
-  const [, b] = range
-  const before = lines.slice(0, b)
-  const after = lines.slice(b)
-  return { lines: [...before, ...newContent.split('\n'), ...after], diff: makeSimpleDiff(lines, [...before, ...newContent.split('\n'), ...after]) }
-}
 
 // ---------- journal（附录 D） ----------
 
-function createJournal(workspaceDir, filePath, absPath, originalContent, state) {
-  const txnId = `txn_${Date.now()}_${randomBytes(4).toString('hex')}`
-  const dir = join(workspaceDir, JOURNAL_ROOT, 'journal', txnId)
-  mkdirSync(join(dir, 'backup'), { recursive: true })
-  writeFileSync(join(dir, 'backup', basename(filePath)), originalContent)
-  writeFileSync(join(dir, 'manifest.json'), JSON.stringify({
-    txn_id: txnId, file: filePath, edit_mode: state.editMode, created_at: new Date().toISOString(),
-  }, null, 2))
-  writeFileSync(join(dir, 'state.json'), JSON.stringify({ txn_id: txnId, state: 'created', ...state }, null, 2))
-  return { txnId, dir }
-}
-
-function updateJournalState(dir, state) {
-  try {
-    const cur = JSON.parse(readFileSync(join(dir, 'state.json'), 'utf-8'))
-    writeFileSync(join(dir, 'state.json'), JSON.stringify({ ...cur, ...state }, null, 2))
-  } catch {}
-}
-
-function auditLog(workspaceDir, entry) {
-  try {
-    appendFileSync(join(workspaceDir, JOURNAL_ROOT, AUDIT_LOG), JSON.stringify({ ts: new Date().toISOString(), ...entry }) + '\n')
-  } catch {}
-}
 
 // ---------- 校验（附录：sandbox + 语法，尽力而为） ----------
 
-function checkBracketBalance(text) {
-  const pairs = { '(': ')', '[': ']', '{': '}' }
-  const stack = []
-  for (const ch of text) {
-    if (pairs[ch]) stack.push(ch)
-    else if (Object.values(pairs).includes(ch)) {
-      const open = stack.pop()
-      if (pairs[open] !== ch) return { ok: false, detail: `unbalanced: expected ${pairs[open] || 'nothing'} but got ${ch}` }
-    }
-  }
-  return stack.length === 0 ? { ok: true } : { ok: false, detail: `unclosed: ${stack.join('')}` }
-}
 
 async function validateSyntax(langParser, source, ext) {
   if (!langParser?.hasErrorsAsync) return { status: 'skip', reason: 'langParser unavailable' }
@@ -645,4 +522,352 @@ export async function writeSymbol(args, context) {
 
 function pipelineStep(pipeline, step, status, extra = {}) {
   pipeline.push({ step, status, ...extra })
+}
+
+// ---------- P4：write_symbols 批量（§6.4 隐式 all_or_nothing 事务 + §16.4 锁序 + 附录 D） ----------
+// 应用层补偿事务（非 FS 级原子）：stage 全量 → 全验证 → 逐个文件原子写 → 任一失败回滚已写文件。
+// 按文件聚合：同文件多符号合并为一次锁 + 一次原子写 + 一次重抽（§16.1）；
+// 组内符号用行偏移（delta）修正定位，写后重抽再重新 resolve（跨调用路径）。
+// 多文件锁按 workspace-relative path 字典序加锁防死锁（§16.4）。
+
+function resolveBatchSymbol(codeIndexService, filePath, locator) {
+  if (locator.symbol_id && codeIndexService) {
+    const sym = codeIndexService.getSymbolByStableId(locator.symbol_id)
+    if (sym && sym.file_path === filePath) return sym
+    if (!sym) return { error: { code: 'SYMBOL_NOT_FOUND', message: `No symbol with stable_id ${locator.symbol_id} in ${filePath}` } }
+    return { error: { code: 'SYMBOL_NOT_FOUND', message: `stable_id ${locator.symbol_id} belongs to ${sym.file_path}, not ${filePath}` } }
+  }
+  if (locator.name && codeIndexService) {
+    const rows = codeIndexService.findSymbolsInFile(filePath, locator.name, locator.kind)
+    if (rows.length > 1) {
+      return { error: { code: 'AMBIGUOUS_SYMBOL', message: `${rows.length} candidates for "${locator.name}" in ${filePath}`, candidates: rows.map(r => ({ symbol_id: r.stable_id, name: r.name, kind: r.type, range: [r.start_line, r.end_line], signature: r.signature })) } }
+    }
+    if (rows.length === 0) return { error: { code: 'SYMBOL_NOT_FOUND', message: `No symbol named "${locator.name}" in ${filePath}` } }
+    return rows[0]
+  }
+  return { error: { code: 'missing_parameter', message: 'each write requires locator.symbol_id or locator.name (patch mode: locator may be file-only)' } }
+}
+
+export async function writeSymbols(args, context) {
+  const { codeIndexService, getWorkspaceDir, langParserService } = context
+  const langParser = langParserService
+  const workspaceDir = args?.workspace_dir
+  const pipeline = []
+  const trace_id = traceId()
+
+  if (!workspaceDir) {
+    return { success: false, error: { code: 'missing_parameter', message: 'workspace_dir is required' }, trace_id }
+  }
+  const writes = args?.writes
+  if (!Array.isArray(writes) || writes.length === 0) {
+    return { success: false, error: { code: 'missing_parameter', message: 'writes is required (non-empty array)' }, trace_id }
+  }
+  const policy = args?.policy || {}
+  const allOrNothing = policy.all_or_nothing !== false
+  const dryRun = !!policy.dry_run || !!args?.dry_run
+  const safety = args?.safety || {}
+  const force = !!args?.allow_unsafe_no_base || !!safety.allow_unsafe_no_base
+
+  const t0 = Date.now()
+  const recovered = recoverJournals(workspaceDir)
+  if (recovered.length > 0) pipelineStep(pipeline, 'crash_recovery', 'warn', { recovered: recovered.length })
+
+  // 按 file_path 分组（保输入序），组按 workspace-relative 路径字典序排序（§16.4 锁序防死锁）
+  const groups = new Map()
+  for (const w of writes) {
+    const fp = w?.file_path
+    if (!fp) {
+      return { success: false, error: { code: 'missing_parameter', message: 'each write requires file_path' }, trace_id }
+    }
+    const pathCheck = validateFilePath(fp)
+    if (!pathCheck.ok) {
+      return { success: false, error: { code: 'PATH_BLOCKED', message: pathCheck.detail }, trace_id }
+    }
+    if (!groups.has(fp)) groups.set(fp, [])
+    groups.get(fp).push(w)
+  }
+  const groupFiles = [...groups.keys()].sort()
+  const absPathOf = (fp) => join(workspaceDir, fp)
+
+  const items = []
+  const written = []   // 已写文件：{ absPath, filePath, backup, journalDir }
+  let failed = null
+  let allDiffs = []
+
+  // ── 逐组（文件）执行：锁 → 组内逐项 resolve+判定+apply（共享 lines）→ 一次原子写 ──
+  for (const fp of groupFiles) {
+    if (failed && allOrNothing) break
+    const absPath = absPathOf(fp)
+    if (!existsSync(absPath)) {
+      failed = { file: fp, error: { code: 'FILE_NOT_FOUND', message: `File not found: ${fp}` } }
+      break
+    }
+    // staleness 预热（锁外；批量内 resolve 需要新 range）
+    if (codeIndexService) {
+      try { await checkFileStaleness(codeIndexService, workspaceDir, fp) } catch {}
+    }
+
+    const lock = await acquireLock(absPath)
+    if (lock.locked) {
+      failed = { file: fp, error: { code: 'FILE_LOCKED', message: `File is locked by another writer: ${fp}`, suggestion: 'Retry after a moment.' } }
+      break
+    }
+    try {
+      let content = ''
+      try { content = readFileSync(absPath, 'utf-8') } catch (e) {
+        failed = { file: fp, error: { code: 'READ_FAILED', message: e.message } }
+        break
+      }
+      let lines = content.split('\n')
+      let offset = 0
+      let firstReal = true
+      const groupItems = groups.get(fp)
+      const groupResults = []
+
+      for (let idx = 0; idx < groupItems.length; idx++) {
+        const w = groupItems[idx]
+        const editMode = w?.edit_mode || (w?.patch ? 'patch' : 'replace_symbol')
+        const boundary = w?.boundary || 'full'
+        const preserveDecorators = w?.preserve_decorators !== false
+
+        // resolve（索引 range + 组内行偏移修正，§16.1：不复用入参 range）
+        let symbol = null
+        if (editMode === 'patch') {
+          // patch 模式：可无符号（文件级 patch 或符号内 patch）
+          if (w?.locator?.symbol_id || w?.locator?.name) {
+            const rs = resolveBatchSymbol(codeIndexService, fp, w.locator)
+            if (rs.error) { failed = { file: fp, itemIndex: idx, error: rs.error }; break }
+            symbol = rs
+          }
+        } else {
+          if (!w?.locator) { failed = { file: fp, itemIndex: idx, error: { code: 'missing_parameter', message: 'replace_symbol requires locator' } }; break }
+          const rs = resolveBatchSymbol(codeIndexService, fp, w.locator)
+          if (rs.error) { failed = { file: fp, itemIndex: idx, error: rs.error }; break }
+          symbol = rs
+        }
+        const range = symbol ? [symbol.start_line + offset, Math.max(symbol.start_line + offset, symbol.end_line + offset)] : null
+
+        // live hashes（内存 lines）
+        const curBodyHash = symbol && range ? `sha256:${sha256(lines.slice(range[0] - 1, range[1]).join('\n'))}` : null
+        const curSigHash = symbol && range ? `sha256:${sha256(extractSignatureLine(lines, { ...symbol, start_line: symbol.start_line + offset }) || '')}` : null
+        const current = {
+          file: { hash: `sha256:${sha256(lines.join('\n'))}`, size: lines.join('\n').length },
+          symbol: symbol ? { body_hash: curBodyHash, signature_hash: curSigHash } : null,
+        }
+
+        // §16.7 幂等预检：目标已是意图内容 → already_applied，跳过冲突判定与 apply
+        // （重试整批时 base_version 已过期，冲突判定会误拒——预检必须在冲突之前）
+        if (w?.content && symbol && range) {
+          const scopeText = boundary === 'body' ? lines.slice(range[0], range[1]).join('\n') : lines.slice(range[0] - 1, range[1]).join('\n')
+          if (scopeText.trim() === w.content.trim()) {
+            groupResults.push({ file_path: fp, symbol_id: symbol.stable_id || null, edit_mode: editMode, status: 'already_applied', content: w.content })
+            pipelineStep(pipeline, 'idempotency', 'ok', { status: 'already_applied', file: fp })
+            continue
+          }
+        } else if (editMode === 'patch' && w?.patch?.old_string) {
+          const patchScope = symbol && range ? lines.slice(range[0] - 1, range[1]).join('\n') : lines.join('\n')
+          if (countOccurrences(patchScope, w.patch.old_string) === 0 && w.patch.new_string && countOccurrences(patchScope, w.patch.new_string) > 0) {
+            groupResults.push({ file_path: fp, symbol_id: symbol?.stable_id || null, edit_mode: editMode, status: 'already_applied' })
+            pipelineStep(pipeline, 'idempotency', 'ok', { status: 'already_applied', file: fp })
+            continue
+          }
+        }
+
+        // 冲突判定：组内首个真实写项做 file-level（文件基线）；后续项仅符号级（文件已在批内变更）
+        const itemBase = w?.base_version
+        if (firstReal && !itemBase && !force) {
+          failed = { file: fp, itemIndex: idx, error: { code: 'VERSION_CONFLICT', conflict_type: 'NO_BASE', message: 'base_version is required for the first write of each file (read_symbol first). Use allow_unsafe_no_base only when you intentionally bypass.' } }
+          break
+        }
+        if (firstReal && itemBase) {
+          const conflict = classifyConflict({ file: { hash: itemBase.file?.hash }, symbol: itemBase.symbol || null }, current, !!symbol)
+          pipelineStep(pipeline, 'version_check', conflict.type === 'CLEAN' ? 'ok' : 'warn', { conflict: conflict.type, file: fp })
+          const policy_ = CONFLICT_POLICY[conflict.type] || 'reject'
+          if (policy_ === 'reject') {
+            failed = { file: fp, itemIndex: idx, error: { code: 'VERSION_CONFLICT', conflict_type: conflict.type, message: `base_version mismatch: ${conflict.type}`, suggestion: 'Re-read the file and regenerate the batch.', next_action: { tool: 'read_symbol', params: { locator: { file_path: fp } } } } }
+            break
+          }
+        } else if (!firstReal && itemBase?.symbol) {
+          // 后续项：符号级判定（file hash 已在批内变化，无比较意义）
+          const baseSymId = itemBase.symbol.symbol_id
+          if (baseSymId && symbol && baseSymId === symbol.stable_id && curBodyHash && itemBase.symbol.body_hash !== curBodyHash) {
+            failed = { file: fp, itemIndex: idx, error: { code: 'VERSION_CONFLICT', conflict_type: 'SYMBOL_CHANGED', message: `base_version mismatch: SYMBOL_CHANGED for ${symbol.stable_id}`, suggestion: 'Re-read the symbol and regenerate content.' } }
+            break
+          }
+        }
+
+        // apply
+        const itemResult = applyBatchItem(lines, range, w, symbol, editMode, boundary, preserveDecorators)
+        if (itemResult.error) { failed = { file: fp, itemIndex: idx, error: itemResult.error }; break }
+        firstReal = false
+        lines = itemResult.lines
+        if (itemResult.delta) offset += itemResult.delta
+        if (itemResult.diff) allDiffs.push({ file: fp, diff: itemResult.diff })
+        groupResults.push({ file_path: fp, symbol_id: symbol?.stable_id || null, edit_mode: editMode, status: itemResult.status, content: w.content })
+      }
+      if (failed) break
+
+      // 全组验证（一次）
+      const newContent = lines.join('\n')
+      const bracket = checkBracketBalance(newContent)
+      const validation = { bracket: bracket.ok ? { status: 'pass' } : { status: 'fail', errors: [bracket.detail] } }
+      if (langOf(fp)) {
+        validation.syntax = await validateSyntax(langParser, newContent, extname(fp))
+      } else {
+        validation.syntax = { status: 'skip', reason: 'non-code file' }
+      }
+      pipelineStep(pipeline, 'validate', validation.syntax.status === 'pass' && validation.bracket.status === 'pass' ? 'ok' : 'warn', { syntax: validation.syntax.status, bracket: validation.bracket.status, file: fp })
+      if (safety.block_on_validation_error && (validation.syntax.status === 'fail' || validation.syntax.status === 'skip' || validation.bracket.status === 'fail')) {
+        failed = { file: fp, error: { code: 'VALIDATION_FAILED', message: `validation failed for ${fp}`, validation }, groupResults }
+        break
+      }
+
+      if (dryRun) continue
+
+      // journal + 一次原子写（组 = 文件）
+      const journal = createJournal(workspaceDir, fp, absPath, content, { editMode: 'write_symbols', state: 'staged', base_file_hash: groupItems[0]?.base_version?.file?.hash || null })
+      updateJournalState(journal.dir, { state: 'staged', new_hash: sha256(newContent) })
+      const tmpPath = `${absPath}.tmp`
+      writeFileSync(tmpPath, newContent)
+      try {
+        renameSync(tmpPath, absPath)
+      } catch (e) {
+        try { unlinkSync(tmpPath) } catch {}
+        updateJournalState(journal.dir, { state: 'failed', reason: e.message })
+        failed = { file: fp, error: { code: 'ATOMIC_WRITE_FAILED', message: e.message, txn_id: journal.txnId } }
+        break
+      }
+      updateJournalState(journal.dir, { state: 'committed', committed_at: new Date().toISOString() })
+      written.push({ absPath, filePath: fp, journalDir: journal.dir, txnId: journal.txnId, groupResults })
+      pipelineStep(pipeline, 'atomic_write', 'ok', { file: fp })
+      items.push(...groupResults.map(r => ({ ...r, txn_id: journal.txnId })))
+    } finally {
+      lock.release()
+    }
+  }
+
+  // ── 回滚（补偿事务，§16.4：非 FS 级原子，兜底靠 journal） ──
+  let rolledBack = []
+  if (failed && allOrNothing && written.length > 0) {
+    pipelineStep(pipeline, 'rollback', 'warn', { files: written.length })
+    for (const wf of written) {
+      try {
+        const backup = join(wf.journalDir, 'backup', basename(wf.filePath))
+        if (existsSync(backup)) {
+          writeFileSync(wf.absPath, readFileSync(backup))
+          updateJournalState(wf.journalDir, { state: 'rolled_back', rolled_back_at: new Date().toISOString() })
+          rolledBack.push(wf.filePath)
+          auditLog(workspaceDir, { event: 'batch_rollback', file: wf.filePath, reason: failed.error?.code })
+          // 恢复索引（文件已还原）
+          if (codeIndexService) {
+            try { await codeIndexService.indexFile(wf.absPath, workspaceDir) } catch { codeIndexService.markIndexDirty(wf.filePath, 'rollback_pending_reindex') }
+          }
+        }
+      } catch (e) {
+        pipelineStep(pipeline, 'rollback', 'error', { reason: `ROLLBACK_FAILED: ${e.message}`, file: wf.filePath })
+        auditLog(workspaceDir, { event: 'rollback_failed', file: wf.filePath, reason: e.message })
+      }
+    }
+  }
+
+  // ── 写后同步重抽（锁外，附录 D；不回滚时每文件一次） ──
+  let reindex = null
+  if (!failed && !dryRun) {
+    const perFile = {}
+    for (const wf of written) {
+      if (langOf(wf.filePath) && codeIndexService) {
+        try {
+          const r = await codeIndexService.indexFile(wf.absPath, workspaceDir)
+          perFile[wf.filePath] = { status: 'ok', symbols: r?.symbols ?? 0 }
+        } catch (e) {
+          perFile[wf.filePath] = { status: 'failed', reason: e.message }
+          codeIndexService.markIndexDirty(wf.filePath, 'write_pending_reindex')
+        }
+      } else if (codeIndexService) {
+        const row = codeIndexService.getFileByPath(wf.filePath)
+        if (row) {
+          codeIndexService._db.prepare("UPDATE files SET content_hash = ?, index_state = 'fresh' WHERE path = ?").run(sha256(readFileSync(wf.absPath, 'utf-8')), wf.filePath)
+          perFile[wf.filePath] = { status: 'ok', note: 'non-code' }
+        }
+      }
+    }
+    reindex = perFile
+    pipelineStep(pipeline, 'reindex', 'ok', { files: Object.keys(perFile).length })
+  }
+
+  const success = !failed
+  const undo = written.length > 0 ? {
+    token: written[0].txnId,
+    txn_id: written[0].txnId,
+    expires_at: null,
+    reverse: written.map(wf => ({ file: wf.filePath, backup: `${JOURNAL_ROOT}/journal/${wf.txnId}/backup/${basename(wf.filePath)}` })),
+  } : null
+
+  return {
+    success,
+    txn_id: written[0]?.txnId || null,
+    mode: allOrNothing ? 'all_or_nothing' : 'best_effort',
+    dry_run: dryRun || undefined,
+    rolled_back: rolledBack.length > 0 ? rolledBack : undefined,
+    items,
+    diff: allDiffs,
+    undo,
+    reindex,
+    pipeline,
+    trace_id,
+    duration_ms: Date.now() - t0,
+    error: failed ? { ...failed.error, file: failed.file, itemIndex: failed.itemIndex } : undefined,
+  }
+}
+
+function applyBatchItem(lines, range, w, symbol, editMode, boundary, preserveDecorators) {
+  const scopeContent = symbol && range ? lines.slice(range[0] - 1, range[1]).join('\n') : lines.join('\n')
+  if (editMode === 'patch') {
+    const oldString = w?.patch?.old_string
+    const newString = w?.patch?.new_string ?? ''
+    if (typeof oldString !== 'string' || oldString === '') {
+      return { error: { code: 'missing_parameter', message: 'patch.old_string is required' } }
+    }
+    const occurrences = countOccurrences(scopeContent, oldString)
+    if (occurrences === 0) {
+      if (newString && countOccurrences(scopeContent, newString) > 0) {
+        return { lines, status: 'already_applied' }
+      }
+      return { error: { code: 'PATCH_OLD_STRING_NOT_FOUND', message: `old_string not found in ${symbol ? 'symbol body' : 'file'}` } }
+    }
+    if (occurrences > 1) {
+      return { error: { code: 'PATCH_OLD_STRING_AMBIGUOUS', message: `old_string matches ${occurrences} times`, suggestion: 'Include more surrounding context in old_string.' } }
+    }
+    const before = lines.slice(0, range ? range[0] - 1 : 0)
+    if (symbol && range) {
+      const body = scopeContent.replace(oldString, newString)
+      const after = lines.slice(range[1])
+      const newLines = [...before, ...body.split('\n'), ...after]
+      return { lines: newLines, delta: body.split('\n').length - (range[1] - range[0] + 1), diff: makeSimpleDiff(lines, newLines), status: 'ok' }
+    }
+    const patched = lines.join('\n').replace(oldString, newString)
+    const newLines = patched.split('\n')
+    return { lines: newLines, diff: makeSimpleDiff(lines, newLines), status: 'ok' }
+  }
+  if (editMode === 'replace_symbol') {
+    if (!symbol || !range) return { error: { code: 'missing_parameter', message: 'replace_symbol requires a resolved symbol' } }
+    if (boundary === 'body') {
+      // 已 applied 幂等（§16.7）
+      const curBody = lines.slice(range[0], range[1]).join('\n')
+      if (curBody.trim() === (w.content || '').trim()) return { lines, status: 'already_applied' }
+      const r = applyBodyEdit(lines, [range[0] + 1, range[1]], w.content, preserveDecorators)
+      if (r.error) return { error: r.error }
+      return { lines: r.lines, delta: r.lines.length - lines.length, diff: r.diff, status: 'ok' }
+    }
+    const curFull = lines.slice(range[0] - 1, range[1]).join('\n')
+    if (curFull.trim() === (w.content || '').trim()) return { lines, status: 'already_applied' }
+    const r = applyReplace(lines, range, w.content)
+    return { lines: r.lines, delta: r.lines.length - lines.length, diff: r.diff, status: 'ok' }
+  }
+  if (editMode === 'insert_after_symbol') {
+    if (!symbol || !range) return { error: { code: 'missing_parameter', message: 'insert_after_symbol requires a resolved symbol' } }
+    const r = applyInsertAfter(lines, range, w.content)
+    return { lines: r.lines, delta: r.lines.length - lines.length, diff: r.diff, status: 'ok' }
+  }
+  return { error: { code: 'INVALID_INPUT', message: `unknown edit_mode: ${editMode}` } }
 }

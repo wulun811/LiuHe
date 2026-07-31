@@ -1,0 +1,93 @@
+{
+  "name": "write_symbols",
+  "version": "1.0.0",
+  "description": "Batch write primitive (P4). Implicit all_or_nothing transaction: multiple symbol/patch writes across files commit together or roll back together (compensation transaction + journal, not FS-level atomic). Files are grouped, locked in path-sorted order (deadlock-safe), each file written once atomically, reindexed once after write. Same-file multi-symbol edits are relocated by line delta (no stale ranges). Returns txn_id + per-item status + full batch diff + undo token. Always read_symbol each target first to obtain base_version (required for the first write of each file). For multi-file refactors (e.g. rename login to authenticate across 3 files) use this instead of N×write_symbol. dry_run supported. Do not use edit_transaction for batch symbol edits.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "workspace_dir": {
+        "type": "string",
+        "description": "REQUIRED: Absolute path to the project root directory."
+      },
+      "writes": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "file_path": {
+              "type": "string",
+              "description": "REQUIRED: Workspace-relative file path (e.g. src/auth.py)"
+            },
+            "locator": {
+              "type": "object",
+              "properties": {
+                "symbol_id": { "type": "string", "description": "Stable symbol id (preferred). Read it from read_symbol output." },
+                "name": { "type": "string", "description": "Symbol name (with file_path)" },
+                "kind": { "type": "string", "description": "Optional: function/method/class/variable" }
+              },
+              "description": "Symbol locator. Omit for file-level patch."
+            },
+            "content": {
+              "type": "string",
+              "description": "New content. For replace_symbol: full new symbol (boundary=full) or new body (boundary=body). For patch: new_string."
+            },
+            "edit_mode": {
+              "type": "string",
+              "enum": ["replace_symbol", "patch", "insert_after_symbol"],
+              "description": "replace_symbol (default) / patch / insert_after_symbol"
+            },
+            "patch": {
+              "type": "object",
+              "properties": {
+                "old_string": { "type": "string", "description": "Exact text to replace (must be unique)" },
+                "new_string": { "type": "string", "description": "Replacement text (or content)" }
+              },
+              "description": "Required when edit_mode=patch"
+            },
+            "boundary": {
+              "type": "string",
+              "enum": ["full", "body"],
+              "description": "full (default) or body (keep signature, replace rest)"
+            },
+            "base_version": {
+              "type": "object",
+              "description": "Version object from read_symbol. Required for the first write of each file (unless allow_unsafe_no_base). Later writes in the same file are checked at symbol level.",
+              "properties": {
+                "file": { "type": "object", "description": "{ hash }" },
+                "symbol": { "type": "object", "description": "{ symbol_id, body_hash, signature_hash }" }
+              }
+            }
+          },
+          "required": ["file_path"]
+        },
+        "description": "REQUIRED: Array of writes. Grouped by file internally."
+      },
+      "policy": {
+        "type": "object",
+        "properties": {
+          "all_or_nothing": {
+            "type": "boolean",
+            "description": "Default true: any failure rolls back all written files (compensation + journal). Set false for best_effort."
+          },
+          "dry_run": { "type": "boolean", "description": "Validate and produce diffs without writing (default false)" }
+        }
+      },
+      "allow_unsafe_no_base": {
+        "type": "boolean",
+        "description": "Bypass base_version requirement for all writes (audited)."
+      },
+      "safety": {
+        "type": "object",
+        "properties": {
+          "profile": { "type": "string", "enum": ["fast", "standard", "strict"], "description": "standard (default)" },
+          "block_on_validation_error": { "type": "boolean", "description": "Block batch if validation fails (default false)" }
+        }
+      }
+    },
+    "required": ["workspace_dir", "writes"]
+  },
+  "handler": "./handler.js",
+  "protocol_version": "1.0",
+  "tags": ["primitive", "write", "batch"],
+  "dependencies": []
+}

@@ -345,7 +345,7 @@ def serialize_result(result: Dict) -> Dict:
             serialized[k] = v
     return serialized
 
-def batch_edit(file_path: str, edits_data: List[Dict], dry_run: bool = False, backup: bool = False, partial: bool = False) -> Dict:
+def batch_edit(file_path: str, edits_data: List[Dict], dry_run: bool = False, backup: bool = False, partial: bool = False, no_write: bool = False) -> Dict:
     """
     批量编辑主函数
     
@@ -477,7 +477,7 @@ def batch_edit(file_path: str, edits_data: List[Dict], dry_run: bool = False, ba
             if matches:
                 final_content = apply_edits(original_content, matches)
                 diff = generate_diff(original_content, final_content, file_path)
-                if not dry_run:
+                if not dry_run and not no_write:
                     if backup:
                         import shutil
                         shutil.copy2(file_path, file_path + '.bak')
@@ -499,6 +499,8 @@ def batch_edit(file_path: str, edits_data: List[Dict], dry_run: bool = False, ba
                     "retry_edits": retry_edits,
                     "diff": diff,
                     "results": results + errors,
+                    "original_content": original_content,
+                    "final_content": final_content,
                 }
         error_types = set(e.status for e in errors)
         return {
@@ -569,20 +571,21 @@ def batch_edit(file_path: str, edits_data: List[Dict], dry_run: bool = False, ba
             "results": results
         }
     else:
-        if backup:
-            import shutil
-            shutil.copy2(file_path, file_path + '.bak')
+        if not no_write:
+            if backup:
+                import shutil
+                shutil.copy2(file_path, file_path + '.bak')
 
-        try:
-            with open(file_path, 'w', encoding='utf-8', newline='') as f:
-                f.write(final_content)
-        except Exception as e:
-            return {
-                "success": False,
-                "error": f"Failed to write file: {e}",
-                "edits_applied": 0,
-                "results": []
-            }
+            try:
+                with open(file_path, 'w', encoding='utf-8', newline='') as f:
+                    f.write(final_content)
+            except Exception as e:
+                return {
+                    "success": False,
+                    "error": f"Failed to write file: {e}",
+                    "edits_applied": 0,
+                    "results": []
+                }
 
         for r in results:
             if r.status == "matched":
@@ -592,7 +595,9 @@ def batch_edit(file_path: str, edits_data: List[Dict], dry_run: bool = False, ba
             "success": True,
             "edits_applied": len(matches),
             "diff": diff,
-            "results": results
+            "results": results,
+            "original_content": original_content,
+            "final_content": final_content
         }
 
 
@@ -611,6 +616,8 @@ def main():
                         help="Create .bak backup before writing")
     parser.add_argument("--partial", action="store_true",
                         help="Apply successful edits even if some fail")
+    parser.add_argument("--no-write", action="store_true",
+                        help="Compute final_content but do not write (delegate write to JS runtime)")
     
     args = parser.parse_args()
     
@@ -632,7 +639,7 @@ def main():
         parser.print_help()
         sys.exit(1)
     
-    result = batch_edit(args.file, edits_data, dry_run=args.dry_run, backup=args.backup, partial=args.partial)
+    result = batch_edit(args.file, edits_data, dry_run=args.dry_run, backup=args.backup, partial=args.partial, no_write=args.no_write)
     
     # 输出：JSON 到 stdout，状态到 stderr
     print(json.dumps(result, indent=2, ensure_ascii=False, cls=EditResultEncoder))

@@ -583,16 +583,25 @@ class CodeIndex {
           const chunk = changedFiles.slice(i, i + BATCH_SIZE)
           const files = chunk.map(fp => ({ path: relative(repo, fp), file_path: fp }))
           const results = await this._langParser.batchExtractAsync(files)
+          const statMap = new Map()
+          for (const fp of chunk) {
+            try { statMap.set(fp, statSync(fp)) } catch {}
+          }
           for (const r of results) {
             if (r.error) {
               console.error(`[code-index] batch parse error for ${r.path}: ${r.error}`)
               continue
             }
+            const st = statMap.get(join(repo, r.path)) || statMap.get(r.path)
             parsed.push({
               relPath: r.path,
-              sourceLength: 0,
+              sourceLength: st?.size || 0,
               symbols: r.symbols || [],
               refs: r.refs || [],
+              contentHash: (() => {
+                // content_hash 供 staleness/embedded reader 做 hash 验证（附录 C 真判据）
+                try { return sha256(readFileSync(st ? join(repo, r.path) : r.path)) } catch { return null }
+              })(),
             })
           }
           if (i + BATCH_SIZE < changedFiles.length) await new Promise(r => setImmediate(r))
@@ -606,7 +615,7 @@ class CodeIndex {
         const chunk = parsed.slice(i, i + CHUNK)
         const txResults = this._db.transaction(() => {
           const r = []
-          for (const p of chunk) r.push(this._indexFileDb(p.relPath, p.sourceLength, p.symbols, p.refs, mtimeMap.get(p.relPath) || Date.now()))
+          for (const p of chunk) r.push(this._indexFileDb(p.relPath, p.sourceLength, p.symbols, p.refs, mtimeMap.get(p.relPath) || Date.now(), p.contentHash))
           return r
         })()
         results.push(...txResults)

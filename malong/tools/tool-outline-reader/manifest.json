@@ -1,7 +1,7 @@
 {
   "name": "read_outline",
   "version": "1.1.0",
-  "description": "Get file structure (functions, classes, signatures) without reading full content. Faster than read for understanding a file. Before editing, check callers: impact_analysis.",
+  "description": "Get file structure (functions, classes, signatures) without reading full content. Faster than read for understanding a file. Before editing, check callers: impact_analysis. For reading one known symbol body + version, use read_symbol instead (primitive).",
   "inputSchema": {
     "type": "object",
     "properties": {

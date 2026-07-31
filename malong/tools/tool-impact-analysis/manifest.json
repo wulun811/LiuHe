@@ -1,22 +1,61 @@
 {
   "name": "impact_analysis",
   "version": "2.1.0",
-  "description": "BEFORE modifying a function/class: see all callers (blast radius), callees, risk level. For line-level, use call_chain.",
+  "description": "BEFORE modifying a function/class: see all callers (blast radius), callees, risk level. For line-level, use call_chain. For simple single-symbol edits, prefer read_symbol + write_symbol (primitive runs collision checks automatically).",
   "inputSchema": {
     "type": "object",
     "properties": {
-      "workspace_dir": { "type": "string", "description": "REQUIRED: Absolute path to the project root directory. Call reindex first if this is a new workspace." },
-      "file": { "type": "string", "description": "File path relative to workspace_dir (e.g. \"scripts/lib/tools/spawn.mjs\", not the full absolute path)" },
-      "symbol": { "type": "string", "description": "Symbol name (function, class, method, variable) to analyze. When provided, does symbol-level analysis. When omitted, does file-level analysis (all symbols in the file). Use symbols for batch analysis of multiple symbols." },
-      "symbols": { "type": "array", "items": { "type": "string" }, "description": "Multiple symbol names to analyze in one call. Returns array of results. Mutually exclusive with symbol." },
-      "change_type": { "type": "string", "enum": ["modify", "delete", "rename"], "description": "Change type. Affects risk threshold (default: modify)" },
-      "max_callers": { "type": "number", "description": "Max callers to return (default: 20). caller_count always includes full counts." },
-      "depth": { "type": "number", "minimum": 1, "maximum": 10, "description": "Indirect caller BFS depth (default: 2, max: 10). Only used when symbol is provided." }
+      "workspace_dir": {
+        "type": "string",
+        "description": "REQUIRED: Absolute path to the project root directory. Call reindex first if this is a new workspace."
+      },
+      "file": {
+        "type": "string",
+        "description": "File path relative to workspace_dir (e.g. \"scripts/lib/tools/spawn.mjs\", not the full absolute path)"
+      },
+      "symbol": {
+        "type": "string",
+        "description": "Symbol name (function, class, method, variable) to analyze. When provided, does symbol-level analysis. When omitted, does file-level analysis (all symbols in the file). Use symbols for batch analysis of multiple symbols."
+      },
+      "symbols": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Multiple symbol names to analyze in one call. Returns array of results. Mutually exclusive with symbol."
+      },
+      "change_type": {
+        "type": "string",
+        "enum": [
+          "modify",
+          "delete",
+          "rename"
+        ],
+        "description": "Change type. Affects risk threshold (default: modify)"
+      },
+      "max_callers": {
+        "type": "number",
+        "description": "Max callers to return (default: 20). caller_count always includes full counts."
+      },
+      "depth": {
+        "type": "number",
+        "minimum": 1,
+        "maximum": 10,
+        "description": "Indirect caller BFS depth (default: 2, max: 10). Only used when symbol is provided."
+      }
     },
-    "required": ["workspace_dir", "file"]
+    "required": [
+      "workspace_dir",
+      "file"
+    ]
   },
   "handler": "./handler.js",
   "protocol_version": "1.0",
-  "tags": ["impact", "analysis"],
-  "dependencies": ["reindex"]
+  "tags": [
+    "impact",
+    "analysis"
+  ],
+  "dependencies": [
+    "reindex"
+  ]
 }
