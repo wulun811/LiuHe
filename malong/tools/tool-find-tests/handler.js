@@ -137,18 +137,16 @@ export async function handle(args, context) {
     return { error: 'missing_parameter', message: 'workspace_dir is required' }
   }
 
-  const file = args?.file
+  let file = args?.file
   if (!file) {
     return { error: 'missing_parameter', message: 'file is required' }
   }
 
-  // 检测 file 是否为目录
-  const absFile = join(workspaceDir, file)
-  if (existsSync(absFile)) {
-    const stat = (await import('node:fs')).statSync(absFile)
-    if (stat.isDirectory()) {
-      return { error: 'invalid_input', message: `"${file}" is a directory, not a file. Please specify a source file path.` }
-    }
+  // 16：file 参数共用守卫——目录/不存在/未索引时返回结构化错误（含路径归一化）
+  if (codeIndexService?.resolveFileArg) {
+    const resolved = codeIndexService.resolveFileArg(file)
+    if (!resolved.ok) return { error: resolved.error.code, message: resolved.error.message, suggestion: resolved.error.suggestion }
+    file = resolved.path
   }
 
   const symbol = args?.symbol

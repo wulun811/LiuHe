@@ -133,7 +133,7 @@ export async function handle(args, context) {
 
   const symbol = args?.symbol
   const newName = args?.new_name
-  const file = args?.file
+  let file = args?.file
   const dryRun = args?.dry_run !== false
 
   if (!symbol || !newName || !file) {
@@ -150,6 +150,13 @@ export async function handle(args, context) {
   }
 
   codeIndexService?.initWorkspace(workspaceDir)
+
+  // 16：file 参数共用守卫——定义文件无效（目录/不存在）时提前返回，不再静默 definition=null
+  if (codeIndexService?.resolveFileArg) {
+    const resolved = codeIndexService.resolveFileArg(file)
+    if (!resolved.ok) return { error: resolved.error.code, message: resolved.error.message, suggestion: resolved.error.suggestion }
+    file = resolved.path
+  }
 
   let semanticRefs = []
   if (codeIndexService) {

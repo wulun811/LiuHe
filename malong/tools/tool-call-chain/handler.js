@@ -34,9 +34,16 @@ export async function handle(args, context) {
 
   codeIndexService.initWorkspace(workspaceDir)
 
-  const file = args?.file || ''
+  let file = args?.file || ''
   if (!file) {
     return { error: 'missing_parameter', message: 'file is required', suggestion: 'Provide a file path relative to workspace_dir (e.g. "src/auth.py")' }
+  }
+
+  // 16：file 参数共用守卫——无效文件先归因（否则 getSymbolsAtLine 静默空 → symbol 解析失败误导）
+  if (codeIndexService?.resolveFileArg) {
+    const resolved = codeIndexService.resolveFileArg(file)
+    if (!resolved.ok) return { error: resolved.error.code, message: resolved.error.message, suggestion: resolved.error.suggestion }
+    file = resolved.path
   }
 
   const line = parseInt(args?.line) || 0
@@ -79,6 +86,8 @@ export async function handle(args, context) {
       signature: symbolSignature || undefined,
       risk_level: impact.risk_level || 'unknown'
     },
+    // 16：file 参数共用守卫归因透传（无效文件时不静默成空调用链）
+    ...(impact.file_error ? { file_error: impact.file_error } : {}),
     callers: formatCallers(impact, 'callers'),
     truncated_callers: impact.truncated_callers || false,
     callees: formatCallees(impact, maxCallees),

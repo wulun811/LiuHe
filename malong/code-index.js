@@ -10,6 +10,7 @@ import os from 'node:os'
 import { createServer } from 'node:http'
 import { DEFAULT_IGNORE_DIRS } from './file-collector.js'
 import { scanCjsRequires } from './cjs-imports.js'
+import { resolveFileArg, normalizeFilePath } from './file-arg.js'
 import { sha256 } from './hash-utils.js'
 import { computeFileAnchors } from './symbol-anchors.js'
 
@@ -850,6 +851,11 @@ class CodeIndex {
         return await self.indexFile(filePath, repo)
       },
 
+      // 16：file 参数共用守卫（供 handler 预检 + 路径归一化）
+      resolveFileArg(rawFile) {
+        return resolveFileArg({ db: self._db, workspaceDir: self._currentWorkspace, file: rawFile })
+      },
+
       // 解析跨文件引用（供 reindex handler 调用）
       resolveCrossFileRefs() {
         self._resolveCrossFileRefs()
@@ -1006,8 +1012,15 @@ class CodeIndex {
           return cached
         }
 
-        const f = self._db.prepare('SELECT id FROM files WHERE path = ?').get(filePath)
-        if (!f) return { file: filePath, symbol: symbol || null, callers: [], importers: [], callees: [], truncated: false, caller_count: { direct: 0, indirect: 0, test: 0, import: 0 }, risk_level: 'low', limitations: [] }
+        // 16：file 参数共用守卫——无效（目录/绝对路径/不存在）时返回 file_error 归因，
+        // 不再静默返回空对象让 LLM 误以为「没有调用者」
+        const fileArg = resolveFileArg({ db: self._db, workspaceDir: self._currentWorkspace, file: filePath })
+        if (!fileArg.ok) {
+          const errRes = { file: filePath, symbol: symbol || null, callers: [], importers: [], callees: [], truncated: false, caller_count: { direct: 0, indirect: 0, test: 0, import: 0 }, risk_level: 'low', limitations: [], file_error: fileArg.error }
+          self._impactCache.set(cacheKey, errRes)
+          return errRes
+        }
+        const f = { id: fileArg.fileId }
 
         let symLine = 0
         let symId = 0
@@ -1139,8 +1152,10 @@ class CodeIndex {
       },
 
       async getModuleDependencies(filePath, { depth = 3 } = {}) {
-        const f = self._db.prepare('SELECT id FROM files WHERE path = ?').get(filePath)
-        if (!f) return { file: filePath, imports: [], transitive: [] }
+        // 16：file 参数共用守卫——无效时 file_error 归因，不再静默空对象
+        const fileArg = resolveFileArg({ db: self._db, workspaceDir: self._currentWorkspace, file: filePath })
+        if (!fileArg.ok) return { file: filePath, imports: [], transitive: [], file_error: fileArg.error }
+        const f = { id: fileArg.fileId }
         const imports = self._db.prepare("SELECT r.target_name AS module FROM refs r WHERE r.source_file_id = ? AND r.kind = 'import' AND (r.call_expr IS NULL OR r.call_expr != '" + ALIAS_LOCAL_MARKER + "')").all(f.id)
         const transitive = []
         if (depth > 1) {
@@ -1260,18 +1275,25 @@ class CodeIndex {
       },
 
       async getFileOutline(filePath, { depth = 1, includeRefs = false, includeTestRefs = false, maxItems = 50 } = {}) {
-        const cacheKey = `${self._currentWorkspace || ''}\0${filePath}\0${depth}\0${includeRefs}\0${includeTestRefs}\0${maxItems}`
+        // 16：复用守卫的路径归一化（绝对路径/./前缀/尾斜杠 → 相对），保留原有更丰富的错误语义
+        const normPath = normalizeFilePath(filePath, self._currentWorkspace)
+        const cacheKey = `${self._currentWorkspace || ''}\0${normPath}\0${depth}\0${includeRefs}\0${includeTestRefs}\0${maxItems}`
         if (self._outlineCache.has(cacheKey)) {
           return self._outlineCache.get(cacheKey)
         }
 
-        const f = self._db.prepare('SELECT id, size, mtime FROM files WHERE path = ?').get(filePath)
+        const f = self._db.prepare('SELECT id, size, mtime FROM files WHERE path = ?').get(normPath)
         if (!f) {
-          const absPath = self._currentWorkspace ? join(self._currentWorkspace, filePath) : filePath
+          const absPath = self._currentWorkspace ? join(self._currentWorkspace, normPath) : normPath
           if (existsSync(absPath)) {
-            return { error: 'not_indexed_yet', message: `File exists but is not indexed yet: ${filePath}`, suggestion: `Re-run the tool (auto-indexes on demand) or call reindex(workspace_dir=...)` }
+            try {
+              if (statSync(absPath).isDirectory()) {
+                return { error: 'dir_as_file', message: `"${filePath}" is a directory, not a file`, suggestion: 'Pass a file path relative to workspace_dir, or omit the file parameter for project-wide search' }
+              }
+            } catch {}
+            return { error: 'not_indexed_yet', message: `File exists but is not indexed yet: ${normPath}`, suggestion: `Re-run the tool (auto-indexes on demand) or call reindex(workspace_dir=...)` }
           }
-          return { error: 'file_not_found', message: `File not found: ${filePath}`, suggestion: `Check the path is relative to workspace_dir and the file exists on disk` }
+          return { error: 'file_not_found', message: `File not found: ${normPath}`, suggestion: `Check the path is relative to workspace_dir and the file exists on disk` }
         }
 
         const symbols = self._db.prepare('SELECT id, name, type, signature, start_line, end_line FROM symbols WHERE file_id = ? ORDER BY start_line').all(f.id)
@@ -1286,7 +1308,7 @@ class CodeIndex {
         const outline = await Promise.all(slice.map(s => buildOutlineNode(s, symbols, depth - 1, includeRefs, includeTestRefs)))
 
         const result = {
-          file: filePath,
+          file: normPath,
           lines: symbols.length > 0 ? Math.max(...symbols.map(s => s.end_line)) : 0,
           tokens_estimate: f.size ? Math.ceil(f.size / 3) : 0,
           mtime: f.mtime || 0,

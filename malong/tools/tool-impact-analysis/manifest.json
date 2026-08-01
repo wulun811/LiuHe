@@ -11,7 +11,7 @@
       },
       "file": {
         "type": "string",
-        "description": "File path relative to workspace_dir (e.g. \"scripts/lib/tools/spawn.mjs\", not the full absolute path)"
+        "description": "File path relative to workspace_dir (e.g. \"scripts/lib/tools/spawn.mjs\", not the full absolute path, not a directory)"
       },
       "symbol": {
         "type": "string",

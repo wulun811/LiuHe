@@ -19,9 +19,16 @@ export async function handle(args, context) {
   }
 
   const symbol = args?.symbol
-  const file = args?.file
+  let file = args?.file
   if (!symbol || !file) {
     return { error: 'missing_parameter', message: 'symbol and file are required' }
+  }
+
+  // 16：file 参数共用守卫——无效（目录/不存在）时返回结构化错误，不再静默空
+  if (codeIndexService?.resolveFileArg) {
+    const resolved = codeIndexService.resolveFileArg(file)
+    if (!resolved.ok) return { error: resolved.error.code, message: resolved.error.message, suggestion: resolved.error.suggestion }
+    file = resolved.path
   }
 
   const includeOutline = args?.include_outline !== false

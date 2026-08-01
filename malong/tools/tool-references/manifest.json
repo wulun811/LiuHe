@@ -7,7 +7,7 @@
     "properties": {
       "workspace_dir": { "type": "string", "description": "REQUIRED: Absolute path to the project root directory. Call reindex first if this is a new workspace." },
       "symbol": { "type": "string", "description": "Symbol name / call target to find references for" },
-      "file": { "type": "string", "description": "Restrict search to a specific file (path relative to workspace root, e.g. \"scripts/lib/tools/spawn.mjs\")" }
+      "file": { "type": "string", "description": "Restrict search to a specific file. Must be a file path relative to workspace root (e.g. \"scripts/lib/tools/spawn.mjs\"), not a directory; omit for project-wide search." }
     },
     "required": ["workspace_dir", "symbol"]
   },

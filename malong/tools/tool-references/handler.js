@@ -46,11 +46,20 @@ export async function handle(args, context) {
   }
 
   const misuseWarning = detectMisuse(symbol)
-  let results = await codeIndexService.getReferences(symbol, args?.file)
+
+  // 16：file 参数共用守卫——无效（目录/绝对路径/不存在）时返回结构化错误，不再静默掉 text_fallback
+  let fileArg = args?.file
+  if (fileArg && codeIndexService?.resolveFileArg) {
+    const resolved = codeIndexService.resolveFileArg(fileArg)
+    if (!resolved.ok) return { error: resolved.error.code, message: resolved.error.message, suggestion: resolved.error.suggestion, workspace_dir: workspaceDir }
+    fileArg = resolved.path
+  }
+
+  let results = await codeIndexService.getReferences(symbol, fileArg)
   const result = { symbol, results, count: results.length, workspace_dir: workspaceDir }
 
   if (results.length === 0) {
-    const textRefs = findSymbolTextRefs(workspaceDir, symbol, args?.file, 30)
+    const textRefs = findSymbolTextRefs(workspaceDir, symbol, fileArg, 30)
     if (textRefs.length > 0) {
       result.results = textRefs
       result.count = textRefs.length
@@ -65,7 +74,7 @@ export async function handle(args, context) {
   }
 
   if (results.length > 0) {
-    result.next_step = `For test refs: find_tests(file="${args?.file || ''}")`
+    result.next_step = `For test refs: find_tests(file="${fileArg || ''}")`
   }
 
   return result
