@@ -311,6 +311,50 @@ const debugRunner = (await import(join(MALONG, 'tools/tool-debug-runner/handler.
   assert(todoIssue && todoIssue.line === 1, `code_review: TODO 行号（line=${todoIssue?.line}）`)
 }
 
+// ── 8. r23-fix3 三轮审查：输入类型健壮性 / 性能上限 / 确定性 ──
+{
+  // 非字符串路径参数 → 明确错误而非 TypeError 崩溃
+  const ft1 = await codeReview({ workspace_dir: WS, file: 123 })
+  assert(ft1.error === 'path_escape', `code_review: file=123 不崩溃（${ft1.error || ft1.mode}）`)
+  const ft2 = await styleSniffer({ workspace_dir: WS, scope: 123 })
+  assert(ft2.error === 'path_escape', `style_sniffer: scope=123 不崩溃（${ft2.error || ft2.status}）`)
+  const ft3 = await debugRunner({ workspace_dir: WS, script: 123 })
+  assert(ft3.error === 'path_escape', `debug_runner: script=123 不崩溃（${ft3.error || ft3.mode}）`)
+  const ft4 = await securityReview({ workspace_dir: WS, scope: 123 })
+  assert(ft4.error === 'path_escape', `security_review: scope=123 不崩溃（${ft4.error || ft4.mode}）`)
+  const ft5 = await styleSniffer({ workspace_dir: WS, output: 123 })
+  assert(ft5.error === 'path_escape', `style_sniffer: output=123 不崩溃（${ft5.error || ft5.status}）`)
+  const ft6 = await codeReview({ workspace_dir: 123, source: 'const a = 1\n' })
+  assert(!ft6.crash, `code_review: workspace_dir=123 不崩溃（${ft6.error || ft6.mode}）`)
+
+  // git_worktree new_content 类型污染（对象会被静默写成 '[object Object]' 并提交）
+  const { execSync } = await import('node:child_process')
+  const ftRepo = join(WS, 'ftrepo')
+  mkdirSync(ftRepo)
+  execSync('git init -q -b main .', { cwd: ftRepo })
+  execSync('git config user.email t@t && git config user.name t', { cwd: ftRepo })
+  writeFileSync(join(ftRepo, 'a.txt'), 'x\n')
+  execSync('git add -A && git commit -qm init', { cwd: ftRepo })
+  const ftg = await gitWorktree({ workspace_dir: ftRepo, changes: [{ path: 'b.txt', new_content: { evil: 1 } }] })
+  assert(ftg.error === 'invalid_parameter', `git_worktree: new_content=对象拒绝（${ftg.error}）`)
+  const ftg2 = await gitWorktree({ workspace_dir: ftRepo, changes: [{ path: 'b.txt', new_content: 'ok\n' }] })
+  assert(ftg2.success === true, 'git_worktree: 正常 string 仍可提交')
+  const ftg3 = await gitWorktree({ workspace_dir: ftRepo, changes: [{ path: 'c.txt', delete: 'yes' }] })
+  assert(ftg3.error === 'invalid_parameter', `git_worktree: delete=非 boolean 拒绝（${ftg3.error}）`)
+
+  // 大目录 walk 上限（5000 截断不卡）
+  const big = join(WS, 'bigdir')
+  mkdirSync(big)
+  for (let i = 0; i < 6000; i++) writeFileSync(join(big, `f${i}.js`), `export const v${i} = ${i}\n`)
+  const fb = await styleSniffer({ workspace_dir: WS, scope: 'bigdir' })
+  assert(fb.status === 'done', `style_sniffer: 6000 文件 walk 上限生效（status=${fb.status}）`)
+
+  // 确定性：同输入两次输出一致
+  const det1 = await codeReview({ workspace_dir: WS, source: 'function longName() {\n  const someVar = 1\n  return someVar\n}\n// TODO x\n', file: 'det.js' })
+  const det2 = await codeReview({ workspace_dir: WS, source: 'function longName() {\n  const someVar = 1\n  return someVar\n}\n// TODO x\n', file: 'det.js' })
+  assert(JSON.stringify(det1.issues) === JSON.stringify(det2.issues), 'code_review: 确定性一致')
+}
+
 rmSync(WS, { recursive: true, force: true })
 console.log(`\n== test-dogfood-r23: ${passed} passed, ${failed} failed ==`)
 process.exit(failed ? 1 : 0)

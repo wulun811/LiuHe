@@ -3,6 +3,8 @@ import { join, extname, resolve } from 'node:path'
 import { createHash } from 'node:crypto'
 
 function guardPath(root, userPath) {
+  // r23-fix3: LLM 可能传非字符串路径（数字/对象）→ resolve() 会抛 TypeError 崩溃
+  if (typeof root !== 'string' || typeof userPath !== 'string' || userPath === '') return null
   const rootResolved = resolve(root)
   const resolved = resolve(rootResolved, userPath)
   return resolved === rootResolved || resolved.startsWith(rootResolved + '/') ? resolved : null
@@ -13,13 +15,17 @@ const IGNORE_DIRS = new Set(['node_modules', '.git', '.tusunsun', 'dist', 'build
 const MAX_SCAN_FILES = 5
 const MIN_SCAN_FILES = 3
 
-// r23：确定性抽样——按文件路径 sha256 排序取前 N，替代原版 Math.random()（见性成佛校验：无非确定性）
+// r23-fix2: 确定性抽样——按文件路径 sha256 排序取前 N，替代原版 Math.random()（见性成佛校验：无非确定性）
+// r23-fix3: walk 上限 5000——几万文件的超大项目全量读盘会卡住 LLM 调用
+const MAX_WALK_FILES = 5000
 function collectCodeFiles(dir) {
   const files = []
   function walk(d) {
+    if (files.length >= MAX_WALK_FILES) return
     let entries
     try { entries = readdirSync(d, { withFileTypes: true }) } catch { return }
     for (const e of entries) {
+      if (files.length >= MAX_WALK_FILES) break
       if (IGNORE_DIRS.has(e.name) || e.name.startsWith('.')) continue
       const full = join(d, e.name)
       if (e.isDirectory()) walk(full)

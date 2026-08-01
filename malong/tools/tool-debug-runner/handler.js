@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 
 function guardPath(root, userPath) {
+  // r23-fix3: LLM 可能传非字符串路径（数字/对象）→ resolve() 会抛 TypeError 崩溃
+  if (typeof root !== 'string' || typeof userPath !== 'string' || userPath === '') return null
   const rootResolved = resolve(root)
   const resolved = resolve(rootResolved, userPath)
   return resolved === rootResolved || resolved.startsWith(rootResolved + '/') ? resolved : null

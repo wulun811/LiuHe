@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 
 function guardPath(root, userPath) {
+  // r23-fix3: LLM 可能传非字符串路径（数字/对象）→ resolve() 会抛 TypeError 崩溃
+  if (typeof root !== 'string' || typeof userPath !== 'string' || userPath === '') return null
   const rootResolved = resolve(root)
   const resolved = resolve(rootResolved, userPath)
   return resolved === rootResolved || resolved.startsWith(rootResolved + sep) ? resolved : null
@@ -37,9 +39,16 @@ export async function handle(args, context) {
     return { error: 'missing_parameter', message: 'changes is required: [{path, new_content|delete}]' }
   }
   // r23-fix: includes('..') 会误拒合法文件名（foo..bar.txt）；改为 resolve 后校验是否逃逸仓库根
+  // r23-fix3: 类型守卫——new_content 必须 string，否则 writeFileSync 会把对象转 '[object Object]' 静默写入并提交
   for (const c of changes) {
     if (!c || typeof c.path !== 'string' || !guardPath(repoDir, c.path)) {
       return { error: 'invalid_parameter', message: `Each change needs a path inside workspace_dir (no '..'): ${JSON.stringify(c)}` }
+    }
+    if (c.new_content !== undefined && typeof c.new_content !== 'string') {
+      return { error: 'invalid_parameter', message: `new_content must be a string (got ${typeof c.new_content}): ${c.path}` }
+    }
+    if (c.delete !== undefined && typeof c.delete !== 'boolean') {
+      return { error: 'invalid_parameter', message: `delete must be a boolean (got ${typeof c.delete}): ${c.path}` }
     }
   }
   const timeout = Math.min(Math.max(parseInt(args?.timeout) || 30000, 1000), 120000)
