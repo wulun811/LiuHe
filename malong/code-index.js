@@ -301,13 +301,16 @@ class CodeIndex {
     this._resolveAliasedRefs()
   }
 
-  _indexFileDb(relPath, sourceLength, symbols, refs, mtime, contentHash, cjsImports = []) {
+  _indexFileDb(relPath, sourceLength, symbols, refs, mtime, contentHash, cjsImports = [], skipCleanup = false) {
     let fileId = null
     const existing = this._db.prepare('SELECT id FROM files WHERE path = ?').get(relPath)
     if (existing) {
       fileId = existing.id
-      this._db.prepare('DELETE FROM symbols WHERE file_id = ?').run(fileId)
-      this._db.prepare('DELETE FROM refs WHERE source_file_id = ?').run(fileId)
+      if (!skipCleanup) {
+        // 18：indexBatch 已在循环前批量清理（IN 一次删光），此处不再逐文件 DELETE
+        this._db.prepare('DELETE FROM symbols WHERE file_id = ?').run(fileId)
+        this._db.prepare('DELETE FROM refs WHERE source_file_id = ?').run(fileId)
+      }
       this._db.prepare("UPDATE files SET size = ?, mtime = ?, content_hash = ?, index_state = 'fresh', indexed_at = datetime('now') WHERE id = ?").run(sourceLength, mtime, contentHash || '', fileId)
     }
     if (!fileId) {
@@ -698,6 +701,30 @@ class CodeIndex {
         })()
       }
 
+      // 18：重抽前批量清理 changed 文件的旧 symbols/refs。两个坑（均实测）：
+      // ① DROP 索引后逐文件 DELETE WHERE file_id=? 是 N×全表扫描（318 文件 × 26084 refs = 52s）
+      // ② 批量 DELETE symbols 触发外键 ON DELETE SET NULL 逐符号级联全扫（10768 syms × 全扫 = 6s）
+      // 正解：关外键 → IN 批量一次删光（单次全扫）→ UPDATE 清悬空引用（单次全扫，_resolveCrossFileRefs 幂等重绑）
+      if (changedFiles.length) {
+        const CLEAN_BATCH = 400
+        const relPaths = changedFiles.map(fp => relative(repo, fp))
+        for (let i = 0; i < relPaths.length; i += CLEAN_BATCH) {
+          const rels = relPaths.slice(i, i + CLEAN_BATCH)
+          const ph = rels.map(() => '?').join(',')
+          const ids = this._db.prepare(`SELECT id FROM files WHERE path IN (${ph})`).all(...rels).map(f => f.id)
+          if (!ids.length) continue
+          const ph2 = ids.map(() => '?').join(',')
+          const fkOn = this._db.pragma('foreign_keys', { simple: true })
+          this._db.pragma('foreign_keys = OFF')
+          this._db.transaction(() => {
+            this._db.prepare(`DELETE FROM refs WHERE source_file_id IN (${ph2})`).run(...ids)
+            this._db.prepare(`DELETE FROM symbols WHERE file_id IN (${ph2})`).run(...ids)
+          })()
+          this._db.prepare('UPDATE refs SET target_symbol_id = NULL, target_file_id = NULL WHERE target_symbol_id NOT IN (SELECT id FROM symbols) AND target_symbol_id IS NOT NULL').run()
+          this._db.pragma(`foreign_keys = ${fkOn ? 'ON' : 'OFF'}`)
+        }
+      }
+
       let parsed = []
       if (changedFiles.length) {
         const BATCH_SIZE = 50
@@ -738,7 +765,7 @@ class CodeIndex {
         const chunk = parsed.slice(i, i + CHUNK)
         const txResults = this._db.transaction(() => {
           const r = []
-          for (const p of chunk) r.push(this._indexFileDb(p.relPath, p.sourceLength, p.symbols, p.refs, mtimeMap.get(p.relPath) || Date.now(), p.contentHash, p.cjsImports))
+          for (const p of chunk) r.push(this._indexFileDb(p.relPath, p.sourceLength, p.symbols, p.refs, mtimeMap.get(p.relPath) || Date.now(), p.contentHash, p.cjsImports, true))
           return r
         })()
         results.push(...txResults)
