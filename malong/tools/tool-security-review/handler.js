@@ -18,7 +18,6 @@ const PATTERNS = [
   { id: 'eval', severity: 'high', category: 'code-injection', re: /\beval\s*\(/g, msg: 'eval() 允许任意代码执行，存在注入风险' },
   { id: 'Function-ctor', severity: 'high', category: 'code-injection', re: /\bnew\s+Function\s*\(/g, msg: 'Function 构造函数存在代码注入风险' },
   { id: 'exec-cmd', severity: 'high', category: 'command-injection', re: /\b(exec|execSync|execFileSync)\s*\([^)]*\+/g, msg: 'exec 中拼接字符串可能导致命令注入' },
-  { id: 'exec-raw', severity: 'high', category: 'command-injection', re: /\b(child_process\.)?exec\s*\(/g, msg: 'exec 调用 shell，避免拼接用户输入' },
   { id: 'spawn-shell', severity: 'high', category: 'command-injection', re: /spawn\s*\([^,]+,\s*[^,]+,\s*{[^}]*shell:\s*true/g, msg: 'spawn 启用 shell=true 可能引入命令注入' },
   { id: 'sql-concat', severity: 'high', category: 'sql-injection', re: /(SELECT|INSERT|UPDATE|DELETE)\s+.+?['"]\s*\+\s*\w+/gis, msg: 'SQL 字符串拼接可能导致 SQL 注入' },
   { id: 'innerHTML', severity: 'medium', category: 'xss', re: /\.innerHTML\s*=/g, msg: 'innerHTML 可导致 XSS，建议用 textContent 或 safe DOM API' },
@@ -36,6 +35,18 @@ const PATTERNS = [
   { id: 'no-input-validation', severity: 'medium', category: 'input-validation', re: /\bbody\.[a-zA-Z]+\b(?:\s*\)|\.\s*map|\s*\.\s*forEach)/g, msg: '直接使用请求体未做输入验证' },
 ]
 
+function isTestPath(rel) {
+  // 测试/示例/夹具文件：secrets 类规则豁免（测试假密钥常见），注入类规则永不豁免
+  if (!rel) return false
+  const segs = rel.split(/[\\/]/)
+  if (segs.some(s => ['tests', 'fixtures', 'examples', '__tests__', 'testdata', 'spec'].includes(s))) return true
+  const base = segs[segs.length - 1] || ''
+  return /^(test|spec)[-_]?/i.test(base) || /\.(test|spec)[.-]/i.test(base) || /_test\./.test(base)
+}
+
+// 在测试/示例文件中豁免的规则子集（注入类不在此列）
+const SECRET_RULES_ON_TEST = new Set(['password-hardcode', 'api-key-hardcode', 'jwt-hardcoded', 'dotenv-secret', 'process-exit'])
+
 function scanOne(source, filePath, maxFindings) {
   let s = String(source)
   const findings = []
@@ -45,6 +56,16 @@ function scanOne(source, filePath, maxFindings) {
     p.re.lastIndex = 0
     let m
     while ((m = p.re.exec(s)) !== null) {
+      if (p.id === 'sql-concat') {
+        // 参数化语句（.prepare + 绑定参数）内的常量拼接不是注入，跳过；真危险形态是 db.exec('...' + userInput)
+        // 在匹配区间 [起点, 拼接点] 内查 .prepare(：参数化 SQL 的拼接点必在 prepare 调用内，跨行贪婪也不会漏
+        const inner = m[0]
+        const jm = /['"]\s*\+\s*\w+/.exec(inner)
+        const plusPos = jm ? m.index + jm.index : m.index
+        const span = s.slice(m.index, plusPos)
+        if (/\.prepare\s*\(/.test(span)) continue
+      }
+      if (SECRET_RULES_ON_TEST.has(p.id) && isTestPath(filePath)) continue
       const lineNum = s.slice(0, m.index).split('\n').length
       findings.push({
         id: p.id, severity: p.severity, category: p.category,
@@ -59,6 +80,7 @@ function scanOne(source, filePath, maxFindings) {
     const envRe = /^[A-Za-z_][A-Za-z0-9_]*=(?:['"]?)([^'"\s]{8,})(?:['"]?)\s*$/gm
     let m
     while ((m = envRe.exec(s)) !== null) {
+      if (SECRET_RULES_ON_TEST.has('dotenv-secret') && isTestPath(filePath)) continue
       findings.push({ id: 'dotenv-secret', severity: 'high', category: 'secrets', message: '.env 中的密钥可能被提交进仓库，确认已在 .gitignore', line: s.slice(0, m.index).split('\n').length, match: m[0].slice(0, 40) })
     }
   }
