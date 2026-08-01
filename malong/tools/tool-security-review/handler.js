@@ -17,9 +17,9 @@ const DOTENV_RE = /^\.env(?:\.|$)/
 const PATTERNS = [
   { id: 'eval', severity: 'high', category: 'code-injection', re: /\beval\s*\(/g, msg: 'eval() 允许任意代码执行，存在注入风险' },
   { id: 'Function-ctor', severity: 'high', category: 'code-injection', re: /\bnew\s+Function\s*\(/g, msg: 'Function 构造函数存在代码注入风险' },
-  { id: 'exec-cmd', severity: 'high', category: 'command-injection', re: /\b(exec|execSync|execFileSync)\s*\([^)]*\+/g, msg: 'exec 中拼接字符串可能导致命令注入' },
+  { id: 'exec-cmd', severity: 'high', category: 'command-injection', re: /(?<![\w.])(exec|execSync|execFileSync)\s*\([^)]*\+/g, msg: 'exec 中拼接字符串可能导致命令注入' }, // r27: (?<![\w.]) 排除 RegExp.exec 成员调用（pathRe.exec(a+b) 误报），保留独立 exec( 注入形态
   { id: 'spawn-shell', severity: 'high', category: 'command-injection', re: /spawn\s*\([^,]+,\s*[^,]+,\s*{[^}]*shell:\s*true/g, msg: 'spawn 启用 shell=true 可能引入命令注入' },
-  { id: 'sql-concat', severity: 'high', category: 'sql-injection', re: /(SELECT|INSERT|UPDATE|DELETE)\s+.+?['"]\s*\+\s*\w+/gis, msg: 'SQL 字符串拼接可能导致 SQL 注入' },
+  { id: 'sql-concat', severity: 'high', category: 'sql-injection', re: /(SELECT|INSERT|UPDATE|DELETE)\s+.+?['"]\s*\+\s*\w+/gi, msg: 'SQL 字符串拼接可能导致 SQL 注入' }, // r27: 去 s 标志——.+? 不跨行，杜绝散文 update/select 词跨行误配（\s 仍可跨行保住真拼接）
   { id: 'innerHTML', severity: 'medium', category: 'xss', re: /\.innerHTML\s*=/g, msg: 'innerHTML 可导致 XSS，建议用 textContent 或 safe DOM API' },
   { id: 'dangerouslySet', severity: 'medium', category: 'xss', re: /dangerouslySetInnerHTML/g, msg: 'dangerouslySetInnerHTML 可导致 XSS' },
   { id: 'fs-unlink-sync', severity: 'medium', category: 'file-access', re: /fs\.(unlinkSync|rmSync|rmdirSync)\s*\(/g, msg: '同步删除大文件会阻塞事件循环' },
