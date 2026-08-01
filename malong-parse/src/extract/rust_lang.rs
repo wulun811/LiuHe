@@ -62,18 +62,19 @@ pub fn extract_all(tree: &Tree, source: &str) -> super::ExtractResult {
     let mut symbols = Vec::new();
     let mut refs = Vec::new();
 
-    fn walk(node: Node, source: &str, depth: u32, symbols: &mut Vec<Symbol>, refs: &mut Vec<Reference>) {
+    fn walk(node: Node, source: &str, depth: u32, impl_ctx: Option<&str>, symbols: &mut Vec<Symbol>, refs: &mut Vec<Reference>) {
         if depth > 100 { return; }
 
         match node.kind() {
             "function_item" => {
                 if let Some(name_node) = node.child_by_field_name("name") {
+                    // impl 块内的函数是方法：kind=method + impl_for=所属类型；其余是自由函数
                     symbols.push(Symbol {
                         name: source[name_node.byte_range()].to_string(),
-                        kind: "function".to_string(),
+                        kind: if impl_ctx.is_some() { "method".to_string() } else { "function".to_string() },
                         start_line: node.start_position().row as u32 + 1,
                         end_line: node.end_position().row as u32 + 1,
-                        impl_for: None,
+                        impl_for: impl_ctx.map(str::to_string),
                     });
                 }
             }
@@ -88,11 +89,22 @@ pub fn extract_all(tree: &Tree, source: &str) -> super::ExtractResult {
                     });
                 }
             }
-            "enum_item" | "trait_item" => {
+            "enum_item" => {
                 if let Some(name_node) = node.child_by_field_name("name") {
                     symbols.push(Symbol {
                         name: source[name_node.byte_range()].to_string(),
-                        kind: "type".to_string(),
+                        kind: "class".to_string(),
+                        start_line: node.start_position().row as u32 + 1,
+                        end_line: node.end_position().row as u32 + 1,
+                        impl_for: None,
+                    });
+                }
+            }
+            "trait_item" => {
+                if let Some(name_node) = node.child_by_field_name("name") {
+                    symbols.push(Symbol {
+                        name: source[name_node.byte_range()].to_string(),
+                        kind: "interface".to_string(),
                         start_line: node.start_position().row as u32 + 1,
                         end_line: node.end_position().row as u32 + 1,
                         impl_for: None,
@@ -100,17 +112,15 @@ pub fn extract_all(tree: &Tree, source: &str) -> super::ExtractResult {
                 }
             }
             "impl_item" => {
-                let trait_node = node.child_by_field_name("trait");
-                let type_node = node.child_by_field_name("type");
-                if let Some(type_n) = type_node {
-                    symbols.push(Symbol {
-                        name: source[type_n.byte_range()].to_string(),
-                        kind: "method".to_string(),
-                        start_line: node.start_position().row as u32 + 1,
-                        end_line: node.end_position().row as u32 + 1,
-                        impl_for: trait_node.map(|t| source[t.byte_range()].to_string()),
-                    });
+                // impl 块本身不产符号（避免假 method/重复 class），但为块内方法提供所属类型上下文
+                let type_ctx = node.child_by_field_name("type")
+                    .map(|t| source[t.byte_range()].to_string());
+                for i in 0..node.child_count() {
+                    if let Some(child) = node.child(i) {
+                        walk(child, source, depth + 1, type_ctx.as_deref(), symbols, refs);
+                    }
                 }
+                return;
             }
             "let_declaration" => {
                 if let Some(pat) = node.child_by_field_name("pattern") {
@@ -217,12 +227,12 @@ pub fn extract_all(tree: &Tree, source: &str) -> super::ExtractResult {
 
         for i in 0..node.child_count() {
             if let Some(child) = node.child(i) {
-                walk(child, source, depth + 1, symbols, refs);
+                walk(child, source, depth + 1, impl_ctx, symbols, refs);
             }
         }
     }
 
-    walk(tree.root_node(), source, 0, &mut symbols, &mut refs);
+    walk(tree.root_node(), source, 0, None, &mut symbols, &mut refs);
 
     super::ExtractResult {
         symbols,
@@ -236,7 +246,7 @@ pub fn extract_symbols(tree: &Tree, source: &str) -> (Vec<Symbol>, Vec<Import>) 
     let mut symbols = Vec::new();
     let mut imports = Vec::new();
 
-    fn walk(node: Node, source: &str, depth: u32, symbols: &mut Vec<Symbol>, imports: &mut Vec<Import>) {
+    fn walk(node: Node, source: &str, depth: u32, impl_ctx: Option<&str>, symbols: &mut Vec<Symbol>, imports: &mut Vec<Import>) {
         if depth > 100 { return; }
 
         match node.kind() {
@@ -244,10 +254,10 @@ pub fn extract_symbols(tree: &Tree, source: &str) -> (Vec<Symbol>, Vec<Import>) 
                 if let Some(name_node) = node.child_by_field_name("name") {
                     symbols.push(Symbol {
                         name: source[name_node.byte_range()].to_string(),
-                        kind: "function".to_string(),
+                        kind: if impl_ctx.is_some() { "method".to_string() } else { "function".to_string() },
                         start_line: node.start_position().row as u32 + 1,
                         end_line: node.end_position().row as u32 + 1,
-                        impl_for: None,
+                        impl_for: impl_ctx.map(str::to_string),
                     });
                 }
             }
@@ -262,11 +272,22 @@ pub fn extract_symbols(tree: &Tree, source: &str) -> (Vec<Symbol>, Vec<Import>) 
                     });
                 }
             }
-            "enum_item" | "trait_item" => {
+            "enum_item" => {
                 if let Some(name_node) = node.child_by_field_name("name") {
                     symbols.push(Symbol {
                         name: source[name_node.byte_range()].to_string(),
-                        kind: "type".to_string(),
+                        kind: "class".to_string(),
+                        start_line: node.start_position().row as u32 + 1,
+                        end_line: node.end_position().row as u32 + 1,
+                        impl_for: None,
+                    });
+                }
+            }
+            "trait_item" => {
+                if let Some(name_node) = node.child_by_field_name("name") {
+                    symbols.push(Symbol {
+                        name: source[name_node.byte_range()].to_string(),
+                        kind: "interface".to_string(),
                         start_line: node.start_position().row as u32 + 1,
                         end_line: node.end_position().row as u32 + 1,
                         impl_for: None,
@@ -274,17 +295,14 @@ pub fn extract_symbols(tree: &Tree, source: &str) -> (Vec<Symbol>, Vec<Import>) 
                 }
             }
             "impl_item" => {
-                let trait_node = node.child_by_field_name("trait");
-                let type_node = node.child_by_field_name("type");
-                if let Some(type_n) = type_node {
-                    symbols.push(Symbol {
-                        name: source[type_n.byte_range()].to_string(),
-                        kind: "method".to_string(),
-                        start_line: node.start_position().row as u32 + 1,
-                        end_line: node.end_position().row as u32 + 1,
-                        impl_for: trait_node.map(|t| source[t.byte_range()].to_string()),
-                    });
+                let type_ctx = node.child_by_field_name("type")
+                    .map(|t| source[t.byte_range()].to_string());
+                for i in 0..node.child_count() {
+                    if let Some(child) = node.child(i) {
+                        walk(child, source, depth + 1, type_ctx.as_deref(), symbols, imports);
+                    }
                 }
+                return;
             }
             "use_declaration" => {
                 for i in 0..node.child_count() {
@@ -343,12 +361,12 @@ pub fn extract_symbols(tree: &Tree, source: &str) -> (Vec<Symbol>, Vec<Import>) 
 
         for i in 0..node.child_count() {
             if let Some(child) = node.child(i) {
-                walk(child, source, depth + 1, symbols, imports);
+                walk(child, source, depth + 1, impl_ctx, symbols, imports);
             }
         }
     }
 
-    walk(tree.root_node(), source, 0, &mut symbols, &mut imports);
+    walk(tree.root_node(), source, 0, None, &mut symbols, &mut imports);
     (symbols, imports)
 }
 

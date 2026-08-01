@@ -8,7 +8,7 @@ import { join, extname } from 'node:path'
 export const name = 'malong-style-sniffer'
 export const version = '0.2.0'
 
-const CACHED_EXT = new Set(['.js', '.mjs', '.cjs', '.py', '.go', '.rs'])
+const CACHED_EXT = new Set(['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.mts', '.cts', '.py', '.go', '.rs', '.c', '.cpp', '.cc', '.cxx', '.hpp', '.java', '.sh', '.bash'])
 const IGNORE_DIRS = new Set(['node_modules', '.git', '.tusunsun', 'dist', 'build', 'coverage'])
 const MAX_SCAN_FILES = 5
 const MIN_SCAN_FILES = 3

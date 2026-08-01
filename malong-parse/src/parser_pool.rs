@@ -17,6 +17,10 @@ impl ParserPool {
         languages.insert("python".to_string(), tree_sitter_python::LANGUAGE.into());
         languages.insert("go".to_string(), tree_sitter_go::LANGUAGE.into());
         languages.insert("rust".to_string(), tree_sitter_rust::LANGUAGE.into());
+        languages.insert("c".to_string(), tree_sitter_c::LANGUAGE.into());
+        languages.insert("cpp".to_string(), tree_sitter_cpp::LANGUAGE.into());
+        languages.insert("java".to_string(), tree_sitter_java::LANGUAGE.into());
+        languages.insert("bash".to_string(), tree_sitter_bash::LANGUAGE.into());
 
         Self {
             languages,
@@ -68,6 +72,11 @@ pub fn ext_to_language(ext: &str) -> Option<&'static str> {
         ".py" => Some("python"),
         ".go" => Some("go"),
         ".rs" => Some("rust"),
+        ".c" => Some("c"),
+        ".h" => Some("c"),
+        ".cpp" | ".cc" | ".cxx" | ".hpp" | ".hh" | ".hxx" => Some("cpp"),
+        ".java" => Some("java"),
+        ".sh" | ".bash" => Some("bash"),
         _ => None,
     }
 }

@@ -8,8 +8,9 @@ import { join, extname } from 'node:path'
 import { bodyHash, signatureHash } from './hash-utils.js'
 
 const LANG_BY_EXT = {
-  '.py': 'py', '.js': 'js', '.mjs': 'js', '.cjs': 'js', '.ts': 'ts',
-  '.go': 'go', '.rs': 'rs',
+  '.py': 'py', '.js': 'js', '.mjs': 'js', '.cjs': 'js', '.jsx': 'js', '.ts': 'ts', '.tsx': 'ts', '.mts': 'ts', '.cts': 'ts',
+  '.go': 'go', '.rs': 'rs', '.c': 'c', '.h': 'c', '.cpp': 'cpp', '.cc': 'cpp', '.cxx': 'cpp', '.hpp': 'cpp', '.hh': 'cpp', '.hxx': 'cpp',
+  '.java': 'java', '.sh': 'bash', '.bash': 'bash',
 }
 const MAX_INDEX_SIZE = 1024 * 1024
 

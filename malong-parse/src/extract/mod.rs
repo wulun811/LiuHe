@@ -2,6 +2,10 @@ pub mod javascript;
 pub mod python;
 pub mod go;
 pub mod rust_lang;
+pub mod c_lang;
+pub mod cpp;
+pub mod java;
+pub mod bash;
 pub mod metrics;
 
 use serde::{Deserialize, Serialize};
@@ -53,6 +57,10 @@ pub fn extract_all(tree: &Tree, source: &str, language: &str) -> ExtractResult {
         "python" => python::extract_all(tree, source),
         "go" => go::extract_all(tree, source),
         "rust" => rust_lang::extract_all(tree, source),
+        "c" => c_lang::extract_all(tree, source),
+        "cpp" => cpp::extract_all(tree, source),
+        "java" => java::extract_all(tree, source),
+        "bash" => bash::extract_all(tree, source),
         _ => ExtractResult {
             symbols: vec![],
             imports: vec![],
@@ -68,6 +76,10 @@ pub fn extract_symbols(tree: &Tree, source: &str, language: &str) -> (Vec<Symbol
         "python" => python::extract_symbols(tree, source),
         "go" => go::extract_symbols(tree, source),
         "rust" => rust_lang::extract_symbols(tree, source),
+        "c" => c_lang::extract_symbols(tree, source),
+        "cpp" => cpp::extract_symbols(tree, source),
+        "java" => java::extract_symbols(tree, source),
+        "bash" => bash::extract_symbols(tree, source),
         _ => (vec![], vec![]),
     }
 }
@@ -78,6 +90,10 @@ pub fn extract_top_level(tree: &Tree, source: &str, language: &str) -> Vec<Symbo
         "python" => python::extract_top_level(tree, source),
         "go" => go::extract_top_level(tree, source),
         "rust" => rust_lang::extract_top_level(tree, source),
+        "c" => c_lang::extract_top_level(tree, source),
+        "cpp" => cpp::extract_top_level(tree, source),
+        "java" => java::extract_top_level(tree, source),
+        "bash" => bash::extract_top_level(tree, source),
         _ => vec![],
     }
 }
@@ -88,6 +104,10 @@ pub fn extract_references(tree: &Tree, source: &str, language: &str) -> Vec<Refe
         "python" => python::extract_references(tree, source),
         "go" => go::extract_references(tree, source),
         "rust" => rust_lang::extract_references(tree, source),
+        "c" => c_lang::extract_references(tree, source),
+        "cpp" => cpp::extract_references(tree, source),
+        "java" => java::extract_references(tree, source),
+        "bash" => bash::extract_references(tree, source),
         _ => vec![],
     }
 }
