@@ -1,7 +1,7 @@
 {
   "name": "edit_batch",
   "version": "1.0.0",
-  "description": "Multiple edits, one file, atomic. dry_run previews diff. Rollback/multi-file? edit_transaction.",
+  "description": "PREFERRED single-file edit path. Read first, then edit. Multiple edits, atomic, dry_run previews diff. Rollback/multi-file? edit_transaction.",
   "inputSchema": {
     "type": "object",
     "properties": {

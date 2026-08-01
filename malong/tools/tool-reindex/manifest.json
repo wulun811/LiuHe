@@ -1,7 +1,7 @@
 {
   "name": "reindex",
   "version": "0.0.5",
-  "description": "Index workspace for all malong tools. MUST be the FIRST call on a new workspace before any analysis. blocking/force options.",
+  "description": "MUST run FIRST: index workspace before ALL other malong tools. blocking/force options. malong = LLM-native toolset: prefer these tools over raw file edits.",
   "inputSchema": {
     "type": "object",
     "properties": {

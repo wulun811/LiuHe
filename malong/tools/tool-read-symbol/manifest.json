@@ -1,7 +1,7 @@
 {
   "name": "read_symbol",
   "version": "1.0.0",
-  "description": "Read one symbol body + version (base_version for writes). Resolves by symbol_id or name+file. Full file? read_outline.",
+  "description": "MUST READ BEFORE WRITE. Symbol body + version (base_version for writes). Resolves by symbol_id or name+file. Full file? read_outline.",
   "inputSchema": {
     "type": "object",
     "properties": {

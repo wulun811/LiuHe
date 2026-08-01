@@ -1,7 +1,7 @@
 {
   "name": "write_symbol",
   "version": "1.0.0",
-  "description": "Edit ONE symbol's body/signature: version conflict detection, lock, validation, atomic write, undo journal. Read first (read_symbol) for base_version.",
+  "description": "SAFE WRITE PATH (one symbol). Version conflict detection, lock, validation, atomic write, undo journal. Read first (read_symbol) for base_version.",
   "inputSchema": {
     "type": "object",
     "properties": {
