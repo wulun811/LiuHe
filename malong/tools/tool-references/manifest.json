@@ -1,7 +1,7 @@
 {
   "name": "references",
   "version": "1.0.0",
-  "description": "Cross-file usages of a symbol. Use full member path (obj.method). Prefer over grep.",
+  "description": "Cross-file usages of a symbol, incl. usage counts. Use full member path (obj.method). Prefer over grep.",
   "inputSchema": {
     "type": "object",
     "properties": {

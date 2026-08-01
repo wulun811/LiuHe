@@ -1,7 +1,7 @@
 {
   "name": "rename_symbol",
   "version": "1.0.0",
-  "description": "Atomic cross-file rename via edit_transaction. Word-boundary, string/comment-aware. dry_run previews; verify test_bridge + mock_sync.",
+  "description": "Execute a cross-file symbol rename (edit_transaction-based). Word-boundary, string/comment-aware. dry_run previews. To see what a rename would affect FIRST, use impact_analysis.",
   "inputSchema": {
     "type": "object",
     "properties": {

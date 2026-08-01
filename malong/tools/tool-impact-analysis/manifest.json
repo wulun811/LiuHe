@@ -1,7 +1,7 @@
 {
   "name": "impact_analysis",
   "version": "2.1.0",
-  "description": "BEFORE modifying: callers (blast radius), callees, risk. Line-level? call_chain. Simple edit? read_symbol+write_symbol.",
+  "description": "BEFORE modifying/renaming: callers (blast radius), callees, risk. Line-level? call_chain. Simple edit? read_symbol+write_symbol.",
   "inputSchema": {
     "type": "object",
     "properties": {

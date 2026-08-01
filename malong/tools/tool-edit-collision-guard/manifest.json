@@ -1,7 +1,7 @@
 {
   "name": "edit_collision_guard",
   "version": "1.1.0",
-  "description": "Two-step guard: record_read after reading, check before editing. Detects external edits. Pairs edit_transaction.",
+  "description": "Two-step guard: record_read (snapshot) after reading, check before editing. Detects external edits. Pairs edit_transaction.",
   "inputSchema": {
     "type": "object",
     "properties": {
