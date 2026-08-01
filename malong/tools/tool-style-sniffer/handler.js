@@ -11,7 +11,8 @@ function guardPath(root, userPath) {
 }
 
 const CACHED_EXT = new Set(['.js', '.mjs', '.cjs', '.py', '.go', '.rs'])
-const IGNORE_DIRS = new Set(['node_modules', '.git', '.tusunsun', 'dist', 'build', 'coverage'])
+// r23-fix5: 去掉通天项目私有目录名（不再特殊对待隐藏目录，统一由 startsWith('.') 规则处理）
+const IGNORE_DIRS = new Set(['node_modules', '.git', 'dist', 'build', 'coverage'])
 const MAX_SCAN_FILES = 5
 const MIN_SCAN_FILES = 3
 

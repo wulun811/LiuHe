@@ -1,6 +1,7 @@
 // r23：通天组件整合 5 新工具 dogfood 测试
 // code_review / style_sniffer / security_review / git_worktree / debug_runner
 import { writeFileSync, mkdirSync, rmSync, existsSync } from 'node:fs'
+import { execSync } from 'node:child_process'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
@@ -367,6 +368,31 @@ const debugRunner = (await import(join(MALONG, 'tools/tool-debug-runner/handler.
   assert(ct3.file === 'ct.js' && ct3.source_provided === false, `code_review: file 模式标记（file=${ct3.file}, source_provided=${ct3.source_provided}）`)
   const ct4 = await codeReview({ workspace_dir: WS, source: 'const snake_case_name = 1\n', file: 'ct.js' })
   assert(ct4.issues.some(i => i.category === 'naming' && i.severity === 'warn'), 'code_review: 审查内容确实是 source 而非磁盘文件')
+}
+
+// ── 10. r23-fix5 五轮审查收尾：返回一致性 / 冲突参数 / 通天遗留 ──
+{
+  // source 模式 issues 带 file（与 diff 模式统一，JSON 不丢字段）
+  const fc1 = await codeReview({ workspace_dir: WS, source: 'const snake_case_name = 1\n// TODO x\n', file: 'f.js' })
+  assert(fc1.issues.length > 0 && fc1.issues.every(i => i.file !== undefined), `code_review: source 模式 issues 带 file（${fc1.issues.map(i => i.file).join(',')}）`)
+  writeFileSync(join(WS, 'f.js'), 'const realFile = 1\n// TODO later\n')
+  const fc2 = await codeReview({ workspace_dir: WS, file: 'f.js' })
+  assert(fc2.issues.every(i => i.file === 'f.js'), `code_review: file 模式 issues 带实际文件名（${fc2.issues.map(i => i.file).join(',')}）`)
+
+  // new_content+delete 冲突参数报错（不再静默忽略 delete）
+  const fcRepo = join(WS, 'fc-repo')
+  mkdirSync(fcRepo)
+  execSync('git init -q -b main .', { cwd: fcRepo })
+  execSync('git config user.email t@t && git config user.name t', { cwd: fcRepo })
+  writeFileSync(join(fcRepo, 'a.txt'), 'x\n')
+  execSync('git add -A && git commit -qm init', { cwd: fcRepo })
+  const fc3 = await gitWorktree({ workspace_dir: fcRepo, changes: [{ path: 'a.txt', new_content: 'new\n', delete: true }] })
+  assert(fc3.error === 'invalid_parameter', `git_worktree: 冲突参数报错（${fc3.error}）`)
+
+  // 无通天私有目录名遗留（通用工具不得含项目特定约定）
+  const { readFileSync: rfs } = await import('node:fs')
+  const ssSrc = rfs(join(MALONG, 'tools/tool-style-sniffer/handler.js'), 'utf-8')
+  assert(!ssSrc.includes('tusunsun'), 'style_sniffer: 无通天私有目录名遗留')
 }
 
 rmSync(WS, { recursive: true, force: true })

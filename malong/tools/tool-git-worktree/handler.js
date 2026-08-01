@@ -50,6 +50,10 @@ export async function handle(args, context) {
     if (c.delete !== undefined && typeof c.delete !== 'boolean') {
       return { error: 'invalid_parameter', message: `delete must be a boolean (got ${typeof c.delete}): ${c.path}` }
     }
+    // r23-fix5: new_content+delete 同传是冲突参数——原版静默忽略 delete 写入 new_content，改为明确报错
+    if (c.new_content !== undefined && c.delete !== undefined) {
+      return { error: 'invalid_parameter', message: `new_content and delete are mutually exclusive: ${c.path}` }
+    }
   }
   const timeout = Math.min(Math.max(parseInt(args?.timeout) || 30000, 1000), 120000)
 

@@ -259,13 +259,15 @@ export async function handle(args, context) {
   }
 
   const result = reviewOne(source, file)
+  // r23-fix5: 与 diff 模式统一——issues 带 file 字段（source 传参时标记 'inline'，JSON 不会丢字段）
+  const issues = result.issues.map(i => ({ ...i, file: readFromFile ? file : 'inline' }))
   return {
     mode: 'source',
     file: readFromFile ? file : undefined,
     source_provided: !readFromFile,
     summary: result.summary,
-    issues: result.issues.slice(0, maxIssues),
-    truncated: result.issues.length > maxIssues,
+    issues: issues.slice(0, maxIssues),
+    truncated: issues.length > maxIssues,
     next_step: result.summary.warnings > 0
       ? 'Fix warnings above (long functions, duplication, naming).'
       : 'Code review passed with no warnings.',
