@@ -204,6 +204,7 @@ export async function writeSymbol(args, context) {
         code: 'VERSION_CONFLICT',
         conflict_type: 'NO_BASE',
         message: 'base_version is required (read_symbol first). Use allow_unsafe_no_base only when you intentionally bypass.',
+        next_action: { tool: 'read_symbol', params: { locator: { file_path: filePath } } },
       },
       trace_id,
     }

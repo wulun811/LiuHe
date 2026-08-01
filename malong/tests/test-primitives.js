@@ -171,6 +171,7 @@ const wNoBase = await writeSymbol({
   content: 'x',
 }, wctx)
 assert(wNoBase.success === false && wNoBase.error?.conflict_type === 'NO_BASE', `P3 无 base_version → NO_BASE 拒（得 ${JSON.stringify(wNoBase.error)}）`)
+assert(wNoBase.error?.next_action?.tool === 'read_symbol' && wNoBase.error?.next_action?.params?.locator?.file_path === 'README.md', `P3 NO_BASE 带 next_action.read_symbol 指引`)
 
 // 3.1 CLEAN 写入（replace_symbol full，改第二个 login 的 body）
 const secondLogin = loginSyms[1]
