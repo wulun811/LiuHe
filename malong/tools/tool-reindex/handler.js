@@ -81,17 +81,19 @@ export async function handle(args, context) {
   const mergedIgnoreDirs = new Set(DEFAULT_IGNORE_DIRS)
   for (const d of userIgnoreDirs) mergedIgnoreDirs.add(d)
 
-  // 第一次统计：获取真实文件总数（不限制 maxFiles）
-  const { files: allFiles, dirStats } = collectFilesWithDirStats(workspaceDir, {
+  // 第一次统计：获取真实文件总数（不限制 maxFiles），但硬上限 threshold+1——
+  // 17：排除后仍超阈值时秒回 needs_review（truncated），绝不再无上限同步 walk 全树导致请求超时
+  const { files: allFiles, dirStats, truncated } = collectFilesWithDirStats(workspaceDir, {
     ignoreRules,
     skipDirs: userSkipDirs,
     maxFiles: 0,  // 不限制，获取真实总数
     ignoreDirs: mergedIgnoreDirs,
+    hardCap: threshold + 1,
   })
 
   const totalFiles = allFiles.length
 
-  if (totalFiles > threshold) {
+  if (totalFiles > threshold || truncated) {
     const topDirs = Object.entries(dirStats)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 15)
@@ -105,9 +107,10 @@ export async function handle(args, context) {
       status: 'needs_review',
       done: false,
       workspace_dir: workspaceDir,
-      total_files: totalFiles,  // 真实总数
+      total_files: truncated ? `>=${totalFiles}` : totalFiles,  // 截断时是下限
       threshold,
       maxFiles: userMaxFiles,
+      truncated,
       top_directories: topDirs,
       suggestion: `This project has ${totalFiles} code files (threshold=${threshold}). `
         + 'Consider adding skipDirs=["dir1","dir2"] to exclude non-essential directories, '

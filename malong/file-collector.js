@@ -109,18 +109,22 @@ export function collectFilesWithDirStats(rootDir, opts = {}) {
     ignoreDirs = DEFAULT_IGNORE_DIRS,
     skipDirs = [],
     maxFiles = 0,
+    hardCap = 0, // 17：统计阶段硬上限——收集到 hardCap 个文件即截断（truncated=true），
+    // 让 reindex 对超大仓库秒回 needs_review，而不是无上限同步 walk 全树导致请求超时
   } = opts
 
   const skipSet = new Set(skipDirs)
   const files = []
   const dirStats = {}
+  let truncated = false
 
   function walk(d, depth = 0) {
     if (depth > 8) return
     let entries
     try { entries = readdirSync(d, { withFileTypes: true }) } catch { return }
     for (const e of entries) {
-      if (maxFiles > 0 && files.length >= maxFiles) return
+      if (maxFiles > 0 && files.length >= maxFiles) { truncated = true; return }
+      if (hardCap > 0 && files.length >= hardCap) { truncated = true; return }
       if (ignoreDirs.has(e.name) || e.name.startsWith('.')) continue
       const full = join(d, e.name)
       const relPath = relative(rootDir, full)
@@ -141,5 +145,5 @@ export function collectFilesWithDirStats(rootDir, opts = {}) {
     }
   }
   walk(rootDir)
-  return { files, dirStats }
+  return { files, dirStats, truncated }
 }
