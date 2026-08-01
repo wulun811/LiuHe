@@ -18,7 +18,7 @@
         "items": {
           "type": "string"
         },
-        "description": "New function/class/variable names to check"
+        "description": "REQUIRED: array of new symbol names to check (e.g. [\"getUser\", \"queryAll\"])"
       },
       "lang": {
         "type": "string",

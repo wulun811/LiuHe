@@ -404,7 +404,9 @@ class CodeIndex {
   }
 
   _resolveCrossFileRefs() {
-    const unbound = this._db.prepare("SELECT r.id, r.source_file_id, r.target_name, r.call_expr FROM refs r WHERE r.target_symbol_id IS NULL AND r.kind IN ('call','import','extends','implements') AND r.target_name != '' AND (r.call_expr IS NULL OR r.call_expr != '" + ALIAS_LOCAL_MARKER + "')").all()
+    // 21：只绑裸调用——成员调用（obj.slice()/byFile.get()）绝大多数是原生/库方法，
+    // 跨文件绑同名符号只会制造噪声（slice→format.rs、get→test_impact.js 等误绑）。
+    const unbound = this._db.prepare("SELECT r.id, r.source_file_id, r.target_name, r.call_expr FROM refs r WHERE r.target_symbol_id IS NULL AND r.kind IN ('call','import','extends','implements') AND r.target_name != '' AND (r.call_expr IS NULL OR r.call_expr = '' OR r.call_expr NOT LIKE '%.%') AND (r.call_expr IS NULL OR r.call_expr != '" + ALIAS_LOCAL_MARKER + "')").all()
     if (!unbound.length) return 0
     const allSyms = this._db.prepare('SELECT s.id, s.name, s.file_id FROM symbols s').all()
     const symMap = new Map()

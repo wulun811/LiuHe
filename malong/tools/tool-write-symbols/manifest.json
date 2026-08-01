@@ -1,7 +1,7 @@
 {
   "name": "write_symbols",
   "version": "1.0.0",
-  "description": "Batch write across files, all-or-nothing with rollback, deadlock-safe. Multi-file refactor? Use instead of N×write_symbol.",
+  "description": "Batch write across files, all-or-nothing with rollback, deadlock-safe. Multi-file refactor? Use instead of N×write_symbol. New symbols: reindex first so references/impact see them.",
   "inputSchema": {
     "type": "object",
     "properties": {
