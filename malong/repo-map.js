@@ -1,60 +1,91 @@
-// 码龙 — Repo Map 生成器 (v2 P2.1)
+// 码龙 — Repo Map 生成器 (v2 P2.1 + r20)
 // 多语言代码地图生成器，带缩进的文本版代码地图 (~1500 tokens/中型项目)
 // 详见：通天计划 §六 码龙
+// r20：数据源从「磁盘扫描 + Rust AST 解析」改为「读 code-index.db」——大仓库从几十秒降到秒级
 
-import { readFileSync, statSync } from 'node:fs'
-import { join, relative, extname, basename } from 'node:path'
-import { collectFiles } from './file-collector.js'
+import Database from 'better-sqlite3'
+import { join, relative, resolve, sep, basename } from 'node:path'
+import { existsSync } from 'node:fs'
 
 export const name = 'malong-repo-map'
-export const version = '0.2.0'
+export const version = '0.2.1'
 
 const MAX_CACHE_AGE = 5 * 60 * 1000
 const MAX_FOCUSED_TOKENS = 2000
 const CHARS_PER_TOKEN = 4
 
-let _core, _langParser, _cache = null, _cacheTime = 0
-
-async function extractTopSymbols(source, ext) {
-  try {
-    return await _langParser.extractTopLevelAsync(source, ext)
-  } catch {
-    return []
-  }
+// DB type → 展示缩写（对齐 parse-client 的 kind 输出：fn/cls/var/...）
+const TYPE_SHORT = {
+  function: 'fn', method: 'fn', class: 'cls', variable: 'var',
+  interface: 'iface', type: 'type', export: 'exp', import: 'imp',
 }
+
+let _core, _cache = null, _cacheTime = 0
 
 function estimateTokens(text) {
   return Math.ceil(text.length / CHARS_PER_TOKEN)
 }
 
-async function buildTree(files, rootDir, relevantFiles, relevantEntities) {
-  const useFilter = relevantFiles && relevantFiles.length > 0
-  const filterSet = useFilter ? new Set(relevantFiles.map(f => f.startsWith('/') ? f : join(rootDir, f))) : null
-  const entitySet = relevantEntities && relevantEntities.length > 0 ? new Set(relevantEntities) : null
+function openDb(workspaceDir) {
+  const dbPath = join(_core.getWorkspaceDir(workspaceDir), 'code-index.db')
+  if (!existsSync(dbPath)) return null
+  return new Database(dbPath, { readonly: true })
+}
 
-  // Build tree structure
-  const tree = { name: basename(rootDir), type: 'dir', children: [], depth: 0 }
-  let parseCount = 0
+// 归一化 DB path：历史库基座可能是 workspace 根，也可能是 workspace 的父目录（path 带 basename 前缀）
+function normalizeDbPath(p, workspaceDir) {
+  const base = basename(resolve(workspaceDir))
+  if (p === base) return '.'
+  if (p.startsWith(base + '/')) return p.slice(base.length + 1)
+  return p
+}
 
-  for (const file of files) {
-    if (filterSet && !filterSet.has(file.path)) continue
-    const rel = relative(rootDir, file.path)
-    const parts = rel.split('/')
+// 从索引读文件 + 顶层符号（零磁盘扫描、零 AST 解析）
+function queryFilesWithSymbols(db, rootDir, workspaceDir, relevantFiles, relevantEntities) {
+  let sql = `SELECT f.path AS path, s.name AS name, s.type AS type, s.start_line AS line
+             FROM symbols s JOIN files f ON s.file_id = f.id`
+  const params = []
+  if (relevantEntities && relevantEntities.length > 0) {
+    sql += ` WHERE s.name IN (${relevantEntities.map(() => '?').join(',')})`
+    params.push(...relevantEntities)
+  }
+  sql += ' ORDER BY s.start_line'
+  const rows = db.prepare(sql).all(...params)
+
+  const filterSet = relevantFiles && relevantFiles.length > 0
+    ? new Set(relevantFiles.map(f => {
+        if (f.startsWith('/')) return normalizeDbPath(relative(workspaceDir, f), workspaceDir)
+        return f
+      }))
+    : null
+
+  const byFile = new Map()
+  for (const r of rows) {
+    const normPath = normalizeDbPath(r.path, workspaceDir)
+    if (filterSet && !filterSet.has(normPath)) continue
+    // scanDir 可能是 workspace 子目录：换算相对路径
+    let rel = normPath
+    if (rootDir !== workspaceDir) {
+      const full = join(workspaceDir, normPath)
+      const rp = relative(rootDir, full)
+      if (rp.startsWith('..' + sep) || rp === '..') continue // 目录外文件跳过
+      rel = rp
+    }
+    if (!byFile.has(rel)) byFile.set(rel, [])
+    byFile.get(rel).push({ name: r.name, type: TYPE_SHORT[r.type] || r.type, line: r.line })
+  }
+  return { files: [...byFile.entries()].map(([path, symbols]) => ({ path, symbols })), rows: rows.length }
+}
+
+function buildTree(entries, rootName) {
+  const tree = { name: rootName, type: 'dir', children: [], depth: 0 }
+  for (const { path, symbols } of entries) {
+    const parts = path.split('/')
     let current = tree
-
     for (let i = 0; i < parts.length; i++) {
       const isLast = i === parts.length - 1
       if (isLast) {
-        // 7：先 stat 后整读——巨型生成文件（bundle/vendor）readFileSync 抛 RangeError 毁掉整个 map 工具
-        let src = null
-        try {
-          if (statSync(file.path).size < 50000) src = readFileSync(file.path, 'utf-8')
-        } catch {}
-        const symbols = file.isCode && src != null
-          ? await extractTopSymbols(src, extname(file.path)) : []
-        const filtered = entitySet ? symbols.filter(s => entitySet.has(s.name)) : symbols
-        const entry = { name: parts[i], type: 'file', symbols: filtered, depth: i + 1 }
-        current.children.push(entry)
+        current.children.push({ name: parts[i], type: 'file', symbols, depth: i + 1 })
       } else {
         let dir = current.children.find(c => c.type === 'dir' && c.name === parts[i])
         if (!dir) {
@@ -64,13 +95,7 @@ async function buildTree(files, rootDir, relevantFiles, relevantEntities) {
         current = dir
       }
     }
-    parseCount++
-    if (parseCount % 50 === 0 && typeof global.gc === 'function') {
-      global.gc()
-      await new Promise(r => setImmediate(r))
-    }
   }
-
   return tree
 }
 
@@ -97,31 +122,6 @@ function renderTree(node, indent = '', isLast = true) {
   return result
 }
 
-async function getFilesByEntities(files, rootDir, entities) {
-  const result = []
-  const entitySet = new Set(entities)
-  let parseCount = 0
-  for (const f of files) {
-    if (!f.isCode) continue
-    // 7：先 stat 后整读（超大文件 RangeError 直接毁掉整个 getFilesByEntities）
-    let source = null
-    try {
-      if (statSync(f.path).size <= 100000) source = readFileSync(f.path, 'utf-8')
-    } catch {}
-    if (source == null) continue
-    const syms = await extractTopSymbols(source, extname(f.path))
-    if (syms.some(s => entitySet.has(s.name))) {
-      result.push(f)
-    }
-    parseCount++
-    if (parseCount % 50 === 0 && typeof global.gc === 'function') {
-      global.gc()
-      await new Promise(r => setImmediate(r))
-    }
-  }
-  return result
-}
-
 function _injectToYingMini(map) {
   if (!_core) return
   const yingMini = _core.getService('ying-mini')
@@ -132,48 +132,72 @@ function _injectToYingMini(map) {
 
 export async function init(core) {
   _core = core
-  _langParser = core.getService('langParser')
-  if (!_langParser) throw new Error('[repo-map] lang-parser service required but not registered')
 
   await core.registerService('repoMap', {
     async generate(rootDir, opts = {}) {
-      const { ignoreRules, relevantFiles, relevantEntities } = opts
-      const files = collectFiles(rootDir, { ignoreRules: ignoreRules || [] })
-      const tree = await buildTree(files, rootDir)
-      const map = renderTree(tree)
-      _cache = { map, files: files.length, timestamp: Date.now() }
-      _cacheTime = Date.now()
-      // 注入番天印 L2 结构记忆
-      _injectToYingMini(map)
-      return { map, files: files.length, tokens: estimateTokens(map) }
+      const { workspaceDir = rootDir } = opts
+      const db = openDb(workspaceDir)
+      if (!db) {
+        return { error: 'workspace_not_indexed', message: `Workspace not indexed: ${workspaceDir}`, suggestion: `Call reindex(workspace_dir="${workspaceDir}") first` }
+      }
+      try {
+        const { files, rows } = queryFilesWithSymbols(db, rootDir, workspaceDir, null, null)
+        const tree = buildTree(files, basename(resolve(rootDir)))
+        const map = renderTree(tree)
+        _cache = { map, files: files.length, timestamp: Date.now() }
+        _cacheTime = Date.now()
+        _injectToYingMini(map)
+        return { map, files: files.length, tokens: estimateTokens(map) }
+      } finally {
+        db.close()
+      }
     },
 
     async generateFocused(rootDir, opts = {}) {
-      const { relevantFiles, relevantEntities, ignoreRules } = opts
-      let files = collectFiles(rootDir, { ignoreRules: ignoreRules || [] })
-      if (relevantEntities && relevantEntities.length > 0) {
-        files = await getFilesByEntities(files, rootDir, relevantEntities)
+      const { workspaceDir = rootDir, relevantFiles, relevantEntities } = opts
+      const db = openDb(workspaceDir)
+      if (!db) {
+        return { error: 'workspace_not_indexed', message: `Workspace not indexed: ${workspaceDir}`, suggestion: `Call reindex(workspace_dir="${workspaceDir}") first` }
       }
-      const tree = await buildTree(files, rootDir, relevantFiles || null, relevantEntities || null)
-      let map = renderTree(tree)
-      const tokens = estimateTokens(map)
+      try {
+        const { files, rows } = queryFilesWithSymbols(db, rootDir, workspaceDir, relevantFiles, relevantEntities)
+        const tree = buildTree(files, basename(resolve(rootDir)))
+        let map = renderTree(tree)
+        const tokens = estimateTokens(map)
 
-      if (tokens > MAX_FOCUSED_TOKENS) {
-        function prune(node) {
-          if (node.type === 'file') node.symbols = []
-          if (node.type === 'dir' && node.children) node.children.forEach(prune)
+        if (tokens > MAX_FOCUSED_TOKENS) {
+          // 20：不再清空符号——超限时先截文件数，符号保留（地图应返回函数，而非光秃目录树）
+          function prune(node) {
+            if (node.type === 'dir' && node.children) {
+              node.children = node.children.slice(0, 40)
+              node.children.forEach(prune)
+            }
+            if (node.type === 'file' && node.symbols.length > 6) {
+              node.symbols = node.symbols.slice(0, 6)
+            }
+          }
+          prune(tree)
+          map = renderTree(tree)
         }
-        prune(tree)
-        map = renderTree(tree)
-      }
-      let truncated = estimateTokens(map)
-      if (truncated > MAX_FOCUSED_TOKENS) {
-        map = map.split('\n').slice(0, 400).join('\n') + '\n... (truncated)'
-        truncated = estimateTokens(map)
-      }
+        let truncated = estimateTokens(map)
+        if (truncated > MAX_FOCUSED_TOKENS) {
+          // 20：按 token 预算截断（旧：固定 400 行——每行含符号时仍超 2000t）
+          const lines = map.split('\n')
+          let budget = MAX_FOCUSED_TOKENS * CHARS_PER_TOKEN
+          let keep = 0
+          while (keep < lines.length - 1 && budget > 0) {
+            budget -= lines[keep].length + 1
+            keep++
+          }
+          map = lines.slice(0, keep).join('\n') + '\n... (truncated)'
+          truncated = estimateTokens(map)
+        }
 
-      _injectToYingMini(map)
-      return { map, files: files.length, tokens: truncated }
+        _injectToYingMini(map)
+        return { map, files: files.length, tokens: truncated }
+      } finally {
+        db.close()
+      }
     },
 
     getSummary() {
@@ -197,5 +221,4 @@ export async function start() {
 
 export async function stop() {
   _cache = null
-  _langParser = null
 }

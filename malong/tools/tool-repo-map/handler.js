@@ -40,6 +40,7 @@ export async function handle(args, context) {
 
   const opts = {
     ignoreRules,
+    workspaceDir,
     relevantFiles: args?.relevantFiles,
     relevantEntities: args?.relevantEntities,
   }
