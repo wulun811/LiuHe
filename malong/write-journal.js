@@ -1,7 +1,7 @@
 // write-journal.js — undo journal + 审计 + crash recovery（附录 D）
 // 从 write-runtime.js 拆分（P4 批量后运行时已近千行）
 import { join, basename } from 'node:path'
-import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, renameSync, appendFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, appendFileSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import { sha256 } from './hash-utils.js'
 

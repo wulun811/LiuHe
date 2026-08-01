@@ -28,7 +28,65 @@ function isTestFile(path) {
 
 function isEntryPoint(file) {
   const base = basename(file, extname(file))
-  return ENTRY_NAMES.has(base)
+  if (ENTRY_NAMES.has(base)) return true
+  // r23：入口识别增强——mcp-server 这类 CLI 启动入口不在通用白名单，靠 package.json 声明兜底
+  return /^(?:mcp[-_]?server|server|daemon|worker|agent|runner)$/.test(base)
+}
+
+// r23：收集全项目 import/require 的目标路径字符串（静态 + 动态 + require）以及
+// tools/*/manifest.json 的 handler 字段（tool-registry 用路径拼接动态 import，无 import 字面量），
+// orphan_file 判定用文件路径级匹配——修复动态 import（await import('./x.js')）产生的误报
+function collectImportTargets(files, workspaceDir) {
+  const targets = new Set()
+  const patterns = [
+    /(?:^|\s)(?:import\s*\(|require\s*\()\s*['"]([^'"]+)['"]/g,        // 动态 import() / require()
+    /^\s*import\s+(?:[^'"]*?\s+from\s+)?['"]([^'"]+)['"]/gm,           // 静态 import ... from '...'
+    /['"]((?:\.{0,2}\/)?[\w./-]+\.(?:js|mjs|cjs|py|ts|tsx))['"]/g,     // 引号路径字面量（join(__dirname,'x.py') 等）
+  ]
+  for (const rel of files) {
+    let content
+    try { content = readFileSync(join(workspaceDir, rel), 'utf-8') } catch { continue }
+    for (let p = 0; p < patterns.length; p++) {
+      const re = patterns[p]
+      let m
+      re.lastIndex = 0
+      while ((m = re.exec(content)) !== null) {
+        const t = m[1]
+        // import/require 模块说明符：只收相对/绝对路径（裸名是 npm 包）
+        if (p < 2 && !(t.startsWith('.') || t.startsWith('/'))) continue
+        // 路径字面量：排除 URL 与 node: 内置
+        if (p === 2 && /^(?:https?:)?\/\//.test(t)) continue
+        targets.add(t.replace(/\.(js|mjs|cjs|jsx|ts|tsx|py)$/, ''))
+      }
+    }
+    // 工具注册机制：tools/*/manifest.json 的 handler 字段（registry 路径拼接 import）
+    const dirPath = dirname(join(workspaceDir, rel))
+    const manifestPath = join(dirPath, 'manifest.json')
+    if (existsSync(manifestPath)) {
+      try {
+        const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'))
+        if (manifest.handler) {
+          const h = join(dirPath, manifest.handler).slice(workspaceDir.length + 1).replace(/\.(js|mjs|cjs)$/, '')
+          targets.add(h)
+          targets.add(`./${h}`)
+        }
+      } catch {}
+    }
+  }
+  return targets
+}
+
+function isReferencedByImport(relPath, importTargets) {
+  const noExt = relPath.replace(/\.(js|mjs|cjs|jsx|ts|tsx|py)$/, '')
+  const bare = basename(noExt)
+  for (const t of importTargets) {
+    const tStripped = t.replace(/^\.\//, '')
+    if (tStripped === noExt) return true
+    // 相对父级路径（../../x）与子目录路径：按裸名与末段匹配
+    if (basename(tStripped) === bare) return true
+    if (noExt.endsWith(`/${tStripped}`)) return true
+  }
+  return false
 }
 
 function findUnusedImports(content, ext) {
@@ -235,16 +293,18 @@ export async function handle(args, context) {
     }
   }
 
-  if (includeFiles && codeIndexService) {
+  if (includeFiles) {
     try {
+      // r23：orphan_file 判定改用「全项目 import/require 目标字符串」路径级匹配，
+      // 替代旧的符号级 getReferences(basename) —— 后者对动态 import（await import('./x.js')）
+      // 与模块路径 import ref 匹配不上，导致 repo-map.js / lang-parser.js / code-index.js
+      // 这类「被动态加载的活文件」被误报为孤儿
+      const importTargets = collectImportTargets(files, workspaceDir)
       const imported = new Set()
       for (const f of files) {
         if (isTestFile(f) || isEntryPoint(f)) continue
-        const refs = await codeIndexService.getReferences(basename(f, extname(f)))
-        if (refs && refs.length > 0) {
-          const hasImporter = refs.some(r => r.kind === 'import' && r.path !== f)
-          if (hasImporter) imported.add(f)
-        }
+        if (f.includes('__init__')) continue
+        if (isReferencedByImport(f, importTargets)) imported.add(f)
       }
       for (const f of files) {
         if (isTestFile(f) || isEntryPoint(f) || imported.has(f)) continue

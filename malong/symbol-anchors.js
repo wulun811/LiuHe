@@ -126,29 +126,3 @@ export function computeFileAnchors(absPath, relPath, symbols) {
 function existsOrNull(p) {
   try { statSync(p); return true } catch { return false }
 }
-
-export async function backfillSymbolAnchors(workspaceDir, codeIndexService) {
-  const db = codeIndexService._db
-  if (!db) return { files: 0, symbols: 0, failed: [] }
-  const files = db.prepare('SELECT id, path FROM files').all()
-  let symCount = 0
-  const failed = []
-  for (const f of files) {
-    const absPath = join(workspaceDir, f.path)
-    if (!existsOrNull(absPath)) { failed.push({ file: f.path, reason: 'missing' }); continue }
-    const symbols = db.prepare('SELECT id, name, type, start_line, end_line FROM symbols WHERE file_id = ?').all(f.id)
-    if (symbols.length === 0) continue
-    const anchors = computeFileAnchors(absPath, f.path, symbols)
-    if (!anchors) { failed.push({ file: f.path, reason: 'too_large_or_unreadable' }); continue }
-    const upd = db.prepare('UPDATE symbols SET parent_id = ?, signature = ?, stable_id = ?, body_hash = ?, signature_hash = ? WHERE id = ?')
-    // 逐行 UPDATE 无事务 → 崩溃留混合状态（部分符号有锚点部分没有，stable_id 查找半失效）——
-    // 递归进化第 5 轮 P1#18
-    db.transaction(() => {
-      for (const a of anchors) {
-        upd.run(a.parentId, a.signature, a.stableId, a.bodyHash, a.signatureHash, a.id)
-        symCount++
-      }
-    })()
-  }
-  return { files: files.length, symbols: symCount, failed }
-}

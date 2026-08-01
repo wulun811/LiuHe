@@ -541,11 +541,6 @@ export async function hasErrors(source, ext, filePath) {
   return result.has_errors
 }
 
-export async function simplifyAST(source, ext, depth = 30, filePath) {
-  const params = filePath ? { file_path: filePath, ext, options: { max_depth: depth } } : { source, ext, options: { max_depth: depth } }
-  return request('simplify_ast', params)
-}
-
 export async function classifyMessage(content) {
   return request('classify_message', { content })
 }
@@ -580,14 +575,6 @@ export async function batchExtract(files) {
       hasErrors: r.result.has_errors,
     }
   })
-}
-
-export async function health() {
-  return request('health', {})
-}
-
-export function isConnected() {
-  return _connected
 }
 
 export function describeConfig() {
