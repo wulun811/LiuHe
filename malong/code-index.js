@@ -77,7 +77,7 @@ CREATE TABLE IF NOT EXISTS meta (
 
 // P2-C1：与 file-collector 的 DEFAULT_CACHED_EXT 对齐（旧缺 .ts/.tsx → outline-reader 对 .ts 永久 not_indexed）
 // r28：补齐 .jsx/.mts/.cts + 新增 C/C++/Java/Bash（与 malong-parse ext_to_language 对齐）；.h/.hh 不入索引（大量 venv 头文件）
-const CACHED_EXT = new Set(['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.mts', '.cts', '.py', '.go', '.rs', '.c', '.cpp', '.cc', '.cxx', '.hpp', '.java', '.sh', '.bash'])
+const CACHED_EXT = new Set(['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.mts', '.cts', '.py', '.go', '.rs', '.c', '.cpp', '.cc', '.cxx', '.hpp', '.hh', '.hxx', '.java', '.sh', '.bash'])
 // 15（P3）：CJS 解构别名 per-local import ref 的 call_expr 标记——模块级查询（dep_graph/
 // getModuleGraph/getCallGraph/跨文件解析）必须排除，避免本地绑定名被当成模块依赖
 const ALIAS_LOCAL_MARKER = '__alias__'
@@ -290,8 +290,10 @@ class CodeIndex {
     const relPath = repo ? relative(repo, filePath) : filePath
     let mtime = Date.now()
     try { mtime = statSync(filePath).mtimeMs } catch {}
+    // r28-fix：CJS require 扫描只对 CJS 文件有意义——对 C/Java/Bash 等新语言文件扫 require( 会误报 import
+    const cjsImports = (ext === '.js' || ext === '.mjs' || ext === '.cjs') ? scanCjsRequires(source) : []
     const idx = this._db.transaction(() => {
-      return this._indexFileDb(relPath, source.length, symbols, refs, mtime, sha256(source), scanCjsRequires(source))
+      return this._indexFileDb(relPath, source.length, symbols, refs, mtime, sha256(source), cjsImports)
     })()
     if (idx) this._reindexDone()
     return idx

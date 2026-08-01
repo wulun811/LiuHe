@@ -9,7 +9,7 @@ function guardPath(root, userPath) {
   return resolved === rootResolved || resolved.startsWith(rootResolved + '/') ? resolved : null
 }
 
-const SOURCE_EXTS = new Set(['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.py', '.go', '.rs', '.java', '.c', '.cpp', '.cc', '.cxx', '.sh', '.bash'])
+const SOURCE_EXTS = new Set(['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.py', '.go', '.rs', '.java', '.c', '.cpp', '.cc', '.cxx', '.hpp', '.hh', '.hxx', '.sh', '.bash'])
 const SKIP_DIRS = new Set(['node_modules', '.git', '__pycache__', '.venv', 'venv', 'dist', 'build', 'coverage'])
 const DOTENV_RE = /^\.env(?:\.|$)/
 // r23-fix: 安全扫描盲区——.env 无扩展名且以点开头被跳过，而恰恰是密钥最集中的文件

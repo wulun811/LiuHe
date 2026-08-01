@@ -4,7 +4,8 @@ import { isFunctionName } from '../misuse-helpers.js'
 import { validateFilePath } from '../../error-codes.js'
 import { checkFileStaleness, attachStalenessWarning } from '../../staleness.js'
 
-const SOURCE_EXTS = new Set(['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.mts', '.cts', '.py', '.go', '.rs', '.java', '.rb', '.php'])
+// r28-fix：诚实化——移除 parser 不支持的 .rb/.php，补 C/C++/Java/Bash
+const SOURCE_EXTS = new Set(['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.mts', '.cts', '.py', '.go', '.rs', '.java', '.c', '.cpp', '.cc', '.cxx', '.hpp', '.hh', '.hxx', '.sh', '.bash'])
 
 const _traceCache = new Map()
 const _traceCacheMax = 200

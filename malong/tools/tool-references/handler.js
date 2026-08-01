@@ -80,7 +80,8 @@ export async function handle(args, context) {
   return result
 }
 
-const SOURCE_EXTS = new Set(['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.mts', '.cts', '.py', '.go', '.rs', '.java', '.rb', '.php'])
+// r28-fix：诚实化——移除 parser 不支持的 .rb/.php，补 C/C++/Java/Bash
+const SOURCE_EXTS = new Set(['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.mts', '.cts', '.py', '.go', '.rs', '.java', '.c', '.cpp', '.cc', '.cxx', '.hpp', '.hh', '.hxx', '.sh', '.bash'])
 
 function findSymbolTextRefs(workspaceDir, symbol, excludeFile, maxResults) {
   const results = []

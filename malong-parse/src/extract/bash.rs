@@ -77,8 +77,7 @@ pub fn extract_all(tree: &Tree, source: &str) -> super::ExtractResult {
             }
             "command" => {
                 let name = command_name_text(node, source).unwrap_or_default();
-                if name.is_empty() { return; }
-                if name == "source" || name == "." {
+                if !name.is_empty() && (name == "source" || name == ".") {
                     // source 文件 / . 文件 -> import
                     if let Some(target) = source_target(node, source) {
                         refs.push(Reference {
@@ -89,7 +88,7 @@ pub fn extract_all(tree: &Tree, source: &str) -> super::ExtractResult {
                             symbols: Some(vec![]),
                         });
                     }
-                } else if !is_noise_command(&name) {
+                } else if !name.is_empty() && !is_noise_command(&name) {
                     refs.push(Reference {
                         kind: "call".to_string(),
                         name: name.clone(),
@@ -220,8 +219,7 @@ pub fn extract_references(tree: &Tree, source: &str) -> Vec<Reference> {
     fn walk(node: Node, source: &str, refs: &mut Vec<Reference>) {
         if node.kind() == "command" {
             let name = command_name_text(node, source).unwrap_or_default();
-            if name.is_empty() { return; }
-            if name == "source" || name == "." {
+            if !name.is_empty() && (name == "source" || name == ".") {
                 if let Some(target) = source_target(node, source) {
                     refs.push(Reference {
                         kind: "import".to_string(),
@@ -231,7 +229,7 @@ pub fn extract_references(tree: &Tree, source: &str) -> Vec<Reference> {
                         symbols: Some(vec![]),
                     });
                 }
-            } else if !is_noise_command(&name) {
+            } else if !name.is_empty() && !is_noise_command(&name) {
                 refs.push(Reference {
                     kind: "call".to_string(),
                     name: name.clone(),

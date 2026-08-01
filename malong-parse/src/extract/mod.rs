@@ -46,11 +46,6 @@ pub struct ExtractResult {
     pub has_errors: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TopLevelResult {
-    pub symbols: Vec<Symbol>,
-}
-
 pub fn extract_all(tree: &Tree, source: &str, language: &str) -> ExtractResult {
     match language {
         "javascript" | "typescript" | "tsx" => javascript::extract_all(tree, source),

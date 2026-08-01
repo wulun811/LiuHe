@@ -18,7 +18,8 @@ const BUILTINS_RS = new Set(['println', 'print', 'format', 'vec', 'String', 'Vec
 
 const BUILTINS_MAP = { python: BUILTINS_PY, javascript: BUILTINS_JS, typescript: BUILTINS_TS, go: BUILTINS_GO, rust: BUILTINS_RS }
 
-const SOURCE_EXTS = new Set(['.js', '.mjs', '.cjs', '.mts', '.cts', '.py', '.go', '.rs'])
+// r28-fix：补 .jsx/.ts/.tsx/.java（import 语义真实存在）；C 用 include、Bash 无 import，不加
+const SOURCE_EXTS = new Set(['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.mts', '.cts', '.py', '.go', '.rs', '.java'])
 
 const KEYWORDS = new Set(['if', 'else', 'for', 'while', 'return', 'import', 'from', 'class', 'def', 'function', 'const', 'let', 'var', 'async', 'await', 'export', 'default', 'extends', 'implements', 'new', 'throw', 'try', 'catch', 'finally', 'switch', 'case', 'break', 'continue', 'typeof', 'instanceof', 'void', 'delete', 'in', 'of', 'this', 'super', 'yield', 'except', 'as', 'with', 'lambda', 'pass', 'raise', 'global', 'nonlocal', 'assert', 'elif', 'not', 'and', 'or', 'is', 'del', 'true', 'false', 'null'])
 

@@ -24,7 +24,8 @@ const SERVICE_PATTERNS = [
 // SQL 执行调用（该行内的字符串是真实 SQL，表名应检出；否则视为自然语言）
 const SQL_CALL_RE = /(?:\.\s*)?(?:execute|executemany|executescript|query|prepare|run)\s*\(/i
 
-const SOURCE_EXTS = new Set(['.js', '.mjs', '.cjs', '.ts', '.tsx', '.py', '.go', '.rs', '.java', '.rb'])
+// r28-fix：移除 parser 不支持的 .rb，补 C/C++/Java/Bash
+const SOURCE_EXTS = new Set(['.js', '.mjs', '.cjs', '.ts', '.tsx', '.py', '.go', '.rs', '.java', '.c', '.cpp', '.cc', '.cxx', '.hpp', '.hh', '.hxx', '.sh', '.bash'])
 const SKIP_DIRS = new Set(['node_modules', '.git', '__pycache__', '.venv', 'venv', 'dist', 'build'])
 
 // CI / 平台内置注入变量（不属于项目配置，不应报 drift）

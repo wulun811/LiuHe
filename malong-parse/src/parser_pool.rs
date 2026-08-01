@@ -28,10 +28,6 @@ impl ParserPool {
         }
     }
 
-    pub fn get_language(&self, name: &str) -> Option<&Language> {
-        self.languages.get(name)
-    }
-
     pub fn supported_languages(&self) -> Vec<String> {
         self.languages.keys().cloned().collect()
     }
@@ -66,7 +62,7 @@ impl Default for ParserPool {
 
 pub fn ext_to_language(ext: &str) -> Option<&'static str> {
     match ext {
-        ".js" | ".mjs" | ".cjs" => Some("javascript"),
+        ".js" | ".mjs" | ".cjs" | ".jsx" => Some("javascript"),
         ".ts" | ".mts" | ".cts" => Some("typescript"),
         ".tsx" => Some("tsx"),
         ".py" => Some("python"),

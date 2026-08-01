@@ -10,7 +10,7 @@ function guardPath(root, userPath) {
   return resolved === rootResolved || resolved.startsWith(rootResolved + '/') ? resolved : null
 }
 
-const CACHED_EXT = new Set(['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.mts', '.cts', '.py', '.go', '.rs', '.c', '.cpp', '.cc', '.cxx', '.hpp', '.java', '.sh', '.bash'])
+const CACHED_EXT = new Set(['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.mts', '.cts', '.py', '.go', '.rs', '.c', '.cpp', '.cc', '.cxx', '.hpp', '.hh', '.hxx', '.java', '.sh', '.bash'])
 // r23-fix5: 去掉通天项目私有目录名（不再特殊对待隐藏目录，统一由 startsWith('.') 规则处理）
 const IGNORE_DIRS = new Set(['node_modules', '.git', 'dist', 'build', 'coverage'])
 const MAX_SCAN_FILES = 5

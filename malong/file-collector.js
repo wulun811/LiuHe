@@ -14,7 +14,7 @@ export const DEFAULT_IGNORE_DIRS = new Set([
   // P2-C5：去掉 lib/deps/runtime/external——通用目录名误伤用户自有源码
   // （本仓库 runtime1 曾被 runtime 规则静默排除）。第三方依赖用 .malongignore 显式声明
 ])
-const DEFAULT_CACHED_EXT = new Set(['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.mts', '.cts', '.py', '.go', '.rs', '.c', '.cpp', '.cc', '.cxx', '.hpp', '.java', '.sh', '.bash'])
+const DEFAULT_CACHED_EXT = new Set(['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.mts', '.cts', '.py', '.go', '.rs', '.c', '.cpp', '.cc', '.cxx', '.hpp', '.hh', '.hxx', '.java', '.sh', '.bash'])
 const MAX_RULES = 100
 
 export function parseMalongignore(filePath) {

@@ -3,7 +3,8 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { TransactionStore } from '../tool-edit-transaction/transaction-store.js'
 import { scanCjsRequires } from '../../cjs-imports.js'
 
-const SOURCE_EXTS = new Set(['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.mts', '.cts', '.py', '.go', '.rs', '.java', '.rb', '.php'])
+// r28-fix：诚实化——移除 parser 不支持的 .rb/.php（提取不到符号，扫描纯浪费），补 C/C++/Java/Bash
+const SOURCE_EXTS = new Set(['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.mts', '.cts', '.py', '.go', '.rs', '.java', '.c', '.cpp', '.cc', '.cxx', '.hpp', '.hh', '.hxx', '.sh', '.bash'])
 
 function escapeRegex(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')

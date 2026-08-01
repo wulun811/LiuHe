@@ -3,7 +3,8 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { stripStrings } from '../../string-utils.js'
 
 const TODO_RE = /(?:#|\/\/|\/\*|\*|--)\s*(TODO|FIXME|XXX|HACK)\s*(?:\((\w+)\))?\s*[:\-]?\s*(.*)/i
-const SOURCE_EXTS = new Set(['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.py', '.go', '.rs', '.java', '.rb', '.c', '.cpp', '.h', '.php'])
+// r28-fix：补 .java/.sh/.bash（TODO 纯文本扫描，rb/php 保留无碍）
+const SOURCE_EXTS = new Set(['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.py', '.go', '.rs', '.java', '.rb', '.c', '.cpp', '.h', '.php', '.sh', '.bash'])
 const SKIP_DIRS = new Set(['node_modules', '.git', '__pycache__', '.venv', 'venv', 'dist', 'build', '.next', 'fixtures', 'test-fixtures', 'mock_data'])
 const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000
 

@@ -136,7 +136,6 @@ pub fn extract_all(tree: &Tree, source: &str) -> super::ExtractResult {
                 let name = node.child_by_field_name("name")
                     .map(|n| source[n.byte_range()].to_string())
                     .unwrap_or_default();
-                if name.is_empty() { return; }
                 let object = node.child_by_field_name("object")
                     .map(|o| source[o.byte_range()].to_string())
                     .unwrap_or_default();
