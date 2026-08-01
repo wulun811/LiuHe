@@ -1118,6 +1118,16 @@ class CodeIndex {
         const crossLanguageMatches = []
         const seenKeys = new Set()
 
+        const sameLangAs = (file) => {
+          const fam = langFamily(langOf(file))
+          return fam === defFamily || defFamily === 'other' || fam === 'other'
+        }
+        const bucketCaller = (info, sameLang, isTest, target) => {
+          if (!sameLang) crossLanguageMatches.push(info)
+          else if (isTest) testCallers.push(info)
+          else target.push(info)
+        }
+
         for (const r of refs) {
           if (r.kind === 'import') {
             importers.push({ file: r.source_file_path, line: r.line || 0, ref_type: 'import' })
@@ -1128,8 +1138,7 @@ class CodeIndex {
           const isTest = self._isTestFile(r.source_file_path)
           const key = `${r.source_file_path}\0${callerFunc || ''}`
           seenKeys.add(key)
-          const callerFamily = langFamily(langOf(r.source_file_path))
-          const sameLang = callerFamily === defFamily || defFamily === 'other' || callerFamily === 'other'
+          const sameLang = sameLangAs(r.source_file_path)
           const info = {
             type: isTest ? 'test' : 'direct',
             ref_type: r.kind,
@@ -1140,9 +1149,7 @@ class CodeIndex {
             confidence: sameLang ? 'high' : 'low',
             context: self._extractContext(r.source_file_path, refLine),
           }
-          if (!sameLang) crossLanguageMatches.push(info)
-          else if (isTest) testCallers.push(info)
-          else directCallers.push(info)
+          bucketCaller(info, sameLang, isTest, directCallers)
         }
 
         const indirectCallers = []
@@ -1153,8 +1160,7 @@ class CodeIndex {
             if (seenKeys.has(key)) continue
             seenKeys.add(key)
             const isTest = self._isTestFile(entry.file)
-            const callerFamily = langFamily(langOf(entry.file))
-            const sameLang = callerFamily === defFamily || defFamily === 'other' || callerFamily === 'other'
+            const sameLang = sameLangAs(entry.file)
             const info = {
               type: isTest ? 'test' : 'indirect',
               ref_type: 'indirect',
@@ -1167,9 +1173,7 @@ class CodeIndex {
               depth: entry.depth,
               via: entry.via,
             }
-            if (!sameLang) crossLanguageMatches.push(info)
-            else if (isTest) testCallers.push(info)
-            else indirectCallers.push(info)
+            bucketCaller(info, sameLang, isTest, indirectCallers)
           }
         }
 

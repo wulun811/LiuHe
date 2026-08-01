@@ -2,13 +2,12 @@
 // 形态：better-sqlite3 readonly + 安全文件读取。不 import parse-client、不起 socket/watcher/server。
 // 快路径：图查询（find/callers/callees/outline）纯 SQLite；正文读取按索引 range 切片（§16.2 不 parse）。
 // 诚实边界：遇 dirty/stale 索引返回 INDEX_STALE（附录 D：不装对）；正文 hash 按需计算。
-import { join, resolve, extname, sep } from 'node:path'
+import { join, resolve, sep } from 'node:path'
 import { readFileSync, statSync, realpathSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import Database from 'better-sqlite3'
 
 const MAX_LIVE_READ = 1024 * 1024
-const CODE_EXTS = new Set(['.py', '.js', '.mjs', '.cjs', '.ts', '.tsx', '.go', '.rs', '.java', '.c', '.cpp', '.h', '.hpp', '.rb', '.php'])
 
 export class EmbeddedReader {
   constructor(dbPath, workspaceDir) {
@@ -181,8 +180,4 @@ export class EmbeddedReader {
     }
     return tree
   }
-}
-
-export function langOfPath(p) {
-  return CODE_EXTS.has(extname(p)) ? extname(p).slice(1) : null
 }

@@ -335,18 +335,6 @@ class EditResultEncoder(json.JSONEncoder):
         return super().default(obj)
 
 
-def serialize_result(result: Dict) -> Dict:
-    """递归将结果中的 dataclass 实例转换为 dict"""
-    serialized = {}
-    for k, v in result.items():
-        if isinstance(v, EditResult):
-            serialized[k] = asdict(v)
-        elif isinstance(v, list) and v and isinstance(v[0], EditResult):
-            serialized[k] = [asdict(item) for item in v]
-        else:
-            serialized[k] = v
-    return serialized
-
 def batch_edit(file_path: str, edits_data: List[Dict], dry_run: bool = False, backup: bool = False, partial: bool = False, no_write: bool = False) -> Dict:
     """
     批量编辑主函数
