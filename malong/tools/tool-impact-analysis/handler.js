@@ -89,7 +89,15 @@ export async function handle(args, context) {
     result.misuse_warning = misuseWarning
   }
 
-  result.next_step = `After modifying, verify: test_bridge(action="run")`
+  const directN = result.caller_count?.direct || 0
+  const testN = result.caller_count?.test || 0
+  if (result.risk_level === 'high') {
+    result.next_step = `High risk (${directN} direct + ${testN} test callers). Before modifying: sandbox_validate(workspace_dir="${workspaceDir}", file="${file}", new_content=...) to pre-validate. After: test_bridge(action="run")`
+  } else if (result.risk_level === 'medium') {
+    result.next_step = `Medium risk (${directN} direct + ${testN} test callers). Review callers above before modifying. After: test_bridge(action="run")`
+  } else {
+    result.next_step = `After modifying, verify: test_bridge(action="run")`
+  }
 
   return result
 }

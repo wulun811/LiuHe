@@ -731,7 +731,7 @@ export async function writeSymbols(args, context) {
         // 冲突判定：组内首个真实写项做 file-level（文件基线）；后续项仅符号级（文件已在批内变更）
         const itemBase = w?.base_version
         if (firstReal && !itemBase && !force) {
-          failed = { file: fp, itemIndex: idx, error: { code: 'VERSION_CONFLICT', conflict_type: 'NO_BASE', message: 'base_version is required for the first write of each file (read_symbol first). Use allow_unsafe_no_base only when you intentionally bypass.' } }
+          failed = { file: fp, itemIndex: idx, error: { code: 'VERSION_CONFLICT', conflict_type: 'NO_BASE', message: 'base_version is required for the first write of each file (read_symbol first). Use allow_unsafe_no_base only when you intentionally bypass.', next_action: { tool: 'read_symbol', params: { locator: { file_path: fp } } } } }
           break
         }
         if (firstReal && itemBase) {

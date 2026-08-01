@@ -40,7 +40,7 @@ export async function handle(args, context) {
   }
   if (result && !result.error) {
     const firstSymbol = result?.outline?.[0]?.name || result?.symbols?.[0]?.name || result?.functions?.[0]?.name || 'symbol'
-    result.next_step = `Before editing, check callers: impact_analysis(symbol="${firstSymbol}")`
+    result.next_step = `Before editing, check callers: impact_analysis(file="${file}", symbol="${firstSymbol}")`
   }
   return attachStalenessWarning(result, staleness)
 }
