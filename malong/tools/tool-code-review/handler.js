@@ -1,5 +1,11 @@
-import { basename, extname, join } from 'node:path'
+import { basename, extname, resolve } from 'node:path'
 import { readFileSync, existsSync } from 'node:fs'
+
+function guardPath(root, userPath) {
+  const rootResolved = resolve(root)
+  const resolved = resolve(rootResolved, userPath)
+  return resolved === rootResolved || resolved.startsWith(rootResolved + '/') ? resolved : null
+}
 
 const KEYWORDS = new Set(['let', 'const', 'var', 'function', 'return', 'if', 'for', 'while', 'switch', 'case', 'break', 'continue', 'new', 'typeof', 'instanceof', 'import', 'export', 'from', 'class', 'extends', 'async', 'await', 'this', 'throw', 'try', 'catch', 'finally', 'else', 'default', 'in', 'of', 'do', 'void', 'delete', 'yield'])
 const BUILTINS = new Set(['String', 'Number', 'Boolean', 'Object', 'Array', 'Function', 'Date', 'RegExp', 'Error', 'Promise', 'Map', 'Set', 'Symbol', 'BigInt', 'Math', 'JSON', 'Intl', 'NaN', 'Infinity', 'undefined', 'null', 'true', 'false'])
@@ -57,10 +63,15 @@ function checkNaming(source, fileName) {
   return issues
 }
 
-function checkComments(source) {
+function checkComments(source, fileName) {
   const issues = []
   const lines = String(source).split('\n')
-  const commentLines = lines.filter(l => l.trim().startsWith('//') || l.trim().startsWith('*') || l.trim().startsWith('/*') || l.trim().startsWith('#'))
+  const isJsLike = /\.(js|mjs|cjs|jsx|ts|tsx)$/i.test(fileName || '')
+  const commentLines = lines.filter(l => {
+    const t = l.trim()
+    // '#' 只在非 JS 语言算注释（JS 私有字段 #foo 不算）
+    return t.startsWith('//') || t.startsWith('*') || t.startsWith('/*') || (t.startsWith('#') && !isJsLike)
+  })
   const ratio = commentLines.length / Math.max(1, lines.length)
   const funcCount = (String(source).match(/function\s+\w+\(/g) || []).length
   const docCommentCount = (String(source).match(/\/\*\*[\s\S]*?\*\//g) || []).length
@@ -81,6 +92,8 @@ function checkComments(source) {
 function checkLongFunctions(source) {
   const issues = []
   const lines = String(source).split('\n')
+  // 控制语句会匹配 methodMatch（if/for/while/catch/switch/with），必须排除
+  const CONTROL_STATEMENTS = new Set(['if', 'for', 'while', 'catch', 'switch', 'with'])
   let inFunc = false, funcLine = 0, funcName = '', braceCount = 0, funcLines = 0
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
@@ -90,7 +103,7 @@ function checkLongFunctions(source) {
 
     if (funcMatch) { inFunc = true; funcLine = i + 1; funcName = funcMatch[1]; braceCount = 1; funcLines = 1 }
     else if (arrowMatch) { inFunc = true; funcLine = i + 1; funcName = arrowMatch[1]; braceCount = 1; funcLines = 1 }
-    else if (methodMatch && !inFunc) { inFunc = true; funcLine = i + 1; funcName = methodMatch[1]; braceCount = 1; funcLines = 1 }
+    else if (methodMatch && !inFunc && !CONTROL_STATEMENTS.has(methodMatch[1])) { inFunc = true; funcLine = i + 1; funcName = methodMatch[1]; braceCount = 1; funcLines = 1 }
     else if (inFunc) {
       for (const ch of line) { if (ch === '{') braceCount++; if (ch === '}') braceCount-- }
       funcLines++
@@ -127,7 +140,7 @@ function checkDuplication(source) {
 function reviewOne(source, filePath) {
   const issues = []
   issues.push(...checkNaming(source, filePath || 'unknown.js'))
-  issues.push(...checkComments(source))
+  issues.push(...checkComments(source, filePath))
   issues.push(...checkLongFunctions(source))
   issues.push(...checkDuplication(source))
 
@@ -163,7 +176,7 @@ export async function handle(args, context) {
   if (!workspaceDir) {
     return { error: 'missing_parameter', message: 'workspace_dir is required' }
   }
-  const maxIssues = Math.min(parseInt(args?.max_issues) || 50, 200)
+  const maxIssues = Math.min(Math.max(parseInt(args?.max_issues) || 50, 1), 200)
 
   if (args?.diff) {
     const blocks = parseSearchReplaceBlocks(args.diff)
@@ -186,7 +199,10 @@ export async function handle(args, context) {
   let source = args?.source
   let file = args?.file
   if (source === undefined && file) {
-    const absPath = join(workspaceDir, file)
+    const absPath = guardPath(workspaceDir, file)
+    if (!absPath) {
+      return { error: 'path_escape', message: `Path escapes workspace_dir: ${file}` }
+    }
     if (!existsSync(absPath)) {
       return { error: 'file_not_found', message: `File not found: ${file}`, suggestion: 'Check the path is relative to workspace_dir and the file exists on disk' }
     }

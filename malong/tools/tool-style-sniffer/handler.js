@@ -1,6 +1,12 @@
 import { readFileSync, readdirSync, writeFileSync, existsSync, mkdirSync } from 'node:fs'
-import { join, extname } from 'node:path'
+import { join, extname, resolve } from 'node:path'
 import { createHash } from 'node:crypto'
+
+function guardPath(root, userPath) {
+  const rootResolved = resolve(root)
+  const resolved = resolve(rootResolved, userPath)
+  return resolved === rootResolved || resolved.startsWith(rootResolved + '/') ? resolved : null
+}
 
 const CACHED_EXT = new Set(['.js', '.mjs', '.cjs', '.py', '.go', '.rs'])
 const IGNORE_DIRS = new Set(['node_modules', '.git', '.tusunsun', 'dist', 'build', 'coverage'])
@@ -85,9 +91,17 @@ function sniffNaming(source) {
 }
 
 function sniffTrailingCommas(source) {
-  const trailing = (source.match(/,\s*$/gm) || []).length
-  const noTrailing = (source.match(/[^\s,]\s*$/gm) || []).filter(l => l.trim().endsWith(',')).length
-  return trailing > noTrailing * 0.5 ? 'yes' : 'no'
+  // r23-fix: 原版 noTrailing 的 filter 恒为空（[^\s,] 保证行尾非逗号，endsWith(',') 永远 false）→ 恒判 yes
+  let trailing = 0, nonTrailing = 0
+  for (const raw of source.split('\n')) {
+    const t = raw.trim()
+    if (!t || t.startsWith('//') || t.startsWith('/*') || t.startsWith('*') || t.startsWith('#') ||
+        t.endsWith('{') || t.endsWith('}') || t.endsWith('(') || t.endsWith('[') || t.endsWith(']')) continue
+    if (t.endsWith(',')) trailing++
+    else nonTrailing++
+  }
+  if (trailing + nonTrailing === 0) return null
+  return { trailing, nonTrailing }
 }
 
 function buildProjectRules(styles) {
@@ -115,7 +129,14 @@ function buildProjectRules(styles) {
     if (styles.naming.UPPER_CASE > 0) conventions.push('constants: UPPER_SNAKE_CASE')
     if (conventions.length > 0) {
       const max = Object.entries(styles.naming).sort((a, b) => b[1] - a[1])[0]
-      const primary = conventions.find(c => c.includes(max[0])) || conventions[0]
+      // r23-fix: includes 子串匹配 'UPPER_CASE' 永远匹配不上 'UPPER_SNAKE_CASE' → 改用查表
+      const map = {
+        camelCase: 'functions/variables: camelCase',
+        PascalCase: 'classes: PascalCase',
+        snake_case: 'functions/variables: snake_case',
+        UPPER_CASE: 'constants: UPPER_SNAKE_CASE',
+      }
+      const primary = map[max[0]] || conventions[0]
       rules.push(`- **Primary**: ${primary}`)
       rules.push(`- **Detected patterns**: ${Object.entries(styles.naming).filter(([, v]) => v > 0).map(([k, v]) => `${k}: ${v}`).join(', ')}`)
     }
@@ -135,7 +156,10 @@ export async function handle(args, context) {
   }
 
   const scope = args?.scope || '.'
-  const scanDir = scope === '.' ? workspaceDir : join(workspaceDir, scope)
+  const scanDir = scope === '.' ? workspaceDir : guardPath(workspaceDir, scope)
+  if (!scanDir) {
+    return { error: 'path_escape', message: `Path escapes workspace_dir: ${scope}` }
+  }
   if (!existsSync(scanDir)) {
     return { error: 'dir_not_found', message: `Directory not found: ${scope}` }
   }
@@ -150,6 +174,7 @@ export async function handle(args, context) {
     naming: { camelCase: 0, PascalCase: 0, snake_case: 0, UPPER_CASE: 0, kebabCase: 0 },
   }
 
+  let trailingTotal = 0, nonTrailingTotal = 0
   for (const file of files) {
     const indent = sniffIndent(file.source)
     if (indent) styles.indent = styles.indent || indent
@@ -157,17 +182,22 @@ export async function handle(args, context) {
     if (quotes) styles.quotes = styles.quotes || quotes
     const semicolons = sniffSemicolons(file.source)
     if (semicolons) styles.semicolons = styles.semicolons || semicolons
-    const trailingCommas = sniffTrailingCommas(file.source)
-    if (trailingCommas) styles.trailingCommas = styles.trailingCommas || trailingCommas
+    // r23-fix: 尾逗号是占比语义，取首个文件会失真 → 全文件聚合
+    const tc = sniffTrailingCommas(file.source)
+    if (tc) { trailingTotal += tc.trailing; nonTrailingTotal += tc.nonTrailing }
     const naming = sniffNaming(file.source)
     for (const [k, v] of Object.entries(naming)) styles.naming[k] += v
   }
+  styles.trailingCommas = trailingTotal + nonTrailingTotal === 0 ? null : (trailingTotal >= nonTrailingTotal ? 'yes' : 'no')
 
   const projectRules = buildProjectRules(styles)
 
   let rulesPath = null
   if (args?.output) {
-    const outDir = args.output === '.' ? workspaceDir : join(workspaceDir, args.output)
+    const outDir = args.output === '.' ? workspaceDir : guardPath(workspaceDir, args.output)
+    if (!outDir) {
+      return { error: 'path_escape', message: `Output path escapes workspace_dir: ${args.output}` }
+    }
     if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true })
     rulesPath = join(outDir, 'PROJECT_RULES.md')
     writeFileSync(rulesPath, projectRules, 'utf-8')

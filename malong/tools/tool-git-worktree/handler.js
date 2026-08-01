@@ -1,8 +1,14 @@
 import { execFile } from 'node:child_process'
 import { mkdtempSync, writeFileSync, existsSync, rmSync, mkdirSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve, sep } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
+
+function guardPath(root, userPath) {
+  const rootResolved = resolve(root)
+  const resolved = resolve(rootResolved, userPath)
+  return resolved === rootResolved || resolved.startsWith(rootResolved + sep) ? resolved : null
+}
 
 function git(args, cwd, timeout) {
   return new Promise((resolve, reject) => {
@@ -30,15 +36,27 @@ export async function handle(args, context) {
   if (!Array.isArray(changes) || changes.length === 0) {
     return { error: 'missing_parameter', message: 'changes is required: [{path, new_content|delete}]' }
   }
+  // r23-fix: includes('..') 会误拒合法文件名（foo..bar.txt）；改为 resolve 后校验是否逃逸仓库根
   for (const c of changes) {
-    if (!c || typeof c.path !== 'string' || c.path.includes('..')) {
-      return { error: 'invalid_parameter', message: `Each change needs a path relative to workspace_dir (no '..'): ${JSON.stringify(c)}` }
+    if (!c || typeof c.path !== 'string' || !guardPath(repoDir, c.path)) {
+      return { error: 'invalid_parameter', message: `Each change needs a path inside workspace_dir (no '..'): ${JSON.stringify(c)}` }
     }
   }
   const timeout = Math.min(parseInt(args?.timeout) || 30000, 120000)
 
   if (!existsSync(join(repoDir, '.git'))) {
     return { error: 'not_a_git_repo', message: 'workspace_dir is not a git repository', path: repoDir }
+  }
+
+  // r23-fix: dirty 工作区下 checkout 系列可能冲突/带脏移动，事务前提是干净基座
+  const status = await git(['status', '--porcelain'], repoDir, timeout)
+  if (status) {
+    return {
+      error: 'dirty_workspace',
+      message: 'Workspace has uncommitted changes; worktree transaction requires a clean base',
+      files: status.split('\n').slice(0, 10),
+      suggestion: 'git stash (or commit) first, then retry',
+    }
   }
 
   const branchName = `tongtian-multi-${Date.now()}-${randomUUID().slice(0, 8)}`
@@ -49,6 +67,10 @@ export async function handle(args, context) {
     originalBranch = await git(['rev-parse', '--abbrev-ref', 'HEAD'], repoDir, timeout)
   } catch (e) {
     return { error: 'git_failed', message: e.message }
+  }
+  // r23-fix: detached HEAD 时 --abbrev-ref 返回 'HEAD'，merge --ff-only 目标歧义 → 拒绝并提示
+  if (originalBranch === 'HEAD') {
+    return { error: 'detached_head', message: 'Workspace is in detached HEAD state', suggestion: 'git checkout -b <branch> first, then retry' }
   }
 
   try {

@@ -158,6 +158,93 @@ const debugRunner = (await import(join(MALONG, 'tools/tool-debug-runner/handler.
   assert(r4.error === 'file_not_found', 'debug_runner: 文件不存在检测')
 }
 
+// ── 6. r23-fix 审查修复验证（P0 穿越 / P1 逻辑 / P2 盲区） ──
+{
+  // 路径穿越全拒
+  writeFileSync(join(WS, 'hack-target.js'), 'const s = "x"\n')
+  const esc1 = await codeReview({ workspace_dir: join(WS, 'nope'), file: '../hack-target.js' })
+  assert(esc1.error === 'path_escape', `code_review: 穿越拒绝（得 ${esc1.error}）`)
+  const esc2 = await securityReview({ workspace_dir: join(WS, 'nope'), file: '../hack-target.js' })
+  assert(esc2.error === 'path_escape', 'security_review: 穿越拒绝')
+  const esc3 = await styleSniffer({ workspace_dir: join(WS, 'nope'), scope: '../' })
+  assert(esc3.error === 'path_escape', 'style_sniffer: scope 穿越拒绝')
+  const esc4 = await debugRunner({ workspace_dir: join(WS, 'nope'), script: '../hack-target.js' })
+  assert(esc4.error === 'path_escape', 'debug_runner: script 穿越拒绝')
+  const esc5 = await styleSniffer({ workspace_dir: WS, scope: '.', output: '../evad' })
+  assert(esc5.error === 'path_escape', 'style_sniffer: output 穿越写拒绝')
+
+  // if 块不误报（控制语句排除）
+  let ifBlock = 'function real() {\n'
+  for (let i = 0; i < 5; i++) ifBlock += `  const v${i} = ${i}\n`
+  ifBlock += '}\nif (condition) {\n'
+  for (let i = 0; i < 60; i++) ifBlock += `  const w${i} = ${i}\n`
+  ifBlock += '}\n'
+  const ri = await codeReview({ workspace_dir: WS, source: ifBlock, file: 'x.js' })
+  assert(!ri.issues.some(i => i.category === 'complexity' && /函数 "if"/.test(i.message)), 'code_review: if 块不误报')
+
+  // 尾逗号 1 处 vs 4 处 → no（独立目录避免抽样干扰）
+  const tc = join(WS, 'tc')
+  mkdirSync(tc, { recursive: true })
+  writeFileSync(join(tc, 'a.js'), 'export const list = [\n  1,\n  2,\n  3,\n]\n')
+  writeFileSync(join(tc, 'b.js'), 'export const b = {\n  a: 1\n}\n')
+  writeFileSync(join(tc, 'c.js'), 'export const c = 1\n')
+  writeFileSync(join(tc, 'd.py'), 'def f():\n    return 1\n')
+  writeFileSync(join(tc, 'e.go'), 'package main\nfunc main() {}\n')
+  const td1 = await styleSniffer({ workspace_dir: WS, scope: 'tc' })
+  assert(td1.styles.trailingCommas === 'no', `style_sniffer: 尾逗号 no（得 ${td1.styles.trailingCommas}）`)
+
+  // script 模式 cwd=workspace_dir
+  writeFileSync(join(WS, 'rel.js'), `const fs = require('node:fs')\nconsole.log('rel:', fs.existsSync('tc'))\n`)
+  const rd = await debugRunner({ workspace_dir: WS, script: 'rel.js' })
+  assert(rd.stdout.includes('rel: true'), `debug_runner: 脚本内相对路径可见（得 ${rd.stdout.trim()}）`)
+
+  // rust 并发互不覆盖
+  writeFileSync(join(WS, 'a.rs'), 'fn main() { println!("A"); }\n')
+  writeFileSync(join(WS, 'b.rs'), 'fn main() { println!("B"); }\n')
+  const [ra, rb] = await Promise.all([debugRunner({ workspace_dir: WS, script: 'a.rs' }), debugRunner({ workspace_dir: WS, script: 'b.rs' })])
+  assert(ra.stdout.includes('A') && rb.stdout.includes('B'), `debug_runner: rust 并发互不覆盖（A=${ra.stdout.trim()}, B=${rb.stdout.trim()}）`)
+
+  // timeout → TimeoutError
+  writeFileSync(join(WS, 'sleep.js'), 'setTimeout(() => console.log("done"), 5000)\n')
+  const ts = await debugRunner({ workspace_dir: WS, script: 'sleep.js', timeout: 400 })
+  assert(ts.error_type === 'TimeoutError', `debug_runner: timeout→TimeoutError（得 ${ts.error_type}）`)
+
+  // .env 安全盲区修复
+  const secdir = join(WS, 'secdir')
+  mkdirSync(secdir, { recursive: true })
+  writeFileSync(join(secdir, '.env'), 'SECRET_TOKEN=hunter2-super-secret\n')
+  writeFileSync(join(secdir, 'app.js'), 'const a = 1\n')
+  const sd = await securityReview({ workspace_dir: WS, scope: 'secdir' })
+  assert(sd.total_findings >= 1, `security_review: .env 密钥扫到（total=${sd.total_findings}）`)
+
+  // git_worktree：合法名含".."不再误拒 / 真穿越仍拒绝 / dirty / detached
+  const { execSync } = await import('node:child_process')
+  const fixRepo = join(WS, 'fixrepo')
+  mkdirSync(fixRepo)
+  execSync('git init -q -b main .', { cwd: fixRepo })
+  execSync('git config user.email t@t && git config user.name t', { cwd: fixRepo })
+  writeFileSync(join(fixRepo, 'a.txt'), 'x\n')
+  execSync('git add -A && git commit -qm init', { cwd: fixRepo })
+  const gf = await gitWorktree({ workspace_dir: fixRepo, changes: [{ path: 'foo..bar.txt', new_content: 'x\n' }] })
+  assert(gf.success === true, `git_worktree: foo..bar.txt 合法名提交（${gf.success}）`)
+  const ge = await gitWorktree({ workspace_dir: fixRepo, changes: [{ path: '../esc.txt', new_content: 'x' }] })
+  assert(ge.error === 'invalid_parameter', 'git_worktree: 真穿越仍拒绝')
+  writeFileSync(join(fixRepo, 'dirty.txt'), 'x\n')
+  const gd = await gitWorktree({ workspace_dir: fixRepo, changes: [{ path: 'b.txt', new_content: 'x\n' }] })
+  assert(gd.error === 'dirty_workspace', `git_worktree: dirty 拒绝（得 ${gd.error}）`)
+  execSync('git clean -f -q', { cwd: fixRepo })
+  execSync('git checkout -q --detach HEAD', { cwd: fixRepo })
+  const gdd = await gitWorktree({ workspace_dir: fixRepo, changes: [{ path: 'd.txt', new_content: 'x\n' }] })
+  assert(gdd.error === 'detached_head', `git_worktree: detached 拒绝（得 ${gdd.error}）`)
+  execSync('git checkout -q main', { cwd: fixRepo })
+
+  // 负数 max_issues clamp
+  let src = ''
+  for (let i = 0; i < 10; i++) src += `const t${i} = ${i} // ${'c'.repeat(50)}\n`
+  const rc = await codeReview({ workspace_dir: WS, source: src, file: 'm.js', max_issues: -3 })
+  assert(!rc.truncated, 'code_review: 负数 max_issues clamp 不尾截')
+}
+
 rmSync(WS, { recursive: true, force: true })
 console.log(`\n== test-dogfood-r23: ${passed} passed, ${failed} failed ==`)
 process.exit(failed ? 1 : 0)

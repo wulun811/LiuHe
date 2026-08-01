@@ -1,8 +1,16 @@
-import { extname, join } from 'node:path'
+import { basename, extname, join, resolve } from 'node:path'
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
+
+function guardPath(root, userPath) {
+  const rootResolved = resolve(root)
+  const resolved = resolve(rootResolved, userPath)
+  return resolved === rootResolved || resolved.startsWith(rootResolved + '/') ? resolved : null
+}
 
 const SOURCE_EXTS = new Set(['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.py', '.go', '.rs', '.java'])
 const SKIP_DIRS = new Set(['node_modules', '.git', '__pycache__', '.venv', 'venv', 'dist', 'build', 'coverage'])
+const DOTENV_RE = /^\.env(?:\.|$)/
+// r23-fix: 安全扫描盲区——.env 无扩展名且以点开头被跳过，而恰恰是密钥最集中的文件
 
 const PATTERNS = [
   { id: 'eval', severity: 'high', category: 'code-injection', re: /\beval\s*\(/g, msg: 'eval() 允许任意代码执行，存在注入风险' },
@@ -27,8 +35,10 @@ const PATTERNS = [
 ]
 
 function scanOne(source, filePath, maxFindings) {
-  const s = String(source)
+  let s = String(source)
   const findings = []
+  const skipped = s.length > 1000000 ? `file too large (${s.length} bytes), truncated scan` : undefined
+  if (skipped) s = s.slice(0, 1000000)
   for (const p of PATTERNS) {
     p.re.lastIndex = 0
     let m
@@ -42,6 +52,14 @@ function scanOne(source, filePath, maxFindings) {
     }
     if (findings.length >= maxFindings) break
   }
+  // .env 专用：KEY=value 无引号格式，通用规则匹配不到
+  if (DOTENV_RE.test(basename(filePath || ''))) {
+    const envRe = /^[A-Za-z_][A-Za-z0-9_]*=(?:['"]?)([^'"\s]{8,})(?:['"]?)\s*$/gm
+    let m
+    while ((m = envRe.exec(s)) !== null) {
+      findings.push({ id: 'dotenv-secret', severity: 'high', category: 'secrets', message: '.env 中的密钥可能被提交进仓库，确认已在 .gitignore', line: s.slice(0, m.index).split('\n').length, match: m[0].slice(0, 40) })
+    }
+  }
   return {
     summary: {
       total: findings.length,
@@ -51,6 +69,7 @@ function scanOne(source, filePath, maxFindings) {
       score: Math.max(0, 100 - findings.filter(f => f.severity === 'high').length * 30
         - findings.filter(f => f.severity === 'medium').length * 10
         - findings.filter(f => f.severity === 'low').length * 3),
+      skipped,
     },
     findings,
     file_path: filePath,
@@ -64,11 +83,11 @@ function walkFiles(baseDir, dir, files, maxFiles) {
   try { entries = readdirSync(dir, { withFileTypes: true }) } catch { return }
   for (const entry of entries) {
     if (files.length >= maxFiles) break
-    if (entry.name.startsWith('.') || SKIP_DIRS.has(entry.name)) continue
+    if (entry.name.startsWith('.') && !DOTENV_RE.test(entry.name)) continue
     const fullPath = join(dir, entry.name)
     if (entry.isDirectory()) {
       walkFiles(baseDir, fullPath, files, maxFiles)
-    } else if (entry.isFile() && SOURCE_EXTS.has(extname(entry.name))) {
+    } else if (entry.isFile() && (SOURCE_EXTS.has(extname(entry.name)) || DOTENV_RE.test(entry.name))) {
       files.push(fullPath.startsWith(baseDir + '/') ? fullPath.slice(baseDir.length + 1) : fullPath)
     }
   }
@@ -79,11 +98,14 @@ export async function handle(args, context) {
   if (!workspaceDir) {
     return { error: 'missing_parameter', message: 'workspace_dir is required' }
   }
-  const maxFindings = Math.min(parseInt(args?.max_findings) || 50, 200)
+  const maxFindings = Math.min(Math.max(parseInt(args?.max_findings) || 50, 1), 200)
 
   // 目录扫描模式
   if (args?.scope) {
-    const scanDir = join(workspaceDir, args.scope)
+    const scanDir = guardPath(workspaceDir, args.scope)
+    if (!scanDir) {
+      return { error: 'path_escape', message: `Path escapes workspace_dir: ${args.scope}` }
+    }
     if (!existsSync(scanDir)) {
       return { error: 'dir_not_found', message: `Directory not found: ${args.scope}` }
     }
@@ -114,7 +136,10 @@ export async function handle(args, context) {
   let source = args?.source
   let file = args?.file
   if (source === undefined && file) {
-    const absPath = join(workspaceDir, file)
+    const absPath = guardPath(workspaceDir, file)
+    if (!absPath) {
+      return { error: 'path_escape', message: `Path escapes workspace_dir: ${file}` }
+    }
     if (!existsSync(absPath)) {
       return { error: 'file_not_found', message: `File not found: ${file}` }
     }

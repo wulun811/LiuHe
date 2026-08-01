@@ -1,6 +1,14 @@
 import { execFile } from 'node:child_process'
-import { existsSync } from 'node:fs'
-import { join, extname } from 'node:path'
+import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { join, extname, resolve } from 'node:path'
+import { tmpdir } from 'node:os'
+import { randomUUID } from 'node:crypto'
+
+function guardPath(root, userPath) {
+  const rootResolved = resolve(root)
+  const resolved = resolve(rootResolved, userPath)
+  return resolved === rootResolved || resolved.startsWith(rootResolved + '/') ? resolved : null
+}
 
 function runCmd(cmd, args, opts = {}) {
   return new Promise((resolve) => {
@@ -85,7 +93,8 @@ function analyzeError(output) {
   const stderr = output?.stderr || ''
   const stdout = output?.stdout || ''
   const exitCode = output?.exitCode ?? -1
-  const errorType = extractErrorType(stderr, stdout, exitCode)
+  // r23-fix: execFile 超时 kill 无 'TimeoutError' 字样 → 用 timeout 标志直接映射
+  const errorType = output?.timeout ? 'TimeoutError' : extractErrorType(stderr, stdout, exitCode)
   const traces = parseStackTraces(stderr + '\n' + stdout)
   const errorLines = stderr.split('\n').filter(l => l.trim()).slice(-20)
   const firstErrorLine = errorLines.find(l => /error|Error|FAIL|panic|Exception|Traceback/i.test(l)) || errorLines[0] || ''
@@ -108,23 +117,32 @@ export async function handle(args, context) {
 
   // script 模式：按扩展名选运行时 + 自动分析
   if (args?.script) {
-    const filePath = join(workspaceDir, args.script)
+    const filePath = guardPath(workspaceDir, args.script)
+    if (!filePath) {
+      return { error: 'path_escape', message: `Path escapes workspace_dir: ${args.script}` }
+    }
     if (!existsSync(filePath)) {
       return { error: 'file_not_found', message: `Script not found: ${args.script}` }
     }
     const ext = extname(args.script)
     let run
-    if (['.js', '.mjs', '.cjs'].includes(ext)) run = runCmd(process.execPath, [filePath], { timeout })
-    else if (ext === '.py') run = runCmd('python3', [filePath], { timeout })
-    else if (ext === '.go') run = runCmd('go', ['run', filePath], { timeout })
+    // r23-fix: 全部补 cwd=workspace_dir（原版只对 command/test 传了 cwd，脚本内相对路径读不到）
+    if (['.js', '.mjs', '.cjs'].includes(ext)) run = runCmd(process.execPath, [filePath], { cwd: workspaceDir, timeout })
+    else if (ext === '.py') run = runCmd('python3', [filePath], { cwd: workspaceDir, timeout })
+    else if (ext === '.go') run = runCmd('go', ['run', filePath], { cwd: workspaceDir, timeout })
     else if (ext === '.rs') {
-      const bin = join('/tmp', `debug_runner_${process.pid}`)
-      const compiled = await runCmd('rustc', ['--edition', '2021', '-o', bin, filePath], { timeout })
+      // r23-fix: 原固定 /tmp/debug_runner_${pid} 并发互相覆盖 → 唯一临时目录，运行后清理
+      const binDir = mkdtempSync(join(tmpdir(), 'dr-rust-'))
+      const bin = join(binDir, `run-${process.pid}-${randomUUID().slice(0, 8)}`)
+      const compiled = await runCmd('rustc', ['--edition', '2021', '-o', bin, filePath], { cwd: workspaceDir, timeout })
       if (compiled.exitCode !== 0) {
+        rmSync(binDir, { recursive: true, force: true })
         return { mode: 'script', script: args.script, ...compiled, ...analyzeError(compiled) }
       }
-      run = await runCmd(bin, [], { timeout })
-    } else if (ext === '.sh') run = runCmd('bash', [filePath], { timeout })
+      const execResult = await runCmd(bin, [], { cwd: workspaceDir, timeout })
+      rmSync(binDir, { recursive: true, force: true })
+      run = Promise.resolve(execResult)
+    } else if (ext === '.sh') run = runCmd('bash', [filePath], { cwd: workspaceDir, timeout })
     else {
       return { error: 'unsupported_extension', message: `Unsupported extension: ${ext} (support js/mjs/cjs/py/go/rs/sh)` }
     }
