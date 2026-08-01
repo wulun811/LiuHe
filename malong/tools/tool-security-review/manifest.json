@@ -7,7 +7,7 @@
     "properties": {
       "workspace_dir": {
         "type": "string",
-        "description": "REQUIRED: project root (abs). reindex first if new."
+        "description": "REQUIRED: absolute path of the project root to scan"
       },
       "file": {
         "type": "string",
@@ -19,7 +19,7 @@
       },
       "scope": {
         "type": "string",
-        "description": "Directory relative to workspace_dir to scan recursively (default: none, single file only)"
+        "description": "Directory relative to workspace_dir to scan recursively (default: none, single file only). scope wins over file/source if both passed"
       },
       "max_findings": {
         "type": "number",

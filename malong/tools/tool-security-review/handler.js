@@ -144,6 +144,8 @@ export async function handle(args, context) {
   // 单文件模式
   let source = args?.source
   let file = args?.file
+  // r23-fix4: source 优先时返回 file=undefined，避免 LLM 误以为扫描的是磁盘文件
+  let readFromFile = false
   if (source === undefined && file) {
     const absPath = guardPath(workspaceDir, file)
     if (!absPath) {
@@ -153,6 +155,7 @@ export async function handle(args, context) {
       return { error: 'file_not_found', message: `File not found: ${file}` }
     }
     source = readFileSync(absPath, 'utf-8')
+    readFromFile = true
   }
   if (source === undefined) {
     return { error: 'missing_parameter', message: 'Provide file (relative to workspace_dir), source, or scope' }
@@ -161,7 +164,8 @@ export async function handle(args, context) {
   const result = scanOne(source, file, maxFindings)
   return {
     mode: 'source',
-    file,
+    file: readFromFile ? file : undefined,
+    source_provided: !readFromFile,
     summary: result.summary,
     findings: result.findings,
     language: result.language,

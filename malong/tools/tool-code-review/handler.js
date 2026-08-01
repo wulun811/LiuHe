@@ -241,6 +241,8 @@ export async function handle(args, context) {
 
   let source = args?.source
   let file = args?.file
+  // r23-fix4: 区分「显式 source」与「从 file 读盘」——source 优先时返回 file=undefined，避免 LLM 误以为审查的是磁盘文件
+  let readFromFile = false
   if (source === undefined && file) {
     const absPath = guardPath(workspaceDir, file)
     if (!absPath) {
@@ -250,6 +252,7 @@ export async function handle(args, context) {
       return { error: 'file_not_found', message: `File not found: ${file}`, suggestion: 'Check the path is relative to workspace_dir and the file exists on disk' }
     }
     source = readFileSync(absPath, 'utf-8')
+    readFromFile = true
   }
   if (source === undefined) {
     return { error: 'missing_parameter', message: 'Provide file (relative to workspace_dir) or source' }
@@ -258,7 +261,8 @@ export async function handle(args, context) {
   const result = reviewOne(source, file)
   return {
     mode: 'source',
-    file,
+    file: readFromFile ? file : undefined,
+    source_provided: !readFromFile,
     summary: result.summary,
     issues: result.issues.slice(0, maxIssues),
     truncated: result.issues.length > maxIssues,

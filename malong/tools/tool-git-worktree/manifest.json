@@ -43,7 +43,7 @@
       },
       "timeout": {
         "type": "number",
-        "description": "Git command timeout in ms (default: 30000)"
+        "description": "Git command timeout in ms (default: 30000, min 1000)"
       }
     },
     "required": [

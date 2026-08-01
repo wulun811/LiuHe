@@ -7,7 +7,7 @@
     "properties": {
       "workspace_dir": {
         "type": "string",
-        "description": "REQUIRED: project root (abs). reindex first if new."
+        "description": "REQUIRED: absolute path of the project root to run in"
       },
       "command": {
         "type": "string",
@@ -15,7 +15,7 @@
       },
       "script": {
         "type": "string",
-        "description": "Script path relative to workspace_dir to run + auto-analyze (js/mjs/py/go/rs/sh by extension)"
+        "description": "Script path relative to workspace_dir to run + auto-analyze (js/mjs/py/go/rs/sh by extension). Pass exactly one of command/script/test; script wins over command"
       },
       "test": {
         "type": "string",

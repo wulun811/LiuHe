@@ -7,7 +7,7 @@
     "properties": {
       "workspace_dir": {
         "type": "string",
-        "description": "REQUIRED: project root (abs). reindex first if new."
+        "description": "REQUIRED: absolute path of the project root to sniff style in"
       },
       "scope": {
         "type": "string",

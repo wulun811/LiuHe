@@ -7,7 +7,7 @@
     "properties": {
       "workspace_dir": {
         "type": "string",
-        "description": "REQUIRED: project root (abs). reindex first if new."
+        "description": "REQUIRED: absolute path of the project root to review code in"
       },
       "file": {
         "type": "string",
@@ -15,11 +15,11 @@
       },
       "source": {
         "type": "string",
-        "description": "Source code text to review (mutually exclusive with file)"
+        "description": "Source code text to review (mutually exclusive with file; source wins if both passed)"
       },
       "diff": {
         "type": "string",
-        "description": "Patch to review block-by-block: SEARCH/REPLACE (<<<<<<< SEARCH ... ======= ... >>>>>>> REPLACE) or unified diff (--- a/x.js / +++ b/x.js / @@ hunks)"
+        "description": "Patch to review block-by-block: SEARCH/REPLACE (<<<<<<< SEARCH ... ======= ... >>>>>>> REPLACE) or unified diff (--- a/x.js / +++ b/x.js / @@ hunks). Pass one of file/source/diff; diff wins over source/file"
       },
       "max_issues": {
         "type": "number",

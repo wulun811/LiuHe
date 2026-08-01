@@ -355,6 +355,20 @@ const debugRunner = (await import(join(MALONG, 'tools/tool-debug-runner/handler.
   assert(JSON.stringify(det1.issues) === JSON.stringify(det2.issues), 'code_review: 确定性一致')
 }
 
+// ── 9. r23-fix4 四轮审查：manifest↔handler 契约 ──
+{
+  // source+file 同传：行为 source 优先，返回 file=undefined（避免 LLM 误以为审查的是磁盘文件）
+  writeFileSync(join(WS, 'ct.js'), 'const realFileContent = 1\n')
+  const ct1 = await codeReview({ workspace_dir: WS, source: 'const goodName = 1\n', file: 'ct.js' })
+  assert(ct1.file === undefined && ct1.source_provided === true, `code_review: source 优先返回一致（file=${ct1.file}, source_provided=${ct1.source_provided}）`)
+  const ct2 = await securityReview({ workspace_dir: WS, source: 'const goodName = 1\n', file: 'ct.js' })
+  assert(ct2.file === undefined && ct2.source_provided === true, `security_review: source 优先返回一致（file=${ct2.file}, source_provided=${ct2.source_provided}）`)
+  const ct3 = await codeReview({ workspace_dir: WS, file: 'ct.js' })
+  assert(ct3.file === 'ct.js' && ct3.source_provided === false, `code_review: file 模式标记（file=${ct3.file}, source_provided=${ct3.source_provided}）`)
+  const ct4 = await codeReview({ workspace_dir: WS, source: 'const snake_case_name = 1\n', file: 'ct.js' })
+  assert(ct4.issues.some(i => i.category === 'naming' && i.severity === 'warn'), 'code_review: 审查内容确实是 source 而非磁盘文件')
+}
+
 rmSync(WS, { recursive: true, force: true })
 console.log(`\n== test-dogfood-r23: ${passed} passed, ${failed} failed ==`)
 process.exit(failed ? 1 : 0)
