@@ -23,7 +23,7 @@
       },
       "timeout": {
         "type": "number",
-        "description": "Timeout in ms (default: 30000)"
+        "description": "Timeout in ms (default: 30000, min 1000)"
       }
     },
     "required": [

@@ -10,6 +10,8 @@ function guardPath(root, userPath) {
 const KEYWORDS = new Set(['let', 'const', 'var', 'function', 'return', 'if', 'for', 'while', 'switch', 'case', 'break', 'continue', 'new', 'typeof', 'instanceof', 'import', 'export', 'from', 'class', 'extends', 'async', 'await', 'this', 'throw', 'try', 'catch', 'finally', 'else', 'default', 'in', 'of', 'do', 'void', 'delete', 'yield'])
 const BUILTINS = new Set(['String', 'Number', 'Boolean', 'Object', 'Array', 'Function', 'Date', 'RegExp', 'Error', 'Promise', 'Map', 'Set', 'Symbol', 'BigInt', 'Math', 'JSON', 'Intl', 'NaN', 'Infinity', 'undefined', 'null', 'true', 'false'])
 const SEARCH_REPLACE_RE = /<<<<<<<\s*SEARCH\s*([\s\S]*?)=======\s*([\s\S]*?)>>>>>>>\s*REPLACE/g
+// r23-fix2: LLM 最常用的 patch 格式是 unified diff（--- a/ +++ b/ @@），必须支持
+const COMMON_MODULES = new Set(['process', 'require', 'console', 'module', 'exports', 'Buffer', 'globalThis', 'window', 'document', 'fetch', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'])
 
 function getNameConvention(fileName) {
   const base = basename(fileName, extname(fileName))
@@ -35,7 +37,7 @@ function checkNaming(source, fileName) {
   const camelRe = /\b([a-z][a-zA-Z0-9]*)\b/g
   while ((m = camelRe.exec(srcStr)) !== null) {
     const w = m[1]
-    if (w.length >= 3 && !KEYWORDS.has(w)) names.camel.add(w)
+    if (w.length >= 3 && !KEYWORDS.has(w) && !COMMON_MODULES.has(w)) names.camel.add(w)
   }
   const pascalRe = /\b([A-Z][a-zA-Z0-9]*)\b/g
   while ((m = pascalRe.exec(srcStr)) !== null) {
@@ -56,7 +58,15 @@ function checkNaming(source, fileName) {
       : dominant === names.snake.size ? 'snake_case' : 'UPPER_SNAKE_CASE'
     if (['.js', '.mjs', '.jsx'].includes(ext)) {
       if (dominantName === 'snake_case' && names.snake.size > names.camel.size * 1.5) {
-        issues.push({ severity: 'warn', category: 'naming', message: `JS 文件主要使用 snake_case (${names.snake.size} 处)，建议使用 camelCase`, line: 1 })
+        // r23-fix2: 给出具体违规行号，LLM 才能直接定位修复
+        const badLines = new Set()
+        let sm
+        snakeRe.lastIndex = 0
+        while ((sm = snakeRe.exec(srcStr)) !== null) {
+          if (!sm[1].startsWith('process.env')) badLines.add(srcStr.slice(0, sm.index).split('\n').length)
+        }
+        const first = [...badLines][0] || 1
+        issues.push({ severity: 'warn', category: 'naming', message: `JS 文件主要使用 snake_case (${names.snake.size} 处，如行 ${[...badLines].slice(0, 3).join(', ')}${badLines.size > 3 ? '…' : ''})，建议使用 camelCase`, line: first })
       }
     }
   }
@@ -82,9 +92,9 @@ function checkComments(source, fileName) {
   if (ratio < 0.03 && lines.length > 100) {
     issues.push({ severity: 'info', category: 'documentation', message: `注释比 ${(ratio * 100).toFixed(1)}%，建议增加注释（>100 行文件）`, line: 1 })
   }
-  const todoCount = (String(source).match(/\b(TODO|FIXME|HACK|XXX)\b/g) || []).length
-  if (todoCount > 0) {
-    issues.push({ severity: 'info', category: 'maintainability', message: `存在 ${todoCount} 处 TODO/FIXME/HACK 标记`, line: 1 })
+  const todoLines = lines.map((l, i) => /\b(TODO|FIXME|HACK|XXX)\b/.test(l) ? i + 1 : null).filter(Boolean)
+  if (todoLines.length > 0) {
+    issues.push({ severity: 'info', category: 'maintainability', message: `存在 ${todoLines.length} 处 TODO/FIXME/HACK 标记（行 ${todoLines.slice(0, 5).join(', ')}${todoLines.length > 5 ? '…' : ''}）`, line: todoLines[0] })
   }
   return issues
 }
@@ -171,6 +181,25 @@ function parseSearchReplaceBlocks(content) {
   return blocks
 }
 
+// r23-fix2: unified diff 解析——按 --- / +++ 文件头分组，只收集 '+' 新增行作为审查对象
+function parseUnifiedBlocks(content) {
+  const blocks = []
+  const segments = String(content).split(/\n(?=---\s(?:a\/|\/))/)
+  for (const seg of segments) {
+    const to = seg.match(/^\+\+\+\s+(?:b\/)?(.+)$/m)
+    if (!to) continue
+    const file = to[1].trim()
+    if (file === '/dev/null') continue
+    const lines = []
+    for (const line of seg.split('\n')) {
+      if (line.startsWith('@@') || line.startsWith('---') || line.startsWith('+++')) continue
+      if (line.startsWith('+')) lines.push(line.slice(1))
+    }
+    if (lines.length > 0) blocks.push({ search: '', replace: lines.join('\n'), file })
+  }
+  return blocks
+}
+
 export async function handle(args, context) {
   const workspaceDir = args?.workspace_dir
   if (!workspaceDir) {
@@ -179,7 +208,17 @@ export async function handle(args, context) {
   const maxIssues = Math.min(Math.max(parseInt(args?.max_issues) || 50, 1), 200)
 
   if (args?.diff) {
-    const blocks = parseSearchReplaceBlocks(args.diff)
+    const srBlocks = parseSearchReplaceBlocks(args.diff)
+    const uniBlocks = parseUnifiedBlocks(args.diff)
+    const blocks = srBlocks.length > 0 ? srBlocks : uniBlocks
+    if (blocks.length === 0) {
+      // r23-fix2: 空块静默返回 blocks=0 会让 LLM 误以为审查通过
+      return {
+        error: 'invalid_diff_format',
+        message: 'No SEARCH/REPLACE or unified diff blocks found in diff',
+        suggestion: 'SEARCH/REPLACE: <<<<<<< SEARCH ... ======= ... >>>>>>> REPLACE; unified: --- a/x.js / +++ b/x.js / @@ -1,3 +1,4 @@ 带 + 行',
+      }
+    }
     const allIssues = []
     for (const block of blocks) {
       const result = reviewOne(block.replace, block.file)
@@ -189,7 +228,9 @@ export async function handle(args, context) {
     const info = allIssues.filter(i => i.severity === 'info').length
     return {
       mode: 'diff',
+      format: srBlocks.length > 0 ? 'search_replace' : 'unified',
       blocks_reviewed: blocks.length,
+      files: [...new Set(blocks.map(b => b.file))],
       summary: { total_issues: allIssues.length, warnings: w, infos: info, score: Math.max(0, 100 - w * 15 - info * 3) },
       issues: allIssues.slice(0, maxIssues),
       truncated: allIssues.length > maxIssues,

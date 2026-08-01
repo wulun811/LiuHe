@@ -42,7 +42,7 @@ export async function handle(args, context) {
       return { error: 'invalid_parameter', message: `Each change needs a path inside workspace_dir (no '..'): ${JSON.stringify(c)}` }
     }
   }
-  const timeout = Math.min(parseInt(args?.timeout) || 30000, 120000)
+  const timeout = Math.min(Math.max(parseInt(args?.timeout) || 30000, 1000), 120000)
 
   if (!existsSync(join(repoDir, '.git'))) {
     return { error: 'not_a_git_repo', message: 'workspace_dir is not a git repository', path: repoDir }
@@ -59,7 +59,8 @@ export async function handle(args, context) {
     }
   }
 
-  const branchName = `tongtian-multi-${Date.now()}-${randomUUID().slice(0, 8)}`
+  // r23-fix2: 去掉 Date.now()（见性成佛铁律：系统时间算非确定性外部调用）——uuid v4 本身含时间+随机，12 hex 足够唯一
+  const branchName = `tongtian-multi-${randomUUID().replace(/-/g, '').slice(0, 12)}`
   const worktreePath = mkdtempSync(join(tmpdir(), 'tongtian-wt-'))
 
   let originalBranch
@@ -112,7 +113,8 @@ export async function handle(args, context) {
       branch: branchName,
       files: changes.length,
       commit,
-      next_step: 'Changes committed on the base branch. Review the commit before pushing.',
+      // r23-fix2: LLM 误提交后需要明确撤销路径
+      next_step: `Committed on the base branch. Undo with: git revert ${commit.slice(0, 12)} (keeps history) or git reset --hard HEAD~1 (removes commit). Review before pushing.`,
     }
   } catch (e) {
     try { await git(['worktree', 'remove', '--force', worktreePath], repoDir, timeout) } catch {}

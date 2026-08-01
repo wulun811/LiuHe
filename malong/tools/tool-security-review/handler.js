@@ -113,12 +113,18 @@ export async function handle(args, context) {
     walkFiles(workspaceDir, scanDir, files, 300)
     const results = []
     let totalFindings = 0
+    // r23-fix2: findings 总量上限——40 文件×50 条会爆 LLM 上下文
+    const FINDINGS_LIMIT = 200
+    let findingsLimited = false
     for (const rel of files) {
       let content
       try { content = readFileSync(join(workspaceDir, rel), 'utf-8') } catch { continue }
       const r = scanOne(content, rel, maxFindings)
-      if (r.summary.total > 0) results.push(r)
-      totalFindings += r.summary.total
+      if (r.summary.total > 0) {
+        results.push(r)
+        totalFindings += r.summary.total
+        if (totalFindings >= FINDINGS_LIMIT) { findingsLimited = true; break }
+      }
     }
     return {
       mode: 'directory',
@@ -126,6 +132,7 @@ export async function handle(args, context) {
       files_scanned: files.length,
       files_with_issues: results.length,
       total_findings: totalFindings,
+      findings_truncated: findingsLimited,
       results: results.slice(0, 30),
       truncated: results.length > 30,
       next_step: totalFindings > 0 ? 'Fix high-severity findings first (injection/secrets).' : 'No security findings. Clean.',

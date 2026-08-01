@@ -15,7 +15,11 @@
       },
       "output": {
         "type": "string",
-        "description": "Directory to write PROJECT_RULES.md into (default: none, returns content only)"
+        "description": "Directory to write PROJECT_RULES.md into (default: none, returns content only). Will NOT overwrite an existing file unless force=true"
+      },
+      "force": {
+        "type": "boolean",
+        "description": "Overwrite existing PROJECT_RULES.md when output is set (default: false)"
       }
     },
     "required": [

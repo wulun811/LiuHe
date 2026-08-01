@@ -142,9 +142,9 @@ function buildProjectRules(styles) {
     }
   }
 
-  rules.push('', '## Project Structure', '', '_(auto-detected by style-sniffer)_', '')
+  rules.push('', '## Project Structure', '', '_(scope to project layout; not auto-detected)_', '')
   rules.push('## Architecture Rules', '', '_(to be completed based on project)_', '')
-  rules.push('## Dependencies', '', '_(auto-detected from package.json)_', '')
+  rules.push('## Dependencies', '', '_(not auto-detected: derive from package.json/requirements.txt manually)_', '')
 
   return rules.join('\n')
 }
@@ -198,8 +198,19 @@ export async function handle(args, context) {
     if (!outDir) {
       return { error: 'path_escape', message: `Output path escapes workspace_dir: ${args.output}` }
     }
+    const target = join(outDir, 'PROJECT_RULES.md')
+    // r23-fix2: 静默覆盖会毁掉人工维护的 rules——默认不覆盖，force=true 才写
+    if (existsSync(target) && !args?.force) {
+      return {
+        status: 'exists',
+        rules_path: target,
+        warning: 'PROJECT_RULES.md already exists, not overwritten',
+        project_rules: projectRules,
+        next_step: 'Review the generated content above; pass force=true to overwrite, or merge manually.',
+      }
+    }
     if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true })
-    rulesPath = join(outDir, 'PROJECT_RULES.md')
+    rulesPath = target
     writeFileSync(rulesPath, projectRules, 'utf-8')
   }
 

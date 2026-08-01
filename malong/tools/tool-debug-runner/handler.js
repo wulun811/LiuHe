@@ -108,12 +108,30 @@ function analyzeError(output) {
   }
 }
 
+// r23-fix2: 统一响应——截断标记 + cwd + 原始长度（LLM 需要知道输出是否被截断）
+const OUT_LIMIT = 6000
+function buildResponse(result, extra) {
+  return {
+    ...extra,
+    exit_code: result.exitCode,
+    timeout: result.timeout,
+    cwd: extra.cwd,
+    stdout: result.stdout.slice(0, OUT_LIMIT),
+    stderr: result.stderr.slice(0, OUT_LIMIT),
+    truncated: { stdout: result.stdout.length > OUT_LIMIT, stderr: result.stderr.length > OUT_LIMIT },
+    stdout_full_length: result.stdout.length,
+    stderr_full_length: result.stderr.length,
+    ...analyzeError(result),
+  }
+}
+
 export async function handle(args, context) {
   const workspaceDir = args?.workspace_dir
   if (!workspaceDir) {
     return { error: 'missing_parameter', message: 'workspace_dir is required' }
   }
-  const timeout = Math.min(parseInt(args?.timeout) || 30000, 120000)
+  // r23-fix2: 下限 1000ms——LLM 常把秒当参数传，timeout=1 会 1ms 秒超时
+  const timeout = Math.min(Math.max(parseInt(args?.timeout) || 30000, 1000), 120000)
 
   // script 模式：按扩展名选运行时 + 自动分析
   if (args?.script) {
@@ -147,49 +165,19 @@ export async function handle(args, context) {
       return { error: 'unsupported_extension', message: `Unsupported extension: ${ext} (support js/mjs/cjs/py/go/rs/sh)` }
     }
     const result = await run
-    const analysis = analyzeError(result)
-    return {
-      mode: 'script',
-      script: args.script,
-      exit_code: result.exitCode,
-      timeout: result.timeout,
-      stdout: result.stdout.slice(0, 6000),
-      stderr: result.stderr.slice(0, 6000),
-      ...analysis,
-      next_step: analysis.error_type ? analysis.suggested_action : 'Script ran successfully.',
-    }
+    return buildResponse(result, { mode: 'script', script: args.script, cwd: workspaceDir, next_step: analyzeError(result).error_type ? analyzeError(result).suggested_action : 'Script ran successfully.' })
   }
 
   // command 模式：bash -c 执行，保留引号语义（split 会拆碎引号导致 SyntaxError）
   if (args?.command) {
     const result = await runCmd('bash', ['-c', args.command], { cwd: workspaceDir, timeout })
-    const analysis = analyzeError(result)
-    return {
-      mode: 'command',
-      command: args.command,
-      exit_code: result.exitCode,
-      timeout: result.timeout,
-      stdout: result.stdout.slice(0, 6000),
-      stderr: result.stderr.slice(0, 6000),
-      ...analysis,
-      next_step: analysis.error_type ? analysis.suggested_action : 'Command ran successfully.',
-    }
+    return buildResponse(result, { mode: 'command', command: args.command, cwd: workspaceDir, next_step: analyzeError(result).error_type ? analyzeError(result).suggested_action : 'Command ran successfully.' })
   }
 
   // test 模式
   if (args?.test) {
     const result = await runCmd('bash', ['-c', args.test], { cwd: workspaceDir, timeout })
-    const analysis = analyzeError(result)
-    return {
-      mode: 'test',
-      command: args.test,
-      exit_code: result.exitCode,
-      timeout: result.timeout,
-      stdout: result.stdout.slice(0, 6000),
-      stderr: result.stderr.slice(0, 6000),
-      ...analysis,
-      next_step: analysis.error_type ? analysis.suggested_action : 'Tests passed.',
-    }
+    return buildResponse(result, { mode: 'test', command: args.test, cwd: workspaceDir, next_step: analyzeError(result).error_type ? analyzeError(result).suggested_action : 'Tests passed.' })
   }
 
   return { error: 'missing_parameter', message: 'Provide command, script, or test to run' }

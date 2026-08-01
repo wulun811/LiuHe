@@ -245,6 +245,72 @@ const debugRunner = (await import(join(MALONG, 'tools/tool-debug-runner/handler.
   assert(!rc.truncated, 'code_review: 负数 max_issues clamp 不尾截')
 }
 
+// ── 7. r23-fix2 LLM 使用者视角（patch 格式 / 截断标记 / 覆盖保护 / 见性成佛） ──
+{
+  // unified diff 解析
+  const unified = `--- a/src/foo.js
++++ b/src/foo.js
+@@ -1,3 +1,4 @@
+-const badName = 1
++const goodName = 1
++// comment line
++const another_one = 2
+`
+  const ru = await codeReview({ workspace_dir: WS, diff: unified })
+  assert(ru.mode === 'diff' && ru.format === 'unified' && ru.blocks_reviewed === 1 && ru.files[0] === 'src/foo.js', `code_review: unified diff 解析（format=${ru.format}, blocks=${ru.blocks_reviewed}, files=${JSON.stringify(ru.files)}）`)
+
+  // 垃圾 diff 明确报错（不再静默 blocks=0）
+  const rg = await codeReview({ workspace_dir: WS, diff: 'not a real diff' })
+  assert(rg.error === 'invalid_diff_format', `code_review: 垃圾 diff 报错（${rg.error}）`)
+
+  // 截断标记 + cwd 返回
+  writeFileSync(join(WS, 'big.js'), `for (let i = 0; i < 3000; i++) console.log('line ' + i)\n`)
+  const db = await debugRunner({ workspace_dir: WS, script: 'big.js' })
+  assert(db.truncated?.stdout === true && db.stdout_full_length > 6000, `debug_runner: 截断标记（${JSON.stringify(db.truncated)}, full=${db.stdout_full_length}）`)
+  const dc = await debugRunner({ workspace_dir: WS, command: 'echo hi' })
+  assert(dc.cwd === WS, `debug_runner: command 返回 cwd（${dc.cwd}）`)
+
+  // timeout 下限（LLM 传秒单位不秒超时）
+  writeFileSync(join(WS, 'quick.js'), 'console.log("fast")\n')
+  const dq = await debugRunner({ workspace_dir: WS, script: 'quick.js', timeout: 1 })
+  assert(dq.exit_code === 0, `debug_runner: timeout=1 clamp 1000ms（exit=${dq.exit_code}）`)
+
+  // style_sniffer 覆盖保护 + force
+  writeFileSync(join(WS, 'PROJECT_RULES.md'), '# PROJECT_RULES\n## 人工维护\n')
+  const se = await styleSniffer({ workspace_dir: WS, output: '.' })
+  assert(se.status === 'exists', `style_sniffer: 已存在不覆盖（status=${se.status}）`)
+  const sf = await styleSniffer({ workspace_dir: WS, output: '.', force: true })
+  assert(sf.status === 'done', 'style_sniffer: force=true 覆盖')
+
+  // 无虚假占位
+  const sp = await styleSniffer({ workspace_dir: WS })
+  assert(!sp.project_rules.includes('auto-detected from package.json'), 'style_sniffer: 无虚假占位')
+
+  // git_worktree 分支名无时间戳 + 回滚指引
+  const { execSync } = await import('node:child_process')
+  const fix2Repo = join(WS, 'fix2repo')
+  mkdirSync(fix2Repo)
+  execSync('git init -q -b main .', { cwd: fix2Repo })
+  execSync('git config user.email t@t && git config user.name t', { cwd: fix2Repo })
+  writeFileSync(join(fix2Repo, 'a.txt'), 'x\n')
+  execSync('git add -A && git commit -qm init', { cwd: fix2Repo })
+  const g2 = await gitWorktree({ workspace_dir: fix2Repo, changes: [{ path: 'b.txt', new_content: 'y\n' }] })
+  assert(/^tongtian-multi-[0-9a-f]{12}$/.test(g2.branch), `git_worktree: 分支名无 Date.now（${g2.branch}）`)
+  assert(g2.next_step.includes('git revert'), 'git_worktree: 回滚指引')
+
+  // findings 总量上限
+  const many = join(WS, 'many2')
+  mkdirSync(many)
+  for (let i = 0; i < 40; i++) writeFileSync(join(many, `f${i}.js`), `const x${i} = ${i}\neval(userInput${i})\n`)
+  const sf2 = await securityReview({ workspace_dir: WS, scope: 'many2' })
+  assert(sf2.total_findings <= 200, `security_review: findings 上限（total=${sf2.total_findings}）`)
+
+  // TODO 行号
+  const rt = await codeReview({ workspace_dir: WS, source: '// TODO: fix\nconst a = 1\n', file: 't.js' })
+  const todoIssue = rt.issues.find(i => i.category === 'maintainability')
+  assert(todoIssue && todoIssue.line === 1, `code_review: TODO 行号（line=${todoIssue?.line}）`)
+}
+
 rmSync(WS, { recursive: true, force: true })
 console.log(`\n== test-dogfood-r23: ${passed} passed, ${failed} failed ==`)
 process.exit(failed ? 1 : 0)

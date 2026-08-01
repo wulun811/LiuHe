@@ -19,7 +19,7 @@
       },
       "diff": {
         "type": "string",
-        "description": "SEARCH/REPLACE diff text to review block-by-block (<<<<<<< SEARCH ... ======= ... >>>>>>> REPLACE)"
+        "description": "Patch to review block-by-block: SEARCH/REPLACE (<<<<<<< SEARCH ... ======= ... >>>>>>> REPLACE) or unified diff (--- a/x.js / +++ b/x.js / @@ hunks)"
       },
       "max_issues": {
         "type": "number",
