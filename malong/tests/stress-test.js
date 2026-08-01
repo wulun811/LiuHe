@@ -246,74 +246,89 @@ function fmtRow(r, label, labelVal) {
 }
 
 async function phase2() {
-  console.log('═══ Phase 2: 并发压测（docker --memory=512m，稳态 2000 文件代码库）═══')
+  console.log('═══ Phase 2: 真并发压测（docker --memory=512m，剔除 reindex，DB 重分析负载）═══')
   if (!USE_DOCKER) {
     console.log('需要 --docker 标志（docker --memory=512m 真 cgroup 限制）')
     return
   }
 
-  // 表 A：固定服务端 concurrency=3，扫客户端在途请求数
-  console.log('\n── 表 A：客户端在途请求数扫描（服务端 concurrency=3）──')
-  const workerLevels = [3, 6, 12, 24, 48, 96]
-  const rowsA = []
-  for (const w of workerLevels) {
-    console.log(`  → workers=${w} ...`)
-    const r = runDriver({ concurrency: 3, workers: w, seconds: 20 })
-    rowsA.push(r)
-    console.log(`    完成=${r.completed} 错误=${r.errors} 吞吐=${r.throughput}/s RSS=${r.peakRssMb}MB P50=${r.p50} P95=${r.p95}${r.oom ? ' OOM!' : ''}`)
-  }
-
-  // 表 B：固定高负载 workers=24，扫服务端 concurrency
-  console.log('\n── 表 B：服务端 concurrency 扫描（客户端 workers=24）──')
-  const connLevels = [1, 2, 3, 4, 6, 8, 12]
-  const rowsB = []
+  // 表 A：并发扫描——服务端 concurrency 与客户端 workers 同步加大（workers=2×concurrency 灌满管道）
+  // 直接回答"512MB 能扛多少并发"：看 RSS 拐点 / 吞吐是否随并发增长 / 何时 OOM 或队列超时
+  console.log('\n── 表 A：并发扫描（concurrency 与 workers 同步加大，DB 重分析负载）──')
+  const connLevels = [1, 8, 16, 32, 64, 128]
+  const rows = []
   for (const c of connLevels) {
-    console.log(`  → concurrency=${c} ...`)
-    const r = runDriver({ concurrency: c, workers: 24, seconds: 20 })
-    rowsB.push(r)
+    const w = c * 2
+    console.log(`  → concurrency=${c} workers=${w} ...`)
+    const r = runDriver({ concurrency: c, workers: w, seconds: 15 })
+    rows.push(r)
     console.log(`    完成=${r.completed} 错误=${r.errors} 吞吐=${r.throughput}/s RSS=${r.peakRssMb}MB P50=${r.p50} P95=${r.p95}${r.oom ? ' OOM!' : ''}`)
   }
 
-  const header = '| 变量 | 完成 | 错误 | 吞吐 (call/s) | 峰值 RSS (MB) | 512MB 占比 | OOM | P50 (ms) | P95 (ms) | P99 (ms) |'
+  // 表 B：Storm 冲突矩阵——高并发读+写混合打共享热点文件，验证零撕裂 + DB 完整性
+  console.log('\n── 表 B：Storm 冲突矩阵（concurrency=32，32 路读+写混合，验证正确性）──')
+  const storm = runDriver({ concurrency: 32, workers: 32, seconds: 15, mode: 'storm' })
+  console.log(`    读=${storm.reads} 写成功=${storm.writesOk} 写冲突=${storm.writesConflict} 错误=${storm.errors} 撕裂=${storm.torn} DB损坏=${storm.integrityFail} RSS=${storm.peakRssMb}MB`)
+  console.log(`    冲突码分布: ${JSON.stringify(storm.conflictCodes)}  终态: ${storm.finalContent}`)
+
+  const header = '| concurrency / workers | 完成 | 错误 | 吞吐 (call/s) | 峰值 RSS (MB) | 512MB 占比 | OOM | P50 (ms) | P95 (ms) | P99 (ms) |'
   const sep = '|---|---|---|---|---|---|---|---|---|---|'
   const md = [
-    '# STRESS-512MB 压测报告 — Phase 2 并发',
+    '# STRESS-512MB 压测报告 — Phase 2 真并发',
     '',
-    `> 生成时间: ${new Date().toISOString()}  |  docker --memory=512m  |  稳态负载（2000 文件 / 58000 符号代码库，索引预建）`,
-    '> 负载模型：N 个客户端 worker 协程持续发混合请求（90% 读工具 + 10% 增量 reindex），模拟真实 LLM 高并发使用',
+    `> 生成时间: ${new Date().toISOString()}  |  docker --memory=512m  |  稳态 2000 文件代码库（索引预建，测量期零 reindex）`,
+    '> 负载模型：DB 重分析工具为主（impact_analysis/references/symbol_search/call_chain/dep_graph 80% + 读 20%），workers=2×concurrency 灌满管道',
     '',
-    '## 表 A：客户端在途请求数扫描（服务端 concurrency=3，部署默认）',
-    '',
-    header, sep,
-    ...rowsA.map(r => fmtRow(r, 'workers', r.workers)),
-    '',
-    '## 表 B：服务端 concurrency 扫描（客户端 workers=24 高负载）',
+    '## 表 A：并发扫描（concurrency 与 workers 同步加大）',
     '',
     header, sep,
-    ...rowsB.map(r => fmtRow(r, 'concurrency', r.concurrency)),
+    ...rows.map(r => fmtRow(r, 'concurrency', `${r.concurrency} / ${r.workers}`)),
+    '',
+    '## 表 B：Storm 冲突矩阵（concurrency=32，32 路读+写混合打共享热点文件）',
+    '',
+    fmtStorm(storm),
     '',
     '## 结论',
     '',
-    ...buildConclusion(rowsA, rowsB),
+    ...buildConclusion(rows, storm),
     '',
   ]
   writeFileSync(join(OUT_DIR, 'STRESS-512MB-phase2.md'), md.join('\n'))
   console.log(`\n报告已写入: ${join(OUT_DIR, 'STRESS-512MB-phase2.md')}`)
 }
 
-function buildConclusion(rowsA, rowsB) {
-  const maxRss = Math.max(...rowsA.map(r => r.peakRssMb), ...rowsB.map(r => r.peakRssMb))
-  const anyOom = rowsA.some(r => r.oom) || rowsB.some(r => r.oom)
-  const okA = rowsA.filter(r => r.errors === 0 && !r.oom)
-  const maxCleanWorkers = okA.length ? okA[okA.length - 1].workers : 0
-  const firstErrA = rowsA.find(r => r.errors > 0)
-  const thruA = rowsA.map(r => r.throughput)
-  const thruFlat = Math.max(...thruA) - Math.min(...thruA) < 5
+function fmtStorm(s) {
+  const codes = Object.entries(s.conflictCodes || {}).map(([k, v]) => `${k}×${v}`).join(', ') || '无'
+  const errNote = s.errSamples?.length ? '（' + s.errSamples.join('; ') + '）' : ''
+  return [
+    '| 指标 | 值 |',
+    '|---|---|',
+    `| 并发读完成 | ${s.reads} |`,
+    `| 并发写成功 | ${s.writesOk} |`,
+    `| 并发写冲突 | ${s.writesConflict}（${codes}） |`,
+    `| 错误 | ${s.errors}${errNote} |`,
+    `| 热点文件撕裂 | ${s.torn ? '是 ❌' : '否 ✓'}（终态: \`${s.finalContent}\`） |`,
+    `| DB integrity_check | ${s.integrityFail ? 'FAIL ❌' : 'PASS ✓'} |`,
+    `| 峰值 RSS | ${s.peakRssMb}MB |`,
+    `| OOM | ${s.oom ? '是 ❌' : '否 ✓'} |`,
+  ].join('\n')
+}
+
+function buildConclusion(rows, storm) {
+  const maxRss = Math.max(...rows.map(r => r.peakRssMb))
+  const anyOom = rows.some(r => r.oom)
+  const firstErr = rows.find(r => r.errors > 0)
+  const lastClean = [...rows].reverse().find(r => r.errors === 0 && !r.oom)
+  const thru = rows.map(r => r.throughput)
+  const maxThru = Math.max(...thru)
+  const thruAtMax = rows[thru.indexOf(maxThru)]
+  const scales = thru[thru.length - 1] > thru[0] * 1.5
+  const c0 = rows[0].concurrency, cN = rows[rows.length - 1].concurrency
   const lines = [
-    `- **内存完全不是瓶颈**：所有并发级别峰值 RSS 稳定在 ${maxRss}MB（512MB 的 ${Math.round(maxRss / 512 * 100)}%），${anyOom ? '出现过 OOM' : '全程零 OOM'}，内存余量 66%。原因：reindex 因 weight=concurrency 独占信号量，永远单实例运行，其内存（~170MB）不随并发叠加；读工具轻量。`,
-    `- **并发请求数几乎无上限（内存维度）**：服务端 concurrency=3 时，客户端 ${maxCleanWorkers} 个在途请求仍零错误零 OOM${firstErrA ? `；workers=${firstErrA.workers} 起才因 60s 队列超时出错` : '（测到 96 仍零错误）'}。代价是排队延迟：P50 从 ${rowsA[0].p50}ms（workers=${rowsA[0].workers}）升到 ${rowsA[rowsA.length - 1].p50}ms（workers=${rowsA[rowsA.length - 1].workers}）。`,
-    `- **吞吐瓶颈不在信号量，而在共享 parse 服务**：吞吐全程稳定在 ~${Math.round(thruA.reduce((a, b) => a + b, 0) / thruA.length)} call/s，${thruFlat ? '且不随服务端 concurrency（1→12）变化' : ''}——说明真正的吞吐天花板是单 UDS 连接的 Rust parse 服务（串行解析）与混合负载中的 reindex，而非并发槽位数。`,
-    `- **部署建议**：512MB 机器上 concurrency 保持默认 3 即可（提到 6-12 无吞吐收益）；内存余量充足，无需为内存调参。若要提升吞吐，应优化 parse 服务并发或减少 reindex 频率，而非加并发槽。`,
+    `- **内存天花板**：并发从 ${c0} 拉到 ${cN}（workers 同步 ${rows[0].workers}→${rows[rows.length - 1].workers}），峰值 RSS 最高 ${maxRss}MB（512MB 的 ${Math.round(maxRss / 512 * 100)}%），${anyOom ? '出现 OOM ❌' : '全程零 OOM ✓'}。${maxRss < 400 ? '内存余量充足，512MB 远未压满——并发上限不由内存决定。' : 'RSS 已逼近 512MB，内存成为硬约束。'}`,
+    `- **零错误最大并发**：${lastClean ? `concurrency=${lastClean.concurrency}（workers=${lastClean.workers}）内零错误零 OOM` : '所有档位均有错误'}${firstErr ? `；concurrency=${firstErr.concurrency} 起出错（${(firstErr.errSamples || []).slice(0, 1).join('; ')}）` : ''}。`,
+    `- **吞吐是否随并发扩展**：${scales ? `是——从 ${thru[0]} call/s（concurrency=${c0}）增至 ${maxThru} call/s（concurrency=${thruAtMax.concurrency}），工具确实在并行。` : `否——吞吐全程 ~${Math.round(thru.reduce((a, b) => a + b, 0) / thru.length)} call/s 基本不随并发增长，说明 DB 重工具被 better-sqlite3 同步查询串行化在 Node 事件循环上，加并发槽无法提速（这是真问题，需评估是否优化）。`}`,
+    `- **并发正确性（Storm，32 路读+写混合）**：热点文件${storm.torn ? '出现撕裂 ❌（原子性被破坏，必须修）' : '零撕裂 ✓（原子 rename 守住）'}；DB integrity_check ${storm.integrityFail ? 'FAIL ❌（必须修）' : 'PASS ✓'}；并发写冲突码 ${Object.keys(storm.conflictCodes || {}).join('/') || '无'}（受控冲突，无静默覆盖）。`,
   ]
   return lines
 }

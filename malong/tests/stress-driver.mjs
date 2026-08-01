@@ -7,7 +7,7 @@
 // 输出: 最后一行 JSON: {"concurrency":..,"workers":..,"completed":..,"errors":..,"peakRssMb":..,"p50":..,"p95":..,"oom":..,"errSamples":[..]}
 
 import { spawn } from 'node:child_process'
-import { readFileSync, readdirSync, existsSync } from 'node:fs'
+import { readFileSync, readdirSync, existsSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 // ── 参数解析 ──
@@ -125,21 +125,111 @@ async function waitReady(timeoutMs = 60000) {
   }
 }
 
-// ── 工具请求构造（稳态：以读为主 + 少量增量 reindex）──
+// ── 工具请求构造（真并发：剔除 reindex，以 DB 重分析工具为主）──
+// reindex 是 weight=concurrency 独占信号量，混入测量负载会把并行度反复折叠成串行 → 彻底剔除。
+// 权重偏向 DB 重工具（impact_analysis/references/symbol_search/call_chain/dep_graph）：
+// 它们走 better-sqlite3 同步查询，是"加并发是否真并行 / 是否阻塞事件循环"的关键探针。
 let pick = 0
-function nextReadReq() {
+function nextReq() {
   const t = targets[pick++ % targets.length]
   const kind = pick % 10
-  if (kind === 0) return { name: 'reindex', arguments: { workspace_dir: FIXTURE, blocking: true, threshold: 5000 } }
-  if (kind === 1) return { name: 'repo_map', arguments: { workspace_dir: FIXTURE, focused: true } }
-  if (kind === 2) return { name: 'read_symbol', arguments: { workspace_dir: FIXTURE, locator: { file_path: t.file, name: t.symbol } } }
-  if (kind === 3) return { name: 'call_chain', arguments: { workspace_dir: FIXTURE, file: t.file, line: 5 } }
-  if (kind === 4) return { name: 'references', arguments: { workspace_dir: FIXTURE, symbol: t.symbol, file: t.file } }
-  if (kind === 5) return { name: 'dep_graph', arguments: { workspace_dir: FIXTURE, file: t.file } }
-  if (kind === 6) return { name: 'impact_analysis', arguments: { workspace_dir: FIXTURE, file: t.file, symbol: t.symbol } }
-  if (kind === 7) return { name: 'read_outline', arguments: { workspace_dir: FIXTURE, file: t.file } }
-  if (kind === 8) return { name: 'symbol_search', arguments: { workspace_dir: FIXTURE, query: t.symbol } }
-  return { name: 'read_symbol', arguments: { workspace_dir: FIXTURE, locator: { file_path: t.file, name: t.klass } } }
+  if (kind <= 2) return { name: 'impact_analysis', arguments: { workspace_dir: FIXTURE, file: t.file, symbol: t.symbol } }
+  if (kind <= 4) return { name: 'references', arguments: { workspace_dir: FIXTURE, symbol: t.symbol, file: t.file } }
+  if (kind === 5) return { name: 'symbol_search', arguments: { workspace_dir: FIXTURE, query: t.symbol } }
+  if (kind === 6) return { name: 'call_chain', arguments: { workspace_dir: FIXTURE, file: t.file, line: 5 } }
+  if (kind === 7) return { name: 'dep_graph', arguments: { workspace_dir: FIXTURE, file: t.file } }
+  if (kind === 8) return { name: 'read_symbol', arguments: { workspace_dir: FIXTURE, locator: { file_path: t.file, name: t.symbol } } }
+  return { name: 'read_outline', arguments: { workspace_dir: FIXTURE, file: t.file } }
+}
+
+// ── Storm 模式：N 路读+写混合打共享热点文件，验证零撕裂 + DB 完整性 ──
+// 目的：高并发下哪些工具不能共存？读+写同文件是否撕裂？并发写是否静默覆盖？DB 是否损坏？
+// 写用 allow_unsafe_no_base 绕过版本守卫 → 逼出文件锁 + 原子 rename 路径的真实并发行为。
+const STORM_FILE = 'src/pkg0/storm.py'
+
+async function runStorm() {
+  writeFileSync(join(FIXTURE, STORM_FILE), 'def hot():\n    return 0\n')
+  await call('tools/call', { name: 'reindex', arguments: { workspace_dir: FIXTURE, blocking: true, threshold: 5000 } }, 180000)
+
+  const latencies = []
+  const errSamples = new Set()
+  const conflictCodes = {}
+  let reads = 0, writesOk = 0, writesConflict = 0, errors = 0
+  const deadline = Date.now() + SECONDS * 1000
+  let n = 0
+
+  async function workerLoop() {
+    while (Date.now() < deadline && !oom) {
+      const t = targets[(n++) % targets.length]
+      const doWrite = (n % 5) < 2 // 40% 写热点文件，60% 读全库
+      const t0 = Date.now()
+      try {
+        let j
+        if (doWrite) {
+          j = await call('tools/call', { name: 'write_symbol', arguments: {
+            workspace_dir: FIXTURE,
+            locator: { file_path: STORM_FILE, name: 'hot' },
+            content: `def hot():\n    return ${n}\n`,
+            allow_unsafe_no_base: true,
+          } }, 90000)
+        } else {
+          const kind = n % 3
+          const req = kind === 0
+            ? { name: 'read_symbol', arguments: { workspace_dir: FIXTURE, locator: { file_path: t.file, name: t.symbol } } }
+            : kind === 1
+            ? { name: 'references', arguments: { workspace_dir: FIXTURE, symbol: t.symbol, file: t.file } }
+            : { name: 'impact_analysis', arguments: { workspace_dir: FIXTURE, file: t.file, symbol: t.symbol } }
+          j = await call('tools/call', req, 90000)
+        }
+        latencies.push(Date.now() - t0)
+        if (j.error) {
+          errors++; errSamples.add((j.error.message || '').slice(0, 60))
+        } else {
+          const text = j.result?.content?.[0]?.text || ''
+          if (doWrite) {
+            if (/"success"\s*:\s*true/.test(text)) writesOk++
+            else {
+              writesConflict++
+              const c = (text.match(/conflict_type"?\s*:\s*"?([A-Z_]+)/) || text.match(/"code"\s*:\s*"([A-Z_]+)/) || [, 'OTHER'])[1]
+              conflictCodes[c] = (conflictCodes[c] || 0) + 1
+            }
+          } else reads++
+        }
+      } catch (e) {
+        errors++; errSamples.add((e.message || 'unknown').slice(0, 60))
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: WORKERS }, () => workerLoop()))
+  await new Promise((r) => setTimeout(r, 300))
+  clearInterval(sampler)
+
+  // 验证 1：热点文件无撕裂（原子 rename → 永远是完整的某个 return N，不应出现两行 return 或半截 token）
+  const finalContent = readFileSync(join(FIXTURE, STORM_FILE), 'utf8')
+  const torn = !/^def hot\(\):\n {4}return \d+$/.test(finalContent.trim())
+
+  // 验证 2：DB 完整性（health 工具含 integrity_check）
+  let integrityFail = false, healthDetail = ''
+  try {
+    const hj = await call('tools/call', { name: 'health', arguments: { workspace_dir: FIXTURE } }, 60000)
+    const htext = hj.result?.content?.[0]?.text || JSON.stringify(hj.error || {})
+    integrityFail = /"status"\s*:\s*"FAIL"/.test(htext)
+    healthDetail = htext.replace(/\s+/g, ' ').slice(0, 140)
+  } catch (e) { integrityFail = true; healthDetail = e.message.slice(0, 80) }
+
+  latencies.sort((a, b) => a - b)
+  const pct = (q) => latencies.length ? latencies[Math.min(latencies.length - 1, Math.floor(latencies.length * q))] : 0
+  return {
+    mode: 'storm', concurrency: CONCURRENCY, workers: WORKERS,
+    reads, writesOk, writesConflict, errors, conflictCodes,
+    torn, integrityFail,
+    finalContent: finalContent.trim().replace(/\n/g, '\\n').slice(0, 50),
+    healthDetail,
+    peakRssMb: Math.round(peakRssKb / 1024),
+    p50: pct(0.5), p95: pct(0.95), oom,
+    errSamples: [...errSamples].slice(0, 4),
+  }
 }
 
 // ── 主流程 ──
@@ -152,6 +242,15 @@ async function main() {
     await call('tools/call', { name: 'reindex', arguments: { workspace_dir: FIXTURE, blocking: true, threshold: 5000 } }, 180000)
   }
 
+  // Storm 模式：读+写冲突正确性测试（独立分支，测完即出）
+  if (MODE === 'storm') {
+    const result = await runStorm()
+    console.log('RESULT_JSON ' + JSON.stringify(result))
+    child.kill('SIGKILL')
+    setTimeout(() => process.exit(0), 200)
+    return
+  }
+
   // 测量阶段
   const latencies = []
   const errSamples = new Set()
@@ -162,7 +261,7 @@ async function main() {
 
   async function workerLoop() {
     while (Date.now() < deadline && !oom) {
-      const req = nextReadReq()
+      const req = nextReq()
       const t0 = Date.now()
       try {
         const j = await call('tools/call', req, 90000)
