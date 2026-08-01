@@ -164,18 +164,25 @@ export async function handle(args, context) {
   const scope = args?.scope || '.'
   const includeFiles = args?.include_files === true
   let scanDir = scope === '.' ? workspaceDir : join(workspaceDir, scope)
+  let scanFile = null
 
-  // 检测 scope 是否为文件路径（而非目录）
+  // 14：scope 为文件路径时只扫该文件——旧实现静默改成扫父目录（scope="lib.js" 扫全仓），
+  // 用户以为只查一个文件，实际拿到整仓结果，扫描范围完全失真
   if (scope !== '.' && existsSync(scanDir)) {
     const stat = statSync(scanDir)
     if (stat.isFile()) {
-      // 调整为扫描该文件所在目录
+      scanFile = scope.replace(/^\.\//, '')
       scanDir = dirname(scanDir)
     }
   }
 
   const files = []
   walkSourceFiles(workspaceDir, scanDir, files, 500)
+  if (scanFile) {
+    const only = files.filter(f => f === scanFile)
+    files.length = 0
+    files.push(...only)
+  }
 
   const deadCode = []
 
@@ -197,12 +204,14 @@ export async function handle(args, context) {
     if (existsSync(dbPath)) {
       try {
         codeIndexService.initWorkspace(workspaceDir)
-        const dead = await codeIndexService.detectDeadCode?.({ minUseCount: 0 })
+        const dead = await codeIndexService.detectDeadCode?.()
         if (dead && Array.isArray(dead)) {
           for (const s of dead) {
             if (!['function', 'method'].includes(s.type)) continue
             if (MAGIC_METHODS.has(s.name)) continue
             if (isTestFile(s.file || s.path || '')) continue
+            // 14：单文件 scope 时，DB 层的 unused_function 也限定在该文件内
+            if (scanFile && (s.file || s.path) !== scanFile) continue
 
             let mtime = null, daysUnused = null
             try {

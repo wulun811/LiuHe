@@ -211,6 +211,11 @@ async function handleRun(args, context) {
 
   const parsed = parseOutput(rawOutput, framework)
   const failures = enrichFailures(parsed.failures, workspaceDir)
+  // 14：run 失败但一个结果都没解析出来时（如 npx 未装、命令不存在），parser 的 raw_hint 或输出尾部
+  // 必须透出——否则 agent 只能看到 exit_code=1 + 全空结果，分不清「没装依赖」和「测试挂了」
+  const runError = exitCode !== 0 && parsed.results.length === 0
+    ? (parsed.raw_hint || rawOutput.slice(-500))
+    : undefined
 
   let suggestedFix = null
   if (failures.length > 0) {
@@ -232,6 +237,7 @@ async function handleRun(args, context) {
     command,
     exit_code: exitCode,
     timed_out: timedOut || undefined,
+    run_error: runError,
     results: parsed.results.slice(0, 50),
     truncated: parsed.results.length > 50 || undefined,
     failures,

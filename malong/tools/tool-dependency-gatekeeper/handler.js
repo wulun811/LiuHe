@@ -1,6 +1,7 @@
 import { join, dirname, basename, extname } from 'node:path'
 import { existsSync, readFileSync } from 'node:fs'
 import { ErrorCodes, makeError, validateFilePath } from '../../error-codes.js'
+import { scanCjsRequires } from '../../cjs-imports.js'
 
 const IMPORT_TO_PACKAGE = {
   cv2: 'opencv-python', yaml: 'pyyaml', PIL: 'pillow',
@@ -341,18 +342,14 @@ async function extractImports(file, content, langParser) {
     return { module: mod, raw: r.module, line: r.line, isRelative: false }
   })
   if (['.js', '.mjs', '.cjs', '.ts', '.tsx'].includes(ext)) {
-    const lines = content.split('\n')
-    for (let i = 0; i < lines.length; i++) {
-      // P2-B4：require() 行级正则不感知注释/字符串 → 注释里 // require('x') 假报 missing_dependency。
-      // 剥单行注释后匹配；字符串里的 require( 文本用引号剥离兜底
-      const code = lines[i].replace(/\/\/.*$/, '').replace(/"(?:[^"\\]|\\.)*"/g, ' ').replace(/'(?:[^'\\]|\\.)*'/g, ' ')
-      for (const m of code.matchAll(/require\(\s*['"]([^'"]+)['"]\s*\)/g)) {
-        const raw = m[1]
-        if (imports.some(imp => imp.raw === raw)) continue
-        if (raw.startsWith('.')) { imports.push({ module: raw, raw, line: i + 1, isRelative: true }); continue }
-        const mod = raw.startsWith('@') ? raw.split('/').slice(0, 2).join('/') : raw.split('/')[0]
-        imports.push({ module: mod, raw, line: i + 1, isRelative: false })
-      }
+    // 14：旧 P2-B4 实现先剥字符串再 matchAll require——`require('./lib.js')` 的参数被单引号剥离
+    // 正则一起删掉，兜底永远匹配不到（死代码）。改用共享 scanCjsRequires（字符串区间判断）。
+    for (const ci of scanCjsRequires(content)) {
+      if (imports.some(imp => imp.raw === ci.module)) continue
+      const raw = ci.module
+      if (raw.startsWith('.')) { imports.push({ module: raw, raw, line: ci.line, isRelative: true }); continue }
+      const mod = raw.startsWith('@') ? raw.split('/').slice(0, 2).join('/') : raw.split('/')[0]
+      imports.push({ module: mod, raw, line: ci.line, isRelative: false })
     }
   }
   return { imports, warnings: [] }

@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url'
 import os from 'node:os'
 import { createServer } from 'node:http'
 import { DEFAULT_IGNORE_DIRS } from './file-collector.js'
+import { scanCjsRequires } from './cjs-imports.js'
 import { sha256 } from './hash-utils.js'
 import { computeFileAnchors } from './symbol-anchors.js'
 
@@ -281,11 +282,11 @@ class CodeIndex {
     let mtime = Date.now()
     try { mtime = statSync(filePath).mtimeMs } catch {}
     return this._db.transaction(() => {
-      return this._indexFileDb(relPath, source.length, symbols, refs, mtime, sha256(source))
+      return this._indexFileDb(relPath, source.length, symbols, refs, mtime, sha256(source), scanCjsRequires(source))
     })()
   }
 
-  _indexFileDb(relPath, sourceLength, symbols, refs, mtime, contentHash) {
+  _indexFileDb(relPath, sourceLength, symbols, refs, mtime, contentHash, cjsImports = []) {
     let fileId = null
     const existing = this._db.prepare('SELECT id FROM files WHERE path = ?').get(relPath)
     if (existing) {
@@ -345,6 +346,16 @@ class CodeIndex {
         }
       }
     }
+    // 14：CJS require() 补 import refs（Rust 解析器只认 ESM import）。
+    // call_expr 存解构别名映射 {"本地名":"源名"}，供 _resolveAliasedRefs 反查 + 别名调用者归位。
+    // 已存在的同模块同行 import ref（ESM 混用）不重复插入。
+    if (cjsImports && cjsImports.length) {
+      for (const ci of cjsImports) {
+        if (refRows.some(r => r[3] === 'import' && r[2] === ci.module && r[4] === ci.line)) continue
+        const aliasJson = ci.aliasMap && Object.keys(ci.aliasMap).length ? JSON.stringify(ci.aliasMap) : ''
+        refRows.push([fileId, null, ci.module, 'import', ci.line, aliasJson])
+      }
+    }
     if (refRows.length > 0) {
       const BATCH_SIZE = 150
       for (let i = 0; i < refRows.length; i += BATCH_SIZE) {
@@ -388,6 +399,32 @@ class CodeIndex {
       }
     })()
     return resolved
+  }
+
+  _resolveAliasedRefs() {
+    // 14：CJS 解构别名反查——import ref 的 call_expr 存 {"本地名":"源名"}（scanCjsRequires 产出）。
+    // 本文件里 target_name=本地名 的 call ref 原本被本地绑定到导入变量（如 libProcess→局部 var），
+    // 这里重绑定到其他文件里的源符号（如 lib.js::process），让 impact_analysis 能反查到别名调用者。
+    const aliasRows = this._db.prepare("SELECT r.source_file_id, r.call_expr FROM refs r WHERE r.kind = 'import' AND r.call_expr LIKE '{%'").all()
+    if (!aliasRows.length) return 0
+    let rebound = 0
+    this._db.transaction(() => {
+      for (const row of aliasRows) {
+        let map
+        try { map = JSON.parse(row.call_expr) } catch { continue }
+        if (!map || typeof map !== 'object') continue
+        for (const [local, original] of Object.entries(map)) {
+          if (!local || !original) continue
+          const target = this._db.prepare('SELECT id, file_id FROM symbols WHERE name = ? AND file_id != ? LIMIT 1').get(original, row.source_file_id)
+          if (!target) continue
+          const res = this._db.prepare(
+            "UPDATE refs SET target_symbol_id = ?, target_file_id = ? WHERE source_file_id = ? AND target_name = ? AND kind = 'call'"
+          ).run(target.id, target.file_id, row.source_file_id, local)
+          rebound += res.changes
+        }
+      }
+    })()
+    return rebound
   }
 
   _isTestFile(filePath) {
@@ -654,15 +691,15 @@ class CodeIndex {
               continue
             }
             const st = statMap.get(join(repo, r.path)) || statMap.get(r.path)
+            let src = null
+            try { src = readFileSync(st ? join(repo, r.path) : r.path) } catch {}
             parsed.push({
               relPath: r.path,
               sourceLength: st?.size || 0,
               symbols: r.symbols || [],
               refs: r.refs || [],
-              contentHash: (() => {
-                // content_hash 供 staleness/embedded reader 做 hash 验证（附录 C 真判据）
-                try { return sha256(readFileSync(st ? join(repo, r.path) : r.path)) } catch { return null }
-              })(),
+              cjsImports: src ? scanCjsRequires(src.toString()) : [],
+              contentHash: src ? sha256(src) : null,
             })
           }
           if (i + BATCH_SIZE < changedFiles.length) await new Promise(r => setImmediate(r))
@@ -676,7 +713,7 @@ class CodeIndex {
         const chunk = parsed.slice(i, i + CHUNK)
         const txResults = this._db.transaction(() => {
           const r = []
-          for (const p of chunk) r.push(this._indexFileDb(p.relPath, p.sourceLength, p.symbols, p.refs, mtimeMap.get(p.relPath) || Date.now(), p.contentHash))
+          for (const p of chunk) r.push(this._indexFileDb(p.relPath, p.sourceLength, p.symbols, p.refs, mtimeMap.get(p.relPath) || Date.now(), p.contentHash, p.cjsImports))
           return r
         })()
         results.push(...txResults)
@@ -686,7 +723,9 @@ class CodeIndex {
       console.error(`[code-index] insert: ${parsed.length} files in ${((Date.now() - t0) / 1000).toFixed(1)}s`)
       if (typeof global.gc === 'function') global.gc()
       const resolved = this._resolveCrossFileRefs()
+      const rebounded = this._resolveAliasedRefs()
       console.error(`[code-index] resolve: ${resolved} refs in ${((Date.now() - t0) / 1000).toFixed(1)}s`)
+      if (rebounded > 0) console.error(`[code-index] aliased: ${rebounded} refs rebound`)
       return results
     } finally {
       if (rebuildIndexes) {
@@ -788,7 +827,9 @@ class CodeIndex {
 
       // 解析跨文件引用（供 reindex handler 调用）
       resolveCrossFileRefs() {
-        return self._resolveCrossFileRefs()
+        self._resolveCrossFileRefs()
+        self._resolveAliasedRefs()
+        return { status: 'ok' }
       },
 
       async indexBatch(filePaths, repo, onProgress) {
@@ -955,11 +996,19 @@ class CodeIndex {
         if (symbol) {
           // 10（F4）：不再排除同文件 caller——旧 `source_file_id != ?` 令同文件调用者（如 writeSymbols 调
           // applyBatchItem）全漏，blast radius 严重低估。同文件调用者同样是真实受影响方
-          refs = self._db.prepare(
-            "SELECT r.id, r.source_file_id, f.path AS source_file_path, r.target_name, r.kind, r.source_symbol_id, r.target_symbol_id, r.line, r.call_expr " +
-            "FROM refs r JOIN files f ON r.source_file_id = f.id " +
-            "WHERE r.target_name = ?"
-          ).all(symbol)
+          // 14：加 target_symbol_id 匹配——CJS 解构别名（{ process: libProcess }）经 _resolveAliasedRefs
+          // 重绑定后，调用点 ref 的 target_symbol_id 指向源符号，按名匹配（libProcess≠process）会漏
+          refs = symId
+            ? self._db.prepare(
+                "SELECT r.id, r.source_file_id, f.path AS source_file_path, r.target_name, r.kind, r.source_symbol_id, r.target_symbol_id, r.line, r.call_expr " +
+                "FROM refs r JOIN files f ON r.source_file_id = f.id " +
+                "WHERE r.target_name = ? OR r.target_symbol_id = ?"
+              ).all(symbol, symId)
+            : self._db.prepare(
+                "SELECT r.id, r.source_file_id, f.path AS source_file_path, r.target_name, r.kind, r.source_symbol_id, r.target_symbol_id, r.line, r.call_expr " +
+                "FROM refs r JOIN files f ON r.source_file_id = f.id " +
+                "WHERE r.target_name = ?"
+              ).all(symbol)
         } else {
           refs = self._db.prepare(
             "SELECT r.id, r.source_file_id, f.path AS source_file_path, r.target_name, r.kind, r.source_symbol_id, r.target_symbol_id, r.line, r.call_expr " +
@@ -1099,7 +1148,10 @@ class CodeIndex {
       },
 
       async detectDeadCode({ minUseCount = 1 } = {}) {
-        return self._db.prepare("SELECT s.name, s.type, f.path AS file, s.start_line, (SELECT COUNT(*) FROM refs WHERE target_name = s.name) AS ref_count FROM symbols s JOIN files f ON s.file_id = f.id WHERE s.type IN ('function','method') AND (SELECT COUNT(*) FROM refs WHERE target_name = s.name AND (source_file_id != s.file_id OR kind != 'import')) < ? ORDER BY ref_count ASC LIMIT 50").all(minUseCount)
+        // 14：usage 计数同时认 target_name 和 target_symbol_id——CJS 别名重绑定后
+        // 调用点 ref 的 target_name 是本地别名（libProcess≠process），只按名计数会把
+        // 被别名调用的函数误报为死代码
+        return self._db.prepare("SELECT s.name, s.type, f.path AS file, s.start_line, (SELECT COUNT(*) FROM refs WHERE (target_name = s.name OR target_symbol_id = s.id)) AS ref_count FROM symbols s JOIN files f ON s.file_id = f.id WHERE s.type IN ('function','method') AND (SELECT COUNT(*) FROM refs WHERE (target_name = s.name OR target_symbol_id = s.id) AND (source_file_id != s.file_id OR kind != 'import')) < ? ORDER BY ref_count ASC LIMIT 50").all(minUseCount)
       },
 
       async getComplexity(symbolName, { filePath } = {}) {
