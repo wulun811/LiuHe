@@ -1358,7 +1358,7 @@ class CodeIndex {
         const decorators = self._extractDecorators(filePath, symbols)
 
         const rootSymbols = symbols.filter(s => !symbols.some(c => c.start_line <= s.start_line && c.end_line >= s.end_line && c.id !== s.id))
-        const truncated = rootSymbols.length > maxItems
+        const truncated = maxItems > 0 && rootSymbols.length > maxItems
         const slice = truncated ? rootSymbols.slice(0, maxItems) : rootSymbols
 
         const outline = await Promise.all(slice.map(s => buildOutlineNode(s, symbols, depth - 1, includeRefs, includeTestRefs)))

@@ -136,7 +136,8 @@ function formatCallees(impact, maxCallees = 20) {
       line: c.callee_line || c.line,
       name: c.function || c.name,
       distance: 1,
-      call_expr: c.call_expr || undefined
+      call_expr: c.call_expr || undefined,
+      ambiguous: c.ambiguous === true ? true : undefined
     }
     const key = `${entry.file}:${entry.line}:${entry.name}`
     if (seen.has(key)) continue

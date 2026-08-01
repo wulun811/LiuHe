@@ -36,7 +36,7 @@ export async function handle(args, context) {
   // r22：next_step 补 symbol——取文件首个顶层 function/class 名，impact 直接可查
   let firstSymbol = null
   try {
-    const outline = await codeIndexService.getFileOutline(file, { depth: 1, includeRefs: false, includeTestRefs: false, maxItems: 10 })
+    const outline = await codeIndexService.getFileOutline(file, { depth: 1, includeRefs: false, includeTestRefs: false, maxItems: 0 })
     if (outline?.outline?.length) {
       const top = outline.outline.find(s => s.type === 'function' || s.type === 'class' || s.type === 'method')
       if (top) firstSymbol = top.name
