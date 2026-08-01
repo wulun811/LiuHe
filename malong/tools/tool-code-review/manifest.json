@@ -1,0 +1,40 @@
+{
+  "name": "code_review",
+  "version": "1.0.0",
+  "description": "Review code: naming, comment coverage, long functions (>50 lines), duplicated blocks, diff review. No LLM, deterministic regex. Pass file or source; use diff for SEARCH/REPLACE patch review.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "workspace_dir": {
+        "type": "string",
+        "description": "REQUIRED: project root (abs). reindex first if new."
+      },
+      "file": {
+        "type": "string",
+        "description": "File path relative to workspace_dir to review (reads from disk)"
+      },
+      "source": {
+        "type": "string",
+        "description": "Source code text to review (mutually exclusive with file)"
+      },
+      "diff": {
+        "type": "string",
+        "description": "SEARCH/REPLACE diff text to review block-by-block (<<<<<<< SEARCH ... ======= ... >>>>>>> REPLACE)"
+      },
+      "max_issues": {
+        "type": "number",
+        "description": "Max issues to return (default: 50)"
+      }
+    },
+    "required": [
+      "workspace_dir"
+    ]
+  },
+  "handler": "./handler.js",
+  "protocol_version": "1.0",
+  "tags": [
+    "quality",
+    "review"
+  ],
+  "dependencies": []
+}

@@ -1,0 +1,40 @@
+{
+  "name": "debug_runner",
+  "version": "1.0.0",
+  "description": "Run command/script/test and analyze failures: 14 error types, 4-language stack traces, suggested actions. script mode auto-picks runtime (js/py/go/rs/sh). Deterministic, zero LLM.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "workspace_dir": {
+        "type": "string",
+        "description": "REQUIRED: project root (abs). reindex first if new."
+      },
+      "command": {
+        "type": "string",
+        "description": "Shell command to run (e.g. \"node src/main.js\")"
+      },
+      "script": {
+        "type": "string",
+        "description": "Script path relative to workspace_dir to run + auto-analyze (js/mjs/py/go/rs/sh by extension)"
+      },
+      "test": {
+        "type": "string",
+        "description": "Test command to run in workspace_dir (e.g. \"npm test\", \"pytest\")"
+      },
+      "timeout": {
+        "type": "number",
+        "description": "Timeout in ms (default: 30000)"
+      }
+    },
+    "required": [
+      "workspace_dir"
+    ]
+  },
+  "handler": "./handler.js",
+  "protocol_version": "1.0",
+  "tags": [
+    "debug",
+    "run"
+  ],
+  "dependencies": []
+}

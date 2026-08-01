@@ -1,0 +1,40 @@
+{
+  "name": "security_review",
+  "version": "1.0.0",
+  "description": "Scan code for 19 security patterns: injection (eval/exec/SQL), XSS, hardcoded secrets (JWT/password/API key), CORS *, timing attacks, insecure compare. Severity-graded + score. Deterministic regex, zero LLM.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "workspace_dir": {
+        "type": "string",
+        "description": "REQUIRED: project root (abs). reindex first if new."
+      },
+      "file": {
+        "type": "string",
+        "description": "File path relative to workspace_dir to scan (reads from disk)"
+      },
+      "source": {
+        "type": "string",
+        "description": "Source code text to scan (mutually exclusive with file)"
+      },
+      "scope": {
+        "type": "string",
+        "description": "Directory relative to workspace_dir to scan recursively (default: none, single file only)"
+      },
+      "max_findings": {
+        "type": "number",
+        "description": "Max findings per file to return (default: 50)"
+      }
+    },
+    "required": [
+      "workspace_dir"
+    ]
+  },
+  "handler": "./handler.js",
+  "protocol_version": "1.0",
+  "tags": [
+    "security",
+    "review"
+  ],
+  "dependencies": []
+}

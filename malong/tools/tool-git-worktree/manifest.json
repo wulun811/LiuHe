@@ -1,0 +1,61 @@
+{
+  "name": "git_worktree",
+  "version": "1.0.0",
+  "description": "Transactional multi-file changes via git worktree: isolated branch, apply changes, optional verify command, commit, ff-only merge, cleanup. Zero pollution of working tree; rollback on failure. For git repos.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "workspace_dir": {
+        "type": "string",
+        "description": "REQUIRED: project root (abs). Must be a git repository."
+      },
+      "changes": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "File path relative to workspace_dir"
+            },
+            "new_content": {
+              "type": "string",
+              "description": "New file content (omit to delete)"
+            },
+            "delete": {
+              "type": "boolean",
+              "description": "Set true to delete the file"
+            }
+          },
+          "required": [
+            "path"
+          ]
+        },
+        "description": "REQUIRED: list of file changes to apply transactionally"
+      },
+      "message": {
+        "type": "string",
+        "description": "Commit message (default: tongtian: multi-file change (N files))"
+      },
+      "verify_cmd": {
+        "type": "string",
+        "description": "Optional shell command run in the worktree before commit; non-zero exit aborts and rolls back"
+      },
+      "timeout": {
+        "type": "number",
+        "description": "Git command timeout in ms (default: 30000)"
+      }
+    },
+    "required": [
+      "workspace_dir",
+      "changes"
+    ]
+  },
+  "handler": "./handler.js",
+  "protocol_version": "1.0",
+  "tags": [
+    "git",
+    "transaction"
+  ],
+  "dependencies": []
+}

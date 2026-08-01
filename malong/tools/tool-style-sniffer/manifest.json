@@ -1,0 +1,32 @@
+{
+  "name": "style_sniffer",
+  "version": "1.0.0",
+  "description": "Sniff project code style (indent, quotes, semicolons, naming, trailing commas) from sample files, generate PROJECT_RULES.md content. Deterministic sampling, zero LLM. Pass output to write rules file.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "workspace_dir": {
+        "type": "string",
+        "description": "REQUIRED: project root (abs). reindex first if new."
+      },
+      "scope": {
+        "type": "string",
+        "description": "Scan scope: directory relative to workspace_dir (default: \".\")"
+      },
+      "output": {
+        "type": "string",
+        "description": "Directory to write PROJECT_RULES.md into (default: none, returns content only)"
+      }
+    },
+    "required": [
+      "workspace_dir"
+    ]
+  },
+  "handler": "./handler.js",
+  "protocol_version": "1.0",
+  "tags": [
+    "quality",
+    "style"
+  ],
+  "dependencies": []
+}
