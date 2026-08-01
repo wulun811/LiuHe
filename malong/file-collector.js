@@ -8,6 +8,9 @@ export const DEFAULT_IGNORE_DIRS = new Set([
   '.next', '.nuxt', '.cache', '.parcel-cache', '.turbo', '.svelte-kit', '.output',
   '.gradle', '.idea', '.vscode',
   '.tusunsun', 'vendor', 'third_party', 'third-party',
+  // 15（P1）：写管线自己的产物——journal 备份（.malong/journal/*/backup/）和碰撞备份
+  // （.ai-transactions/*/backup/）此前被 watcher 当新文件索引进项目（符号重复/ref 指向备份）
+  '.malong', '.ai-transactions',
   // P2-C5：去掉 lib/deps/runtime/external——通用目录名误伤用户自有源码
   // （本仓库 runtime1 曾被 runtime 规则静默排除）。第三方依赖用 .malongignore 显式声明
 ])

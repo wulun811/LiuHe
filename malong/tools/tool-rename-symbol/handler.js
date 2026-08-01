@@ -1,6 +1,7 @@
 import { join } from 'node:path'
 import { readFileSync, readdirSync } from 'node:fs'
 import { TransactionStore } from '../tool-edit-transaction/transaction-store.js'
+import { scanCjsRequires } from '../../cjs-imports.js'
 
 const SOURCE_EXTS = new Set(['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.mts', '.cts', '.py', '.go', '.rs', '.java', '.rb', '.php'])
 
@@ -61,6 +62,37 @@ function findTextRefs(workspaceDir, symbol, maxFiles = 300, maxResults = 100) {
   const scanned = { files: 0 }
   walk(workspaceDir, workspaceDir, re, results, scanned, maxFiles, maxResults)
   return results
+}
+
+// 15（P2）：作用域保护——被改名符号在本文件的局部绑定名 ≠ symbol 时，只允许改 import 行。
+// 例：app.js `const { process: libProcess } = require('./lib.js')` 局部绑定名是 libProcess，
+// 裸 token `process`（如 process.env 的 Node 全局）与 lib.js::process 无关，改名不应连坐。
+// 若存在同名的同形绑定（`{ process }` / `import { process }`）则保守放行全部（改错比漏改安全）。
+function computeScopeRestriction(content, symbol) {
+  const lines = content.split('\n')
+  const aliasedLines = new Set()
+  let bindsSameName = false
+
+  for (const imp of scanCjsRequires(content)) {
+    if (!imp.aliasMap) continue
+    for (const [local, original] of Object.entries(imp.aliasMap)) {
+      if (original !== symbol) continue
+      if (local === symbol) bindsSameName = true
+      else aliasedLines.add(imp.line)
+    }
+  }
+
+  const asRe = new RegExp(`\\b${escapeRegex(symbol)}\\s+as\\s+(\\w+)`, 'g')
+  for (let i = 0; i < lines.length; i++) {
+    let m
+    asRe.lastIndex = 0
+    while ((m = asRe.exec(lines[i])) !== null) {
+      if (m[1] === symbol) bindsSameName = true
+      else aliasedLines.add(i + 1)
+    }
+  }
+
+  return bindsSameName ? null : (aliasedLines.size ? aliasedLines : null)
 }
 
 function walk(baseDir, dir, re, results, scanned, maxFiles, maxResults) {
@@ -152,6 +184,9 @@ export async function handle(args, context) {
     let content
     try { content = readFileSync(absPath, 'utf-8') } catch { continue }
 
+    // 15（P2）：别名绑定文件（局部名 ≠ symbol）只改 import 行，裸 token 不改
+    const scopeRestriction = computeScopeRestriction(content, symbol)
+
     const lines = content.split('\n')
     const wordRe = new RegExp(`\\b${escapeRegex(symbol)}\\b`, 'g')
     const fileEdits = []
@@ -159,6 +194,7 @@ export async function handle(args, context) {
     for (const ref of refs) {
       const lineIdx = ref.line - 1
       if (lineIdx < 0 || lineIdx >= lines.length) continue
+      if (scopeRestriction && !scopeRestriction.has(ref.line)) continue
       const line = lines[lineIdx]
       if (!wordRe.test(line)) continue
       wordRe.lastIndex = 0

@@ -76,6 +76,9 @@ CREATE TABLE IF NOT EXISTS meta (
 
 // P2-C1：与 file-collector 的 DEFAULT_CACHED_EXT 对齐（旧缺 .ts/.tsx → outline-reader 对 .ts 永久 not_indexed）
 const CACHED_EXT = new Set(['.js', '.mjs', '.cjs', '.ts', '.tsx', '.py', '.go', '.rs'])
+// 15（P3）：CJS 解构别名 per-local import ref 的 call_expr 标记——模块级查询（dep_graph/
+// getModuleGraph/getCallGraph/跨文件解析）必须排除，避免本地绑定名被当成模块依赖
+const ALIAS_LOCAL_MARKER = '__alias__'
 const WATCHER_DEBOUNCE = 300
 
 // Rust stdlib/prelude/方法链噪声 callee（与 malong-parse rust_lang.rs 的 NOISE_CALLEES 对齐）。
@@ -281,9 +284,20 @@ class CodeIndex {
     const relPath = repo ? relative(repo, filePath) : filePath
     let mtime = Date.now()
     try { mtime = statSync(filePath).mtimeMs } catch {}
-    return this._db.transaction(() => {
+    const idx = this._db.transaction(() => {
       return this._indexFileDb(relPath, source.length, symbols, refs, mtime, sha256(source), scanCjsRequires(source))
     })()
+    if (idx) this._reindexDone()
+    return idx
+  }
+
+  _reindexDone() {
+    // 15（P0）：单文件重抽会 DELETE+重插本文件符号（id 全变），其他文件指向它的 ref 的
+    // target_symbol_id 被外键 ON DELETE SET NULL 清空；indexFile 路径此前从不重 resolve →
+    // impact/sweep/别名反查在「写后读」循环里静默失真。两个 resolve 都幂等（只绑未绑定的
+    // ref），先按名解析再别名归位，顺序与 indexBatch 一致。
+    this._resolveCrossFileRefs()
+    this._resolveAliasedRefs()
   }
 
   _indexFileDb(relPath, sourceLength, symbols, refs, mtime, contentHash, cjsImports = []) {
@@ -354,6 +368,16 @@ class CodeIndex {
         if (refRows.some(r => r[3] === 'import' && r[2] === ci.module && r[4] === ci.line)) continue
         const aliasJson = ci.aliasMap && Object.keys(ci.aliasMap).length ? JSON.stringify(ci.aliasMap) : ''
         refRows.push([fileId, null, ci.module, 'import', ci.line, aliasJson])
+        // 15（P3）：CJS 解构别名补 per-local import refs（对齐 ESM r.symbols 行为）。
+        // references(symbol=本地名) 走 DB 命中 kind='import'，不再掉 text_fallback
+        // 把绑定行标成 "reference"；_resolveCrossFileRefs 对同名本地变量会被
+        // file_id 过滤跳过，不影响解析。
+        if (ci.aliasMap) {
+          for (const local of Object.keys(ci.aliasMap)) {
+            if (!local) continue
+            refRows.push([fileId, null, local, 'import', ci.line, ALIAS_LOCAL_MARKER])
+          }
+        }
       }
     }
     if (refRows.length > 0) {
@@ -376,7 +400,7 @@ class CodeIndex {
   }
 
   _resolveCrossFileRefs() {
-    const unbound = this._db.prepare("SELECT r.id, r.source_file_id, r.target_name, r.call_expr FROM refs r WHERE r.target_symbol_id IS NULL AND r.kind IN ('call','import','extends','implements') AND r.target_name != ''").all()
+    const unbound = this._db.prepare("SELECT r.id, r.source_file_id, r.target_name, r.call_expr FROM refs r WHERE r.target_symbol_id IS NULL AND r.kind IN ('call','import','extends','implements') AND r.target_name != '' AND (r.call_expr IS NULL OR r.call_expr != '" + ALIAS_LOCAL_MARKER + "')").all()
     if (!unbound.length) return 0
     const allSyms = this._db.prepare('SELECT s.id, s.name, s.file_id FROM symbols s').all()
     const symMap = new Map()
@@ -759,6 +783,7 @@ class CodeIndex {
           self._db.prepare('DELETE FROM symbols WHERE file_id = ?').run(matched.id)
           self._db.prepare('DELETE FROM refs WHERE source_file_id = ?').run(matched.id)
           self._db.prepare('DELETE FROM files WHERE id = ?').run(matched.id)
+          self._reindexDone()
         }
         if (self._core.emit) self._core.emit('file.changed', { path: filePath, type: 'deleted' })
         return { path: relPath, status: 'deleted' }
@@ -902,7 +927,7 @@ class CodeIndex {
         const f = self._db.prepare('SELECT id FROM files WHERE path = ?').get(filePath)
         if (!f) return { calls: [], calledBy: [] }
         const syms = self._db.prepare("SELECT id, name, type, start_line FROM symbols WHERE file_id = ? AND type IN ('function','method')").all(f.id)
-        const calls = self._db.prepare("SELECT r.target_name, r.kind FROM refs r WHERE r.source_file_id = ? AND r.kind IN ('call','import')").all(f.id)
+        const calls = self._db.prepare("SELECT r.target_name, r.kind FROM refs r WHERE r.source_file_id = ? AND r.kind IN ('call','import') AND (r.call_expr IS NULL OR r.call_expr != '" + ALIAS_LOCAL_MARKER + "')").all(f.id)
         const calledBy = self._db.prepare("SELECT f.path, r.kind FROM refs r JOIN files f ON r.source_file_id = f.id WHERE r.target_name IN (SELECT name FROM symbols WHERE file_id = ? AND type IN ('function','method'))").all(f.id)
         return { functions: syms, calls, calledBy }
       },
@@ -914,7 +939,7 @@ class CodeIndex {
         for (const e of entries) {
           const f = self._db.prepare('SELECT id FROM files WHERE path = ?').get(e)
           if (!f) continue
-          const refs = self._db.prepare("SELECT r.target_name, f.path AS source FROM refs r JOIN files f ON r.source_file_id = f.id WHERE r.source_file_id = ? AND r.kind = 'import'").all(f.id)
+          const refs = self._db.prepare("SELECT r.target_name, f.path AS source FROM refs r JOIN files f ON r.source_file_id = f.id WHERE r.source_file_id = ? AND r.kind = 'import' AND (r.call_expr IS NULL OR r.call_expr != '" + ALIAS_LOCAL_MARKER + "')").all(f.id)
           for (const r of refs) {
             edges.push({ from: r.source, to: r.target_name, kind: 'import' })
             nodes.add(r.target_name)
@@ -1116,7 +1141,7 @@ class CodeIndex {
       async getModuleDependencies(filePath, { depth = 3 } = {}) {
         const f = self._db.prepare('SELECT id FROM files WHERE path = ?').get(filePath)
         if (!f) return { file: filePath, imports: [], transitive: [] }
-        const imports = self._db.prepare("SELECT r.target_name AS module FROM refs r WHERE r.source_file_id = ? AND r.kind = 'import'").all(f.id)
+        const imports = self._db.prepare("SELECT r.target_name AS module FROM refs r WHERE r.source_file_id = ? AND r.kind = 'import' AND (r.call_expr IS NULL OR r.call_expr != '" + ALIAS_LOCAL_MARKER + "')").all(f.id)
         const transitive = []
         if (depth > 1) {
           const visited = new Set([filePath])
@@ -1133,7 +1158,7 @@ class CodeIndex {
                 mf = self._db.prepare("SELECT id, path FROM files WHERE path LIKE ?").get(`%${slashed}%`)
               }
               if (!mf) continue
-              const sub = self._db.prepare("SELECT r.target_name AS module FROM refs r WHERE r.source_file_id = ? AND r.kind = 'import'").all(mf.id)
+              const sub = self._db.prepare("SELECT r.target_name AS module FROM refs r WHERE r.source_file_id = ? AND r.kind = 'import' AND (r.call_expr IS NULL OR r.call_expr != '" + ALIAS_LOCAL_MARKER + "')").all(mf.id)
               for (const s of sub) {
                 if (!visited.has(s.module) && !s.module.startsWith('node:')) {
                   transitive.push({ depth: d, from: mf.path, module: s.module })

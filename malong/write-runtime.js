@@ -250,7 +250,12 @@ export async function writeSymbol(args, context) {
       }
       symbol = symbolRows[0] || null
       if (!symbol) {
-        return { success: false, error: { code: 'SYMBOL_NOT_FOUND', message: `No symbol named "${locator.name}" in ${filePath}` }, trace_id }
+        // 15（P3）：insert_after_symbol 需要已存在的锚点符号；新符号用 patch 模式创建，
+        // 旧文案会让 LLM 以为符号真不存在（其实只是模式选错）
+        const hint = editMode === 'insert_after_symbol'
+          ? ' (insert_after_symbol needs an existing anchor symbol; use edit_mode="patch" to create a new symbol)'
+          : ''
+        return { success: false, error: { code: 'SYMBOL_NOT_FOUND', message: `No symbol named "${locator.name}" in ${filePath}${hint}` }, trace_id }
       }
     }
     pipelineStep(pipeline, 'resolve_locator', symbol ? 'ok' : 'ok', { via: symbol ? 'symbol' : 'degraded_patch' })
@@ -293,7 +298,9 @@ export async function writeSymbol(args, context) {
         const suggestion = conflict.type === 'SYMBOL_CHANGED' || conflict.type === 'SYMBOL_SIGNATURE_CHANGED'
           ? 'Re-read the symbol and regenerate content.'
           : conflict.type === 'SYMBOL_DELETED' ? 'Symbol was deleted; re-read the file.'
-          : 'Resolve ambiguity via symbol_id.'
+          : conflict.type === 'FILE_CHANGED'
+            ? 'File changed externally; re-read (read_symbol) and retry with the fresh version.'
+            : 'Resolve ambiguity via symbol_id.'
         return {
           success: false,
           error: {
