@@ -605,6 +605,27 @@ class CodeIndex {
       "WHERE r.source_symbol_id = ? AND r.kind = 'call'"
     ).all(symId)
 
+    // r22：裸调用跨文件绑定可能猜错——查 source 文件是否真的 import 了该符号
+    const srcFile = sourceFilePath ? this._db.prepare('SELECT id FROM files WHERE path = ?').get(sourceFilePath) : null
+    const srcFileId = srcFile?.id
+    const hasImportBinding = (targetName, calleeFile) => {
+      if (!srcFileId) return false
+      // ① 符号级 import ref（ESM symbols / CJS per-local）：target_name = 符号名
+      const byName = this._db.prepare(
+        "SELECT 1 FROM refs WHERE source_file_id = ? AND kind = 'import' AND target_name = ? LIMIT 1"
+      ).get(srcFileId, targetName)
+      if (byName) return true
+      // ② 模块级 import ref（target_name = './lib3.js'）：与 callee 文件基名匹配
+      if (calleeFile) {
+        const base = calleeFile.split('/').pop().replace(/\.[^.]+$/, '')
+        const byModule = this._db.prepare(
+          "SELECT 1 FROM refs WHERE source_file_id = ? AND kind = 'import' AND target_name LIKE ? LIMIT 1"
+        ).get(srcFileId, `%${base}%`)
+        if (byModule) return true
+      }
+      return false
+    }
+
     const callees = []
     const seen = new Set()
     const calleeLang = langOf(sourceFilePath)
@@ -627,6 +648,11 @@ class CodeIndex {
         }
       }
 
+      // 裸调用（非成员访问）且解析到跨文件同名符号、source 又没 import 它 → 同名猜测，标 ambiguous
+      const isMemberCall = !!(r.call_expr || '').includes('.')
+      const isCrossFile = calleeFile && calleeFile !== sourceFilePath
+      const ambiguous = !isMemberCall && isCrossFile && !hasImportBinding(r.target_name, calleeFile)
+
       callees.push({
         function: r.target_name,
         file: sourceFilePath,
@@ -636,6 +662,7 @@ class CodeIndex {
         callee_file: calleeFile,
         callee_line: calleeLine,
         resolved: !!r.target_symbol_id,
+        ambiguous,
       })
     }
     return callees

@@ -22,6 +22,7 @@ export async function init(core) {
   core.registerService('langParser', {
     getMode() { return 'rust-service' },
     isRustService() { return true },
+    getConfigMode() { return parseClient.describeConfig?.() || 'uds' },
 
     async extractAllAsync(source, ext, filePath) {
       return await parseClient.extractAll(source, ext, filePath)

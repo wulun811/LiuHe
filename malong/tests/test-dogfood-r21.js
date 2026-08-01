@@ -1,4 +1,5 @@
 // r21：_resolveCrossFileRefs 只绑裸调用——成员调用（obj.slice()/byFile.get()）不跨文件绑同名符号
+// + r22：裸调用跨文件同名绑定且无 import 边 → 标 ambiguous
 // 场景：app.js 调 helper.run()（成员），other.js 有裸函数 run()——成员调用不得绑到它
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -67,6 +68,30 @@ const processSym = processRef?.target_symbol_id
   ? db.prepare('SELECT name, file_id FROM symbols WHERE id = ?').get(processRef.target_symbol_id)
   : null
 assert(processSym && processSym.name === 'process', `裸调用 process 绑到自身（得 ${JSON.stringify(processSym)}）`)
+
+// ④ r22：裸调用跨文件同名但无 import 边 → 标 ambiguous；有 import 边 → 不标
+// app3.js 裸调用 foo()（本文件无定义），lib2.js 有裸函数 foo()，app3 未 import 它
+writeFileSync(`${WS}/app3.js`, `export function go() {\n  return foo(1)\n}\n`)
+writeFileSync(`${WS}/lib2.js`, `export function foo(x) {\n  return x * 2\n}\n`)
+await svc.indexBatch([`${WS}/app3.js`, `${WS}/lib2.js`], WS)
+svc.resolveCrossFileRefs()
+
+const goImpact = await svc.getImpactAnalysis('app3.js', { symbol: 'go' })
+const fooCallee = (goImpact.callees || []).find(c => c.function === 'foo')
+assert(fooCallee, `getImpactAnalysis(go) 含 foo 调用（得 ${JSON.stringify((goImpact.callees || []).map(c => c.function))}）`)
+assert(fooCallee.ambiguous === true, `app3 未 import foo 却跨文件同名绑定 → ambiguous=true（得 ${fooCallee.ambiguous}, callee_file=${fooCallee.callee_file}）`)
+
+// ⑤ r22：有 import 边的裸调用不标 ambiguous
+// app4.js import { bar } from './lib3.js' 后裸调用 bar()
+writeFileSync(`${WS}/lib3.js`, `export function bar(x) {\n  return x + 1\n}\n`)
+writeFileSync(`${WS}/app4.js`, `import { bar } from './lib3.js'\nexport function useBar() {\n  return bar(1)\n}\n`)
+await svc.indexBatch([`${WS}/lib3.js`, `${WS}/app4.js`], WS)
+svc.resolveCrossFileRefs()
+
+const useBarImpact = await svc.getImpactAnalysis('app4.js', { symbol: 'useBar' })
+const barCallee = (useBarImpact.callees || []).find(c => c.function === 'bar')
+assert(barCallee, `getImpactAnalysis(useBar) 含 bar 调用（得 ${JSON.stringify((useBarImpact.callees || []).map(c => c.function))}）`)
+assert(barCallee.ambiguous === false, `app4 import 了 bar → ambiguous=false（得 ${barCallee.ambiguous}, callee_file=${barCallee.callee_file}）`)
 
 db.close()
 await pc.close?.()

@@ -590,6 +590,11 @@ export function isConnected() {
   return _connected
 }
 
+export function describeConfig() {
+  const bin = process.env.MALONG_PARSE_BIN || process.env.MALONG_PARSE_BIN_ALT || BINARY_PATH
+  return `uds=${SOCKET_PATH} bin=${bin} connected=${_connected ? 'yes' : 'no'}`
+}
+
 export async function disconnect() {
   _stopped = true
   if (_socket) {
