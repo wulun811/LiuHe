@@ -1,13 +1,13 @@
 {
   "name": "guard_patterns",
   "version": "1.1.0",
-  "description": "AST rules: no-bare-except/debugger/eval built-in. Custom via .ai-patterns.json. Pairs with dep_gatekeeper + naming_consistency as pre-commit gate.",
+  "description": "AST rules: no bare-except/debugger/eval. Custom via .ai-patterns.json. Pre-commit gate with dep_gatekeeper.",
   "inputSchema": {
     "type": "object",
     "properties": {
       "workspace_dir": {
         "type": "string",
-        "description": "REQUIRED: Absolute path to the project root directory."
+        "description": "REQUIRED: project root (abs). reindex first if new."
       },
       "file": {
         "type": "string",

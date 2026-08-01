@@ -1,7 +1,7 @@
 {
   "name": "edit_batch",
   "version": "1.0.0",
-  "description": "Apply multiple edits to one file atomically. dry_run previews diff. Prefer over repeated edit calls. After editing: fix_imports + test_bridge. Use file (workspace-relative) + workspace_dir.",
+  "description": "Multiple edits, one file, atomic. dry_run previews diff. Rollback/multi-file? edit_transaction.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -11,11 +11,11 @@
       },
       "workspace_dir": {
         "type": "string",
-        "description": "Project root; required when using file (relative)"
+        "description": "REQUIRED: project root (abs). reindex first if new."
       },
       "file_path": {
         "type": "string",
-        "description": "DEPRECATED alias: absolute path to the file. Allowed only inside workspace_dir when provided."
+        "description": "DEPRECATED: abs path alias, only inside workspace"
       },
       "verbose": {
         "type": "boolean",
@@ -52,7 +52,7 @@
       },
       "partial": {
         "type": "boolean",
-        "description": "Apply successful edits even if some fail. Returns applied_indices, failed_indices, and retry_edits for fixing"
+        "description": "Apply successful edits even if some fail (returns applied/failed indices)"
       }
     },
     "required": [

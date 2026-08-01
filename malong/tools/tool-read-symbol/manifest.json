@@ -1,13 +1,13 @@
 {
   "name": "read_symbol",
   "version": "1.0.0",
-  "description": "Default primitive for reading a code symbol with version, outline, and safe fallback. Resolves by stable symbol_id or name+file, returns body with exact file hash / symbol body_hash (version anchors), index freshness, pipeline trace, and budget truncation. Non-code files degrade to line_range/file reads. Use read_outline only when you need full file structure without editing.",
+  "description": "Read one symbol body + version (base_version for writes). Resolves by symbol_id or name+file. Full file? read_outline.",
   "inputSchema": {
     "type": "object",
     "properties": {
       "workspace_dir": {
         "type": "string",
-        "description": "REQUIRED: Absolute path to the project root directory."
+        "description": "REQUIRED: project root (abs). reindex first if new."
       },
       "locator": {
         "type": "object",
@@ -30,16 +30,23 @@
           },
           "line_range": {
             "type": "array",
-            "items": { "type": "integer" },
+            "items": {
+              "type": "integer"
+            },
             "description": "Degraded line_range read for non-code files: [start, end] 1-based inclusive"
           }
         },
-        "required": ["file_path"]
+        "required": [
+          "file_path"
+        ]
       },
       "mode": {
         "type": "string",
-        "enum": ["core", "rich"],
-        "description": "core (default): body + version, no outline (saves tokens). rich: adds outline + navigation counts."
+        "enum": [
+          "core",
+          "rich"
+        ],
+        "description": "core (default): body+version. rich: +outline+navigation."
       },
       "context_lines": {
         "type": "integer",
@@ -47,7 +54,7 @@
       },
       "include_outline": {
         "type": "boolean",
-        "description": "Include file outline summary. Default: off in core mode, on in rich mode. Set true to force."
+        "description": "Force include file outline (off in core by default)"
       },
       "outline_depth": {
         "type": "integer",
@@ -59,19 +66,30 @@
       },
       "source": {
         "type": "string",
-        "enum": ["live", "indexed"],
-        "description": "live (default): read current file + check staleness. indexed: read-only snapshot, never use for write."
+        "enum": [
+          "live",
+          "indexed"
+        ],
+        "description": "live (default): current file+staleness. indexed: read-only snapshot, never for write."
       },
       "on_ambiguous": {
         "type": "string",
-        "enum": ["fail"],
+        "enum": [
+          "fail"
+        ],
         "description": "fail (default): return candidates, never silently pick."
       }
     },
-    "required": ["workspace_dir", "locator"]
+    "required": [
+      "workspace_dir",
+      "locator"
+    ]
   },
   "handler": "./handler.js",
   "protocol_version": "1.0",
-  "tags": ["primitive", "read"],
+  "tags": [
+    "primitive",
+    "read"
+  ],
   "dependencies": []
 }

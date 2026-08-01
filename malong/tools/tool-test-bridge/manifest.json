@@ -1,22 +1,55 @@
 {
   "name": "test_bridge",
   "version": "1.0.0",
-  "description": "Close the edit→verify loop. action=run: execute tests, parse output, enrich failures with code context + root cause hints. action=suggest: recommend tests after code changes. action=discover: find available tests for a file. For finding test files without running, use find_tests. After fixing failures, re-run. Pairs with rename_symbol, mock_sync.",
+  "description": "Run tests, parse output, enrich failures with context. actions: run/suggest/discover. Find tests? find_tests.",
   "inputSchema": {
     "type": "object",
     "properties": {
-      "action": { "type": "string", "enum": ["run", "suggest", "discover"], "description": "run: execute tests; suggest: recommend tests after changes; discover: find available tests" },
-      "workspace_dir": { "type": "string", "description": "REQUIRED: Absolute path to the project root directory." },
-      "scope": { "type": "string", "description": "For action=run: test scope (e.g. \"tests/\", \"tests/test_auth.py\", \"tests/test_auth.py::test_login\", \".\")" },
-      "file": { "type": "string", "description": "For action=suggest/discover: source file path relative to workspace_dir" },
-      "symbol": { "type": "string", "description": "For action=suggest: narrow to a specific symbol" },
-      "framework": { "type": "string", "description": "Override auto-detection: pytest, jest, vitest, go_test, cargo_test, maven, gradle" },
-      "timeout": { "type": "number", "description": "Test execution timeout in seconds (default: 60)" }
+      "action": {
+        "type": "string",
+        "enum": [
+          "run",
+          "suggest",
+          "discover"
+        ],
+        "description": "run: execute tests; suggest: recommend tests after changes; discover: find available tests"
+      },
+      "workspace_dir": {
+        "type": "string",
+        "description": "REQUIRED: project root (abs). reindex first if new."
+      },
+      "scope": {
+        "type": "string",
+        "description": "Test scope: 'tests/', 'tests/test_a.py', 'tests/test_a.py::test_x', '.'"
+      },
+      "file": {
+        "type": "string",
+        "description": "For action=suggest/discover: source file path relative to workspace_dir"
+      },
+      "symbol": {
+        "type": "string",
+        "description": "For action=suggest: narrow to a specific symbol"
+      },
+      "framework": {
+        "type": "string",
+        "description": "Override: pytest/jest/vitest/go_test/cargo_test/maven/gradle"
+      },
+      "timeout": {
+        "type": "number",
+        "description": "Test execution timeout in seconds (default: 60)"
+      }
     },
-    "required": ["action", "workspace_dir"]
+    "required": [
+      "action",
+      "workspace_dir"
+    ]
   },
   "handler": "./handler.js",
   "protocol_version": "1.0",
-  "tags": ["test", "verification", "loop"],
+  "tags": [
+    "test",
+    "verification",
+    "loop"
+  ],
   "dependencies": []
 }

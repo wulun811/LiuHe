@@ -1,18 +1,35 @@
 {
   "name": "references",
   "version": "1.0.0",
-  "description": "Find cross-file usages of a symbol. Prefer over grep: semantic match, supports member paths like obj.method.",
+  "description": "Cross-file usages of a symbol. Use full member path (obj.method). Prefer over grep.",
   "inputSchema": {
     "type": "object",
     "properties": {
-      "workspace_dir": { "type": "string", "description": "REQUIRED: Absolute path to the project root directory. Call reindex first if this is a new workspace." },
-      "symbol": { "type": "string", "description": "Symbol name / call target to find references for" },
-      "file": { "type": "string", "description": "Restrict search to a specific file. Must be a file path relative to workspace root (e.g. \"scripts/lib/tools/spawn.mjs\"), not a directory; omit for project-wide search." }
+      "workspace_dir": {
+        "type": "string",
+        "description": "REQUIRED: project root (abs). reindex first if new."
+      },
+      "symbol": {
+        "type": "string",
+        "description": "Symbol name / call target to find references for"
+      },
+      "file": {
+        "type": "string",
+        "description": "Restrict to file rel to root; not a dir; omit = project-wide"
+      }
     },
-    "required": ["workspace_dir", "symbol"]
+    "required": [
+      "workspace_dir",
+      "symbol"
+    ]
   },
   "handler": "./handler.js",
   "protocol_version": "1.0",
-  "tags": ["references", "symbol"],
-  "dependencies": ["reindex"]
+  "tags": [
+    "references",
+    "symbol"
+  ],
+  "dependencies": [
+    "reindex"
+  ]
 }

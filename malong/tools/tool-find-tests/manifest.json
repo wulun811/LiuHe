@@ -1,18 +1,35 @@
 {
   "name": "find_tests",
   "version": "1.0.0",
-  "description": "Find test files for a source file: naming conventions + import graph reverse lookup. Index optional (convention fallback). For running found tests, use test_bridge(action=\"run\"). Prefer over manual glob/find for test discovery.",
+  "description": "Find test files for a source file (naming + import reverse lookup). Run them? test_bridge.",
   "inputSchema": {
     "type": "object",
     "properties": {
-      "workspace_dir": { "type": "string", "description": "REQUIRED: Absolute path to the project root directory. Index optional (convention fallback)." },
-      "file": { "type": "string", "description": "Source file path relative to workspace_dir (e.g. \"src/auth.py\")" },
-      "symbol": { "type": "string", "description": "Optional: narrow to tests referencing a specific symbol" }
+      "workspace_dir": {
+        "type": "string",
+        "description": "REQUIRED: project root (abs)."
+      },
+      "file": {
+        "type": "string",
+        "description": "Source file path relative to workspace_dir (e.g. \"src/auth.py\")"
+      },
+      "symbol": {
+        "type": "string",
+        "description": "Optional: narrow to tests referencing a specific symbol"
+      }
     },
-    "required": ["workspace_dir", "file"]
+    "required": [
+      "workspace_dir",
+      "file"
+    ]
   },
   "handler": "./handler.js",
   "protocol_version": "1.0",
-  "tags": ["test", "discovery"],
-  "dependencies": ["reindex"]
+  "tags": [
+    "test",
+    "discovery"
+  ],
+  "dependencies": [
+    "reindex"
+  ]
 }

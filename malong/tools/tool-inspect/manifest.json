@@ -1,21 +1,48 @@
 {
   "name": "inspect",
   "version": "1.0.0",
-  "description": "Combined symbol analysis: outline + references + call chain in one call. Replaces 3 separate calls (read_outline + references + call_chain). Index required. Before modifying, use impact_analysis for blast radius. After modifying, verify with test_bridge.",
+  "description": "Outline + references + call chain in one call (replaces 3). Then impact_analysis before edit, test_bridge after.",
   "inputSchema": {
     "type": "object",
     "properties": {
-      "workspace_dir": { "type": "string", "description": "REQUIRED: Absolute path to the project root directory. Call reindex first." },
-      "symbol": { "type": "string", "description": "Symbol name to inspect" },
-      "file": { "type": "string", "description": "File path relative to workspace_dir" },
-      "include_outline": { "type": "boolean", "description": "Include file outline (default: true)" },
-      "include_refs": { "type": "boolean", "description": "Include cross-file references (default: true)" },
-      "include_chain": { "type": "boolean", "description": "Include call chain (default: true)" }
+      "workspace_dir": {
+        "type": "string",
+        "description": "REQUIRED: project root (abs). reindex first if new."
+      },
+      "symbol": {
+        "type": "string",
+        "description": "Symbol name to inspect"
+      },
+      "file": {
+        "type": "string",
+        "description": "File path relative to workspace_dir"
+      },
+      "include_outline": {
+        "type": "boolean",
+        "description": "Include file outline (default: true)"
+      },
+      "include_refs": {
+        "type": "boolean",
+        "description": "Include cross-file references (default: true)"
+      },
+      "include_chain": {
+        "type": "boolean",
+        "description": "Include call chain (default: true)"
+      }
     },
-    "required": ["workspace_dir", "symbol", "file"]
+    "required": [
+      "workspace_dir",
+      "symbol",
+      "file"
+    ]
   },
   "handler": "./handler.js",
   "protocol_version": "1.0",
-  "tags": ["analysis", "combined"],
-  "dependencies": ["reindex"]
+  "tags": [
+    "analysis",
+    "combined"
+  ],
+  "dependencies": [
+    "reindex"
+  ]
 }

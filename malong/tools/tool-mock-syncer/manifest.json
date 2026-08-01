@@ -1,18 +1,35 @@
 {
   "name": "mock_sync",
   "version": "1.0.0",
-  "description": "Detect mock/patch mismatches after signature changes. Compares function signature vs test mock usage. No index required. After fixing, verify with test_bridge(action=\"run\"). Pairs with rename_symbol (check mocks after rename).",
+  "description": "Detect mock/patch mismatches after signature changes. Pairs rename_symbol. Fix → test_bridge.",
   "inputSchema": {
     "type": "object",
     "properties": {
-      "workspace_dir": { "type": "string", "description": "REQUIRED: Absolute path to the project root directory." },
-      "file": { "type": "string", "description": "Source file path (relative to workspace_dir)" },
-      "function": { "type": "string", "description": "Function name to check mocks for" }
+      "workspace_dir": {
+        "type": "string",
+        "description": "REQUIRED: project root (abs). reindex first if new."
+      },
+      "file": {
+        "type": "string",
+        "description": "Source file path (relative to workspace_dir)"
+      },
+      "function": {
+        "type": "string",
+        "description": "Function name to check mocks for"
+      }
     },
-    "required": ["workspace_dir", "file", "function"]
+    "required": [
+      "workspace_dir",
+      "file",
+      "function"
+    ]
   },
   "handler": "./handler.js",
   "protocol_version": "1.0",
-  "tags": ["quality", "mock", "test"],
+  "tags": [
+    "quality",
+    "mock",
+    "test"
+  ],
   "dependencies": []
 }

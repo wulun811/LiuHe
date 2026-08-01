@@ -1,24 +1,122 @@
 {
   "name": "edit_transaction",
   "version": "1.3.0",
-  "description": "Multi-file edits with rollback, preview, and undo. Different edits per file supported. Prefer over edit for multi-file or risky changes. Single-file: use edit_batch.",
+  "description": "Multi-file edits with rollback/preview/undo (begin→edit→commit). Single-file? edit_batch.",
   "inputSchema": {
     "type": "object",
     "properties": {
-      "workspace_dir": { "type": "string", "description": "REQUIRED: Absolute path to the project root directory." },
-      "action": { "type": "string", "enum": ["begin", "edit", "edit_multi", "commit", "undo_commit", "rollback", "info"], "description": "Transaction action to perform." },
-      "name": { "type": "string", "description": "Transaction name (required for action=begin)." },
-      "txn_id": { "type": "string", "description": "Transaction ID (required for edit, edit_multi, commit, undo_commit, rollback, info)." },
-      "file": { "type": "string", "description": "Single file path relative to workspace_dir (required for action=edit)." },
-      "files": { "type": "array", "items": { "type": "string" }, "description": "Multiple file paths relative to workspace_dir. Same edits applied to all (broadcast mode)." },
-      "edits": { "type": "array", "items": { "type": "object", "properties": { "old_string": { "type": "string" }, "new_string": { "type": "string" }, "replace_all": { "type": "boolean" } }, "required": ["old_string"] }, "description": "Array of edits. Required for edit. For edit_multi: required with files (broadcast), or use file_edits for per-file edits." },
-      "file_edits": { "type": "array", "items": { "type": "object", "properties": { "file": { "type": "string", "description": "File path relative to workspace_dir" }, "edits": { "type": "array", "items": { "type": "object", "properties": { "old_string": { "type": "string" }, "new_string": { "type": "string" }, "replace_all": { "type": "boolean" } }, "required": ["old_string"] }, "description": "Array of edits for this file" } }, "required": ["file", "edits"] }, "description": "Per-file edits for edit_multi. Each item: {file, edits}. When provided, overrides files+edits. Use when different files need different edits." },
-      "atomic": { "type": "boolean", "description": "For edit_multi: all-or-nothing (default: true)." }
+      "workspace_dir": {
+        "type": "string",
+        "description": "REQUIRED: project root (abs). reindex first if new."
+      },
+      "action": {
+        "type": "string",
+        "enum": [
+          "begin",
+          "edit",
+          "edit_multi",
+          "commit",
+          "undo_commit",
+          "rollback",
+          "info"
+        ],
+        "description": "Transaction action to perform."
+      },
+      "name": {
+        "type": "string",
+        "description": "Transaction name (required for action=begin)."
+      },
+      "txn_id": {
+        "type": "string",
+        "description": "Transaction ID (required for edit, edit_multi, commit, undo_commit, rollback, info)."
+      },
+      "file": {
+        "type": "string",
+        "description": "Single file path relative to workspace_dir (required for action=edit)."
+      },
+      "files": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Multiple file paths relative to workspace_dir. Same edits applied to all (broadcast mode)."
+      },
+      "edits": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "old_string": {
+              "type": "string"
+            },
+            "new_string": {
+              "type": "string"
+            },
+            "replace_all": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "old_string"
+          ]
+        },
+        "description": "Array of {old_string,new_string}. Required for edit."
+      },
+      "file_edits": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string",
+              "description": "File path relative to workspace_dir"
+            },
+            "edits": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "old_string": {
+                    "type": "string"
+                  },
+                  "new_string": {
+                    "type": "string"
+                  },
+                  "replace_all": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "old_string"
+                ]
+              },
+              "description": "Array of edits for this file"
+            }
+          },
+          "required": [
+            "file",
+            "edits"
+          ]
+        },
+        "description": "Per-file edits for edit_multi: [{file, edits}]. Overrides files+edits."
+      },
+      "atomic": {
+        "type": "boolean",
+        "description": "For edit_multi: all-or-nothing (default: true)."
+      }
     },
-    "required": ["workspace_dir", "action"]
+    "required": [
+      "workspace_dir",
+      "action"
+    ]
   },
   "handler": "./handler.js",
   "protocol_version": "1.0",
-  "tags": ["transaction", "edit", "atomic", "backup"],
+  "tags": [
+    "transaction",
+    "edit",
+    "atomic",
+    "backup"
+  ],
   "dependencies": []
 }

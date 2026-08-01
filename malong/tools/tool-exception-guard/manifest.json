@@ -1,17 +1,31 @@
 {
   "name": "exception_guard",
   "version": "1.0.0",
-  "description": "Check if raise/throw uses project custom exceptions vs builtins. Index optional (regex fallback for exception hierarchy). After fixing, verify with test_bridge(action=\"run\"). Pairs with config_drift as quality gate.",
+  "description": "Check raise/throw uses project exceptions vs builtins. Fix → verify test_bridge. Pairs config_drift.",
   "inputSchema": {
     "type": "object",
     "properties": {
-      "workspace_dir": { "type": "string", "description": "REQUIRED: Absolute path to the project root directory. Index optional (regex fallback)." },
-      "file": { "type": "string", "description": "File to check (relative to workspace_dir)" }
+      "workspace_dir": {
+        "type": "string",
+        "description": "REQUIRED: project root (abs)."
+      },
+      "file": {
+        "type": "string",
+        "description": "File to check (relative to workspace_dir)"
+      }
     },
-    "required": ["workspace_dir", "file"]
+    "required": [
+      "workspace_dir",
+      "file"
+    ]
   },
   "handler": "./handler.js",
   "protocol_version": "1.0",
-  "tags": ["quality", "exceptions"],
-  "dependencies": ["reindex"]
+  "tags": [
+    "quality",
+    "exceptions"
+  ],
+  "dependencies": [
+    "reindex"
+  ]
 }

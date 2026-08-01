@@ -1,13 +1,13 @@
 {
   "name": "dependency_gatekeeper",
   "version": "1.1.0",
-  "description": "Imports vs manifests: undeclared deps + install hints. Py/JS/Go/Rust. Pairs with guard_patterns as quality gate.",
+  "description": "Imports vs manifests: undeclared deps + install hints (Py/JS/Go/Rust). Pairs with guard_patterns.",
   "inputSchema": {
     "type": "object",
     "properties": {
       "workspace_dir": {
         "type": "string",
-        "description": "REQUIRED: Absolute path to the project root directory."
+        "description": "REQUIRED: project root (abs). reindex first if new."
       },
       "file": {
         "type": "string",

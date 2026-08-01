@@ -1,18 +1,22 @@
 {
   "name": "health",
   "version": "1.2.0",
-  "description": "System health check + self-healing. action='check' (default): DB integrity, tool manifests, memory, semaphore, active requests. action='restart': soft-restart services without killing process. action='cleanup': prune stale workspace index caches older than max_age_days (rebuildable via reindex). Set stats=true for usage statistics.",
+  "description": "System check + self-healing: DB integrity, tools, memory, semaphore. actions: check/restart/cleanup.",
   "inputSchema": {
     "type": "object",
     "properties": {
       "action": {
         "type": "string",
-        "enum": ["check", "restart", "cleanup"],
-        "description": "check: run health checks. restart: soft-restart services (GC + reinit) to recover from bad state. cleanup: prune stale workspace index caches (rebuildable) older than max_age_days."
+        "enum": [
+          "check",
+          "restart",
+          "cleanup"
+        ],
+        "description": "check (default) / restart (soft-recover) / cleanup (prune stale caches)"
       },
       "stats": {
         "type": "boolean",
-        "description": "Include usage statistics: per-tool call counts, success rate, tokens saved, issues caught"
+        "description": "Usage stats: calls, success rate, tokens saved"
       },
       "max_age_days": {
         "type": "number",
@@ -27,5 +31,9 @@
   },
   "handler": "./handler.js",
   "protocol_version": "1.0",
-  "tags": ["system", "health", "self-healing"]
+  "tags": [
+    "system",
+    "health",
+    "self-healing"
+  ]
 }

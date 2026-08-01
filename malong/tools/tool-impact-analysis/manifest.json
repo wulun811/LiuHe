@@ -1,21 +1,21 @@
 {
   "name": "impact_analysis",
   "version": "2.1.0",
-  "description": "BEFORE modifying a function/class: see all callers (blast radius), callees, risk level. For line-level, use call_chain. For simple single-symbol edits, prefer read_symbol + write_symbol (primitive runs collision checks automatically).",
+  "description": "BEFORE modifying: callers (blast radius), callees, risk. Line-level? call_chain. Simple edit? read_symbol+write_symbol.",
   "inputSchema": {
     "type": "object",
     "properties": {
       "workspace_dir": {
         "type": "string",
-        "description": "REQUIRED: Absolute path to the project root directory. Call reindex first if this is a new workspace."
+        "description": "REQUIRED: project root (abs). reindex first if new."
       },
       "file": {
         "type": "string",
-        "description": "File path relative to workspace_dir (e.g. \"scripts/lib/tools/spawn.mjs\", not the full absolute path, not a directory)"
+        "description": "Path rel to root (not absolute, not a dir)"
       },
       "symbol": {
         "type": "string",
-        "description": "Symbol name (function, class, method, variable) to analyze. When provided, does symbol-level analysis. When omitted, does file-level analysis (all symbols in the file). Use symbols for batch analysis of multiple symbols."
+        "description": "Symbol to analyze (fn/class/method/var). Omit → file-level. Use symbols[] for batch."
       },
       "symbols": {
         "type": "array",

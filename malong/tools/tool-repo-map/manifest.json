@@ -1,20 +1,46 @@
 {
   "name": "repo_map",
   "version": "1.0.0",
-  "description": "Project code map: file relationships and symbols. For large codebases (100+ files). Better than glob for understanding structure.",
+  "description": "Project code map: files ↔ symbols. For 100+ file codebases. focused+relevantEntities for token efficiency.",
   "inputSchema": {
     "type": "object",
     "properties": {
-      "workspace_dir": { "type": "string", "description": "REQUIRED: Absolute path to the project root directory to map." },
-      "dir": { "type": "string", "description": "Subdirectory to map (default: workspace_dir)" },
-      "focused": { "type": "boolean", "description": "If true, limit output to ~2000 tokens by pruning symbols. Combine with relevantEntities for best results." },
-      "relevantFiles": { "type": "array", "items": { "type": "string" }, "description": "Only include these specific files (paths relative to workspace root, e.g. [\"scripts/lib/tools/spawn.mjs\"])" },
-      "relevantEntities": { "type": "array", "items": { "type": "string" }, "description": "Only include files that contain these top-level symbols (e.g. [\"spawnFixer\", \"agentLoop\"])" }
+      "workspace_dir": {
+        "type": "string",
+        "description": "REQUIRED: project root (abs). reindex first if new."
+      },
+      "dir": {
+        "type": "string",
+        "description": "Subdirectory to map (default: workspace_dir)"
+      },
+      "focused": {
+        "type": "boolean",
+        "description": "Limit output ~2000 tokens. Combine with relevantEntities."
+      },
+      "relevantFiles": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Only include these files (rel to root)"
+      },
+      "relevantEntities": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Only include files that contain these top-level symbols (e.g. [\"spawnFixer\", \"agentLoop\"])"
+      }
     },
-    "required": ["workspace_dir"]
+    "required": [
+      "workspace_dir"
+    ]
   },
   "handler": "./handler.js",
   "protocol_version": "1.0",
-  "tags": ["map", "overview"],
+  "tags": [
+    "map",
+    "overview"
+  ],
   "dependencies": []
 }

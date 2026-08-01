@@ -1,13 +1,13 @@
 {
   "name": "naming_consistency",
   "version": "1.1.0",
-  "description": "New symbols vs project naming: style (snake/camel/Pascal) + verb consistency. Index required. Pairs with guard_patterns before commit. Returns suggestions.",
+  "description": "New symbol names vs project style (snake/camel/Pascal) + verb consistency. Index required.",
   "inputSchema": {
     "type": "object",
     "properties": {
       "workspace_dir": {
         "type": "string",
-        "description": "REQUIRED: Absolute path to the project root directory. Call reindex first."
+        "description": "REQUIRED: project root (abs). reindex first if new."
       },
       "file": {
         "type": "string",

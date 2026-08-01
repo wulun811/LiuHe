@@ -1,18 +1,34 @@
 {
   "name": "sweep_dead_code",
   "version": "1.0.0",
-  "description": "Detect dead code: unused imports, unused functions, orphan files. Index optional (regex import fallback). Remove dead code via edit_transaction. Unused imports are safe to remove immediately.",
+  "description": "Detect dead code: unused imports/functions, orphan files. Remove via edit_transaction. Unused imports safe now.",
   "inputSchema": {
     "type": "object",
     "properties": {
-      "workspace_dir": { "type": "string", "description": "REQUIRED: Absolute path to the project root directory. Index optional (regex import fallback)." },
-      "scope": { "type": "string", "description": "Scan scope: directory relative to workspace_dir (default: \".\")" },
-      "include_files": { "type": "boolean", "description": "Also detect orphan files (default: false)" }
+      "workspace_dir": {
+        "type": "string",
+        "description": "REQUIRED: project root (abs)."
+      },
+      "scope": {
+        "type": "string",
+        "description": "Scan scope: directory relative to workspace_dir (default: \".\")"
+      },
+      "include_files": {
+        "type": "boolean",
+        "description": "Also detect orphan files (default: false)"
+      }
     },
-    "required": ["workspace_dir"]
+    "required": [
+      "workspace_dir"
+    ]
   },
   "handler": "./handler.js",
   "protocol_version": "1.0",
-  "tags": ["quality", "dead-code"],
-  "dependencies": ["reindex"]
+  "tags": [
+    "quality",
+    "dead-code"
+  ],
+  "dependencies": [
+    "reindex"
+  ]
 }

@@ -1,13 +1,13 @@
 {
   "name": "call_chain",
   "version": "1.1.0",
-  "description": "Callers/callees at a specific line. Use when you know the line but not the symbol name. For symbol-level blast radius, use impact_analysis.",
+  "description": "Callers/callees at a line; use when you know line, not symbol name. Symbol-level? impact_analysis.",
   "inputSchema": {
     "type": "object",
     "properties": {
       "workspace_dir": {
         "type": "string",
-        "description": "REQUIRED: Absolute path to the project root directory. Call reindex first."
+        "description": "REQUIRED: project root (abs). reindex first if new."
       },
       "file": {
         "type": "string",
@@ -15,11 +15,11 @@
       },
       "line": {
         "type": "number",
-        "description": "Line number of the function to analyze. Provide this OR symbol (at least one required)."
+        "description": "Line number. OR symbol (at least one required)."
       },
       "symbol": {
         "type": "string",
-        "description": "Symbol name to analyze. Provide this OR line (at least one required). If both provided, symbol takes precedence."
+        "description": "Symbol name. OR line. Both? symbol wins."
       },
       "depth": {
         "type": "number",

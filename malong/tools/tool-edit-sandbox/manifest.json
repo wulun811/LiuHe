@@ -1,13 +1,13 @@
 {
   "name": "sandbox_validate",
   "version": "1.0.0",
-  "description": "Pre-validate edits before writing: syntax check, indentation consistency, undefined symbol detection. Zero-cost trial. If valid, apply with edit_transaction. Prefer over write-then-discover-errors workflow.",
+  "description": "Pre-validate edits (syntax/indent/undefined) before writing. Zero-cost trial; then edit_transaction.",
   "inputSchema": {
     "type": "object",
     "properties": {
       "workspace_dir": {
         "type": "string",
-        "description": "REQUIRED: Absolute path to the project root directory."
+        "description": "REQUIRED: project root (abs). reindex first if new."
       },
       "file": {
         "type": "string",

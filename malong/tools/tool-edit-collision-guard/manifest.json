@@ -1,13 +1,13 @@
 {
   "name": "edit_collision_guard",
   "version": "1.1.0",
-  "description": "Two-step guard: 1) record_read after reading a file 2) check before editing. Detects external modifications. Pairs with edit_transaction.",
+  "description": "Two-step guard: record_read after reading, check before editing. Detects external edits. Pairs edit_transaction.",
   "inputSchema": {
     "type": "object",
     "properties": {
       "workspace_dir": {
         "type": "string",
-        "description": "REQUIRED: Absolute path to the project root directory."
+        "description": "REQUIRED: project root (abs). reindex first if new."
       },
       "file": {
         "type": "string",
@@ -15,7 +15,10 @@
       },
       "action": {
         "type": "string",
-        "enum": ["record_read", "check"],
+        "enum": [
+          "record_read",
+          "check"
+        ],
         "description": "record_read: snapshot after reading; check: verify before editing"
       },
       "session_id": {
@@ -23,11 +26,21 @@
         "description": "Optional session ID for multi-agent isolation (default: \"default\")"
       }
     },
-    "required": ["workspace_dir", "file", "action"],
+    "required": [
+      "workspace_dir",
+      "file",
+      "action"
+    ],
     "additionalProperties": false
   },
   "handler": "./handler.js",
   "protocol_version": "1.0",
-  "tags": ["collision", "staleness", "safety"],
-  "dependencies": ["edit_transaction"]
+  "tags": [
+    "collision",
+    "staleness",
+    "safety"
+  ],
+  "dependencies": [
+    "edit_transaction"
+  ]
 }

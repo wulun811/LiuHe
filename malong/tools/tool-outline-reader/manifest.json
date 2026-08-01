@@ -1,13 +1,13 @@
 {
   "name": "read_outline",
   "version": "1.1.0",
-  "description": "Get file structure (functions, classes, signatures) without reading full content. Faster than read for understanding a file. Before editing, check callers: impact_analysis. For reading one known symbol body + version, use read_symbol instead (primitive).",
+  "description": "File structure: functions/classes/signatures, no full read. depth=hierarchy nesting, NOT call depth. Known symbol? read_symbol.",
   "inputSchema": {
     "type": "object",
     "properties": {
       "workspace_dir": {
         "type": "string",
-        "description": "REQUIRED: Absolute path to the project root directory. Call reindex first."
+        "description": "REQUIRED: project root (abs). reindex first if new."
       },
       "file": {
         "type": "string",

@@ -1,13 +1,13 @@
 {
   "name": "dep_graph",
   "version": "1.0.0",
-  "description": "Trace import dependencies up to N levels deep. No built-in equivalent. Circular deps? Use fix_imports. Modifying a dependency? impact_analysis first.",
+  "description": "Import dependency graph of a file, transitive N levels. Circular deps? fix_imports. Changing a dep? impact_analysis first.",
   "inputSchema": {
     "type": "object",
     "properties": {
       "workspace_dir": {
         "type": "string",
-        "description": "REQUIRED: Absolute path to the project root directory. Call reindex first if this is a new workspace."
+        "description": "REQUIRED: project root (abs). reindex first if new."
       },
       "file": {
         "type": "string",

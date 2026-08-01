@@ -1,20 +1,45 @@
 {
   "name": "rename_symbol",
   "version": "1.0.0",
-  "description": "Atomic cross-file symbol rename via edit_transaction. Word-boundary-safe, string/comment-aware. dry_run=true (default) previews; set false to apply. Index optional (text fallback). After renaming, verify with test_bridge(action=\"run\") and check mocks with mock_sync.",
+  "description": "Atomic cross-file rename via edit_transaction. Word-boundary, string/comment-aware. dry_run previews; verify test_bridge + mock_sync.",
   "inputSchema": {
     "type": "object",
     "properties": {
-      "workspace_dir": { "type": "string", "description": "REQUIRED: Absolute path to the project root directory. Index optional (text fallback)." },
-      "symbol": { "type": "string", "description": "Current symbol name to rename" },
-      "new_name": { "type": "string", "description": "New symbol name" },
-      "file": { "type": "string", "description": "File where the symbol is defined (relative to workspace_dir)" },
-      "dry_run": { "type": "boolean", "description": "Preview changes without writing (default: true)" }
+      "workspace_dir": {
+        "type": "string",
+        "description": "REQUIRED: project root (abs)."
+      },
+      "symbol": {
+        "type": "string",
+        "description": "Current symbol name to rename"
+      },
+      "new_name": {
+        "type": "string",
+        "description": "New symbol name"
+      },
+      "file": {
+        "type": "string",
+        "description": "File where the symbol is defined (relative to workspace_dir)"
+      },
+      "dry_run": {
+        "type": "boolean",
+        "description": "Preview changes without writing (default: true)"
+      }
     },
-    "required": ["workspace_dir", "symbol", "new_name", "file"]
+    "required": [
+      "workspace_dir",
+      "symbol",
+      "new_name",
+      "file"
+    ]
   },
   "handler": "./handler.js",
   "protocol_version": "1.0",
-  "tags": ["refactor", "rename"],
-  "dependencies": ["reindex"]
+  "tags": [
+    "refactor",
+    "rename"
+  ],
+  "dependencies": [
+    "reindex"
+  ]
 }

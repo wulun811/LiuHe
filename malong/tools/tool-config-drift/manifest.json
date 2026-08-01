@@ -1,13 +1,13 @@
 {
   "name": "config_drift",
   "version": "1.0.0",
-  "description": "Detect config drift: env vars / DB tables / services in code but missing from .env.example, docker-compose.yml. No index required (pure regex). After fixing, re-run to verify. Pairs with exception_guard as quality gate.",
+  "description": "Detect env vars/DB tables/services in code missing from .env.example/docker-compose. Pairs with exception_guard.",
   "inputSchema": {
     "type": "object",
     "properties": {
       "workspace_dir": {
         "type": "string",
-        "description": "REQUIRED: Absolute path to the project root directory."
+        "description": "REQUIRED: project root (abs). reindex first if new."
       },
       "file": {
         "type": "string",

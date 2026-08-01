@@ -1,13 +1,13 @@
 {
   "name": "trace_symbol",
   "version": "1.1.0",
-  "description": "Trace constant values and find hardcoded copies. For refactoring magic numbers. Not for function impact (use impact_analysis). For atomic rename of traced symbols, use rename_symbol.",
+  "description": "Trace constant values + hardcoded copies (magic numbers). Function impact? impact_analysis. Rename? rename_symbol.",
   "inputSchema": {
     "type": "object",
     "properties": {
       "workspace_dir": {
         "type": "string",
-        "description": "REQUIRED: Absolute path to the project root directory. Call reindex first."
+        "description": "REQUIRED: project root (abs). reindex first if new."
       },
       "symbol": {
         "type": "string",
@@ -15,7 +15,7 @@
       },
       "file": {
         "type": "string",
-        "description": "File path relative to workspace_dir where the symbol is defined (e.g. \"src/config.py\")"
+        "description": "File rel to root where symbol is defined"
       },
       "include_literals": {
         "type": "boolean",
