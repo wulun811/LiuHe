@@ -16,6 +16,9 @@ import { computeFileAnchors } from './symbol-anchors.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
+// r31-fix: Windows 下 relative() 返回反斜杠路径，DB 统一正斜杠（查询侧用 src/auth.py）
+const toDbRel = (p) => p.replace(/\\/g, '/')
+
 // 13#1：提取器版本戳 = 二进制文件 sha256。二进制内容变（重新部署）→ 版本变 → 触发索引自愈。
 // 路径解析与 mcp-server.js 的 PARSE_SERVICE_BIN / _ALT 对齐（primary 优先，dev 回退 target/release）。
 export function resolveExtractorBin() {
@@ -311,7 +314,7 @@ class CodeIndex {
     const result = await this._langParser.extractAllAsync(source, ext, filePath)
     if (!result) return null
     const { symbols = [], refs = [] } = result
-    const relPath = repo ? relative(repo, filePath) : filePath
+    const relPath = repo ? toDbRel(relative(repo, filePath)) : filePath
     let mtime = Date.now()
     try { mtime = statSync(filePath).mtimeMs } catch {}
     // r28-fix：CJS require 扫描只对 CJS 文件有意义——对 C/Java/Bash 等新语言文件扫 require( 会误报 import
@@ -723,7 +726,7 @@ class CodeIndex {
     const mtimeMap = new Map()
     const currentPaths = new Set()
     for (const fp of validFiles) {
-      const relPath = repo ? relative(repo, fp) : fp
+      const relPath = repo ? toDbRel(relative(repo, fp)) : fp
       currentPaths.add(relPath)
       let st
       try { st = statSync(fp) } catch { continue }
@@ -767,7 +770,7 @@ class CodeIndex {
       // 正解：关外键 → IN 批量一次删光（单次全扫）→ UPDATE 清悬空引用（单次全扫，_resolveCrossFileRefs 幂等重绑）
       if (changedFiles.length) {
         const CLEAN_BATCH = 400
-        const relPaths = changedFiles.map(fp => relative(repo, fp))
+        const relPaths = changedFiles.map(fp => toDbRel(relative(repo, fp)))
         for (let i = 0; i < relPaths.length; i += CLEAN_BATCH) {
           const rels = relPaths.slice(i, i + CLEAN_BATCH)
           const ph = rels.map(() => '?').join(',')
@@ -791,7 +794,7 @@ class CodeIndex {
         parsed = []
         for (let i = 0; i < changedFiles.length; i += BATCH_SIZE) {
           const chunk = changedFiles.slice(i, i + BATCH_SIZE)
-          const files = chunk.map(fp => ({ path: relative(repo, fp), file_path: fp }))
+          const files = chunk.map(fp => ({ path: toDbRel(relative(repo, fp)), file_path: fp }))
           const results = await this._langParser.batchExtractAsync(files)
           const statMap = new Map()
           for (const fp of chunk) {
@@ -865,7 +868,7 @@ class CodeIndex {
 
     async function doSyncFileChange(filePath) {
       if (!existsSync(filePath)) {
-        const relPath = self._watchedDir ? relative(self._watchedDir, filePath) : filePath
+        const relPath = self._watchedDir ? toDbRel(relative(self._watchedDir, filePath)) : filePath
         const matched = self._db.prepare('SELECT id FROM files WHERE path = ?').get(relPath)
         if (matched) {
           self._db.prepare('DELETE FROM symbols WHERE file_id = ?').run(matched.id)

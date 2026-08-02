@@ -82,9 +82,10 @@ export class EmbeddedReader {
     const filePath = locator?.file_path
     if (!filePath) return { error: 'missing_parameter', message: 'file_path is required' }
     // 路径安全（§7：workspace 边界，防 ../../ 穿越 + P2-C2：符号链接指向外部）
-    const wsRoot = this.workspaceDir.endsWith('/') ? this.workspaceDir : this.workspaceDir + '/'
+    // r31-fix: Windows 下 workspaceDir 是反斜杠，旧 `+'/'` 拼串与 resolve() 结果 startsWith 永远 false → 误判穿越
+    const wsRoot = this.workspaceDir.endsWith(sep) ? this.workspaceDir : this.workspaceDir + sep
     const resolved = resolve(wsRoot, filePath)
-    if (!resolved.startsWith(wsRoot)) {
+    if (resolved !== wsRoot && !resolved.startsWith(wsRoot)) {
       return { error: 'PATH_BLOCKED', message: `Path escapes workspace: ${filePath}` }
     }
     let st = null
