@@ -21,8 +21,10 @@ const MEMORY_CHECK_INTERVAL_MS = 30_000
 const MEMORY_DANGER_MB = 480
 
 // ── Rust 解析服务自动拉起 ──
+// r35-fix: Windows 无 getuid → UID 兜底 0（与 parse-client.js 同款守卫）
 
-const PARSE_SERVICE_SOCKET = `/tmp/malong-parse-${process.getuid()}.sock`
+const UID = typeof process.getuid === 'function' ? process.getuid() : 0
+const PARSE_SERVICE_SOCKET = `/tmp/malong-parse-${UID}.sock`
 const PARSE_SERVICE_BIN = join(os.homedir(), '.local', 'bin', 'malong-parse')
 const PARSE_SERVICE_BIN_ALT = join(__dirname, '..', 'malong-parse', 'target', 'release', 'malong-parse')
 

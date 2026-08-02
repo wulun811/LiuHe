@@ -3,7 +3,8 @@ import { join } from 'node:path'
 import { homedir } from 'node:os'
 
 function getFeedbackPath() {
-  const dir = join(homedir(), '.config', 'opencode')
+  // r35-fix: Windows 上 homedir() 忽略 HOME（读 USERPROFILE），沙盒/测试靠 HOME 定向 → HOME 优先
+  const dir = join(process.env.HOME || homedir(), '.config', 'opencode')
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
   return join(dir, 'malong-feedback.jsonl')
 }

@@ -4,7 +4,7 @@
 // r20：数据源从「磁盘扫描 + Rust AST 解析」改为「读 code-index.db」——大仓库从几十秒降到秒级
 
 import { createDb } from './db-adapter.js'
-import { join, relative, resolve, sep, basename } from 'node:path'
+import { join, relative, resolve, sep, basename, isAbsolute } from 'node:path'
 import { existsSync } from 'node:fs'
 
 export const name = 'malong-repo-map'
@@ -54,7 +54,7 @@ function queryFilesWithSymbols(db, rootDir, workspaceDir, relevantFiles, relevan
 
   const filterSet = relevantFiles && relevantFiles.length > 0
     ? new Set(relevantFiles.map(f => {
-        if (f.startsWith('/')) return normalizeDbPath(relative(workspaceDir, f), workspaceDir)
+        if (isAbsolute(f)) return normalizeDbPath(relative(workspaceDir, f).replace(/\\/g, '/'), workspaceDir)
         return f
       }))
     : null

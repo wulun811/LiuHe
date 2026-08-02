@@ -71,7 +71,8 @@ for (const f of ['src/a.js', 'src/b.py', 'src/deep/c.js', 'src/deep/er/d.js', 's
 
 const files = collectFiles(WS, {})
 assert(files.length === 9, `默认忽略 node_modules/.hidden/dist，收集 9 个（实际 ${files.length}）`)
-const paths = files.map(f => f.path.replace(WS + '/', ''))
+const normWs = WS.replace(/\\/g, '/')
+const paths = files.map(f => f.path.replace(/\\/g, '/').replace(normWs + '/', ''))
 assert(!paths.includes('node_modules/pkg/x.js'), 'node_modules 被忽略')
 assert(!paths.includes('dist/o.js'), 'dist 被忽略')
 assert(!paths.includes('.hidden/s.js'), '点目录被忽略')
@@ -84,7 +85,7 @@ assert(capped.length === 3, `maxFiles=3 截断（实际 ${capped.length}）`)
 
 // 深度 8 内可遍历，9 层截断
 const deepFiles = collectFiles(WS, {})
-assert(deepFiles.some(f => f.path.includes('way/i.js')), '8 层深度可收集（depth>8 才截断）')
+assert(deepFiles.some(f => f.path.replace(/\\/g, '/').includes('way/i.js')), '8 层深度可收集（depth>8 才截断）')
 mkdirSync(join(WS, 'src', 'deep', 'er', 'nest', 'ed', 'too', 'deep', 'way', 'nine'), { recursive: true })
 writeFileSync(join(WS, 'src', 'deep', 'er', 'nest', 'ed', 'too', 'deep', 'way', 'nine', 'j.js'), 'x')
 const deep9 = collectFiles(WS, {})
@@ -97,7 +98,7 @@ assert(!skipped.some(f => f.path.includes('src/deep')), 'skipDirs 跳过子目�
 // 自定义规则
 const withRule = collectFiles(WS, { ignoreRules: ['src/deep/er/'] })
 assert(!withRule.some(f => f.path.includes('er/nest')), '自定义目录规则生效')
-assert(withRule.some(f => f.path.includes('src/deep/c.js')), '自定义规则不误伤其他')
+assert(withRule.some(f => f.path.replace(/\\/g, '/').includes('src/deep/c.js')), '自定义规则不误伤其他')
 
 rmSync(TMP, { recursive: true, force: true })
 console.log(`== test-file-collector: ${pass} passed, ${fail} failed ==`)

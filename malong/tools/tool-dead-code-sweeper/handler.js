@@ -1,4 +1,4 @@
-import { join, extname, basename, dirname } from 'node:path'
+import { join, extname, basename, dirname, sep } from 'node:path'
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 
 // r29：与 malong-parse 支持语言对齐（r28 新增 C/C++/Java/Bash）
@@ -18,7 +18,8 @@ function walkSourceFiles(baseDir, dir, files, maxFiles) {
     if (entry.isDirectory()) {
       walkSourceFiles(baseDir, fullPath, files, maxFiles)
     } else if (entry.isFile() && SOURCE_EXTS.has(extname(entry.name))) {
-      files.push(fullPath.startsWith(baseDir + '/') ? fullPath.slice(baseDir.length + 1) : fullPath)
+      const relPath = fullPath.startsWith(baseDir + sep) ? fullPath.slice(baseDir.length + 1) : fullPath
+      files.push(relPath.replace(/\\/g, '/'))
     }
   }
 }

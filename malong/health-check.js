@@ -8,7 +8,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const SCHEMA_VERSION = 1
 
 export function readUsageStats() {
-  const usagePath = join(homedir(), '.config', 'opencode', 'malong-usage.jsonl')
+  // r35-fix: Windows 上 os.homedir() 忽略 HOME 环境变量（读 USERPROFILE），测试/沙盒靠 HOME 定向 → HOME 优先
+  const usagePath = join(process.env.HOME || homedir(), '.config', 'opencode', 'malong-usage.jsonl')
   if (!existsSync(usagePath)) return null
   try {
     const lines = readFileSync(usagePath, 'utf-8').trim().split('\n').filter(Boolean)

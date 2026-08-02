@@ -129,6 +129,16 @@ async function validateSyntax(langParser, source, ext) {
 
 // ---------- 主编排 ----------
 
+// r35-fix: Windows rename 偶发 EPERM/EBUSY（杀软扫描/句柄短暂占用）→ 短暂重试后再放弃
+async function renameRetry(from, to) {
+  for (let i = 0; ; i++) {
+    try { renameSync(from, to); return } catch (e) {
+      if (i >= 3 || !['EPERM', 'EBUSY', 'EACCES'].includes(e.code)) throw e
+      await new Promise(r => setTimeout(r, 150))
+    }
+  }
+}
+
 export async function writeSymbol(args, context) {
   const { codeIndexService, getWorkspaceDir, langParserService } = context
   const langParser = langParserService
@@ -463,7 +473,7 @@ export async function writeSymbol(args, context) {
     try {
       // 7（F7）：旧 writeFileSync 在 try 外——磁盘满/权限错误裸异常逃逸，tmp 半写残留，错误契约破坏
       writeFileSync(tmpPath, newContent)
-      renameSync(tmpPath, absPath)
+      await renameRetry(tmpPath, absPath)
     } catch (e) {
       try { unlinkSync(tmpPath) } catch {}
       updateJournalState(journal.dir, { state: 'failed', reason: e.message })
@@ -787,7 +797,7 @@ export async function writeSymbols(args, context) {
       try {
         // 7（F7）：writeFileSync 在 try 外——异常逃逸跳过 failed 分支与回滚
         writeFileSync(tmpPath, newContent)
-        renameSync(tmpPath, absPath)
+        await renameRetry(tmpPath, absPath)
       } catch (e) {
         try { unlinkSync(tmpPath) } catch {}
         updateJournalState(journal.dir, { state: 'failed', reason: e.message })
@@ -812,7 +822,7 @@ export async function writeSymbols(args, context) {
         const backup = join(wf.journalDir, 'backup', basename(wf.filePath))
         if (existsSync(backup)) {
           writeFileSync(`${wf.absPath}.rollback-tmp`, readFileSync(backup))
-          renameSync(`${wf.absPath}.rollback-tmp`, wf.absPath)
+          await renameRetry(`${wf.absPath}.rollback-tmp`, wf.absPath)
           updateJournalState(wf.journalDir, { state: 'rolled_back', rolled_back_at: new Date().toISOString() })
           rolledBack.push(wf.filePath)
           auditLog(workspaceDir, { event: 'batch_rollback', file: wf.filePath, reason: failed.error?.code })
