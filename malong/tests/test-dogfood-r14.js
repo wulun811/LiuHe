@@ -28,6 +28,10 @@ writeFileSync(`${WS}/lib.js`, `function process(data, attempt) {\n  return { ok:
 writeFileSync(`${WS}/app.js`, `const { process: libProcess } = require('./lib.js');\nconst MAX_RETRIES = 3;\n// const fake = require('not-real')\nconst str = "require('also-not-real')"\nfunction handle(data) {\n  let result = null\n  for (let i = 0; i < MAX_RETRIES; i++) {\n    result = libProcess(data, i)\n    if (result.ok) break\n  }\n  return result\n}\nmodule.exports = { handle }\n`)
 writeFileSync(`${WS}/test_app.js`, `const { handle } = require('./app.js');\nfunction testIt() { return handle({ value: 2 }) }\nmodule.exports = { testIt }\n`)
 writeFileSync(`${WS}/plain.js`, `const os = require('os')\nconst path = require('node:path')\nmodule.exports = { os, path }\n`)
+mkdirSync(`${WS}/src`, { recursive: true })
+writeFileSync(`${WS}/src/util.js`, `function helper() { return 'used' }\nfunction unusedHelper() { return 'dead' }\nmodule.exports = { helper }\n`)
+writeFileSync(`${WS}/app2.js`, `const { helper } = require('./src/util.js');\nfunction orphanFn() { return 42 }\nmodule.exports = { run: () => helper() }\n`)
+writeFileSync(`${WS}/registry.js`, `function registeredFn() { return 'via-object' }\nfunction deadFn() { return 'truly dead' }\ncore.registerService('demo', { run: registeredFn })\n`)
 const libJs = join(WS, 'lib.js')
 const appJs = join(WS, 'app.js')
 const testAppJs = join(WS, 'test_app.js')
@@ -57,7 +61,7 @@ const core = {
 await codeIndex.init(core)
 const svc = services.codeIndex
 svc.initWorkspace(WS)
-await svc.indexBatch([libJs, appJs, testAppJs, plainJs], WS)
+await svc.indexBatch([libJs, appJs, testAppJs, plainJs, join(WS, 'src', 'util.js'), join(WS, 'app2.js'), join(WS, 'registry.js')], WS)
 
 const db2 = new Database(join(DATA, 'code-index.db'))
 db2.pragma('busy_timeout=5000')
@@ -105,8 +109,18 @@ const sweep = await import(join(MALONG_DIR, 'tools', 'tool-dead-code-sweeper', '
 const sweepRes = await sweep.handle({ workspace_dir: WS, scope: 'lib.js' }, { codeIndexService: svc, getWorkspaceDir: () => DATA })
 assert(sweepRes.scanned_files === 1, `③ scope=lib.js 只扫 1 个文件（得 ${sweepRes.scanned_files}）`)
 const sweepWhole = await sweep.handle({ workspace_dir: WS, scope: '.' }, { codeIndexService: svc, getWorkspaceDir: () => DATA })
-assert(sweepWhole.scanned_files === 4, `③ scope=. 扫全部 4 个文件（得 ${sweepWhole.scanned_files}）`)
+assert(sweepWhole.scanned_files === 7, `③ scope=. 扫全部 7 个文件（得 ${sweepWhole.scanned_files}）`)
 assert(sweepWhole.dead_code.some(d => d.type === 'unused_function' && d.name === 'testIt'), `③ 全仓扫描照常报 unused_function（${JSON.stringify(sweepWhole.summary)}）`)
+
+// ③' r29：目录 scope 时 DB 层结果限定在 scope 内——旧实现把整仓 unused_function 混进来
+const sweepDir = await sweep.handle({ workspace_dir: WS, scope: 'src' }, { codeIndexService: svc, getWorkspaceDir: () => DATA })
+assert(sweepDir.scanned_files === 1, `③' scope=src 只扫 1 个文件（得 ${sweepDir.scanned_files}）`)
+assert(sweepDir.dead_code.every(d => d.file.startsWith('src/')), `③' scope=src 结果全在 src/ 内（得 ${JSON.stringify(sweepDir.dead_code.map(d => d.file))}）`)
+assert(!sweepDir.dead_code.some(d => d.name === 'orphanFn'), `③' scope=src 不含 scope 外 app2.js::orphanFn（得 ${JSON.stringify(sweepDir.dead_code.map(d => d.name))}）`)
+
+// ③'' r29：register 对象字面量属性值引用不算死代码（refs 只记调用/import，detectDeadCode 显式豁免）
+assert(!sweepWhole.dead_code.some(d => d.name === 'registeredFn'), `③'' registeredFn 被对象字面量引用不算死代码（得 ${JSON.stringify(sweepWhole.dead_code.map(d => d.name))}）`)
+assert(sweepWhole.dead_code.some(d => d.name === 'deadFn'), `③'' 真死函数 deadFn 照常报（得 ${JSON.stringify(sweepWhole.dead_code.map(d => d.name))}）`)
 
 console.log(`\n== test-dogfood-r14: ${pass} passed, ${fail} failed ==`)
 process.exit(fail > 0 ? 1 : 0)

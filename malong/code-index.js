@@ -153,6 +153,30 @@ function pickCandidate(candidates, callExpr, filePathMap) {
   return candidates[0]
 }
 
+const _exportRefCache = new Map()
+// r29：判定函数是否被「注册/导出形态」引用（对象字面量属性值、exports.name、export 列表）——
+// refs 只记调用与 import，这些形态零 ref，detectDeadCode 需显式豁免以免误报死代码。
+// 保守方向：宁可漏报（不报死代码）不可杀错（真删）。同文件缓存避免重复读盘。
+function isExportReferenced(name, file) {
+  if (!file || !name) return false
+  let source = _exportRefCache.get(file)
+  if (source === undefined) {
+    // r29：file 已是调用方拼好的绝对路径（self._currentWorkspace + 相对路径），
+    // 此处直接读——旧实现再 join(process.cwd(), file) 双重拼接读不到文件 → 过滤永不生效
+    try { source = readFileSync(file, 'utf-8') } catch { source = null }
+    if (source !== null) {
+      if (_exportRefCache.size > 200) _exportRefCache.clear()
+      _exportRefCache.set(file, source)
+    }
+  }
+  if (source === null) return false
+  const esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  // 只豁免「对象字面量属性值引用」（registerService/registerTool 回调挂载）：refs 零记录但语义上是活引用。
+  // 导出形态（module.exports = { x } / exports.x = / export default x）不豁免——导出后无调用 = 死导出，
+  // 该报（r14 断言：module.exports = { testIt } 的 testIt 必须报死代码）。
+  return new RegExp(`:\\s*${esc}\\b`).test(source)
+}
+
 function _calcComplexity(sym) {
   const loc = Math.max(1, (sym.end_line || sym.start_line) - sym.start_line + 1)
   const cyclomatic = Math.min(10, Math.ceil(loc / 10))
@@ -413,7 +437,7 @@ class CodeIndex {
   _resolveCrossFileRefs() {
     // 21：只绑裸调用——成员调用（obj.slice()/byFile.get()）绝大多数是原生/库方法，
     // 跨文件绑同名符号只会制造噪声（slice→format.rs、get→test_impact.js 等误绑）。
-    const unbound = this._db.prepare("SELECT r.id, r.source_file_id, r.target_name, r.call_expr FROM refs r WHERE r.target_symbol_id IS NULL AND r.kind IN ('call','import','extends','implements') AND r.target_name != '' AND (r.call_expr IS NULL OR r.call_expr = '' OR r.call_expr NOT LIKE '%.%') AND (r.call_expr IS NULL OR r.call_expr != '" + ALIAS_LOCAL_MARKER + "')").all()
+    const unbound = this._db.prepare("SELECT r.id, r.source_file_id, r.target_name, r.call_expr FROM refs r WHERE r.target_symbol_id IS NULL AND r.kind IN ('call','import','extends','implements') AND r.target_name != '' AND (r.call_expr IS NULL OR r.call_expr = '' OR r.call_expr NOT LIKE '%.%') AND (r.call_expr IS NULL OR r.call_expr != ?)").all(ALIAS_LOCAL_MARKER)
     if (!unbound.length) return 0
     const allSyms = this._db.prepare('SELECT s.id, s.name, s.file_id FROM symbols s').all()
     const symMap = new Map()
@@ -996,7 +1020,7 @@ class CodeIndex {
         const f = self._db.prepare('SELECT id FROM files WHERE path = ?').get(filePath)
         if (!f) return { calls: [], calledBy: [] }
         const syms = self._db.prepare("SELECT id, name, type, start_line FROM symbols WHERE file_id = ? AND type IN ('function','method')").all(f.id)
-        const calls = self._db.prepare("SELECT r.target_name, r.kind FROM refs r WHERE r.source_file_id = ? AND r.kind IN ('call','import') AND (r.call_expr IS NULL OR r.call_expr != '" + ALIAS_LOCAL_MARKER + "')").all(f.id)
+        const calls = self._db.prepare("SELECT r.target_name, r.kind FROM refs r WHERE r.source_file_id = ? AND r.kind IN ('call','import') AND (r.call_expr IS NULL OR r.call_expr != ?)").all(f.id, ALIAS_LOCAL_MARKER)
         const calledBy = self._db.prepare("SELECT f.path, r.kind FROM refs r JOIN files f ON r.source_file_id = f.id WHERE r.target_name IN (SELECT name FROM symbols WHERE file_id = ? AND type IN ('function','method'))").all(f.id)
         return { functions: syms, calls, calledBy }
       },
@@ -1008,7 +1032,7 @@ class CodeIndex {
         for (const e of entries) {
           const f = self._db.prepare('SELECT id FROM files WHERE path = ?').get(e)
           if (!f) continue
-          const refs = self._db.prepare("SELECT r.target_name, f.path AS source FROM refs r JOIN files f ON r.source_file_id = f.id WHERE r.source_file_id = ? AND r.kind = 'import' AND (r.call_expr IS NULL OR r.call_expr != '" + ALIAS_LOCAL_MARKER + "')").all(f.id)
+          const refs = self._db.prepare("SELECT r.target_name, f.path AS source FROM refs r JOIN files f ON r.source_file_id = f.id WHERE r.source_file_id = ? AND r.kind = 'import' AND (r.call_expr IS NULL OR r.call_expr != ?)").all(f.id, ALIAS_LOCAL_MARKER)
           for (const r of refs) {
             edges.push({ from: r.source, to: r.target_name, kind: 'import' })
             nodes.add(r.target_name)
@@ -1223,7 +1247,7 @@ class CodeIndex {
         const fileArg = resolveFileArg({ db: self._db, workspaceDir: self._currentWorkspace, file: filePath })
         if (!fileArg.ok) return { file: filePath, imports: [], transitive: [], file_error: fileArg.error }
         const f = { id: fileArg.fileId }
-        const imports = self._db.prepare("SELECT r.target_name AS module FROM refs r WHERE r.source_file_id = ? AND r.kind = 'import' AND (r.call_expr IS NULL OR r.call_expr != '" + ALIAS_LOCAL_MARKER + "')").all(f.id)
+        const imports = self._db.prepare("SELECT r.target_name AS module FROM refs r WHERE r.source_file_id = ? AND r.kind = 'import' AND (r.call_expr IS NULL OR r.call_expr != ?)").all(f.id, ALIAS_LOCAL_MARKER)
         const transitive = []
         if (depth > 1) {
           const visited = new Set([filePath])
@@ -1240,7 +1264,7 @@ class CodeIndex {
                 mf = self._db.prepare("SELECT id, path FROM files WHERE path LIKE ?").get(`%${slashed}%`)
               }
               if (!mf) continue
-              const sub = self._db.prepare("SELECT r.target_name AS module FROM refs r WHERE r.source_file_id = ? AND r.kind = 'import' AND (r.call_expr IS NULL OR r.call_expr != '" + ALIAS_LOCAL_MARKER + "')").all(mf.id)
+              const sub = self._db.prepare("SELECT r.target_name AS module FROM refs r WHERE r.source_file_id = ? AND r.kind = 'import' AND (r.call_expr IS NULL OR r.call_expr != ?)").all(mf.id, ALIAS_LOCAL_MARKER)
               for (const s of sub) {
                 if (!visited.has(s.module) && !s.module.startsWith('node:')) {
                   transitive.push({ depth: d, from: mf.path, module: s.module })
@@ -1258,7 +1282,10 @@ class CodeIndex {
         // 14：usage 计数同时认 target_name 和 target_symbol_id——CJS 别名重绑定后
         // 调用点 ref 的 target_name 是本地别名（libProcess≠process），只按名计数会把
         // 被别名调用的函数误报为死代码
-        return self._db.prepare("SELECT s.name, s.type, f.path AS file, s.start_line, (SELECT COUNT(*) FROM refs WHERE (target_name = s.name OR target_symbol_id = s.id)) AS ref_count FROM symbols s JOIN files f ON s.file_id = f.id WHERE s.type IN ('function','method') AND (SELECT COUNT(*) FROM refs WHERE (target_name = s.name OR target_symbol_id = s.id) AND (source_file_id != s.file_id OR kind != 'import')) < ? ORDER BY ref_count ASC LIMIT 50").all(minUseCount)
+        const dead = self._db.prepare("SELECT s.name, s.type, f.path AS file, s.start_line, (SELECT COUNT(*) FROM refs WHERE (target_name = s.name OR target_symbol_id = s.id)) AS ref_count FROM symbols s JOIN files f ON s.file_id = f.id WHERE s.type IN ('function','method') AND (SELECT COUNT(*) FROM refs WHERE (target_name = s.name OR target_symbol_id = s.id) AND (source_file_id != s.file_id OR kind != 'import')) < ? ORDER BY ref_count ASC LIMIT 50").all(minUseCount)
+        // r29：注册/导出形态引用过滤——refs 只记调用与 import，`extract: extractBlocksFromLLM`
+        // 这类「对象字面量属性值引用」（registerService/registerTool 回调挂载）零 ref → 被误报死代码
+        return dead.filter(s => !isExportReferenced(s.name, join(self._currentWorkspace || process.cwd(), s.file)))
       },
 
       async getComplexity(symbolName, { filePath } = {}) {

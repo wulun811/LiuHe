@@ -1,7 +1,8 @@
 import { join, extname, basename, dirname } from 'node:path'
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 
-const SOURCE_EXTS = new Set(['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.py', '.go', '.rs', '.java', '.rb'])
+// r29：与 malong-parse 支持语言对齐（r28 新增 C/C++/Java/Bash）
+const SOURCE_EXTS = new Set(['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.mts', '.cts', '.py', '.go', '.rs', '.java', '.c', '.cpp', '.cc', '.cxx', '.hpp', '.hh', '.hxx', '.sh', '.bash', '.rb'])
 const SKIP_DIRS = new Set(['node_modules', '.git', '__pycache__', '.venv', 'venv', 'dist', 'build'])
 const ENTRY_NAMES = new Set(['main', 'index', 'app', 'server', 'cli', '__main__', 'manage'])
 const MAGIC_METHODS = new Set(['__init__', '__str__', '__repr__', '__eq__', '__hash__', '__len__', '__call__', '__enter__', '__exit__', '__new__', '__del__'])
@@ -233,6 +234,8 @@ export async function handle(args, context) {
       scanDir = dirname(scanDir)
     }
   }
+  // r29：目录 scope 前缀（DB 层结果按此过滤）；规范化 ./ 前缀与尾部 /，防前缀串匹配
+  const scopePrefix = scope === '.' ? '' : scope.replace(/^\.\//, '').replace(/\/+$/, '') + '/'
 
   const files = []
   walkSourceFiles(workspaceDir, scanDir, files, 500)
@@ -270,6 +273,13 @@ export async function handle(args, context) {
             if (isTestFile(s.file || s.path || '')) continue
             // 14：单文件 scope 时，DB 层的 unused_function 也限定在该文件内
             if (scanFile && (s.file || s.path) !== scanFile) continue
+            // r29：目录 scope 时 DB 层结果同样限定在 scope 内——旧实现只有单文件过滤，
+            // 目录 scope 会把整仓 unused_function 混进来（scope 外目录的文件也报）
+            if (!scanFile && scope !== '.' && !(s.file || s.path || '').startsWith(scopePrefix)) continue
+            // r29：Rust #[cfg(test)] 内联测试函数（test_ 前缀）由 cargo test 直接发现，
+            // 不走符号引用 → 全被误报 unused_function
+            const sPath = s.file || s.path || ''
+            if (extname(sPath) === '.rs' && (s.name.startsWith('test_') || s.name.endsWith('_test'))) continue
 
             let mtime = null, daysUnused = null
             try {
