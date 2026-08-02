@@ -52,7 +52,7 @@ export async function handle(args, context) {
     return makeError(ErrorCodes.SERVICE_UNAVAILABLE, 'codeIndex service not available', { suggestion: 'Check MCP server configuration' })
   }
 
-  codeIndexService.initWorkspace(workspaceDir)
+  await codeIndexService.initWorkspace(workspaceDir)
 
   if (codeIndexService.indexing && codeIndexService.indexProgress) {
     const p = codeIndexService.indexProgress

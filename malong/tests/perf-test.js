@@ -159,7 +159,7 @@ async function testCodeIndex() {
   }
 
   // 2a. 索引 51 个文件
-  ci.initWorkspace(TMP_DIR)
+  await ci.initWorkspace(TMP_DIR)
   const files = Array.from({ length: 51 }, (_, i) =>
     i < 50 ? join(TMP_DIR, 'src', `module_${i}.js`) : join(TMP_DIR, 'src', 'utils.js')
   )

@@ -5,7 +5,7 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs'
 import { createHash } from 'node:crypto'
-import Database from 'better-sqlite3'
+import { createDb } from '../db-adapter.js'
 import { tmpdir } from 'node:os'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -52,10 +52,10 @@ const core = {
 }
 await codeIndex.init(core)
 const svc = services.codeIndex
-svc.initWorkspace(WS)
+await svc.initWorkspace(WS)
 await svc.indexBatch([aJs, bJs], WS)
 
-const db2 = new Database(join(DATA, 'code-index.db'))
+const db2 = await createDb(join(DATA, 'code-index.db'))
 db2.pragma('busy_timeout=5000')
 const symIds = (p) => db2.prepare('SELECT id FROM symbols WHERE file_id=(SELECT id FROM files WHERE path=?)').all(p).map(r => r.id).sort((x, y) => x - y)
 const fileRow = (p) => db2.prepare('SELECT content_hash, index_state FROM files WHERE path=?').get(p)

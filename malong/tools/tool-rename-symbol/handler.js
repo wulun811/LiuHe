@@ -150,7 +150,7 @@ export async function handle(args, context) {
     return { error: 'invalid_input', message: `"${newName}" is not a valid identifier. Must match /^[a-zA-Z_$][a-zA-Z0-9_$]*$/` }
   }
 
-  codeIndexService?.initWorkspace(workspaceDir)
+  await codeIndexService?.initWorkspace(workspaceDir)
 
   // 16：file 参数共用守卫——定义文件无效（目录/不存在）时提前返回，不再静默 definition=null
   if (codeIndexService?.resolveFileArg) {

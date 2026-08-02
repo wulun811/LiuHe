@@ -224,7 +224,7 @@ export async function handle(args, context) {
     const dbPath = join(getWorkspaceDir(workspaceDir), 'code-index.db')
     if (existsSync(dbPath)) {
       try {
-        codeIndexService.initWorkspace(workspaceDir)
+        await codeIndexService.initWorkspace(workspaceDir)
         const results = await codeIndexService.searchSymbols('Error')
         const results2 = await codeIndexService.searchSymbols('Exception')
         for (const s of [...(results || []), ...(results2 || [])]) {

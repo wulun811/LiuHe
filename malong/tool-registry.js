@@ -9,7 +9,8 @@ import { homedir } from 'node:os'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
-function extractMetrics(name, result) {
+// r34：导出供单测（原为模块私有，行为不变）
+export function extractMetrics(name, result) {
   if (!result || result.error) return undefined
   const m = {}
   switch (name) {
@@ -91,7 +92,8 @@ class ToolRegistry {
     this.toolsDir = toolsDir || join(__dirname, 'tools')
     this.tools = new Map()
     this.log = options.log || ((level, msg) => process.stderr.write(`[registry] [${level}] ${msg}\n`))
-    this._usagePath = null
+    // r34：usagePath 可注入（测试隔离；默认走 ~/.config/opencode/），行为不变
+    this._usagePath = options.usagePath || null
   }
 
   async loadAll() {

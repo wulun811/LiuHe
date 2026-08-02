@@ -3,7 +3,7 @@
 // 详见：通天计划 §六 码龙
 // r20：数据源从「磁盘扫描 + Rust AST 解析」改为「读 code-index.db」——大仓库从几十秒降到秒级
 
-import Database from 'better-sqlite3'
+import { createDb } from './db-adapter.js'
 import { join, relative, resolve, sep, basename } from 'node:path'
 import { existsSync } from 'node:fs'
 
@@ -26,10 +26,10 @@ function estimateTokens(text) {
   return Math.ceil(text.length / CHARS_PER_TOKEN)
 }
 
-function openDb(workspaceDir) {
+async function openDb(workspaceDir) {
   const dbPath = join(_core.getWorkspaceDir(workspaceDir), 'code-index.db')
   if (!existsSync(dbPath)) return null
-  return new Database(dbPath, { readonly: true })
+  return await createDb(dbPath, { readonly: true })
 }
 
 // 归一化 DB path：历史库基座可能是 workspace 根，也可能是 workspace 的父目录（path 带 basename 前缀）
@@ -136,7 +136,7 @@ export async function init(core) {
   await core.registerService('repoMap', {
     async generate(rootDir, opts = {}) {
       const { workspaceDir = rootDir } = opts
-      const db = openDb(workspaceDir)
+      const db = await openDb(workspaceDir)
       if (!db) {
         return { error: 'workspace_not_indexed', message: `Workspace not indexed: ${workspaceDir}`, suggestion: `Call reindex(workspace_dir="${workspaceDir}") first` }
       }
@@ -155,7 +155,7 @@ export async function init(core) {
 
     async generateFocused(rootDir, opts = {}) {
       const { workspaceDir = rootDir, relevantFiles, relevantEntities } = opts
-      const db = openDb(workspaceDir)
+      const db = await openDb(workspaceDir)
       if (!db) {
         return { error: 'workspace_not_indexed', message: `Workspace not indexed: ${workspaceDir}`, suggestion: `Call reindex(workspace_dir="${workspaceDir}") first` }
       }

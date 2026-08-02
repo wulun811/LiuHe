@@ -117,7 +117,7 @@ const core = {
 }
 await codeIndex.init(core)
 const svc = services.codeIndex
-svc.initWorkspace(WS)
+await svc.initWorkspace(WS)
 await svc.indexBatch(['golden.py', 'golden.js', 'golden.go'].map(f => join(WS, 'src', f)), WS)
 svc.resolveCrossFileRefs()
 

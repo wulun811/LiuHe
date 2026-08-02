@@ -1,6 +1,6 @@
 import { join, extname } from 'node:path'
 import { existsSync } from 'node:fs'
-import Database from 'better-sqlite3'
+import { createDb } from '../../db-adapter.js'
 import { ErrorCodes, makeError, validateFilePath } from '../../error-codes.js'
 
 const EXT_MAP = { python: '.py', javascript: '.js', typescript: '.ts', go: '.go', rust: '.rs', java: '.java' }
@@ -127,7 +127,7 @@ export async function handle(args, context) {
 
   let db
   try {
-    db = new Database(dbPath, { readonly: true })
+    db = await createDb(dbPath, { readonly: true })
   } catch (e) {
     return makeError(ErrorCodes.SERVICE_UNAVAILABLE, `Cannot open database: ${e.message}`)
   }

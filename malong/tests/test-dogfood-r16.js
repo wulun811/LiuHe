@@ -5,7 +5,7 @@
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs'
-import Database from 'better-sqlite3'
+import { createDb } from '../db-adapter.js'
 import { tmpdir } from 'node:os'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -53,7 +53,7 @@ const core = {
 }
 await codeIndex.init(core)
 const svc = services.codeIndex
-svc.initWorkspace(WS)
+await svc.initWorkspace(WS)
 await svc.indexBatch([libJs, appJs], WS)
 
 const ctx = { codeIndexService: svc, getWorkspaceDir: () => DATA }

@@ -4,7 +4,7 @@
 
 [English](README.md) | **简体中文** | [官方文档](https://www.ttimmortal.com/) | [GitHub](https://github.com/wulun811/LiuHe)
 
-![tests](https://img.shields.io/badge/tests-200%2B%20assertions%20passed-brightgreen)
+![tests](https://img.shields.io/badge/tests-984%2B%20assertions%20passed-brightgreen)
 ![tools](https://img.shields.io/badge/tools-38%20MCP-blue)
 ![languages](https://img.shields.io/badge/parsers-10%20languages-brightgreen)
 ![read](https://img.shields.io/badge/read%20P95-1ms-brightgreen)
@@ -91,9 +91,27 @@
 
 ## 自我进化（self-hosting）
 
-25+ 轮「码龙查码龙」：工具集审查并修复**自身**代码，累计修复数十处真实 bug 且全部带测试锁定——包括目录 scope 过滤失效、注册形态死代码误报、常量追踪读取点丢失、SQL 参数化治理等。测试盲区即 bug 潜伏区，每一轮审查都伴随断言增长（现 200+ 断言全绿）。
+25+ 轮「码龙查码龙」：工具集审查并修复**自身**代码，累计修复数十处真实 bug 且全部带测试锁定——包括目录 scope 过滤失效、注册形态死代码误报、常量追踪读取点丢失、SQL 参数化治理等。测试盲区即 bug 潜伏区，每一轮审查都伴随断言增长（现 39 个 JS 测试文件共 984+ 断言）。
 
 ## 快速开始
+
+### 零构建部署（沙盒 / 离线环境）
+
+适用于 **Node ≥ 20 且无法 npm 安装**的环境（不能 `npm ci`、不能原生编译）——全部从仓库文件直接运行：
+
+```bash
+# 1) 解析 daemon——用 releases/ 里的预编译二进制（无需 cargo）：
+tar -xzf releases/malong-parse-0.3.34-linux-x86_64.tar.gz
+cp malong-parse ~/.local/bin
+malong-parse &                                   # 启动 daemon
+
+# 2) 直接跑工具集——零 npm 安装：
+node mcp-server.js --workspace /path/to/project   # 自动启用仓库内置 SQLite（sql.js WASM）
+```
+
+- SQLite 后端自动探测：有 `better-sqlite3` 时用完整版（行为完全不变）；否则回退**仓库内置 sql.js WASM**（`malong/vendor/`，零依赖）——无需安装、无需编译、无需网络。
+- 两后端数据文件完全兼容（都是 SQLite 格式）。
+- 内置组件声明见 `THIRD_PARTY_NOTICES.md`。
 
 ### 10 秒体验
 
@@ -162,7 +180,9 @@ node --max-old-space-size=512 mcp-server.js
 ## 测试
 
 - Rust 侧：`cargo test`（14 断言，含各语言提取正确性）
-- JS 侧：`npm test`（130+ 断言：primitives / embedded / mvp-batch）+ `tests/test-dogfood-*.js`（真实 daemon 端到端：事务回滚、死代码、引用追踪、并发、熔断恢复、daemon 击杀恢复等，69+ 断言）
+- JS 侧：`npm test`（338+ 断言：primitives / embedded / mvp-batch / tool-registry / repo-map / handler smoke / patch-parser / file-collector / code-search / health-check / db-adapter 双后端）+ `tests/test-dogfood-r*.js`（真实 daemon 端到端，9 个套件共 226+ 断言）+ `test-mcp-server.js`（18 断言，MCP stdio 协议）
+- Rust 侧：`cargo test`（68 断言：各语言提取 + 协议帧编解码 + 缓存 LFU + 服务端 dispatch/优先级队列 + batch_extract）
+- 总计：46 个测试文件共 1052+ 断言（984 JS + 68 Rust）
 - 一键验证：`./scripts/ci.sh`（自包含：cargo test + npm test + dogfood，复用或自起 daemon）
 
 ## 许可证

@@ -92,7 +92,7 @@ const core = {
 }
 await codeIndex.init(core)
 const svc = services.codeIndex
-svc.initWorkspace(WS)
+await svc.initWorkspace(WS)
 
 const absFiles = ['src/auth.py', 'src/client.js'].map(f => join(WS, f))
 await svc.indexBatch(absFiles, WS)

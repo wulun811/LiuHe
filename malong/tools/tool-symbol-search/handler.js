@@ -26,7 +26,7 @@ export async function handle(args, context) {
   }
 
   // 初始化 workspace 数据库
-  codeIndexService.initWorkspace(workspaceDir)
+  await codeIndexService.initWorkspace(workspaceDir)
 
   const query = args?.query || ''
   // P2-B2：limit 负值 → SQL LIMIT -1 返回全表（几万条全量返回）；钳制到 [1, 500]

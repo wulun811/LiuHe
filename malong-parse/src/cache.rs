@@ -194,3 +194,125 @@ impl SourceCache {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn tmp_file(name: &str, content: &str) -> String {
+        let path = std::env::temp_dir().join(format!("malong-cache-test-{}-{name}", std::process::id()));
+        fs::write(&path, content).unwrap();
+        path.to_string_lossy().to_string()
+    }
+
+    fn sample_tree(source: &str) -> Tree {
+        let mut parser = tree_sitter::Parser::new();
+        let lang: tree_sitter::Language = tree_sitter_javascript::LANGUAGE.into();
+        parser.set_language(&lang).unwrap();
+        parser.parse(source, None).unwrap()
+    }
+
+    #[test]
+    fn source_cache_hit_and_miss_counters() {
+        let mut c = SourceCache::new();
+        assert!(c.get("let x = 1", ".js").is_none(), "first get must miss");
+        assert!(c.get("let x = 1", ".py").is_none(), "different ext must miss");
+        c.insert("let x = 1", ".js", serde_json::json!({"symbols": []}));
+        assert!(c.get("let x = 1", ".js").is_some(), "same source+ext must hit");
+        let s = c.stats();
+        assert_eq!(s["hits"], 1);
+        assert_eq!(s["misses"], 2);
+        assert_eq!(s["entries"], 1);
+    }
+
+    #[test]
+    fn source_cache_reinsert_same_key_updates() {
+        let mut c = SourceCache::new();
+        c.insert("a", ".js", serde_json::json!({"v": 1}));
+        c.insert("a", ".js", serde_json::json!({"v": 2}));
+        assert_eq!(c.get("a", ".js").unwrap()["v"], 2, "reinsert must update value");
+        assert_eq!(c.stats()["entries"], 1, "reinsert must not grow entries");
+    }
+
+    #[test]
+    fn source_cache_evicts_oldest_over_max() {
+        let mut c = SourceCache::new();
+        for i in 0..SOURCE_CACHE_MAX + 5 {
+            c.insert(&format!("src-{i}"), ".js", serde_json::json!({"i": i}));
+        }
+        let s = c.stats();
+        assert_eq!(s["entries"], SOURCE_CACHE_MAX as u64, "capacity must cap at max");
+        assert!(c.get("src-0", ".js").is_none(), "oldest must be evicted");
+        assert!(c.get(&format!("src-{}", SOURCE_CACHE_MAX + 4), ".js").is_some(), "newest must survive");
+    }
+
+    #[test]
+    fn source_cache_different_source_same_ext() {
+        let mut c = SourceCache::new();
+        c.insert("def f(): pass", ".py", serde_json::json!({"a": 1}));
+        assert!(c.get("def g(): pass", ".py").is_none(), "different source must not collide");
+    }
+
+    #[test]
+    fn tree_cache_insert_then_get_hits() {
+        let mut c = TreeCache::new();
+        let path = tmp_file("tree-hit.js", "function alpha() {}\nfunction beta() {}");
+        let tree = sample_tree("function alpha() {}\nfunction beta() {}");
+        c.insert(&path, tree, "function alpha() {}".into(), "javascript".into());
+        let got = c.get(&path);
+        assert!(got.is_some(), "same file must hit after insert");
+        let (t, s, l) = got.unwrap();
+        assert_eq!(s, "function alpha() {}");
+        assert_eq!(l, "javascript");
+        let st = c.stats();
+        assert_eq!(st["hits"], 1);
+        assert_eq!(st["misses"], 0);
+        fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn tree_cache_get_missing_file_misses() {
+        let mut c = TreeCache::new();
+        let missing = tmp_file("tree-miss.js", "");
+        fs::remove_file(&missing).unwrap();
+        assert!(c.get(&missing).is_none(), "nonexistent file must miss");
+        // 设计行为：无法 stat 的文件在统计前提前返回，不累计 misses
+        assert_eq!(c.stats()["misses"], 0);
+    }
+
+    #[test]
+    fn tree_cache_empty_stats_shape() {
+        let c = TreeCache::new();
+        let s = c.stats();
+        assert_eq!(s["entries"], 0);
+        assert_eq!(s["max_entries"], MAX_ENTRIES as u64);
+        assert_eq!(s["ttl_secs"], 300);
+        assert_eq!(s["hit_ratio"], 0.0);
+    }
+
+    #[test]
+    fn content_hash_deterministic_and_sensitive() {
+        let h1 = content_hash("let x = 1", ".js");
+        assert_eq!(h1, content_hash("let x = 1", ".js"), "same input must hash same");
+        assert_ne!(h1, content_hash("let x = 2", ".js"), "source change must change hash");
+        assert_ne!(h1, content_hash("let x = 1", ".py"), "ext change must change hash");
+    }
+
+    #[test]
+    fn tree_cache_stats_after_evict_release_memory() {
+        let mut c = TreeCache::new();
+        let path = tmp_file("tree-evict.js", "let x = 1;");
+        let tree = sample_tree("let x = 1;");
+        c.insert(&path, tree, "let x = 1;".into(), "javascript".into());
+        let before = c.stats()["total_memory_bytes"].as_u64().unwrap();
+        assert!(before > 0);
+        c.stats();
+        // 再次插入同 key 不会重复计入内存
+        let tree2 = sample_tree("let x = 1;");
+        c.insert(&path, tree2, "let x = 1;".into(), "javascript".into());
+        let after = c.stats()["total_memory_bytes"].as_u64().unwrap();
+        assert_eq!(before, after, "reinsert of same key must not double-count memory");
+        fs::remove_file(&path).ok();
+    }
+}

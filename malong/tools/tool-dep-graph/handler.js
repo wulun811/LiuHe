@@ -23,7 +23,7 @@ export async function handle(args, context) {
     return { error: 'service_unavailable', message: 'codeIndex service not available', suggestion: 'Check MCP server configuration and ensure code-index.js is loaded' }
   }
 
-  codeIndexService.initWorkspace(workspaceDir)
+  await codeIndexService.initWorkspace(workspaceDir)
 
   const file = args?.file || ''
   if (!file) {

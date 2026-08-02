@@ -63,7 +63,9 @@ impl Eq for PrioritizedRequest {}
 
 impl Ord for PrioritizedRequest {
     fn cmp(&self, other: &Self) -> Ordering {
-        other.decoded.request.priority.cmp(&self.decoded.request.priority)
+        // r34-fix: 之前 `other.priority.cmp(&self.priority)` 反转了优先级——
+        // BinaryHeap 是 max-heap，pop() 取最大，batch(priority=1) 反而被排在普通请求之后。
+        self.decoded.request.priority.cmp(&other.decoded.request.priority)
             .then_with(|| other.sequence.cmp(&self.sequence))
     }
 }
@@ -610,5 +612,355 @@ fn dispatch(decoded: DecodedRequest, state: &ServerState) -> Response {
         }
 
         _ => Response::error(req.id, "METHOD_NOT_FOUND", &format!("unknown method: {}", req.method)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn state() -> ServerState {
+        ServerState::new()
+    }
+
+    fn call(state: &ServerState, method: &str, params: serde_json::Value) -> Response {
+        dispatch(DecodedRequest {
+            request: crate::protocol::Request { id: "t".into(), method: method.into(), params, priority: 0 },
+            raw_source: None,
+        }, state)
+    }
+
+    fn result(resp: Response) -> serde_json::Value {
+        serde_json::to_value(&resp).unwrap()
+    }
+
+    fn tmp_file(name: &str, content: &str) -> String {
+        let path = std::env::temp_dir().join(format!("malong-server-test-{}-{name}", std::process::id()));
+        fs::write(&path, content).unwrap();
+        path.to_string_lossy().to_string()
+    }
+
+    // ── resolve_source ──
+
+    #[test]
+    fn resolve_source_inline() {
+        let p = serde_json::json!({ "source": "let a = 1", "ext": ".js" });
+        let (src, ext, fp) = resolve_source(&p, None).unwrap();
+        assert_eq!(src, "let a = 1");
+        assert_eq!(ext, ".js");
+        assert_eq!(fp, "");
+    }
+
+    #[test]
+    fn resolve_source_raw_preferred() {
+        let p = serde_json::json!({ "source": "IGNORED", "ext": ".js" });
+        let (src, ext, _) = resolve_source(&p, Some(b"raw-body")).unwrap();
+        assert_eq!(src, "raw-body");
+        assert_eq!(ext, ".js");
+    }
+
+    #[test]
+    fn resolve_source_oversize_rejected() {
+        let big = "x".repeat(1_000_001);
+        let p = serde_json::json!({ "source": big });
+        assert!(resolve_source(&p, None).is_err(), ">1MB source must be rejected");
+        let big_raw = vec![b'x'; 1_000_001];
+        assert!(resolve_source(&serde_json::json!({}), Some(&big_raw)).is_err(), ">1MB raw must be rejected");
+    }
+
+    #[test]
+    fn resolve_source_missing_params() {
+        assert!(resolve_source(&serde_json::json!({}), None).is_err());
+        assert!(resolve_source(&serde_json::json!({ "ext": ".js" }), None).is_err());
+    }
+
+    #[test]
+    fn resolve_source_file_path_mode() {
+        let dir = std::env::temp_dir().join(format!("malong-ws-test-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let inner = dir.join("a.py");
+        fs::write(&inner, "def f(): pass").unwrap();
+        let p = serde_json::json!({
+            "file_path": inner.to_string_lossy(),
+            "workspace_root": dir.to_string_lossy()
+        });
+        let (src, ext, fp) = resolve_source(&p, None).unwrap();
+        assert_eq!(src, "def f(): pass");
+        assert_eq!(ext, ".py");
+        assert!(!fp.is_empty());
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn resolve_source_path_escape_blocked() {
+        let dir = std::env::temp_dir().join(format!("malong-ws2-test-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let outside = std::env::temp_dir().join(format!("malong-outside-{}", std::process::id()));
+        fs::write(&outside, "x").unwrap();
+        let p = serde_json::json!({
+            "file_path": outside.to_string_lossy(),
+            "workspace_root": dir.to_string_lossy()
+        });
+        assert!(resolve_source(&p, None).is_err(), "path outside workspace must be rejected");
+        fs::remove_dir_all(&dir).ok();
+        fs::remove_file(&outside).ok();
+    }
+
+    #[test]
+    fn resolve_source_missing_file() {
+        let p = serde_json::json!({ "file_path": "/nonexistent/malong-missing-file-xyz.js" });
+        assert!(resolve_source(&p, None).is_err());
+    }
+
+    // ── record_stats ──
+
+    #[test]
+    fn record_stats_language_and_buckets() {
+        let s = state();
+        record_stats(&s, ".js", 5);
+        record_stats(&s, ".js", 60);
+        record_stats(&s, ".py", 3000);
+        let stats = s.lang_stats.lock().unwrap();
+        assert_eq!(stats["javascript"], 2);
+        assert_eq!(stats["python"], 1);
+        drop(stats);
+        let buckets = s.sym_count_buckets.lock().unwrap();
+        assert_eq!(buckets[0], 1, "5 -> bucket 0-10");
+        assert_eq!(buckets[2], 1, "60 -> bucket 51-200");
+        assert_eq!(buckets[4], 1, "3000 -> bucket 1000+");
+    }
+
+    #[test]
+    fn record_stats_unknown_ext_goes_unknown() {
+        let s = state();
+        record_stats(&s, ".xyz", 1);
+        let stats = s.lang_stats.lock().unwrap();
+        assert_eq!(stats["unknown"], 1);
+    }
+
+    #[test]
+    fn record_hot_file_increments_and_caps() {
+        let s = state();
+        record_hot_file(&s, "a.js");
+        record_hot_file(&s, "a.js");
+        record_hot_file(&s, "b.js");
+        {
+            let hf = s.hot_files.lock().unwrap();
+            assert_eq!(hf.len(), 2);
+            let a = hf.iter().find(|(p, _)| p == "a.js").unwrap();
+            assert_eq!(a.1, 2);
+        }
+        record_hot_file(&s, "");
+        assert_eq!(s.hot_files.lock().unwrap().len(), 2, "empty path must be ignored");
+    }
+
+    // ── dispatch ──
+
+    #[test]
+    fn dispatch_health_shape() {
+        let s = state();
+        let r = result(call(&s, "health", serde_json::json!({})));
+        assert!(r["result"]["version"].is_string(), "version must be present");
+        assert!(r["result"]["requests_served"].is_u64());
+        assert!(r["result"]["cache"]["max_entries"].is_u64());
+        assert!(r["result"]["stats"]["symbol_counts"]["0_10"].is_u64());
+        assert_eq!(r["result"]["stats"]["hot_files"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn dispatch_extract_all_js() {
+        let s = state();
+        let r = result(call(&s, "extract_all", serde_json::json!({
+            "source": "function foo() {}\nconst bar = 1;",
+            "ext": ".js"
+        })));
+        assert!(r["error"].is_null(), "extract must succeed: {:?}", r);
+        let syms = r["result"]["symbols"].as_array().unwrap();
+        assert!(syms.len() >= 2, "must find foo and bar, got {}", syms.len());
+        let names: Vec<&str> = syms.iter().map(|x| x["name"].as_str().unwrap()).collect();
+        assert!(names.contains(&"foo"));
+        assert!(names.contains(&"bar"));
+        assert!(syms[0]["name"].is_string(), "symbol name must be present");
+        assert!(syms[0]["kind"].is_string());
+        assert!(syms[0]["start_line"].is_u64());
+        assert!(syms[0]["end_line"].is_u64());
+        assert!(r["result"]["imports"].is_array());
+        assert!(r["result"]["refs"].is_array());
+        assert_eq!(r["result"]["has_errors"], false);
+    }
+
+    #[test]
+    fn dispatch_unsupported_ext() {
+        let s = state();
+        let r = result(call(&s, "extract_all", serde_json::json!({ "source": "x", "ext": ".xyz" })));
+        assert_eq!(r["error"]["code"], "UNSUPPORTED_EXT");
+    }
+
+    #[test]
+    fn dispatch_missing_source_bad_request() {
+        let s = state();
+        let r = result(call(&s, "extract_all", serde_json::json!({ "ext": ".js" })));
+        assert_eq!(r["error"]["code"], "BAD_REQUEST");
+    }
+
+    #[test]
+    fn dispatch_unknown_method() {
+        let s = state();
+        let r = result(call(&s, "no_such_method", serde_json::json!({})));
+        assert_eq!(r["error"]["code"], "METHOD_NOT_FOUND");
+        assert!(r["error"]["message"].as_str().unwrap().contains("no_such_method"));
+    }
+
+    #[test]
+    fn dispatch_has_errors() {
+        let s = state();
+        let good = result(call(&s, "has_errors", serde_json::json!({ "source": "let a = 1;", "ext": ".js" })));
+        assert_eq!(good["result"]["has_errors"], false);
+        let bad = result(call(&s, "has_errors", serde_json::json!({ "source": "let a = ;;;", "ext": ".js" })));
+        assert_eq!(bad["result"]["has_errors"], true);
+    }
+
+    #[test]
+    fn dispatch_extract_symbols_and_top_level() {
+        let s = state();
+        let r = result(call(&s, "extract_symbols", serde_json::json!({
+            "source": "export class Foo {}\nfunction helper() {}",
+            "ext": ".ts"
+        })));
+        assert!(r["result"]["symbols"].as_array().unwrap().len() >= 2);
+        assert!(r["result"]["imports"].is_array());
+        let t = result(call(&s, "extract_top_level", serde_json::json!({ "source": "def a(): pass\ndef b(): pass", "ext": ".py" })));
+        assert_eq!(t["result"]["symbols"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn dispatch_batch_extract_requires_files() {
+        let s = state();
+        let r = result(call(&s, "batch_extract", serde_json::json!({})));
+        assert_eq!(r["error"]["code"], "INVALID_PARAMS");
+    }
+
+    #[test]
+    fn dispatch_batch_extract_multi_language() {
+        let s = state();
+        let r = result(call(&s, "batch_extract", serde_json::json!({
+            "files": [
+                { "path": "src/a.js", "source": "function one() {}", "file_path": "" },
+                { "path": "src/b.py", "source": "def two(): pass", "file_path": "" },
+                { "path": "src/c.bad", "source": "x", "file_path": "" }
+            ]
+        })));
+        let results = r["result"]["results"].as_array().unwrap();
+        assert_eq!(results.len(), 3);
+        assert_eq!(results[0]["path"], "src/a.js");
+        assert!(results[0]["result"]["symbols"].as_array().unwrap().len() == 1);
+        assert!(results[1]["result"]["symbols"].as_array().unwrap().len() == 1);
+        assert_eq!(results[2]["error"], "UNSUPPORTED_EXT");
+    }
+
+    #[test]
+    fn dispatch_source_cache_hit_on_second_call() {
+        let s = state();
+        let p = serde_json::json!({ "source": "function cachedFn() {}", "ext": ".js" });
+        let r1 = result(call(&s, "extract_all", p.clone()));
+        assert!(r1["result"]["symbols"].as_array().unwrap().len() >= 1);
+        let before = s.source_cache.lock().unwrap().stats()["hits"].as_u64().unwrap();
+        let r2 = result(call(&s, "extract_all", p));
+        assert_eq!(r2["result"]["symbols"], r1["result"]["symbols"], "cached result must be identical");
+        let after = s.source_cache.lock().unwrap().stats()["hits"].as_u64().unwrap();
+        assert_eq!(after, before + 1, "second identical call must hit source cache");
+    }
+
+    #[test]
+    fn dispatch_classify_message() {
+        let s = state();
+        let r = result(call(&s, "classify_message", serde_json::json!({ "content": "please fix the bug" })));
+        assert!(r["result"].is_object(), "classify must return an object");
+        assert!(r["error"].is_null());
+    }
+
+    #[test]
+    fn dispatch_simplify_ast_and_metrics() {
+        let s = state();
+        let src = "function outer() { const inner = () => 1; }";
+        let r = result(call(&s, "simplify_ast", serde_json::json!({ "source": src, "ext": ".js" })));
+        assert!(r["result"].is_array() || r["result"].is_object(), "simplify must return tree-ish value");
+        let m = result(call(&s, "compute_metrics", serde_json::json!({ "source": src, "ext": ".js" })));
+        assert!(m["result"]["total_lines"].as_u64().is_some() || m["result"].is_object(), "metrics must return object");
+    }
+
+    #[test]
+    fn dispatch_extract_all_file_path_mode_with_cache() {
+        let s = state();
+        let path = tmp_file("dispatch-file.js", "function fileFn() {}");
+        let p = serde_json::json!({ "file_path": path });
+        let r1 = result(call(&s, "extract_all", p.clone()));
+        assert!(r1["result"]["symbols"].as_array().unwrap().len() >= 1, "file mode must extract");
+        let before = s.cache.lock().unwrap().stats()["hits"].as_u64().unwrap();
+        let r2 = result(call(&s, "extract_all", p));
+        assert_eq!(r2["result"]["symbols"], r1["result"]["symbols"]);
+        let after = s.cache.lock().unwrap().stats()["hits"].as_u64().unwrap();
+        assert_eq!(after, before + 1, "file_path second call must hit TreeCache");
+        fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn dispatch_batch_extract_file_path_cache_hit() {
+        let s = state();
+        let path = tmp_file("batch-file.js", "function batchFn() {}");
+        let p = serde_json::json!({
+            "files": [
+                { "path": "src/batch-file.js", "file_path": path }
+            ]
+        });
+        let r1 = result(call(&s, "batch_extract", p.clone()));
+        let results = r1["result"]["results"].as_array().unwrap();
+        assert_eq!(results[0]["path"], "src/batch-file.js");
+        assert!(results[0]["result"]["symbols"].as_array().unwrap().len() >= 1, "batch file_path 模式必须提取");
+        let before = s.cache.lock().unwrap().stats()["hits"].as_u64().unwrap();
+        let _ = result(call(&s, "batch_extract", p));
+        let after = s.cache.lock().unwrap().stats()["hits"].as_u64().unwrap();
+        assert_eq!(after, before + 1, "batch 二次调用必须命中 TreeCache");
+        fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn dispatch_batch_extract_error_codes() {
+        let s = state();
+        let p = serde_json::json!({
+            "files": [
+                { "path": "a.js", "file_path": "/nonexistent/x.js" },
+                { "path": "big.js", "source": "x".repeat(1_000_001) },
+                { "path": "c.js" }
+            ]
+        });
+        let r = result(call(&s, "batch_extract", p));
+        let results = r["result"]["results"].as_array().unwrap();
+        assert_eq!(results[0]["error"], "FILE_NOT_FOUND", "不存在文件报 FILE_NOT_FOUND");
+        assert_eq!(results[1]["error"], "FILE_TOO_LARGE", "超限报 FILE_TOO_LARGE");
+        assert_eq!(results[2]["error"], "MISSING_SOURCE", "缺 source/file_path 报 MISSING_SOURCE");
+    }
+
+    #[test]
+    fn priority_queue_orders_high_first() {
+        let mut heap: BinaryHeap<PrioritizedRequest> = BinaryHeap::new();
+        let mk = |method: &str, priority: u8, seq: u64| PrioritizedRequest {
+            decoded: DecodedRequest {
+                request: crate::protocol::Request {
+                    id: method.into(), method: method.into(),
+                    params: serde_json::json!({}), priority,
+                },
+                raw_source: None,
+            },
+            sequence: seq,
+        };
+        heap.push(mk("low-a", 0, 1));
+        heap.push(mk("high-b", 1, 2));
+        heap.push(mk("low-c", 0, 3));
+        let top = heap.pop().unwrap();
+        assert_eq!(top.decoded.request.method, "high-b", "priority 1 must pop first");
+        let second = heap.pop().unwrap();
+        assert_eq!(second.decoded.request.method, "low-a", "same priority must respect FIFO sequence");
     }
 }

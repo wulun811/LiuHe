@@ -42,10 +42,12 @@ export function readUsageStats() {
       t.avg_ms = Math.round(t.total_ms / t.calls)
       delete t.total_ms
     }
-    const crashFree = totalCalls - breakdown.crash
+    // r34-fix: 旧 `(total - crash)/total` 把 error 状态也计入成功率——
+    // success_rate 应为 ok/total（error 是失败调用）
+    const okCount = breakdown.ok
     return {
       total_calls: totalCalls,
-      success_rate: totalCalls ? Math.round(crashFree / totalCalls * 100) / 100 : 1,
+      success_rate: totalCalls ? Math.round(okCount / totalCalls * 100) / 100 : 1,
       status_breakdown: breakdown,
       total_duration_ms: totalDuration,
       period: firstTs && lastTs ? `${firstTs.slice(0, 10)} ~ ${lastTs.slice(0, 10)}` : null,
@@ -137,8 +139,8 @@ export async function runHealthCheck({ stateDir, toolsDir, workspacesDir, regist
       let badCount = 0
       let totalSizeMB = 0
       const databases = []
-      let Database
-      try { Database = (await import('better-sqlite3')).default } catch {}
+      let createDb
+      try { ({ createDb } = await import('./db-adapter.js')) } catch {}
       for (const e of entries) {
         if (!e.isDirectory()) continue
         const dbPath = join(workspacesDir, e.name, 'code-index.db')
@@ -155,11 +157,11 @@ export async function runHealthCheck({ stateDir, toolsDir, workspacesDir, regist
               : `${Math.round(ageMs / 86400000)}d ago`
           } catch {}
           databases.push({ workspace: e.name, size_mb: sizeMB, last_access: lastAccess })
-          if (Database) {
+          if (createDb) {
             try {
               // 7（#18）：busy_timeout——恰逢 indexBatch 的 DROP/CREATE INDEX（schema 锁）时
               // SQLITE_BUSY 被旧实现当损坏计 WARN
-              const db = new Database(dbPath, { timeout: 5000 })
+              const db = await createDb(dbPath, { timeout: 5000 })
               const r = db.pragma('integrity_check')
               const integrityOk = Array.isArray(r) && r.length === 1 && r[0]?.integrity_check === 'ok'
               db.close()

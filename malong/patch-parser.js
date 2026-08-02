@@ -34,12 +34,13 @@ function fuzzyNormalize(text) {
   return text
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n')
-    .replace(/[ \t]+/g, ' ')
-    .replace(/\n\s*\n/g, '\n')
+    // r34-fix: 折叠所有空白（含换行）——单行 SEARCH 才能匹配多行内容（"忽略空白差异"语义）
+    .replace(/\s+/g, ' ')
     .trim()
 }
 
-function parseBlocks(text) {
+// r34-fix: 导出供单测（原模块私有，行为不变）
+export function parseBlocks(text) {
   const blocks = []
   const lines = text.split('\n')
   let i = 0
@@ -51,12 +52,10 @@ function parseBlocks(text) {
       const searchLines = []
       i++
       while (i < lines.length) {
-        // P2-C9：SEARCH 块内的整行 =======（如被 patch 的 markdown 表格分隔行）不是分隔符——
-        // 仅当后随 REPLACE_MARKER 时才作为分隔符结束 SEARCH（lookahead）
-        if (lines[i].trim() === SEPARATOR) {
-          const next = lines[i + 1]?.trim() || ''
-          if (next === REPLACE_MARKER || next.startsWith('>>>>>>>')) break
-        }
+        // r34-fix: 旧 lookahead（仅当 next===REPLACE_MARKER 才结束）让标准格式
+        // `======= 后跟 replace 内容` 永远解析失败（分隔符被吞进 SEARCH）——
+        // 标准协议中 ======= 无条件结束 SEARCH；markdown 表格分隔行是 |---| 不是 =======
+        if (lines[i].trim() === SEPARATOR) break
         searchLines.push(lines[i])
         i++
       }
@@ -90,17 +89,22 @@ function findExactMatch(content, searchBlock) {
   const idx = normalizedContent.indexOf(normalizedSearch)
   if (idx === -1) return null
 
-  // Map back to original content (preserve original whitespace)
-  const beforeLen = content.slice(0, idx).length
-  const afterLen = content.slice(idx + normalizedSearch.length).length
-  // Since normalization only removes trailing whitespace, the index in original
-  // content should be close. Find the actual match by scanning around idx.
-  for (let offset = -5; offset <= 5; offset++) {
-    const candidateIdx = idx + offset
-    if (candidateIdx < 0 || candidateIdx + normalizedSearch.length > content.length) continue
-    const candidate = normalizeWhitespace(content.slice(candidateIdx, candidateIdx + normalizedSearch.length))
-    if (candidate === normalizedSearch) {
-      return { start: candidateIdx, end: candidateIdx + normalizedSearch.length }
+  // Map back to original content (preserve original whitespace).
+  // r34-fix: 切片长度必须用 searchBlock 的原文长度（normalized 更短——行尾空白/CRLF
+  // 被移除），且窗口按长度差扩展——旧 ±5 固定窗口 + normalized 长度会把尾空格漏进结果
+  // （替换后残留尾空格）或在长空白差异时漏匹配。
+  const lenDiff = Math.abs(normalizedSearch.length - searchBlock.length)
+  const windowSize = 5 + lenDiff
+  for (let offset = -windowSize; offset <= windowSize; offset++) {
+    const start = idx + offset
+    if (start < 0 || start > content.length) continue
+    // r34-fix: end 动态扩展——原文段长度 ≠ searchBlock.length（CRLF/尾空格/折叠空白），
+    // 固定长度切片会截断或残留空白（"REPLACED " bug）
+    const maxEnd = Math.min(content.length, start + searchBlock.length + 64)
+    for (let end = start + searchBlock.length; end <= maxEnd; end++) {
+      if (normalizeWhitespace(content.slice(start, end)) === normalizedSearch) {
+        return { start, end }
+      }
     }
   }
   return null
@@ -113,21 +117,24 @@ function findFuzzyMatch(content, searchBlock) {
   const idx = fuzzyContent.indexOf(fuzzySearch)
   if (idx === -1) return null
 
-  // Map back to original content
-  for (let offset = -20; offset <= 20; offset++) {
-    const candidateIdx = idx + offset
-    if (candidateIdx < 0 || candidateIdx + fuzzySearch.length > content.length) continue
-    const candidate = fuzzyNormalize(content.slice(candidateIdx, candidateIdx + fuzzySearch.length))
-    if (candidate === fuzzySearch) {
-      return { start: candidateIdx, end: candidateIdx + fuzzySearch.length }
+  // Map back to original content（同 findExactMatch 的长度对齐修正）
+  const lenDiff = Math.abs(fuzzySearch.length - searchBlock.length)
+  const windowSize = 20 + lenDiff
+  for (let offset = -windowSize; offset <= windowSize; offset++) {
+    const start = idx + offset
+    if (start < 0 || start > content.length) continue
+    const maxEnd = Math.min(content.length, start + searchBlock.length + 64)
+    for (let end = start + searchBlock.length; end <= maxEnd; end++) {
+      if (fuzzyNormalize(content.slice(start, end)) === fuzzySearch) {
+        return { start, end }
+      }
     }
   }
-  // ±20 窗口内找不到原文位置：fuzzy 空间 idx 与原文偏差过大（如匹配块前有长空白差异）。
-  // 此时用 fuzzy idx + 原文长度硬切会静默篡改文件（递归进化第 5 轮 P0#4），宁可报错
   return null
 }
 
-function applyBlocks(content, blocks) {
+// r34-fix: 导出供单测（原模块私有，行为不变）
+export function applyBlocks(content, blocks) {
   let result = content
   const applied = []
   const errors = []

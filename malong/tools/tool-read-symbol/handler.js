@@ -54,7 +54,7 @@ export async function handle(args, context) {
   const t0 = Date.now()
   let staleness = null
   if (source === 'live' && codeIndexService) {
-    codeIndexService.initWorkspace(workspaceDir)
+    await codeIndexService.initWorkspace(workspaceDir)
     staleness = await checkFileStaleness(codeIndexService, workspaceDir, filePath)
     pipelineStep(pipeline, 'index_status_check', staleness?.auto_indexed ? 'ok' : staleness ? 'warn' : 'ok', {
       detail: staleness?.auto_indexed ? 'auto_reindexed' : staleness?.warning || 'fresh',

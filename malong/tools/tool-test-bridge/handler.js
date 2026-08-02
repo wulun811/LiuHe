@@ -277,7 +277,7 @@ async function handleSuggest(args, context) {
     const dbPath = join(getWorkspaceDir(workspaceDir), 'code-index.db')
     if (existsSync(dbPath)) {
       try {
-        codeIndexService.initWorkspace(workspaceDir)
+        await codeIndexService.initWorkspace(workspaceDir)
         const impact = await codeIndexService.getImpactAnalysis(file, { symbol, maxCallers: 50 })
         for (const c of impact.callers || []) {
           if (c.type === 'test') {

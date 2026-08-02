@@ -4,7 +4,7 @@
 
 **English** | [简体中文](README.zh-CN.md) | [Docs](https://www.ttimmortal.com/) | [GitHub](https://github.com/wulun811/LiuHe)
 
-![tests](https://img.shields.io/badge/tests-200%2B%20assertions%20passed-brightgreen)
+![tests](https://img.shields.io/badge/tests-984%2B%20assertions%20passed-brightgreen)
 ![tools](https://img.shields.io/badge/tools-38%20MCP-blue)
 ![languages](https://img.shields.io/badge/parsers-10%20languages-brightgreen)
 ![read](https://img.shields.io/badge/read%20P95-1ms-brightgreen)
@@ -90,9 +90,30 @@ Traditional tools (git, sed, IDE) assume a user with hands, eyes, and memory. An
 
 ## Self-Hosting (Dogfooding)
 
-25+ rounds of "Malong reviews Malong": the toolset audits and fixes its **own** code, with dozens of real bugs fixed and locked by tests — including directory-scope filtering gaps, false dead-code reports for registration patterns, lost constant read-sites, and SQL parameterization cleanup. Every round grew the assertion count (now 200+ green).
+25+ rounds of "Malong reviews Malong": the toolset audits and fixes its **own** code, with dozens of real bugs fixed and locked by tests — including directory-scope filtering gaps, false dead-code reports for registration patterns, lost constant read-sites, and SQL parameterization cleanup. Every round grew the assertion count (now 984+ across 39 JS test files).
 
 ## Quick Start
+
+### Zero-build deployment (sandbox / offline environments)
+
+For environments with **Node >= 20 and no npm access** (no `npm ci`, no native
+compilation), everything runs from the repo files as-is:
+
+```bash
+# 1) Parse daemon — prebuilt binary from releases/ (no cargo needed):
+tar -xzf releases/malong-parse-0.3.34-linux-x86_64.tar.gz
+cp malong-parse ~/.local/bin
+malong-parse &                                   # start the daemon
+
+# 2) Run the toolset — zero npm install:
+node mcp-server.js --workspace /path/to/project   # vendored SQLite (sql.js WASM) auto-enabled
+```
+
+- SQLite backend auto-detection: `better-sqlite3` when available (full version,
+  unchanged behavior); otherwise the **vendored sql.js WASM** (`malong/vendor/`,
+  zero-dependency) is used — no install, no compilation, no network.
+- Data files are fully compatible between backends (both are SQLite).
+- See `THIRD_PARTY_NOTICES.md` for the vendored component.
 
 ### 10-second taste
 
@@ -160,8 +181,9 @@ Register the MCP server with any MCP-capable LLM client (e.g. opencode, Claude D
 
 ## Testing
 
-- Rust: `cargo test` (14 assertions, incl. per-language extraction correctness)
-- JS: `npm test` (130+ assertions: primitives / embedded / mvp-batch) + `tests/test-dogfood-*.js` (end-to-end against a real daemon: transaction rollback, dead code, reference tracing, concurrency, circuit breaker, daemon kill-recovery — 69+ assertions)
+- Rust: `cargo test` (68 assertions: per-language extraction + protocol framing/decoding + cache LFU + server dispatch/priority queue + batch_extract)
+- JS: `npm test` (338+ assertions: primitives / embedded / mvp-batch / tool-registry / repo-map / handler smoke / patch-parser / file-collector / code-search / health-check / db-adapter dual-backend) + `tests/test-dogfood-r*.js` (9 end-to-end suites against a real daemon, 226+ assertions) + `test-mcp-server.js` (18 assertions, MCP protocol over stdio)
+- Total: 1052+ assertions across 46 test files (984 JS + 68 Rust)
 
 ## License
 

@@ -96,7 +96,7 @@ const core = {
 }
 await codeIndex.init(core)
 const svc = services.codeIndex
-svc.initWorkspace(WS)
+await svc.initWorkspace(WS)
 
 // 索引整个 workspace
 const absFiles = ['src/hash.rs', 'src/format.rs', 'src/reader.rs', 'src/main.rs', 'py/registry.py'].map(f => join(WS, f))

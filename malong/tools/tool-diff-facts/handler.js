@@ -155,7 +155,7 @@ async function extractChanges(change, langParser) {
 
 async function checkCallerSync(symbolsChanged, filesInChange, codeIndexService, workspaceDir) {
   if (!codeIndexService) return { status: 'skipped', reason: 'code-index service not available (requires MCP context)' }
-  try { codeIndexService.initWorkspace(workspaceDir) } catch { return { status: 'skipped', reason: 'workspace not indexed' } }
+  try { await codeIndexService.initWorkspace(workspaceDir) } catch { return { status: 'skipped', reason: 'workspace not indexed' } }
   const result = []
   for (const sym of symbolsChanged.filter(s => s.change === 'signature_changed')) {
     try {

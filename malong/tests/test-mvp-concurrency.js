@@ -70,7 +70,7 @@ const core = {
 }
 await codeIndex.init(core)
 const svc = services.codeIndex
-svc.initWorkspace(WS)
+await svc.initWorkspace(WS)
 await svc.indexBatch([`${WS}/src/service.py`], WS)
 svc.resolveCrossFileRefs()
 

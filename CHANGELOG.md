@@ -2,6 +2,44 @@
 
 All notable changes to **Malong LiuHe** are documented here.
 
+## [0.3.35] - 2026-08-02
+
+### r35: Sandbox edition — zero-dependency SQLite (db-adapter dual-backend)
+
+Branch product for extreme environments (Node >= 20, **no npm install, no native compilation**):
+
+- **`db-adapter.js`**: backend auto-detection — `better-sqlite3` when available (full version, behavior 100% unchanged); otherwise falls back to the **vendored sql.js WASM** (`malong/vendor/`, MIT, zero-dependency)
+- sql.js backend: read-only mtime-detected reload (auto re-reads after writer exports), transaction-granularity export with 500ms throttled merge, tmp+rename atomic write-back, `prepare/get/all/run/exec/close/transaction/pragma` shapes aligned with better-sqlite3
+- 6 files migrated to `createDb` (code-index / embedded-reader / repo-map / health-check / naming-consistency); `initWorkspace` async propagation across 17 handlers and 16 test files
+- `releases/` re-cut at 0.3.34 (previous 0.3.32 binary contained already-fixed bugs) — sandbox deployment: extract to `~/.local/bin`, zero cargo
+- Verified in a simulated sandbox (better-sqlite3 removed): full `npm test` (11 files, 338 assertions) + mcp-server + dogfood all green; full-version regression green; `test-db-adapter` (13 assertions) locks both backends
+- Third-party notice: `THIRD_PARTY_NOTICES.md` (sql.js 1.12.0, MIT)
+- README (EN/ZH): "Zero-build deployment" section
+
+## [0.3.34] - 2026-08-02
+
+### r34 + r34-fix: Test coverage drive-out — 5 real bugs fixed, 970+ JS / 68 Rust assertions
+
+Test coverage pushed into previously untested layers (protocol framing, server dispatch, MCP stdio, tool registry, repo-map, 7 orphan handlers, patch parser, file collector, NL code search, health stats). **Five real bugs found and fixed**:
+
+- **Fixed** `PrioritizedRequest::Ord` inverted priority comparison — `batch_extract` (priority=1) was queued *after* normal requests (BinaryHeap is a max-heap; pop() returns the largest)
+- **Fixed** `simplify.rs` byte-slice truncation `&text[..100]` panicked on UTF-8 multi-byte boundaries (CJK/emoji) — now char-based truncation
+- **Fixed** `patch-parser.js` — the P2-C9 lookahead made the standard SEARCH/REPLACE format parse **100% of the time to zero blocks**; also fixed replacement leaking trailing whitespace (normalized-length slicing) and fuzzy-match length misalignment (dynamic end expansion)
+- **Fixed** `code-search.js` intent ordering — `/depend.*/` in the whereUsed entry hijacked `dependency tree of X` queries
+- **Fixed** `health-check.js` `success_rate` counted `error` status as success (`(total-crash)/total` → now `ok/total`)
+
+Known limits locked by tests: `**/src/foo` multi-segment glob never matches; `generated_*` prefix rules only match at repo root.
+
+New suites: `test-mcp-server` (MCP stdio protocol, 18), `test-tool-registry` (41), `test-repo-map` (32), `test-handler-smoke` (7 orphan handlers, 28), `test-patch-parser` (20), `test-file-collector` (33), `test-code-search` (24), `test-health-check` (17), plus Rust inline tests in `protocol.rs`/`cache.rs`/`server.rs`/`simplify.rs`.
+
+`npm test` 130 → **325** assertions (10 files); `cargo test` 14 → **68**; 1038+ assertions across 45 test files.
+
+### r31: Cross-platform support — Windows (TCP) + macOS ready (see 0.3.33 for details)
+
+- Windows: TCP `127.0.0.1:31001` (`MALONG_PORT` override), no pid/SIGTERM; macOS/Windows build-ready via GitHub Actions matrix; release artifacts on tag
+- Windows path adaptation (r31-fix): `pathToFileURL` dynamic imports, `tmpdir()`-based test paths, `toDbRel` forward-slash normalization, UDS→named pipe on Windows, `sep`-aware workspace boundary check
+- Reverse-drift guard in `sync-from-dev.sh`: refuses to sync when OSS-only improvements are missing in the dev repo (checks 7 markers, `--skip-guard` escape hatch)
+
 ## [0.3.33] - 2026-08-02
 
 ### r31: Cross-platform support — Windows (TCP) + macOS ready

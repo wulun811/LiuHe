@@ -264,7 +264,7 @@ export async function handle(args, context) {
     const dbPath = join(getWorkspaceDir(workspaceDir), 'code-index.db')
     if (existsSync(dbPath)) {
       try {
-        codeIndexService.initWorkspace(workspaceDir)
+        await codeIndexService.initWorkspace(workspaceDir)
         const dead = await codeIndexService.detectDeadCode?.()
         if (dead && Array.isArray(dead)) {
           for (const s of dead) {

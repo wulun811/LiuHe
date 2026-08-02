@@ -50,7 +50,7 @@ const core = {
 }
 await codeIndex.init(core)
 const svc = services.codeIndex
-svc.initWorkspace(WS)
+await svc.initWorkspace(WS)
 await svc.indexBatch([join(WS, 'constants.js'), join(WS, 'app.js')], WS)
 
 // ── ① trace_symbol：值提取 + 引用 + 硬编码副本 ──

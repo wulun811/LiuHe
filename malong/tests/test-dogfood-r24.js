@@ -57,7 +57,7 @@ const core = {
 }
 await codeIndex.init(core)
 const codeIndexService = services.codeIndex
-codeIndexService.initWorkspace(WS)
+await codeIndexService.initWorkspace(WS)
 await codeIndexService.indexBatch([join(WS, 'src/app.js')], WS)
 codeIndexService.resolveCrossFileRefs()
 

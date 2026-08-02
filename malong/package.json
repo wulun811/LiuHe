@@ -1,6 +1,6 @@
 {
   "name": "malong",
-  "version": "0.3.33",
+  "version": "0.3.35",
   "description": "码龙 MCP 工具集 — LLM-Native 代码操作工具链（六合工具集底层 AST 基础设施）",
   "type": "module",
   "engines": {
@@ -10,6 +10,6 @@
     "better-sqlite3": "^11.0.0"
   },
   "scripts": {
-    "test": "node tests/test-primitives.js && node tests/test-embedded.js && node tests/test-mvp-batch.js"
+    "test": "node tests/test-primitives.js && node tests/test-embedded.js && node tests/test-mvp-batch.js && node tests/test-tool-registry.js && node tests/test-repo-map.js && node tests/test-handler-smoke.js && node tests/test-patch-parser.js && node tests/test-file-collector.js && node tests/test-code-search.js && node tests/test-health-check.js && node tests/test-db-adapter.js"
   }
 }

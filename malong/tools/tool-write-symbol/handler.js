@@ -7,7 +7,7 @@ export async function handle(args, context) {
   const { codeIndexService } = context
   const workspaceDir = args?.workspace_dir
   if (workspaceDir && codeIndexService) {
-    codeIndexService.initWorkspace(workspaceDir)
+    await codeIndexService.initWorkspace(workspaceDir)
   }
   return writeSymbol(args || {}, context)
 }

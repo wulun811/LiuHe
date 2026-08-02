@@ -39,7 +39,7 @@ export async function handle(args, context) {
     return { error: 'invalid_input', message: 'at least one section required (include_outline, include_refs, or include_chain)' }
   }
 
-  try { codeIndexService.initWorkspace(workspaceDir) } catch {}
+  try { await codeIndexService.initWorkspace(workspaceDir) } catch {}
   const t0 = Date.now()
 
   // P2-C11：allSettled——任一子查询失败（并发 reindex 的 DROP/CREATE INDEX 窗口等）

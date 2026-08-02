@@ -38,7 +38,7 @@ export async function handle(args, context) {
   }
 
   // 初始化 workspace 数据库
-  codeIndexService.initWorkspace(workspaceDir)
+  await codeIndexService.initWorkspace(workspaceDir)
 
   const symbol = args?.symbol || ''
   if (!symbol) {

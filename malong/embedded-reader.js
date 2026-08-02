@@ -5,7 +5,7 @@
 import { join, resolve, sep } from 'node:path'
 import { readFileSync, statSync, realpathSync } from 'node:fs'
 import { createHash } from 'node:crypto'
-import Database from 'better-sqlite3'
+import { createDb } from './db-adapter.js'
 
 const MAX_LIVE_READ = 1024 * 1024
 
@@ -13,7 +13,14 @@ export class EmbeddedReader {
   constructor(dbPath, workspaceDir) {
     this.dbPath = dbPath
     this.workspaceDir = workspaceDir
-    this.db = new Database(dbPath, { readonly: true })
+    this.db = null
+  }
+
+  // r35：db 打开改异步（sql.js 沙盒后端 wasm 初始化）；调用方 await open()
+  async open() {
+    if (this.db) return this
+    this.db = await createDb(this.dbPath, { readonly: true })
+    return this
   }
 
   close() {

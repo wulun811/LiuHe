@@ -6,7 +6,7 @@ const NL_PATTERNS = [
   { intents: ['findFunction', 'findMethod'], patterns: [/function\s+(\w+)/i, /method\s+(\w+)/i, /where is (\w+) (?:function|method|defined)/i, /find\s+(?:the\s+)?(\w+)\s+(?:function|method)/i] },
   { intents: ['findClass'], patterns: [/class\s+(\w+)/i, /where is (\w+) class/i, /find\s+(?:the\s+)?(\w+)\s+class/i] },
   { intents: ['findVariable'], patterns: [/variable\s+(\w+)/i, /where is (\w+) (?:variable|const)/i] },
-  { intents: ['whereUsed', 'impactAnalysis'], patterns: [/(?:where|how|what)\s+(?:is\s+)?(\w+)\s+(?:used|called|referenced)/i, /who calls (\w+)/i, /impact.*(\w+)/i, /depend.*(\w+)/i] },
+  { intents: ['whereUsed', 'impactAnalysis'], patterns: [/(?:where|how|what)\s+(?:is\s+)?(\w+)\s+(?:used|called|referenced)/i, /who calls (\w+)/i, /impact.*(\w+)/i] },
   { intents: ['deadCode'], patterns: [/dead\s*code/i, /unused\s+(?:function|code)/i, /never\s+called/i, /what.*not.*used/i] },
   { intents: ['dependencyTree'], patterns: [/dependency\s+(?:tree|graph|chain)/i, /depend.*module/i, /import.*graph/i] },
   { intents: ['complexity'], patterns: [/complexity/i, /complex/i, /hard to understand/i, /too many lines/i] },

@@ -40,6 +40,7 @@ echo "== dogfood suites =="
 for t in r14 r30; do
   node "$ROOT/malong/tests/test-dogfood-$t.js"
 done
+node "$ROOT/malong/tests/test-mcp-server.js"
 
 echo "== git cleanliness =="
 if [ -n "$(git -C "$ROOT" status --porcelain)" ]; then

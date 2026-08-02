@@ -31,7 +31,7 @@ function assert(c, m) { if (c) { pass++ } else { fail++; console.error('  FAIL:'
   const core = { services, getService: n => services[n], registerService: (n, s) => { services[n] = s }, getWorkspaceDir: () => DATA, log: () => {}, emit: () => {}, get: (k, d) => k === 'codeIndex.udsPath' ? SOCK : (k === 'codeIndex.udsToken' ? '' : d) }
   await codeIndex.init(core)
   const svc = services.codeIndex
-  svc.initWorkspace(WS)
+  await svc.initWorkspace(WS)
   await svc.indexBatch([join(WS, 'src/caller.js'), join(WS, 'src/lib.js')], WS)
   svc.resolveCrossFileRefs()
   const refs = await svc.getReferences('helper')

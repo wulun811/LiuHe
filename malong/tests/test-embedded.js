@@ -67,7 +67,7 @@ const core = {
 }
 await codeIndex.init(core)
 const svc = services.codeIndex
-svc.initWorkspace(WS)
+await svc.initWorkspace(WS)
 await svc.indexBatch([`${WS}/src/service.py`, `${WS}/src/main.py`], WS)
 svc.resolveCrossFileRefs()
 
@@ -75,6 +75,7 @@ svc.resolveCrossFileRefs()
 const { EmbeddedReader } = await imp(join(MALONG_DIR, 'embedded-reader.js'))
 const dbPath = join(DATA, 'code-index.db')
 const reader = new EmbeddedReader(dbPath, WS)
+await reader.open()
 
 console.log('── 图查询 ──')
 const found = reader.findSymbols('increment')
@@ -120,7 +121,7 @@ assert(rEsc.error === 'PATH_BLOCKED', `../../ 穿越 → PATH_BLOCKED（得 ${rE
 console.log('── 无 parse 依赖 ──')
 const src = readFileSync(join(MALONG_DIR, 'embedded-reader.js'), 'utf-8')
 const importLines = src.split('\n').filter(l => l.trim().startsWith('import '))
-assert(importLines.some(l => l.includes('better-sqlite3')) && !importLines.some(l => l.includes('parse-client')), `纯 SQLite 依赖，无 parse-client`)
+assert(importLines.some(l => l.includes('db-adapter') || l.includes('better-sqlite3')) && !importLines.some(l => l.includes('parse-client')), `纯 SQLite 依赖（db-adapter），无 parse-client`)
 assert(src.includes('readonly'), `readonly 打开 db`)
 
 reader.close()

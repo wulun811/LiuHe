@@ -2,7 +2,7 @@
 // 多语言 Rust 解析服务，SQLite 存储符号/引用/依赖
 // 详见：通天计划 §六 码龙
 
-import Database from 'better-sqlite3'
+import { createDb } from './db-adapter.js'
 import { join, relative, extname, resolve, dirname } from 'node:path'
 import { readFileSync, writeFileSync, existsSync, unlinkSync, watch, chmodSync, statSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -195,9 +195,9 @@ function _calcComplexity(sym) {
   }
 }
 
-function initDb(dir) {
+async function initDb(dir) {
   const dbPath = join(dir, 'code-index.db')
-  const db = openHealthy(dbPath)
+  const db = await openHealthy(dbPath)
   db.pragma('journal_mode=WAL')
   db.pragma('synchronous=NORMAL')
   db.pragma('busy_timeout=5000')
@@ -221,23 +221,24 @@ function initDb(dir) {
   return db
 }
 
-function openHealthy(dbPath) {
-  const attempt = () => {
+// r35：openHealthy 走 db-adapter（better-sqlite3 完整版 / sql.js 沙盒版）
+async function openHealthy(dbPath) {
+  const attempt = async () => {
     // 7：锁冲突≠损坏——busy_timeout 5s 让并发进程的写锁先等再判，SQLITE_BUSY 不删库
-    const db = new Database(dbPath, { timeout: 5000 })
+    const db = await createDb(dbPath, { timeout: 5000 })
     const r = db.pragma('integrity_check')
     const ok = Array.isArray(r) && r.length === 1 && r[0]?.integrity_check === 'ok'
     if (!ok) { db.close(); throw new Error('integrity_check failed') }
     return db
   }
   try {
-    return attempt()
+    return await attempt()
   } catch (e) {
     console.error(`[code-index] DB corrupt (${e.message}) — rebuilding: ${dbPath}`)
     for (const suffix of ['', '-wal', '-shm']) {
       try { unlinkSync(dbPath + suffix) } catch {}
     }
-    return new Database(dbPath)
+    return await createDb(dbPath)
   }
 }
 
@@ -273,7 +274,7 @@ class CodeIndex {
     return null
   }
 
-  _initWorkspaceDb(workspaceDir) {
+  async _initWorkspaceDb(workspaceDir) {
     const wsDir = this._core.getWorkspaceDir(workspaceDir)
     if (this._db && this._currentWorkspace === workspaceDir) {
       return // 已经初始化过
@@ -286,7 +287,7 @@ class CodeIndex {
     if (this._db) {
       this._db.close()
     }
-    this._db = initDb(wsDir)
+    this._db = await initDb(wsDir)
     this._currentWorkspace = workspaceDir
     // 13#4：开库自检提取器版本戳，陈旧（含首次无戳的既有库）→ 全量标 dirty，下次 reindex 自动重抽
     this._reconcileExtractorVersion()
@@ -304,7 +305,7 @@ class CodeIndex {
     if (!CACHED_EXT.has(extname(filePath))) return null
     if (!this._db) {
       if (!repo) return null
-      this._initWorkspaceDb(repo)
+      await this._initWorkspaceDb(repo)
     }
     let size = 0
     try { size = statSync(filePath).size } catch { return null }
@@ -862,8 +863,8 @@ class CodeIndex {
     const self = this
 
     // 初始化指定 workspace 的数据库（委托 class 方法，保证 indexFile 懒初始化路径一致）
-    function initWorkspaceDb(workspaceDir) {
-      self._initWorkspaceDb(workspaceDir)
+    async function initWorkspaceDb(workspaceDir) {
+      await self._initWorkspaceDb(workspaceDir)
     }
 
     async function doSyncFileChange(filePath) {
@@ -927,8 +928,8 @@ class CodeIndex {
 
     core.registerService('codeIndex', {
       // 初始化 workspace（供 handler 调用）
-      initWorkspace(workspaceDir) {
-        initWorkspaceDb(workspaceDir)
+      async initWorkspace(workspaceDir) {
+        await initWorkspaceDb(workspaceDir)
         if (!self._watcher || self._watchedDir !== resolve(workspaceDir)) {
           if (self._watcher) { self._watcher.close(); self._watcher = null }
           startWatcher(resolve(workspaceDir))
