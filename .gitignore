@@ -15,3 +15,6 @@ metadata.json
 # 临时
 *.log
 .tmp/
+
+# Python
+__pycache__/
