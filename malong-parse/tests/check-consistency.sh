@@ -24,7 +24,7 @@ for f in "$FIXTURES"/*.py "$FIXTURES"/*.js "$FIXTURES"/*.mjs "$FIXTURES"/*.go "$
 
   # Rust side
   node -e "
-    import('$DIR/../../docs/六合工具集/malong/parse-client.js').then(async pc => {
+    import('$DIR/../../malong/parse-client.js').then(async pc => {
       const fs = await import('fs');
       const src = fs.readFileSync('$f', 'utf-8');
       const core = { log: () => {} };

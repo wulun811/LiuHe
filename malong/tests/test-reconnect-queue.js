@@ -4,7 +4,7 @@ import { readFileSync, existsSync } from 'node:fs'
 
 const SOCKET = `/tmp/malong-parse-${process.getuid()}.sock`
 const PID_FILE = `/tmp/malong-parse-${process.getuid()}.pid`
-const BIN = '/home/chen/.local/bin/malong-parse'
+const BIN = process.env.MALONG_PARSE_BIN || 'malong-parse'
 
 let passed = 0, failed = 0
 function assert(label, ok, detail) {

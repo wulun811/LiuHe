@@ -21,7 +21,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 export function resolveExtractorBin() {
   const primary = join(os.homedir(), '.local', 'bin', 'malong-parse')
   if (existsSync(primary)) return primary
-  const alt = join(__dirname, '..', '..', '..', 'malong-parse', 'target', 'release', 'malong-parse')
+  const alt = join(__dirname, '..', 'malong-parse', 'target', 'release', 'malong-parse')
   if (existsSync(alt)) return alt
   return null
 }

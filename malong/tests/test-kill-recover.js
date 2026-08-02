@@ -35,7 +35,7 @@ async function main() {
   // 手动重启进程
   console.log('  重启进程 ...')
   const t0 = performance.now()
-  execSync('setsid /home/chen/.local/bin/malong-parse &', { stdio: 'ignore' })
+  execSync(`setsid ${process.env.MALONG_PARSE_BIN || 'malong-parse'} &`, { stdio: 'ignore' })
   
   // 等待 socket 出现
   for (let i = 0; i < 30; i++) {

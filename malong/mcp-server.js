@@ -24,7 +24,7 @@ const MEMORY_DANGER_MB = 480
 
 const PARSE_SERVICE_SOCKET = `/tmp/malong-parse-${process.getuid()}.sock`
 const PARSE_SERVICE_BIN = join(os.homedir(), '.local', 'bin', 'malong-parse')
-const PARSE_SERVICE_BIN_ALT = join(__dirname, '..', '..', '..', 'malong-parse', 'target', 'release', 'malong-parse')
+const PARSE_SERVICE_BIN_ALT = join(__dirname, '..', 'malong-parse', 'target', 'release', 'malong-parse')
 
 async function ensureParseService() {
   // 检查是否已运行

@@ -1,0 +1,17 @@
+# Rust
+target/
+Cargo.lock.orig
+
+# Node
+node_modules/
+
+# SQLite 索引 / 缓存
+*.db
+*.db-journal
+*.db-wal
+.index-cache/
+metadata.json
+
+# 临时
+*.log
+.tmp/
