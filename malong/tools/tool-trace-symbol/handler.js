@@ -107,6 +107,16 @@ export async function handle(args, context) {
       result.direct_references = textRefs
       result.search_method = 'text_fallback'
     }
+  } else if (refs.every(r => r.kind === 'import')) {
+    // r30：常量被 import 后 refs 只剩 import 行（变量读取不产 ref）——真实使用点全丢。
+    // 旧实现只在 0 条时 fallback，常量永远 0 条以上（import）→ 读取点永远查不到。
+    // 改：全部是 import 类 ref 时也跑文本扫描并去重合并。
+    const textRefs = findSymbolNameRefs(workspaceDir, symbol, file, result.value_line, maxResults)
+    if (textRefs.length > 0) {
+      const seen = new Set(result.direct_references.map(r => r.file + ':' + r.line))
+      result.direct_references = [...result.direct_references, ...textRefs.filter(r => !seen.has(r.file + ':' + r.line))].slice(0, maxResults)
+      result.search_method = 'index_plus_text'
+    }
   }
 
   if (includeLiterals && valueInfo) {
@@ -155,7 +165,7 @@ function extractSymbolValue(absPath, symbol) {
     for (let i = 0; i < lines.length; i++) {
       const match = lines[i].match(assignmentRegex)
       if (match) {
-        let value = match[1].trim().replace(/,$/, '').replace(/#.*$/, '').trim()
+        let value = match[1].trim().replace(/,$/, '').replace(/#.*$/, '').replace(/;+$/, '').trim()
         if (value.length > 0 && value.length < 200) {
           if (/^[a-zA-Z_]\w*\(/.test(value) || value.includes(' lambda ') || value.includes(' new ')) {
             return { value: null, dynamic: true, raw: value, line: i + 1 }
