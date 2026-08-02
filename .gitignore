@@ -18,3 +18,7 @@ metadata.json
 
 # Python
 __pycache__/
+
+# 运行时产物
+.malong/
+data/

@@ -127,3 +127,7 @@ Register the MCP server with any MCP-capable LLM client (e.g. opencode, Claude D
 ## License
 
 [MIT](LICENSE)
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for the full release history (0.0.1 → 0.3.32).
