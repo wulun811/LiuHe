@@ -32,14 +32,23 @@ jobs:
         working-directory: malong-parse
         run: cargo build --release
 
-      - name: Package (unix)
-        if: runner.os != 'Windows'
+      - name: Package (ubuntu)
+        if: runner.os == 'Linux'
         run: |
           mkdir -p dist
           cp malong-parse/target/release/malong-parse dist/malong-parse
           cp LICENSE dist/LICENSE
           tar -czf "${{ matrix.artifact }}.tar.gz" -C dist malong-parse LICENSE
           sha256sum "${{ matrix.artifact }}.tar.gz" > "${{ matrix.artifact }}.tar.gz.sha256"
+
+      - name: Package (macos)
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p dist
+          cp malong-parse/target/release/malong-parse dist/malong-parse
+          cp LICENSE dist/LICENSE
+          tar -czf "${{ matrix.artifact }}.tar.gz" -C dist malong-parse LICENSE
+          shasum -a 256 "${{ matrix.artifact }}.tar.gz" > "${{ matrix.artifact }}.tar.gz.sha256"
 
       - name: Package (windows)
         if: runner.os == 'Windows'
@@ -52,7 +61,7 @@ jobs:
           $hash = (Get-FileHash "${{ matrix.artifact }}.zip" -Algorithm SHA256).Hash.ToLower()
           "$hash  ${{ matrix.artifact }}.zip" | Out-File -Encoding ascii "${{ matrix.artifact }}.zip.sha256"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.artifact }}.*
@@ -61,7 +70,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
         with:
           path: artifacts
       - name: List artifacts
