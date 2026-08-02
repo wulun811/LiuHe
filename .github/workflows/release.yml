@@ -16,8 +16,6 @@ jobs:
         include:
           - os: ubuntu-latest
             artifact: malong-parse-linux-x86_64
-          - os: macos-13
-            artifact: malong-parse-darwin-x86_64
           - os: macos-14
             artifact: malong-parse-darwin-aarch64
           - os: windows-latest
