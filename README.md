@@ -2,6 +2,8 @@
 
 **LLM-Native Code Operations Toolkit** — Code tooling reinvented for the LLM that has no hands, no eyes, and no memory.
 
+**English** | [简体中文](README.zh-CN.md)
+
 ![tests](https://img.shields.io/badge/tests-200%2B%20assertions%20passed-brightgreen)
 ![tools](https://img.shields.io/badge/tools-38%20MCP-blue)
 ![languages](https://img.shields.io/badge/parsers-10%20languages-brightgreen)
@@ -16,7 +18,6 @@
 ![commits](https://img.shields.io/badge/commits-185-blue)
 
 **Malong LiuHe** is a toolkit built for LLMs rather than humans. It ships two components:
-
 - **`malong/`** — an MCP toolset (38 tools): symbol read/write, indexing, impact analysis, reference tracing, call graphs, dead-code detection, code review, security scanning, atomic batch editing — served to the LLM over MCP (JSON-RPC over stdio).
 - **`malong-parse/`** — a Rust parsing service: a tree-sitter-based multi-language symbol extraction engine (JavaScript/TypeScript/TSX/Python/Go/Rust/C/C++/Java/Bash), talking to the toolset over a Unix socket, with an LRU tree cache and batched parallel extraction.
 
