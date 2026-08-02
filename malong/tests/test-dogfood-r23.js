@@ -4,10 +4,11 @@ import { writeFileSync, mkdirSync, rmSync, existsSync } from 'node:fs'
 import { execSync } from 'node:child_process'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { dirname } from 'node:path'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
+const imp = (p) => import(pathToFileURL(p).href)
 const MALONG = join(__dirname, '..')
 const WS = join(tmpdir(), `r23-${Date.now()}`)
 
@@ -20,7 +21,7 @@ function assert(cond, msg) {
 mkdirSync(WS, { recursive: true })
 
 // ── 1. code_review ──
-const codeReview = (await import(join(MALONG, 'tools/tool-code-review/handler.js'))).handle
+const codeReview = (await imp(join(MALONG, 'tools/tool-code-review/handler.js'))).handle
 {
   const badSource = `function processUserData(name) {\n  if (name === 'a') { return name }\n  if (name === 'b') { return name }\n  if (name === 'c') { return name }\n  const tmp = name + 'x'\n  const tmp2 = name + 'y'\n  const tmp3 = name + 'z'\n  return tmp + tmp2 + tmp3\n}\n`
   const r = await codeReview({ workspace_dir: WS, source: badSource, file: 'bad_file_name.js' })
@@ -42,7 +43,7 @@ const codeReview = (await import(join(MALONG, 'tools/tool-code-review/handler.js
 }
 
 // ── 2. style_sniffer ──
-const styleSniffer = (await import(join(MALONG, 'tools/tool-style-sniffer/handler.js'))).handle
+const styleSniffer = (await imp(join(MALONG, 'tools/tool-style-sniffer/handler.js'))).handle
 {
   writeFileSync(join(WS, 'a.js'), `export function alpha(x) {\n  if (x > 1) {\n    return 'ok'\n  }\n  return 'no'\n}\n`)
   writeFileSync(join(WS, 'b.js'), `export function beta(x) {\n  return x + 1\n}\n`)
@@ -73,7 +74,7 @@ const styleSniffer = (await import(join(MALONG, 'tools/tool-style-sniffer/handle
 }
 
 // ── 3. security_review ──
-const securityReview = (await import(join(MALONG, 'tools/tool-security-review/handler.js'))).handle
+const securityReview = (await imp(join(MALONG, 'tools/tool-security-review/handler.js'))).handle
 {
   const vuln = `const password = 'hunter2'\nconst apiKey = 'sk-abcdef1234567890'\neval(userInput)\n`
   const r = await securityReview({ workspace_dir: WS, source: vuln, file: 'app.js' })
@@ -93,7 +94,7 @@ const securityReview = (await import(join(MALONG, 'tools/tool-security-review/ha
 }
 
 // ── 4. git_worktree ──
-const gitWorktree = (await import(join(MALONG, 'tools/tool-git-worktree/handler.js'))).handle
+const gitWorktree = (await imp(join(MALONG, 'tools/tool-git-worktree/handler.js'))).handle
 {
   const gitRepo = join(WS, 'gitrepo')
   mkdirSync(gitRepo, { recursive: true })
@@ -136,7 +137,7 @@ const gitWorktree = (await import(join(MALONG, 'tools/tool-git-worktree/handler.
 }
 
 // ── 5. debug_runner ──
-const debugRunner = (await import(join(MALONG, 'tools/tool-debug-runner/handler.js'))).handle
+const debugRunner = (await imp(join(MALONG, 'tools/tool-debug-runner/handler.js'))).handle
 {
   writeFileSync(join(WS, 'boom.js'), `function crash() {\n  return undefinedVar + 1\n}\ncrash()\n`)
   const r = await debugRunner({ workspace_dir: WS, script: 'boom.js' })

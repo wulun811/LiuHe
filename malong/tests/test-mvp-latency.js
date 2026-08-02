@@ -1,9 +1,10 @@
 // test-mvp-latency.js — 附录 F 体验指标：小文件 read P95 <80ms / write P95 <150ms
 import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
+const imp = (p) => import(pathToFileURL(p).href)
 const MALONG_DIR = join(__dirname, '..')
 const TOOLS_DIR = join(MALONG_DIR, 'tools')
 
@@ -32,12 +33,12 @@ for (let i = 0; i < 30; i++) {
 }
 writeFileSync(`${WS}/src/service.py`, src.join('\n') + '\n')
 
-const pc = await import(join(MALONG_DIR, 'parse-client.js'))
+const pc = await imp(join(MALONG_DIR, 'parse-client.js'))
 await pc.init({ log: () => {} })
 const connected = await pc.connect()
 assert(connected, 'parse-client 连接')
 
-const { default: codeIndex } = await import(join(MALONG_DIR, 'code-index.js'))
+const { default: codeIndex } = await imp(join(MALONG_DIR, 'code-index.js'))
 const langParser = {
   extractAllAsync: (source, ext, filePath) => pc.extractAll(source, ext, filePath),
   hasErrorsAsync: (source, ext, filePath) => pc.hasErrors(source, ext, filePath),
@@ -59,9 +60,9 @@ svc.initWorkspace(WS)
 await svc.indexBatch([`${WS}/src/service.py`], WS)
 svc.resolveCrossFileRefs()
 
-const { writeSymbol } = await import(join(MALONG_DIR, 'write-runtime.js'))
+const { writeSymbol } = await imp(join(MALONG_DIR, 'write-runtime.js'))
 const wctx = { codeIndexService: svc, getWorkspaceDir: () => DATA, langParserService: langParser }
-const readHandler = (await import(join(TOOLS_DIR, 'tool-read-symbol', 'handler.js'))).handle
+const readHandler = (await imp(join(TOOLS_DIR, 'tool-read-symbol', 'handler.js'))).handle
 const rctx = { codeIndexService: svc, getWorkspaceDir: () => DATA }
 
 function p95(arr) {

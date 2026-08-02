@@ -1,10 +1,11 @@
 // test-primitives.js — 原语化 P1+P2+P3 端到端验证（附录 F：冲突矩阵/幂等/同步重抽/降级）
 // 依赖：malong-parse 服务在跑（真实 parse 校验）。
 import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync, statSync, unlinkSync } from 'node:fs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
+const imp = (p) => import(pathToFileURL(p).href)
 const MALONG_DIR = join(__dirname, '..')
 const TOOLS_DIR = join(MALONG_DIR, 'tools')
 
@@ -67,12 +68,12 @@ writeFileSync(`${WS}/src/client.js`, `class SessionManager {
 `)
 
 // ── 起真实 code-index ──
-const pc = await import(join(MALONG_DIR, 'parse-client.js'))
+const pc = await imp(join(MALONG_DIR, 'parse-client.js'))
 await pc.init({ log: () => {} })
 const connected = await pc.connect()
 assert(connected, 'parse-client 连接到 malong-parse')
 
-const { default: codeIndex } = await import(join(MALONG_DIR, 'code-index.js'))
+const { default: codeIndex } = await imp(join(MALONG_DIR, 'code-index.js'))
 const langParser = {
   extractAllAsync: (source, ext, filePath) => pc.extractAll(source, ext, filePath),
   hasErrorsAsync: (source, ext, filePath) => pc.hasErrors(source, ext, filePath),
@@ -124,7 +125,7 @@ assert(jsSyms.length === 2 && jsSyms.every(s => s.stable_id.startsWith('js:src/c
 // ══════════════ P2：read_symbol ══════════════
 
 console.log('── P2 read_symbol ──')
-const readHandler = (await import(join(TOOLS_DIR, 'tool-read-symbol', 'handler.js'))).handle
+const readHandler = (await imp(join(TOOLS_DIR, 'tool-read-symbol', 'handler.js'))).handle
 const ctx = { codeIndexService: svc, getWorkspaceDir: () => DATA }
 
 const r1 = await readHandler({ workspace_dir: WS, locator: { file_path: 'src/auth.py', symbol_id: loginSyms[0].stable_id }, budget_hint: 400 }, ctx)
@@ -159,7 +160,7 @@ assert(rFile.symbol?.text.includes('truncated'), `P2 file 模式降级读 + budg
 // ══════════════ P3：write_symbol ══════════════
 
 console.log('── P3 write_symbol ──')
-const { writeSymbol } = await import(join(MALONG_DIR, 'write-runtime.js'))
+const { writeSymbol } = await imp(join(MALONG_DIR, 'write-runtime.js'))
 const wctx = { codeIndexService: svc, getWorkspaceDir: () => DATA, langParserService: langParser }
 
 // 3.0 无 base_version → NO_BASE 拒（用 patch 模式避免同名歧义干扰）
@@ -376,7 +377,7 @@ const wBad = await writeSymbol({
 assert(wBad.success === false && wBad.error?.code === 'VALIDATION_FAILED', `P3 block_on_validation_error 拒写（得 ${JSON.stringify(wBad.error || wBad.validation || wBad.safety_report?.validation)}）`)
 
 // 3.14 锁：假锁文件 → acquireLock 超时返回 locked（FILE_LOCKED 语义）
-const wrMod = await import(join(MALONG_DIR, 'write-runtime.js'))
+const wrMod = await imp(join(MALONG_DIR, 'write-runtime.js'))
 const { acquireLock } = wrMod
 const fakeLock = `${WS}/src/auth.py.mlock`
 writeFileSync(fakeLock, JSON.stringify({ pid: 999999, ts: Date.now() }))
@@ -389,8 +390,8 @@ const hNow = codeIndex._db.prepare("SELECT body_hash FROM symbols s JOIN files f
 assert(hNow.length === 2 && hNow.every(h => h.body_hash && h.body_hash.length === 64), `P3 重抽后 helper body_hash 更新（得 ${JSON.stringify(hNow)}）`)
 
 // 3.16 crash recovery 哈希三方判定（staged 不再盲目回滚 —— 递归进化第 4 轮修复）
-const { recoverJournals, createJournal, updateJournalState } = await import(join(MALONG_DIR, 'write-journal.js'))
-const { sha256 } = await import(join(MALONG_DIR, 'hash-utils.js'))
+const { recoverJournals, createJournal, updateJournalState } = await imp(join(MALONG_DIR, 'write-journal.js'))
+const { sha256 } = await imp(join(MALONG_DIR, 'hash-utils.js'))
 const recWS = `${WS}/rec`
 rmSync(recWS, { recursive: true, force: true })
 mkdirSync(join(recWS, '.malong', 'journal'), { recursive: true })
@@ -419,7 +420,7 @@ assert(readFileSync(`${recWS}/c.txt`, 'utf-8') === 'EXTERNAL', 'P3 recovery: 外
 assert(recoverJournals(recWS).length === 0, 'P3 recovery: 二次运行无重复处理')
 
 // 3.17 括号平衡校验字符串感知（字符串/注释里的括号不是代码结构 —— 递归进化第 4 轮修复）
-const { checkBracketBalance } = await import(join(MALONG_DIR, 'write-edit.js'))
+const { checkBracketBalance } = await imp(join(MALONG_DIR, 'write-edit.js'))
 assert(checkBracketBalance('print(")")').ok === true, 'P3 字符串含 ) 不误报 unbalanced')
 assert(checkBracketBalance("const s = '(not closed'").ok === true, 'P3 单引号串含 ( 不误报')
 assert(checkBracketBalance('const t = `template with }`').ok === true, 'P3 模板串含 } 不误报')

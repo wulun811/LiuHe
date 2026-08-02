@@ -6,11 +6,12 @@
 // P3b write_symbol 两处文案（insert_after_symbol 提示 / FILE_CHANGED 建议）
 // 依赖：malong-parse 服务在跑。起真实 code-index（mock core + parse-client 做 langParser）+ 直接调 handler。
 import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import Database from 'better-sqlite3'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
+const imp = (p) => import(pathToFileURL(p).href)
 const MALONG_DIR = join(__dirname, '..')
 
 let pass = 0, fail = 0
@@ -42,12 +43,12 @@ const appJs = join(WS, 'app.js')
 const esmLibJs = join(WS, 'esm-lib.mjs')
 const esmAppJs = join(WS, 'esm-app.mjs')
 
-const pc = await import(join(MALONG_DIR, 'parse-client.js'))
+const pc = await imp(join(MALONG_DIR, 'parse-client.js'))
 await pc.init({ log: () => {} })
 const connected = await pc.connect()
 assert(connected, 'parse-client 连接到 malong-parse')
 
-const { default: codeIndex } = await import(join(MALONG_DIR, 'code-index.js'))
+const { default: codeIndex } = await imp(join(MALONG_DIR, 'code-index.js'))
 const langParser = {
   extractAllAsync: (source, ext, filePath) => pc.extractAll(source, ext, filePath),
   extractReferencesAsync: (source, ext) => pc.extractReferences(source, ext),
@@ -99,14 +100,14 @@ const p2Sym = p2Ref.target_symbol_id ? q("SELECT name, file_id FROM symbols WHER
 assert(p2Sym && p2Sym.name === 'process', `P0 新文件单文件路径别名 ref 同样重绑定（得 ${JSON.stringify(p2Sym)}）`)
 
 // ── P1：.malong / .ai-transactions 不进索引 ──
-const fc = await import(join(MALONG_DIR, 'file-collector.js'))
+const fc = await imp(join(MALONG_DIR, 'file-collector.js'))
 assert(fc.DEFAULT_IGNORE_DIRS.has('.malong') && fc.DEFAULT_IGNORE_DIRS.has('.ai-transactions'), 'P1 忽略清单含 .malong/.ai-transactions')
 await svc.indexProject(WS, { timeout: 60000 })
 const backupRows = qa("SELECT path FROM files WHERE path LIKE '.malong/%' OR path LIKE '.ai-transactions/%'")
 assert(backupRows.length === 0, `P1 walkAndIndex 不索引备份目录（得 ${backupRows.map(r => r.path).join(',') || '无'}）`)
 
 // ── P2：rename_symbol 别名绑定文件只改 import 行 ──
-const rename = await import(join(MALONG_DIR, 'tools', 'tool-rename-symbol', 'handler.js'))
+const rename = await imp(join(MALONG_DIR, 'tools', 'tool-rename-symbol', 'handler.js'))
 const renameRes = await rename.handle(
   { workspace_dir: WS, file: 'lib.js', symbol: 'process', new_name: 'retryProcess', dry_run: true },
   { codeIndexService: svc, getWorkspaceDir: () => DATA },
@@ -123,12 +124,12 @@ assert(libEdits && libEdits.edits.some(e => e.new.includes('function retryProces
 // ── P3a：CJS 解构别名补 per-local import ref（kind=import）──
 const localImportRef = q("SELECT r.kind FROM refs r JOIN files f ON r.source_file_id=f.id WHERE f.path='app.js' AND r.target_name='libProcess' AND r.kind='import'")
 assert(localImportRef, 'P3a app.js 有 libProcess 的 per-local import ref')
-const refsTool = await import(join(MALONG_DIR, 'tools', 'tool-references', 'handler.js'))
+const refsTool = await imp(join(MALONG_DIR, 'tools', 'tool-references', 'handler.js'))
 const refsRes = await refsTool.handle({ workspace_dir: WS, symbol: 'libProcess' }, { codeIndexService: svc, getWorkspaceDir: () => DATA })
 assert(refsRes.search_method !== 'text_fallback' && refsRes.results.some(r => r.path === 'app.js' && r.kind === 'import' && r.line === 1), `P3a references(libProcess) 走 DB 且绑定行标 import（得 ${refsRes.search_method || 'db'} ${JSON.stringify(refsRes.results)}}）`)
 
 // ── P3b-1：insert_after_symbol 对不存在符号返回 patch 提示 ──
-const ws = await import(join(MALONG_DIR, 'tools', 'tool-write-symbol', 'handler.js'))
+const ws = await imp(join(MALONG_DIR, 'tools', 'tool-write-symbol', 'handler.js'))
 const insertRes = await ws.handle(
   { workspace_dir: WS, file: 'app.js', locator: { file_path: 'app.js', name: 'nonexistent_fn', kind: 'function' }, edit_mode: 'insert_after_symbol', content: 'function nonexistent_fn() { return 1 }', patch: { old_string: 'x', new_string: 'x' }, base_version: { file: { hash: 'sha256:0' }, symbol: null } },
   { codeIndexService: svc, getWorkspaceDir: () => DATA },
@@ -138,7 +139,7 @@ assert(insertRes.error.message.includes('edit_mode="patch"'), `P3b-1 错误信�
 
 // ── P3b-2：patch 模式 FILE_CHANGED 建议文案 ──
 const appContent = (await import('node:fs')).readFileSync(appJs, 'utf-8')
-const curHash = await (await import(join(MALONG_DIR, 'hash-utils.js'))).sha256(appContent)
+const curHash = await (await imp(join(MALONG_DIR, 'hash-utils.js'))).sha256(appContent)
 const okWrite = await ws.handle(
   { workspace_dir: WS, file: 'app.js', locator: { file_path: 'app.js' }, edit_mode: 'patch', patch: { old_string: 'const MAX_RETRIES = 3;', new_string: 'const MAX_RETRIES = 3; // bump' }, base_version: { file: { hash: `sha256:${curHash}` }, symbol: null } },
   { codeIndexService: svc, getWorkspaceDir: () => DATA },

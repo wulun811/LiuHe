@@ -3,11 +3,12 @@
 // 覆盖：DIR_AS_FILE / FILE_NOT_FOUND / FILE_NOT_INDEXED / 绝对路径归一化 / file_error 透传
 // 依赖：malong-parse 服务在跑。起真实 code-index（mock core + parse-client 做 langParser）+ 直接调 handler。
 import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import Database from 'better-sqlite3'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
+const imp = (p) => import(pathToFileURL(p).href)
 const MALONG_DIR = join(__dirname, '..')
 
 let pass = 0, fail = 0
@@ -29,11 +30,11 @@ writeFileSync(`${WS}/app.js`, `const { process: libProcess } = require('./lib.js
 const libJs = join(WS, 'lib.js')
 const appJs = join(WS, 'app.js')
 
-const pc = await import(join(MALONG_DIR, 'parse-client.js'))
+const pc = await imp(join(MALONG_DIR, 'parse-client.js'))
 await pc.init({ log: () => {} })
 assert(await pc.connect(), 'parse-client 连接到 malong-parse')
 
-const { default: codeIndex } = await import(join(MALONG_DIR, 'code-index.js'))
+const { default: codeIndex } = await imp(join(MALONG_DIR, 'code-index.js'))
 const langParser = {
   extractAllAsync: (source, ext, filePath) => pc.extractAll(source, ext, filePath),
   extractReferencesAsync: (source, ext) => pc.extractReferences(source, ext),
@@ -55,14 +56,14 @@ svc.initWorkspace(WS)
 await svc.indexBatch([libJs, appJs], WS)
 
 const ctx = { codeIndexService: svc, getWorkspaceDir: () => DATA }
-const refs = await import(join(MALONG_DIR, 'tools', 'tool-references', 'handler.js'))
-const impact = await import(join(MALONG_DIR, 'tools', 'tool-impact-analysis', 'handler.js'))
-const depGraph = await import(join(MALONG_DIR, 'tools', 'tool-dep-graph', 'handler.js'))
-const inspect = await import(join(MALONG_DIR, 'tools', 'tool-inspect', 'handler.js'))
-const findTests = await import(join(MALONG_DIR, 'tools', 'tool-find-tests', 'handler.js'))
-const rename = await import(join(MALONG_DIR, 'tools', 'tool-rename-symbol', 'handler.js'))
-const callChain = await import(join(MALONG_DIR, 'tools', 'tool-call-chain', 'handler.js'))
-const outline = await import(join(MALONG_DIR, 'tools', 'tool-outline-reader', 'handler.js'))
+const refs = await imp(join(MALONG_DIR, 'tools', 'tool-references', 'handler.js'))
+const impact = await imp(join(MALONG_DIR, 'tools', 'tool-impact-analysis', 'handler.js'))
+const depGraph = await imp(join(MALONG_DIR, 'tools', 'tool-dep-graph', 'handler.js'))
+const inspect = await imp(join(MALONG_DIR, 'tools', 'tool-inspect', 'handler.js'))
+const findTests = await imp(join(MALONG_DIR, 'tools', 'tool-find-tests', 'handler.js'))
+const rename = await imp(join(MALONG_DIR, 'tools', 'tool-rename-symbol', 'handler.js'))
+const callChain = await imp(join(MALONG_DIR, 'tools', 'tool-call-chain', 'handler.js'))
+const outline = await imp(join(MALONG_DIR, 'tools', 'tool-outline-reader', 'handler.js'))
 
 // ── 共用守卫服务层直测 ──
 const r1 = svc.resolveFileArg(WS) // 目录

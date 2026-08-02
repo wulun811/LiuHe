@@ -3,11 +3,12 @@
 // ④ impact_analysis 别名导入反查（CJS 解构 { process: libProcess }）
 // 依赖：malong-parse 服务在跑。起真实 code-index（mock core + parse-client 做 langParser）+ 直接调 handler。
 import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs'
 import Database from 'better-sqlite3'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
+const imp = (p) => import(pathToFileURL(p).href)
 const MALONG_DIR = join(__dirname, '..')
 
 let pass = 0, fail = 0
@@ -37,12 +38,12 @@ const appJs = join(WS, 'app.js')
 const testAppJs = join(WS, 'test_app.js')
 const plainJs = join(WS, 'plain.js')
 
-const pc = await import(join(MALONG_DIR, 'parse-client.js'))
+const pc = await imp(join(MALONG_DIR, 'parse-client.js'))
 await pc.init({ log: () => {} })
 const connected = await pc.connect()
 assert(connected, 'parse-client 连接到 malong-parse')
 
-const { default: codeIndex } = await import(join(MALONG_DIR, 'code-index.js'))
+const { default: codeIndex } = await imp(join(MALONG_DIR, 'code-index.js'))
 const langParser = {
   extractAllAsync: (source, ext, filePath) => pc.extractAll(source, ext, filePath),
   extractReferencesAsync: (source, ext) => pc.extractReferences(source, ext),
@@ -92,20 +93,20 @@ const libJsFileId = db2.prepare("SELECT id FROM files WHERE path='lib.js'").get(
 assert(libProcessSym && libProcessSym.name === 'process' && libProcessSym.file_id === libJsFileId, `④ 别名 call ref 重绑定到 lib.js::process（得 ${JSON.stringify(libProcessSym)}）`)
 
 // ② dependency_gatekeeper：CJS 文件 imports_checked >= 1
-const gk = await import(join(MALONG_DIR, 'tools', 'tool-dependency-gatekeeper', 'handler.js'))
+const gk = await imp(join(MALONG_DIR, 'tools', 'tool-dependency-gatekeeper', 'handler.js'))
 const gkRes = await gk.handle({ workspace_dir: WS, file: 'app.js' }, { langParserService: langParser })
 assert(gkRes.imports_checked === 1, `② gatekeeper 识别 CJS require（imports_checked=${gkRes.imports_checked}，应=1）`)
 const gkResPlain = await gk.handle({ workspace_dir: WS, file: 'plain.js' }, { langParserService: langParser })
 assert(gkResPlain.imports_checked === 2, `② gatekeeper 对 plain.js 两条 require 都识别（得 ${gkResPlain.imports_checked}）`)
 
 // ② test_bridge run_error：workspace 无 jest → exit 1 + 无结果 → run_error 必须透出
-const tb = await import(join(MALONG_DIR, 'tools', 'tool-test-bridge', 'handler.js'))
+const tb = await imp(join(MALONG_DIR, 'tools', 'tool-test-bridge', 'handler.js'))
 const tbRes = await tb.handle({ action: 'run', workspace_dir: WS, scope: 'test_app.js', framework: 'jest', timeout: 10 }, {})
 assert(tbRes.exit_code !== 0, `② test_bridge 无 jest 时 exit != 0（得 ${tbRes.exit_code}）`)
 assert(typeof tbRes.run_error === 'string' && tbRes.run_error.length > 0, `② run_error 透出原始输出（得 ${String(tbRes.run_error).slice(0, 60)}...）`)
 
 // ③ sweep_dead_code 单文件 scope：只扫目标文件
-const sweep = await import(join(MALONG_DIR, 'tools', 'tool-dead-code-sweeper', 'handler.js'))
+const sweep = await imp(join(MALONG_DIR, 'tools', 'tool-dead-code-sweeper', 'handler.js'))
 const sweepRes = await sweep.handle({ workspace_dir: WS, scope: 'lib.js' }, { codeIndexService: svc, getWorkspaceDir: () => DATA })
 assert(sweepRes.scanned_files === 1, `③ scope=lib.js 只扫 1 个文件（得 ${sweepRes.scanned_files}）`)
 const sweepWhole = await sweep.handle({ workspace_dir: WS, scope: '.' }, { codeIndexService: svc, getWorkspaceDir: () => DATA })

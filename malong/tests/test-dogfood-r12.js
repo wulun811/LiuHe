@@ -1,11 +1,12 @@
 // test-dogfood-r12.js — 第 12 轮全工具 dogfood 修复回归
 // 锁定：#1 references 行号 / #2 edit_batch diff 换行 / #4 mock_sync 类方法 / #5 exception_guard 同语言 / #6 find_tests 文本反查
 import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
+const imp = (p) => import(pathToFileURL(p).href)
 const MALONG = join(__dirname, '..')
 
 let pass = 0, fail = 0
@@ -20,11 +21,11 @@ function assert(c, m) { if (c) { pass++ } else { fail++; console.error('  FAIL:'
   mkdirSync(join(WS, 'src'), { recursive: true }); mkdirSync(DATA, { recursive: true })
   writeFileSync(join(WS, 'src/caller.js'), `import { helper } from './lib.js'\nexport function a() {\n  helper(1)\n  const x = helper(2)\n  return helper(3) + x\n}\n`)
   writeFileSync(join(WS, 'src/lib.js'), `export function helper(n) { return n * 2 }\n`)
-  const pc = await import(join(MALONG, 'parse-client.js'))
+  const pc = await imp(join(MALONG, 'parse-client.js'))
   await pc.init({ log: () => {} })
   const ok = await pc.connect()
   assert(ok, '#1 parse-client 连接 daemon')
-  const { default: codeIndex } = await import(join(MALONG, 'code-index.js'))
+  const { default: codeIndex } = await imp(join(MALONG, 'code-index.js'))
   const langParser = { extractAllAsync: (s, e, f) => pc.extractAll(s, e, f), batchExtractAsync: (f) => pc.batchExtract(f) }
   const services = { langParser }
   const core = { services, getService: n => services[n], registerService: (n, s) => { services[n] = s }, getWorkspaceDir: () => DATA, log: () => {}, emit: () => {}, get: (k, d) => k === 'codeIndex.udsPath' ? SOCK : (k === 'codeIndex.udsToken' ? '' : d) }
@@ -58,7 +59,7 @@ print(d.startswith('--- a/f.txt\\n+++ b/f.txt\\n@@'))
   const WS = '/tmp/opencode/r12-mock'
   rmSync(WS, { recursive: true, force: true }); mkdirSync(join(WS, 'src'), { recursive: true })
   writeFileSync(join(WS, 'src/svc.js'), `class Svc {\n  async getImpactAnalysis(filePath, opts) {\n    return null\n  }\n}\n`)
-  const { handle } = await import(join(MALONG, 'tools/tool-mock-syncer/handler.js'))
+  const { handle } = await imp(join(MALONG, 'tools/tool-mock-syncer/handler.js'))
   const r = await handle({ workspace_dir: WS, file: 'src/svc.js', function: 'getImpactAnalysis' }, {})
   assert(!r.error, `#4 mock_sync 找到类方法（得 ${r.error || 'ok'}）`)
   assert(r.target?.line === 2, `#4 类方法定位 line=2（得 ${r.target?.line}）`)
@@ -71,7 +72,7 @@ print(d.startswith('--- a/f.txt\\n+++ b/f.txt\\n@@'))
   rmSync(WS, { recursive: true, force: true }); mkdirSync(join(WS, 'src'), { recursive: true })
   writeFileSync(join(WS, 'src/app.js'), `export function f(x) { if (!x) throw new Error('not found') }\n`)
   writeFileSync(join(WS, 'code-index.db'), '')
-  const { handle } = await import(join(MALONG, 'tools/tool-exception-guard/handler.js'))
+  const { handle } = await imp(join(MALONG, 'tools/tool-exception-guard/handler.js'))
   const pyClasses = [{ name: 'ValidationError', type: 'class', file: 'fixtures/exceptions.py', start_line: 1 }]
   const ctx = { codeIndexService: { initWorkspace() {}, searchSymbols: async q => pyClasses.filter(c => c.name.includes(q)) }, getWorkspaceDir: () => WS }
   const r = await handle({ workspace_dir: WS, file: 'src/app.js' }, ctx)
@@ -86,7 +87,7 @@ print(d.startswith('--- a/f.txt\\n+++ b/f.txt\\n@@'))
   rmSync(WS, { recursive: true, force: true }); mkdirSync(join(WS, 'src'), { recursive: true }); mkdirSync(join(WS, 'tests'), { recursive: true })
   writeFileSync(join(WS, 'src/health-check.js'), `export function run() { return 1 }\n`)
   writeFileSync(join(WS, 'tests/test-dyn.js'), `const m = await import('../src/health-check.js')\nconsole.log(m.run())\n`)
-  const { handle } = await import(join(MALONG, 'tools/tool-find-tests/handler.js'))
+  const { handle } = await imp(join(MALONG, 'tools/tool-find-tests/handler.js'))
   const r = await handle({ workspace_dir: WS, file: 'src/health-check.js' }, {})
   assert(r.by_import.some(t => t.path.endsWith('test-dyn.js')), `#6 文本反查找到动态 import 测试（得 ${JSON.stringify(r.by_import)}）`)
   assert(r.by_import.some(t => t.line > 0), '#6 反查结果带行号')

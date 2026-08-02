@@ -2,11 +2,12 @@
 // + r22：裸调用跨文件同名绑定且无 import 边 → 标 ambiguous
 // 场景：app.js 调 helper.run()（成员），other.js 有裸函数 run()——成员调用不得绑到它
 import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import Database from 'better-sqlite3'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
+const imp = (p) => import(pathToFileURL(p).href)
 const MALONG_DIR = join(__dirname, '..')
 const WS = '/tmp/opencode/r21-ws'
 const DATA = '/tmp/opencode/r21-data'
@@ -26,11 +27,11 @@ function assert(cond, msg) {
 writeFileSync(`${WS}/app.js`, `const helper = { run: (x) => x * 2 }\nexport function process(data) {\n  return helper.run(data)\n}\nexport function query() {\n  return process(2)\n}\n`)
 writeFileSync(`${WS}/other.js`, `export function run() {\n  return 42\n}\n`)
 
-const pc = await import(join(MALONG_DIR, 'parse-client.js'))
+const pc = await imp(join(MALONG_DIR, 'parse-client.js'))
 await pc.init({ log: () => {} })
 await pc.connect()
 
-const { default: codeIndex } = await import(join(MALONG_DIR, 'code-index.js'))
+const { default: codeIndex } = await imp(join(MALONG_DIR, 'code-index.js'))
 const langParser = {
   extractAllAsync: (source, ext, filePath) => pc.extractAll(source, ext, filePath),
   extractReferencesAsync: (source, ext) => pc.extractReferences(source, ext),

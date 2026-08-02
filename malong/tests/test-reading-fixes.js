@@ -1,10 +1,11 @@
 // test-reading-fixes.js — 验证码龙阅读四问题修复（①旧索引 ②跨语言碰撞 ③Rust路径解析 ④噪声过滤）
 // 依赖：malong-parse 服务在跑（新二进制）。起真实 code-index（mock core + parse-client 做 langParser）。
 import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
+const imp = (p) => import(pathToFileURL(p).href)
 const MALONG_DIR = join(__dirname, '..')
 
 let pass = 0, fail = 0
@@ -62,7 +63,7 @@ def use():
 `)
 
 // ── ④ 提取器层：Rust 噪声不入库 ──
-const pc = await import(join(MALONG_DIR, 'parse-client.js'))
+const pc = await imp(join(MALONG_DIR, 'parse-client.js'))
 await pc.init({ log: () => {} })
 const connected = await pc.connect()
 assert(connected, 'parse-client 连接到 malong-parse')
@@ -77,7 +78,7 @@ assert(leaked.length === 0, `④ 提取器层噪声应清零，泄漏: ${leaked.
 assert(refNames.some(n => lastSeg(n) === 'token_to_id'), '④/③ 真实调用 token_to_id 保留')
 
 // ── 起真实 code-index ──
-const { default: codeIndex } = await import(join(MALONG_DIR, 'code-index.js'))
+const { default: codeIndex } = await imp(join(MALONG_DIR, 'code-index.js'))
 const langParser = {
   extractAllAsync: (source, ext, filePath) => pc.extractAll(source, ext, filePath),
   batchExtractAsync: (files) => pc.batchExtract(files),
@@ -112,7 +113,7 @@ writeFileSync(`${WS}/src/fresh.rs`, `pub fn brand_new() -> u32 { 42 }\n`)
 const freshBefore = await svc.getFileOutline('src/fresh.rs')
 assert(freshBefore.error === 'not_indexed_yet', `① 磁盘存在未索引 -> not_indexed_yet（得 ${freshBefore.error}）`)
 
-const { ensureIndexed, checkFileStaleness } = await import(join(MALONG_DIR, 'staleness.js'))
+const { ensureIndexed, checkFileStaleness } = await imp(join(MALONG_DIR, 'staleness.js'))
 const ensured = await ensureIndexed(svc, WS, 'src/fresh.rs')
 const freshAfter = await svc.getFileOutline('src/fresh.rs')
 assert(ensured && !freshAfter.error, '① ensureIndexed 异步等待后真索引成功（竞态修复）')

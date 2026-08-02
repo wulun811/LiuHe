@@ -5,10 +5,11 @@
 //   3) 锁超时 → FILE_LOCKED（持锁 >2s）
 //   4) 读写 TOCTOU：并发 read+write，读到的永远是完整旧版或完整新版（原子 rename，无撕裂）
 import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { mkdirSync, writeFileSync, readFileSync, rmSync, openSync, closeSync, writeSync, unlinkSync } from 'node:fs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
+const imp = (p) => import(pathToFileURL(p).href)
 const MALONG_DIR = join(__dirname, '..')
 const TOOLS_DIR = join(MALONG_DIR, 'tools')
 
@@ -45,12 +46,12 @@ writeFileSync(`${WS}/src/service.py`, `class Service:
         return self.calls
 `)
 
-const pc = await import(join(MALONG_DIR, 'parse-client.js'))
+const pc = await imp(join(MALONG_DIR, 'parse-client.js'))
 await pc.init({ log: () => {} })
 const connected = await pc.connect()
 assert(connected, 'parse-client 连接 malong-parse')
 
-const { default: codeIndex } = await import(join(MALONG_DIR, 'code-index.js'))
+const { default: codeIndex } = await imp(join(MALONG_DIR, 'code-index.js'))
 const langParser = {
   extractAllAsync: (source, ext, filePath) => pc.extractAll(source, ext, filePath),
   hasErrorsAsync: (source, ext, filePath) => pc.hasErrors(source, ext, filePath),
@@ -72,10 +73,10 @@ svc.initWorkspace(WS)
 await svc.indexBatch([`${WS}/src/service.py`], WS)
 svc.resolveCrossFileRefs()
 
-const { writeSymbol } = await import(join(MALONG_DIR, 'write-runtime.js'))
-const { acquireLock } = await import(join(MALONG_DIR, 'write-runtime.js'))
+const { writeSymbol } = await imp(join(MALONG_DIR, 'write-runtime.js'))
+const { acquireLock } = await imp(join(MALONG_DIR, 'write-runtime.js'))
 const wctx = { codeIndexService: svc, getWorkspaceDir: () => DATA, langParserService: langParser }
-const readHandler = (await import(join(TOOLS_DIR, 'tool-read-symbol', 'handler.js'))).handle
+const readHandler = (await imp(join(TOOLS_DIR, 'tool-read-symbol', 'handler.js'))).handle
 const rctx = { codeIndexService: svc, getWorkspaceDir: () => DATA }
 
 async function currentVersion(filePath) {
@@ -128,7 +129,7 @@ assert(rUnlock.success === true, `释放后恢复可写（得 ${rUnlock.error?.c
 
 // ── 场景 4：读写 TOCTOU — 原子性 + 大文件降级（附录 E：>1MB 不索引，file-level 版本检测） ──
 console.log('── 场景 4: 读写 TOCTOU 原子性 + 大文件降级 ──')
-const bigRead = (await import(join(TOOLS_DIR, 'tool-read-symbol', 'handler.js'))).handle
+const bigRead = (await imp(join(TOOLS_DIR, 'tool-read-symbol', 'handler.js'))).handle
 const BIG = `${WS}/src/big.js`
 // >1MB 大文件：47k 行注释填充（Rust FILE_TOO_LARGE 拒索引 → 走 patch + file-level 降级）
 const filler = '// filler line for size\n'.repeat(47000)

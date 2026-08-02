@@ -2,10 +2,11 @@
 // malong 性能测试套件 — 重启 opencode 后运行: node tests/perf-test.js
 
 import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { existsSync, writeFileSync, unlinkSync, mkdirSync, rmSync } from 'node:fs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
+const imp = (p) => import(pathToFileURL(p).href)
 const MALONG_DIR = join(__dirname, '..')
 const TMP_DIR = join(__dirname, '.perf-tmp')
 
@@ -33,7 +34,7 @@ async function testRustParse() {
 
   let parseClient
   try {
-    parseClient = await import(join(MALONG_DIR, 'parse-client.js'))
+    parseClient = await imp(join(MALONG_DIR, 'parse-client.js'))
   } catch (e) {
     console.log('✗ 无法加载 parse-client.js:', e.message)
     return
@@ -124,7 +125,7 @@ async function testCodeIndex() {
 
   let CodeIndex
   try {
-    CodeIndex = (await import(join(MALONG_DIR, 'code-index.js'))).default
+    CodeIndex = (await imp(join(MALONG_DIR, 'code-index.js'))).default
   } catch (e) {
     console.log('✗ 无法加载 code-index.js:', e.message)
     return
@@ -144,7 +145,7 @@ async function testCodeIndex() {
 
   // 先注册 lang-parser 服务
   try {
-    const langParser = await import(join(MALONG_DIR, 'lang-parser.js'))
+    const langParser = await imp(join(MALONG_DIR, 'lang-parser.js'))
     await langParser.init(mockCore)
   } catch (e) {
     console.log('⚠ lang-parser 加载失败，code-index 测试可能受限:', e.message)
@@ -221,21 +222,21 @@ async function testToolHandlers() {
   }
 
   // 3a. error-codes 验证
-  const { makeError, validateFilePath } = await import(join(MALONG_DIR, 'error-codes.js'))
+  const { makeError, validateFilePath } = await imp(join(MALONG_DIR, 'error-codes.js'))
   const { ms: msValidate } = await timeit(() => {
     for (let i = 0; i < 1000; i++) validateFilePath(`src/file_${i}.js`)
   })
   record('validateFilePath ×1000', msValidate, 100)
 
   // 3b. staleness 检查
-  const { checkFileStaleness } = await import(join(MALONG_DIR, 'staleness.js'))
+  const { checkFileStaleness } = await imp(join(MALONG_DIR, 'staleness.js'))
   const { ms: msStale } = await timeit(() => {
     for (let i = 0; i < 100; i++) checkFileStaleness(null, '/tmp', `file_${i}.js`)
   })
   record('checkFileStaleness ×100 (no service)', msStale, 100)
 
   // 3c. file-collector
-  const { collectFiles } = await import(join(MALONG_DIR, 'file-collector.js'))
+  const { collectFiles } = await imp(join(MALONG_DIR, 'file-collector.js'))
   const { ms: msCollect } = await timeit(() => collectFiles(MALONG_DIR, { maxFiles: 100 }))
   record('collectFiles (100 files)', msCollect, 1000)
 }
@@ -254,7 +255,7 @@ async function testMemory() {
     'code-search.js', 'style-sniffer.js', 'patch-parser.js',
   ]
   for (const m of modules) {
-    try { await import(join(MALONG_DIR, m)) } catch {}
+    try { await imp(join(MALONG_DIR, m)) } catch {}
   }
 
   if (typeof global.gc === 'function') global.gc()
@@ -274,7 +275,7 @@ async function testSandbox() {
 
   let sandboxMod
   try {
-    sandboxMod = await import(join(MALONG_DIR, 'sandbox.js'))
+    sandboxMod = await imp(join(MALONG_DIR, 'sandbox.js'))
   } catch (e) {
     console.log('✗ 无法加载 sandbox.js:', e.message)
     return
@@ -329,7 +330,7 @@ async function main() {
 
   // 清理：断开 parse 连接
   try {
-    const pc = await import(join(MALONG_DIR, 'parse-client.js'))
+    const pc = await imp(join(MALONG_DIR, 'parse-client.js'))
     await pc.disconnect()
   } catch {}
 

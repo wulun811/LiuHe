@@ -3,10 +3,11 @@
 // 统计调用次数 / 参数输入字符 / 工具输出字符，token 估算 = chars/4。
 // 任务：给 src/app.py 的 login 加一行日志（改 body），确认 logout 未被影响。
 import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
+const imp = (p) => import(pathToFileURL(p).href)
 const MALONG_DIR = join(__dirname, '..')
 const TOOLS_DIR = join(MALONG_DIR, 'tools')
 
@@ -58,11 +59,11 @@ function makeApp() {
 writeFileSync(`${WS}/src/app.py`, makeApp())
 writeFileSync(`${WS}/src/app_old.py`, makeApp())
 
-const pc = await import(join(MALONG_DIR, 'parse-client.js'))
+const pc = await imp(join(MALONG_DIR, 'parse-client.js'))
 await pc.init({ log: () => {} })
 await pc.connect()
 
-const { default: codeIndex } = await import(join(MALONG_DIR, 'code-index.js'))
+const { default: codeIndex } = await imp(join(MALONG_DIR, 'code-index.js'))
 const langParser = {
   extractAllAsync: (source, ext, filePath) => pc.extractAll(source, ext, filePath),
   hasErrorsAsync: (source, ext, filePath) => pc.hasErrors(source, ext, filePath),
@@ -86,12 +87,12 @@ svc.resolveCrossFileRefs()
 
 const wctx = { codeIndexService: svc, getWorkspaceDir: () => DATA, langParserService: langParser }
 const rctx = { codeIndexService: svc, getWorkspaceDir: () => DATA }
-const readHandler = (await import(join(TOOLS_DIR, 'tool-read-symbol', 'handler.js'))).handle
-const { writeSymbol } = await import(join(MALONG_DIR, 'write-runtime.js'))
-const outlineHandler = (await import(join(TOOLS_DIR, 'tool-outline-reader', 'handler.js'))).handle
-const inspectHandler = (await import(join(TOOLS_DIR, 'tool-inspect', 'handler.js'))).handle
-const impactHandler = (await import(join(TOOLS_DIR, 'tool-impact-analysis', 'handler.js'))).handle
-const editBatchHandler = (await import(join(TOOLS_DIR, 'tool-batch-edit', 'handler.js'))).handle
+const readHandler = (await imp(join(TOOLS_DIR, 'tool-read-symbol', 'handler.js'))).handle
+const { writeSymbol } = await imp(join(MALONG_DIR, 'write-runtime.js'))
+const outlineHandler = (await imp(join(TOOLS_DIR, 'tool-outline-reader', 'handler.js'))).handle
+const inspectHandler = (await imp(join(TOOLS_DIR, 'tool-inspect', 'handler.js'))).handle
+const impactHandler = (await imp(join(TOOLS_DIR, 'tool-impact-analysis', 'handler.js'))).handle
+const editBatchHandler = (await imp(join(TOOLS_DIR, 'tool-batch-edit', 'handler.js'))).handle
 
 const newBody = `    """Authenticate and return a session."""
     logger.info("login attempt: %s", username)

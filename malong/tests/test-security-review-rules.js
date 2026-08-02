@@ -2,11 +2,12 @@
 // 背景：规则此前零测试覆盖。r27 dogfooding 自扫 27 条全误报，治理 exec-cmd/sql-concat 两条规则，
 // 本测试固化「真注入必抓 + 误报模式必免」，防回归。
 import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
+const imp = (p) => import(pathToFileURL(p).href)
 const MALONG = dirname(__dirname)
-const { handle } = await import(join(MALONG, 'tools/tool-security-review/handler.js'))
+const { handle } = await imp(join(MALONG, 'tools/tool-security-review/handler.js'))
 
 let passed = 0
 let failed = 0

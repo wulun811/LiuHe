@@ -2,12 +2,13 @@
 // ① extractorVersion=二进制sha256 ② meta版本戳 ③ indexBatch认dirty ④ 开库自检reconcile ⑤ markAllDirty/force入口
 // 依赖：malong-parse 服务在跑。起真实 code-index（mock core + parse-client 做 langParser）+ 第二个 DB 连接检视。
 import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import Database from 'better-sqlite3'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
+const imp = (p) => import(pathToFileURL(p).href)
 const MALONG_DIR = join(__dirname, '..')
 
 let pass = 0, fail = 0
@@ -28,12 +29,12 @@ writeFileSync(`${WS}/b.js`, `function gamma() { return 2 }\n`)
 const aJs = join(WS, 'a.js')
 const bJs = join(WS, 'b.js')
 
-const pc = await import(join(MALONG_DIR, 'parse-client.js'))
+const pc = await imp(join(MALONG_DIR, 'parse-client.js'))
 await pc.init({ log: () => {} })
 const connected = await pc.connect()
 assert(connected, 'parse-client 连接到 malong-parse')
 
-const { default: codeIndex, extractorVersion, resolveExtractorBin } = await import(join(MALONG_DIR, 'code-index.js'))
+const { default: codeIndex, extractorVersion, resolveExtractorBin } = await imp(join(MALONG_DIR, 'code-index.js'))
 const langParser = {
   extractAllAsync: (source, ext, filePath) => pc.extractAll(source, ext, filePath),
   batchExtractAsync: (files) => pc.batchExtract(files),

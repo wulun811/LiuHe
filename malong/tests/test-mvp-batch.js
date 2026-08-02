@@ -2,10 +2,11 @@
 // 场景：批量成功 / 同文件多符号（行偏移重定位）/ 部分冲突全回滚 / dry_run /
 //       already_applied 幂等 / NO_BASE / patch 混用 / 冲突后重读整批重试
 import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
+const imp = (p) => import(pathToFileURL(p).href)
 const MALONG_DIR = join(__dirname, '..')
 const TOOLS_DIR = join(MALONG_DIR, 'tools')
 
@@ -47,12 +48,12 @@ def handle_logout(session_id):
     return svc.logout(session_id)
 `)
 
-const pc = await import(join(MALONG_DIR, 'parse-client.js'))
+const pc = await imp(join(MALONG_DIR, 'parse-client.js'))
 await pc.init({ log: () => {} })
 const connected = await pc.connect()
 assert(connected, 'parse-client 连接')
 
-const { default: codeIndex } = await import(join(MALONG_DIR, 'code-index.js'))
+const { default: codeIndex } = await imp(join(MALONG_DIR, 'code-index.js'))
 const langParser = {
   extractAllAsync: (source, ext, filePath) => pc.extractAll(source, ext, filePath),
   hasErrorsAsync: (source, ext, filePath) => pc.hasErrors(source, ext, filePath),
@@ -74,9 +75,9 @@ svc.initWorkspace(WS)
 await svc.indexBatch([`${WS}/src/auth.py`, `${WS}/src/api.py`], WS)
 svc.resolveCrossFileRefs()
 
-const { writeSymbols } = await import(join(MALONG_DIR, 'write-runtime.js'))
+const { writeSymbols } = await imp(join(MALONG_DIR, 'write-runtime.js'))
 const wctx = { codeIndexService: svc, getWorkspaceDir: () => DATA, langParserService: langParser }
-const readHandler = (await import(join(TOOLS_DIR, 'tool-read-symbol', 'handler.js'))).handle
+const readHandler = (await imp(join(TOOLS_DIR, 'tool-read-symbol', 'handler.js'))).handle
 const rctx = { codeIndexService: svc, getWorkspaceDir: () => DATA }
 
 async function currentVersion(filePath) {

@@ -1,11 +1,12 @@
 // test-workspace-gc.js — 工作区索引库自清理（治本 B）回归
 // 纯 fs 逻辑，不依赖 parse daemon。验证：dryRun 只报告 / 真删 stale / 保留 fresh / protect 豁免 / no-op 安全。
 import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { mkdirSync, writeFileSync, rmSync, existsSync, utimesSync } from 'node:fs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const { cleanupStaleWorkspaces } = await import(join(__dirname, '..', 'health-check.js'))
+const imp = (p) => import(pathToFileURL(p).href)
+const { cleanupStaleWorkspaces } = await imp(join(__dirname, '..', 'health-check.js'))
 
 let pass = 0, fail = 0
 function assert(c, m) { if (c) { pass++ } else { fail++; console.error('  FAIL:', m) } }

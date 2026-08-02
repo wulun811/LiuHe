@@ -1,8 +1,9 @@
 import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
+const imp = (p) => import(pathToFileURL(p).href)
 const FIXTURES = join(__dirname, 'fixtures')
 const TOOLS = join(__dirname, '..', 'tools')
 
@@ -18,7 +19,7 @@ const mockContext = {
 }
 
 async function loadTool(name) {
-  return (await import(join(TOOLS, name, 'handler.js'))).handle
+  return (await imp(join(TOOLS, name, 'handler.js'))).handle
 }
 
 // ═══════════════════════════════════════════
@@ -202,7 +203,7 @@ fn build() -> HashMap<String, u32> {
 // ═══════════════════════════════════════════
 console.log('\n═══ T8: test_bridge parsers ═══')
 {
-  const { parsePytest, parseJest, parseGoTest } = await import(join(TOOLS, 'tool-test-bridge', 'parsers.js'))
+  const { parsePytest, parseJest, parseGoTest } = await imp(join(TOOLS, 'tool-test-bridge', 'parsers.js'))
 
   const pytestOut = `tests/test_auth.py::test_login_success PASSED
 tests/test_auth.py::test_login_mfa FAILED

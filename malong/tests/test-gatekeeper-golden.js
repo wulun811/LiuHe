@@ -2,13 +2,14 @@
 // golden fixtures 全部来自生产体检发现的真实 bug（2026-07-31）：
 //   fix_imports：node:/多行 import/模板字符串/数组解构/C 风格 for/export async/副作用导入/修剪保真/语法护栏
 import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
+const imp = (p) => import(pathToFileURL(p).href)
 const MALONG_DIR = join(__dirname, '..')
-const { handle: fixImports } = await import(join(MALONG_DIR, 'tools/tool-fix-imports/handler.js'))
-const parseClient = await import(join(MALONG_DIR, 'parse-client.js'))
+const { handle: fixImports } = await imp(join(MALONG_DIR, 'tools/tool-fix-imports/handler.js'))
+const parseClient = await imp(join(MALONG_DIR, 'parse-client.js'))
 
 let pass = 0, fail = 0
 function assert(cond, msg) {
@@ -77,7 +78,7 @@ assert(undef7.some(i => i.symbol === 'totallyUndefined'), `真 undefined 被报�
 
 // ═══════════ golden 8：edit_batch 自指陷阱（分隔符撞上被编辑文件内容） ═══════════
 console.log('── golden 8: edit_batch 自指陷阱 ──')
-const { handle: editBatch } = await import(join(MALONG_DIR, 'tools/tool-batch-edit/handler.js'))
+const { handle: editBatch } = await imp(join(MALONG_DIR, 'tools/tool-batch-edit/handler.js'))
 // 被编辑文件自身含协议分隔符字符串 → 旧 handler 的 indexOf 截断会吞掉成功结果
 writeFileSync(`${WS}/src/selfref.js`, `const marker = '---MALONG_BATCH_EDIT_JSON_END---'\nconst x = 1\n`)
 const r8 = await editBatch({ workspace_dir: WS, file: 'src/selfref.js', edits: [{ old_string: 'const x = 1', new_string: 'const x = 2' }] }, { codeIndexService: { indexFile: async () => ({ symbols: 0 }), markIndexDirty() {} } })
@@ -97,7 +98,7 @@ assert(r9c.success === true, `file_path（绝对，workspace 内）反向兼容`
 
 // ═══════════ golden 10：sweep_dead_code 字符串/注释感知（模板/三引号/块注释内 import 文本不误报） ═══════════
 console.log('── golden 10: sweep_dead_code 字符串感知 ──')
-const { handle: deadSweep } = await import(join(MALONG_DIR, 'tools/tool-dead-code-sweeper/handler.js'))
+const { handle: deadSweep } = await imp(join(MALONG_DIR, 'tools/tool-dead-code-sweeper/handler.js'))
 const sweepCtx = { codeIndexService: null, getWorkspaceDir: () => DATA }
 writeFileSync(`${WS}/src/sweep.js`, `import { helper } from './utils'\nimport { realUnused } from './other'\n\nconst snippet = \`\nimport { helper } from './utils'\nusage:\n  helper(1)\n\`\n\n/*\nimport { helper } from './utils'\n*/\n\nexport function run() {\n  return helper(1)\n}\n`)
 r = await deadSweep({ workspace_dir: WS, scope: 'src' }, sweepCtx)
@@ -111,7 +112,7 @@ assert(!sweepUnusedPy.some(d => d.symbol === 'os'), `三引号 docstring 内 imp
 
 // ═══════════ golden 11：exception_guard 不支持语言显式声明（不静默 clean） ═══════════
 console.log('── golden 11: exception_guard 语言感知 ──')
-const { handle: excGuard } = await import(join(MALONG_DIR, 'tools/tool-exception-guard/handler.js'))
+const { handle: excGuard } = await imp(join(MALONG_DIR, 'tools/tool-exception-guard/handler.js'))
 writeFileSync(`${WS}/src/main.go`, 'package main\n\nfunc main() {\n\tpanic("boom")\n}\n')
 r = await excGuard({ workspace_dir: WS, file: 'src/main.go' }, { codeIndexService: null, getWorkspaceDir: () => DATA })
 assert(r.error === 'unsupported_language', `不支持扩展名显式报错（得 ${r.error}）`)
@@ -121,7 +122,7 @@ assert(r.error === undefined && Array.isArray(r.issues), `支持语言正常路�
 
 // ═══════════ golden 12：active_todos 跳过 fixtures（测试假数据不污染） ═══════════
 console.log('── golden 12: active_todos fixtures 跳过 ──')
-const { handle: activeTodos } = await import(join(MALONG_DIR, 'tools/tool-active-todos/handler.js'))
+const { handle: activeTodos } = await imp(join(MALONG_DIR, 'tools/tool-active-todos/handler.js'))
 mkdirSync(`${WS}/fixtures`, { recursive: true })
 mkdirSync(`${WS}/src`, { recursive: true })
 writeFileSync(`${WS}/fixtures/dummy.js`, '// TODO: 假数据里的 TODO 不应被扫到\nconst x = 1\n')
@@ -132,7 +133,7 @@ assert(r.todos.some(t => t.file === 'src/real.js'), `真实代码 TODO 保留`)
 
 // ═══════════ golden 13：config_drift CI 内置变量白名单（GITHUB_* 不误报） ═══════════
 console.log('── golden 13: config_drift CI 白名单 ──')
-const { handle: configDrift } = await import(join(MALONG_DIR, 'tools/tool-config-drift/handler.js'))
+const { handle: configDrift } = await imp(join(MALONG_DIR, 'tools/tool-config-drift/handler.js'))
 writeFileSync(`${WS}/src/ci.js`, `export async function run() {\n  const repo = process.env.GITHUB_REPOSITORY\n  const token = process.env.GITHUB_TOKEN\n  const custom = process.env.MY_CUSTOM_KEY\n  return { repo, token, custom }\n}\n`)
 writeFileSync(`${WS}/.env.example`, 'MY_CUSTOM_KEY=x\n')
 r = await configDrift({ workspace_dir: WS, file: 'src/ci.js' }, {})
@@ -224,7 +225,7 @@ assert(!recallEnv.some(d => d.name === 'NODE_ENV'), `字符串里的环境变量
 // ═══════════ golden 19：第 5 轮全量审查修复回归（路径安全/注入/模糊补丁/字符串状态机/通配导入） ═══════════
 console.log('── golden 19: 全量审查修复回归 ──')
 // 1. validateFilePath 绝对路径拒绝（旧：放行 → join 胜出 → 越界读写）
-const { validateFilePath } = await import(join(MALONG_DIR, 'error-codes.js'))
+const { validateFilePath } = await imp(join(MALONG_DIR, 'error-codes.js'))
 assert(validateFilePath('/etc/passwd').blocked === true, `绝对路径 /etc/passwd 拒绝（得 ${JSON.stringify(validateFilePath('/etc/passwd'))})`)
 assert(validateFilePath('/home/user/../x.txt').blocked === true, `绝对路径含 .. 拒绝`)
 assert(validateFilePath('src/auth.py').ok === true, `相对路径正常放行`)
@@ -237,7 +238,7 @@ assert(tb.sanitizeScope('tests/\nrm -rf /') === null, `换行注入拒绝（旧 
 assert(tb.sanitizeScope('..') === null, `.. 越界拒绝`)
 assert(tb.sanitizeScope('../x') === null, `相对穿越拒绝`)
 // 3. patch-parser fuzzy 错位不硬切（旧：混用坐标静默篡改文件）
-const ppMod = await import(join(MALONG_DIR, 'patch-parser.js'))
+const ppMod = await imp(join(MALONG_DIR, 'patch-parser.js'))
 const ppServices = {}
 const ppCore = { get: () => null, log: () => {}, registerService: (n, s) => { ppServices[n] = s } }
 await ppMod.init(ppCore)
@@ -246,7 +247,7 @@ const fuzzySrc = 'x = 1\n' + ' '.repeat(30) + 'return 42\n\ndef bar():\n    retu
 const fuzzyR = pp.apply(fuzzySrc, [{ search: 'return 42\n\n\ndef bar()', replace: 'return 43\n\ndef bar()' }])
 assert(fuzzyR.applied.length === 0 && fuzzyR.result === fuzzySrc, `fuzzy 错位不硬切（旧：静默篡改；得 ${JSON.stringify(fuzzyR.applied)}）`)
 // 4. guard-patterns except_bare 三场景（docstring 行内收尾 / 赋值三引号 / 单行 docstring）
-const { handle: guardP } = await import(join(MALONG_DIR, 'tools/tool-guard-patterns/handler.js'))
+const { handle: guardP } = await imp(join(MALONG_DIR, 'tools/tool-guard-patterns/handler.js'))
 // except_bare 分支需要 refs 非空才能到达（checkRules 空 refs 提前返回）——mock langParser 提供假 refs
 const gpCtx = { ...context, langParserService: { extractAllAsync: async () => ({ refs: [{ type: 'call', name: 'x' }], symbols: [{ name: 'x', type: 'function' }] }), hasErrorsAsync: async () => false } }
 writeFileSync(`${WS}/src/gp_a.py`, 'def f():\n    """doc start\n    more doc"""\n    try:\n        pass\n    except:\n        pass\n')
@@ -256,7 +257,7 @@ writeFileSync(`${WS}/src/gp_b.py`, 'x = """\nthis is except: not code\n"""\ndef 
 const gpB = await guardP({ workspace_dir: WS, file: 'src/gp_b.py' }, gpCtx)
 assert((gpB.violations ?? []).length === 1, `赋值三引号字符串内 except 不误报 + 真 except 报（得 ${JSON.stringify(gpB.violations)})`)
 // 5. dead-code-sweeper 通配导入 + JSX React 不报、真 unused 仍报
-const { handle: dcsP } = await import(join(MALONG_DIR, 'tools/tool-dead-code-sweeper/handler.js'))
+const { handle: dcsP } = await imp(join(MALONG_DIR, 'tools/tool-dead-code-sweeper/handler.js'))
 writeFileSync(`${WS}/src/dcs_a.py`, 'from os import *\nimport sys\n\nprint(sys.version)\n')
 const dcsA = await dcsP({ workspace_dir: WS, file: 'src/dcs_a.py' }, context)
 assert(!(dcsA.dead_code ?? []).some(d => d.symbol === '*'), `通配导入 from x import * 不报 unused（得 ${JSON.stringify(dcsA.dead_code)})`)
@@ -267,7 +268,7 @@ writeFileSync(`${WS}/src/dcs_c.js`, 'import unusedThing from "x"\nexport const f
 const dcsC = await dcsP({ workspace_dir: WS, file: 'src/dcs_c.js' }, context)
 assert((dcsC.dead_code ?? []).some(d => d.symbol === 'unusedThing'), `真 unused 仍报（得 ${JSON.stringify(dcsC.dead_code)})`)
 // 6. file-collector isIgnored glob 规则（前导 * 不吞全树）
-const { isIgnored } = await import(join(MALONG_DIR, 'file-collector.js'))
+const { isIgnored } = await imp(join(MALONG_DIR, 'file-collector.js'))
 assert(isIgnored('src/a.js', ['*.min.js'], false) === false, `*.min.js 不忽略普通文件`)
 assert(isIgnored('src/a.min.js', ['*.min.js'], false) === true, `*.min.js 忽略 min 文件`)
 assert(isIgnored('src/a.js', ['**/node_modules'], false) === false, `**/node_modules 不忽略普通文件`)
@@ -279,7 +280,7 @@ console.log('── golden 20: P2 debt 修复回归 ──')
 assert(validateFilePath('src/.ENV').blocked === true, `.ENV 大小写变体拒绝（得 ${JSON.stringify(validateFilePath('src/.ENV'))})`)
 assert(validateFilePath('src/.Env.local').blocked === true, `.Env.local 变体拒绝`)
 // 2. symbol-anchors 同起始行不嵌套（def a(): x=1; def b(): y=2 内联定义）
-const { buildParentMap } = await import(join(MALONG_DIR, 'symbol-anchors.js'))
+const { buildParentMap } = await imp(join(MALONG_DIR, 'symbol-anchors.js'))
 const pm = buildParentMap([
   { id: 1, start_line: 3, end_line: 5 },
   { id: 2, start_line: 3, end_line: 9 },
@@ -295,33 +296,33 @@ assert(pm.get(4) === 2, `真嵌套符号 parent 正确（得 ${JSON.stringify([.
 const pp2 = pp.apply('a\n=======\nb\n', [{ search: 'a\n=======\nb', replace: 'a\n=======\nb' }])
 assert(pp2.applied.length === 1, `SEARCH 内 ======= 行不截断（得 ${JSON.stringify(pp2.applied)}）`)
 // 4. file-collector 默认不再忽略 lib/deps/runtime（用户自有源码目录）
-const fc2 = await import(join(MALONG_DIR, 'file-collector.js'))
+const fc2 = await imp(join(MALONG_DIR, 'file-collector.js'))
 mkdirSync(`${WS}/src/lib`, { recursive: true })
 writeFileSync(`${WS}/src/lib/core.js`, 'export const x = 1\n')
 const fcFiles = fc2.collectFiles(`${WS}/src`, {})
 assert(fcFiles.some(f => String(f.path || f.file || f).endsWith('lib/core.js')), `lib/ 目录不再被默认忽略（得 ${JSON.stringify(fcFiles.slice(0, 5).map(f => f.path || f.file))}）`)
 // 5. find-tests 字符串/注释里的 it('x') 不假报测试名
-const { handle: findTests } = await import(join(MALONG_DIR, 'tools/tool-find-tests/handler.js'))
+const { handle: findTests } = await imp(join(MALONG_DIR, 'tools/tool-find-tests/handler.js'))
 writeFileSync(`${WS}/src/ft.py`, 'def test_real():\n    pass\n')
 const ftR = await findTests({ workspace_dir: WS, file: 'src/ft.py' }, context)
 assert((ftR.by_convention ?? []).length > 0, `测试位置推荐非空（得 ${JSON.stringify(ftR.by_convention)}）`)
 // 6. symbol-search limit 钳制（负值/超大值不无界）
 const limitsSeen = []
 const searchCtx = { codeIndexService: { initWorkspace() {}, searchSymbols: async (q, { limit }) => { limitsSeen.push(limit); return [] } }, getWorkspaceDir: () => DATA }
-const { handle: symbolSearch } = await import(join(MALONG_DIR, 'tools/tool-symbol-search/handler.js'))
+const { handle: symbolSearch } = await imp(join(MALONG_DIR, 'tools/tool-symbol-search/handler.js'))
 await symbolSearch({ workspace_dir: WS, query: 'foo', limit: -1 }, searchCtx)
 await symbolSearch({ workspace_dir: WS, query: 'foo', limit: 100000 }, searchCtx)
 await symbolSearch({ workspace_dir: WS, query: 'foo' }, searchCtx)
 assert(limitsSeen[0] === 1 && limitsSeen[1] === 500 && limitsSeen[2] === 30, `limit 钳制 [1,500] 默认 30（得 ${JSON.stringify(limitsSeen)}）`)
 // 7. semaphore reset（watchdog 死锁兜底）
-const { Semaphore } = await import(join(MALONG_DIR, 'semaphore.js'))
+const { Semaphore } = await imp(join(MALONG_DIR, 'semaphore.js'))
 const sem = new Semaphore(1)
 sem.current = 1
 sem.queue.push({ resolve: () => {}, weight: 1, waitTime: Date.now(), timer: null })
 const resetR = sem.reset()
 assert(resetR.drained === 1 && sem.current === 0 && sem.queue.length === 0, `reset 清队列复位账本（得 ${JSON.stringify(resetR)}）`)
 // 8. string-utils 模板嵌套 ${'}'} 不提前截断
-const { stripStrings } = await import(join(MALONG_DIR, 'string-utils.js'))
+const { stripStrings } = await imp(join(MALONG_DIR, 'string-utils.js'))
 const su = stripStrings('const t = `x${"}"}y`')
 assert(!su.includes("'") && su.includes('}'), `模板嵌套 ${'{'}${'}'} 不残留引号（得 ${JSON.stringify(su)}）`)
 

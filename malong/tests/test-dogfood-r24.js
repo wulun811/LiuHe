@@ -5,6 +5,7 @@
 import { writeFileSync, mkdirSync, rmSync, mkdtempSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { pathToFileURL } from 'node:url'
 
 let passed = 0, failed = 0
 function assert(cond, msg) {
@@ -29,15 +30,16 @@ export function other6() { hot() }
 `.trim() + '\n')
 
 const MALONG = new URL('..', import.meta.url).pathname
-const impactHandler = (await import(join(MALONG, 'tools/tool-impact-analysis/handler.js'))).handle
-const outlineHandler = (await import(join(MALONG, 'tools/tool-outline-reader/handler.js'))).handle
-const { writeSymbols } = await import(join(MALONG, 'write-runtime.js'))
+const imp = (p) => import(pathToFileURL(p).href)
+const impactHandler = (await imp(join(MALONG, 'tools/tool-impact-analysis/handler.js'))).handle
+const outlineHandler = (await imp(join(MALONG, 'tools/tool-outline-reader/handler.js'))).handle
+const { writeSymbols } = await imp(join(MALONG, 'write-runtime.js'))
 
-const pc = await import(join(MALONG, 'parse-client.js'))
+const pc = await imp(join(MALONG, 'parse-client.js'))
 await pc.init({ log: () => {} })
 await pc.connect()
 
-const { default: codeIndex } = await import(join(MALONG, 'code-index.js'))
+const { default: codeIndex } = await imp(join(MALONG, 'code-index.js'))
 const langParser = {
   extractAllAsync: (source, ext, filePath) => pc.extractAll(source, ext, filePath),
   hasErrorsAsync: (source, ext, filePath) => pc.hasErrors(source, ext, filePath),
@@ -106,7 +108,7 @@ assert(noBaseErr.error?.next_action?.tool === 'read_symbol', `NO_BASE 报错带 
 assert(noBaseErr.error?.next_action?.params?.locator?.file_path === 'src/app.js', `next_action 带 locator.file_path`)
 
 // 有 base_version 时正常写入（回归：不破坏正常路径）
-const v = await (await import(join(MALONG, 'tools/tool-read-symbol/handler.js'))).handle({ workspace_dir: WS, locator: { name: 'cold', file_path: 'src/app.js' } }, ctx)
+const v = await (await imp(join(MALONG, 'tools/tool-read-symbol/handler.js'))).handle({ workspace_dir: WS, locator: { name: 'cold', file_path: 'src/app.js' } }, ctx)
 assert(v.version && v.version.symbol, `read_symbol 拿到 version（${v.version?.symbol?.body_hash ? '有 hash' : '?'}）`)
 const okRes = await writeSymbols({
   workspace_dir: WS,

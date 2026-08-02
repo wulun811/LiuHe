@@ -1,10 +1,11 @@
 // test-embedded.js — P6 embedded reader（§7 读侧去壳）
 // 验证：图查询纯 SQLite + 正文快路径 + INDEX_STALE 诚实 + 路径安全；不 import parse-client
 import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
+const imp = (p) => import(pathToFileURL(p).href)
 const MALONG_DIR = join(__dirname, '..')
 const TOOLS_DIR = join(MALONG_DIR, 'tools')
 
@@ -44,10 +45,10 @@ def invoke():
 `)
 
 // ── 用完整 code-index 建索引（含 refs） ──
-const pc = await import(join(MALONG_DIR, 'parse-client.js'))
+const pc = await imp(join(MALONG_DIR, 'parse-client.js'))
 await pc.init({ log: () => {} })
 await pc.connect()
-const { default: codeIndex } = await import(join(MALONG_DIR, 'code-index.js'))
+const { default: codeIndex } = await imp(join(MALONG_DIR, 'code-index.js'))
 const langParser = {
   extractAllAsync: (source, ext, filePath) => pc.extractAll(source, ext, filePath),
   hasErrorsAsync: (source, ext, filePath) => pc.hasErrors(source, ext, filePath),
@@ -70,7 +71,7 @@ await svc.indexBatch([`${WS}/src/service.py`, `${WS}/src/main.py`], WS)
 svc.resolveCrossFileRefs()
 
 // ── embedded reader：独立进程语义（新实例，只读 db） ──
-const { EmbeddedReader } = await import(join(MALONG_DIR, 'embedded-reader.js'))
+const { EmbeddedReader } = await imp(join(MALONG_DIR, 'embedded-reader.js'))
 const dbPath = join(DATA, 'code-index.db')
 const reader = new EmbeddedReader(dbPath, WS)
 

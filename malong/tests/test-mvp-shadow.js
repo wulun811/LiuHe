@@ -2,11 +2,12 @@
 // 影子比对：dry_run 预测的写入后 hash == 真实写后文件 hash（一致率 100% 才切流）
 // golden：py（装饰器/嵌套/类方法）/ js（class 方法/顶层函数）/ go（方法/函数）各测 full/body boundary
 import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
+const imp = (p) => import(pathToFileURL(p).href)
 const MALONG_DIR = join(__dirname, '..')
 const TOOLS_DIR = join(MALONG_DIR, 'tools')
 
@@ -92,12 +93,12 @@ func NewServer(port int) *Server {
 }
 `)
 
-const pc = await import(join(MALONG_DIR, 'parse-client.js'))
+const pc = await imp(join(MALONG_DIR, 'parse-client.js'))
 await pc.init({ log: () => {} })
 const connected = await pc.connect()
 assert(connected, 'parse-client 连接 malong-parse')
 
-const { default: codeIndex } = await import(join(MALONG_DIR, 'code-index.js'))
+const { default: codeIndex } = await imp(join(MALONG_DIR, 'code-index.js'))
 const langParser = {
   extractAllAsync: (source, ext, filePath) => pc.extractAll(source, ext, filePath),
   hasErrorsAsync: (source, ext, filePath) => pc.hasErrors(source, ext, filePath),
@@ -119,9 +120,9 @@ svc.initWorkspace(WS)
 await svc.indexBatch(['golden.py', 'golden.js', 'golden.go'].map(f => join(WS, 'src', f)), WS)
 svc.resolveCrossFileRefs()
 
-const { writeSymbol } = await import(join(MALONG_DIR, 'write-runtime.js'))
+const { writeSymbol } = await imp(join(MALONG_DIR, 'write-runtime.js'))
 const wctx = { codeIndexService: svc, getWorkspaceDir: () => DATA, langParserService: langParser }
-const readHandler = (await import(join(TOOLS_DIR, 'tool-read-symbol', 'handler.js'))).handle
+const readHandler = (await imp(join(TOOLS_DIR, 'tool-read-symbol', 'handler.js'))).handle
 const rctx = { codeIndexService: svc, getWorkspaceDir: () => DATA }
 
 async function currentVersion(filePath) {
