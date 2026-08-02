@@ -7,9 +7,18 @@ import { existsSync, unlinkSync, openSync, writeSync, closeSync, readFileSync, s
 import { spawn } from 'node:child_process'
 import { isInString } from './string-utils.js'
 
-const SOCKET_PATH = `/tmp/malong-parse-${process.getuid()}.sock`
-const PID_PATH = `/tmp/malong-parse-${process.getuid()}.pid`
-const RESTART_LOCK = `/tmp/malong-parse-${process.getuid()}.restart-lock`
+// r31：三平台支持——Unix 用 Unix socket；Windows 无 uid/无 Unix socket，走 TCP 127.0.0.1:MALONG_PORT
+// （daemon 需手动启动，客户端不管理进程）。环境变量 MALONG_SOCKET 覆盖 Unix socket 路径。
+const IS_WIN = process.platform === 'win32'
+const UID = typeof process.getuid === 'function' ? process.getuid() : 0
+const SOCKET_PATH = IS_WIN ? '' : (process.env.MALONG_SOCKET || `/tmp/malong-parse-${UID}.sock`)
+const PID_PATH = IS_WIN ? '' : `/tmp/malong-parse-${UID}.pid`
+const RESTART_LOCK = IS_WIN ? '' : `/tmp/malong-parse-${UID}.restart-lock`
+const TCP_PORT = parseInt(process.env.MALONG_PORT || '31001', 10)
+
+function _createConn() {
+  return IS_WIN ? net.createConnection({ host: '127.0.0.1', port: TCP_PORT }) : net.createConnection(SOCKET_PATH)
+}
 const RESTART_LOCK_STALE_MS = 30000
 const HEALTH_PROBE_TIMEOUT_MS = 2000
 const MAX_FRAME_SIZE = 64 * 1024 * 1024
@@ -75,7 +84,7 @@ export async function connect() {
   // 创建重连 Promise，让其他请求可以等待
   _reconnectPromise = (async () => {
     try {
-      if (!existsSync(SOCKET_PATH)) {
+      if (!IS_WIN && !existsSync(SOCKET_PATH)) {
         const started = await _startProcess()
         if (!started) {
           _connecting = false
@@ -85,7 +94,7 @@ export async function connect() {
       }
 
       const result = await new Promise((resolve) => {
-        const sock = net.createConnection(SOCKET_PATH)
+        const sock = _createConn()
         const timer = setTimeout(() => {
           sock.destroy()
           _connecting = false
@@ -278,8 +287,8 @@ function _circuitRecordSuccess() {
 // 9（F6）：独立探活连接（绕过熔断、不复用可能已死的 _socket）——daemon 在 timeout 内回任意帧就算活着
 function _probeDaemon(timeoutMs = HEALTH_PROBE_TIMEOUT_MS) {
   return new Promise((resolve) => {
-    if (!existsSync(SOCKET_PATH)) return resolve(false)
-    const sock = net.createConnection(SOCKET_PATH)
+    if (!IS_WIN && !existsSync(SOCKET_PATH)) return resolve(false)
+    const sock = _createConn()
     let settled = false
     const done = (ok) => { if (settled) return; settled = true; clearTimeout(timer); try { sock.destroy() } catch {}; resolve(ok) }
     const timer = setTimeout(() => done(false), timeoutMs)
@@ -305,6 +314,12 @@ function _probeDaemon(timeoutMs = HEALTH_PROBE_TIMEOUT_MS) {
 
 let _restarting = false
 async function _restartProcess() {
+  if (IS_WIN) {
+    _core?.log('warn', '[parse-client] daemon auto-restart not supported on Windows; start malong-parse manually')
+    _circuitOpen = false
+    _circuitFailures = 0
+    return
+  }
   if (_restarting) return // B5：进程内并发触发互斥（两个 daemon 抢同一 socket，孤儿进程泄漏）
   // 9（F7）：跨会话重启互斥——共享 daemon 可能被多会话同时熔断，只有一个执行重启，其余等待后重连，
   // 避免抢 socket / 双 spawn（crash log 见过同时间戳两个 daemon pid）。O_EXCL 拿不到锁 = 别人正在重启。
@@ -579,7 +594,7 @@ export async function batchExtract(files) {
 
 export function describeConfig() {
   const bin = process.env.MALONG_PARSE_BIN || process.env.MALONG_PARSE_BIN_ALT || BINARY_PATH
-  return `uds=${SOCKET_PATH} bin=${bin} connected=${_connected ? 'yes' : 'no'}`
+  return IS_WIN ? `tcp=127.0.0.1:${TCP_PORT} connected=${_connected ? 'yes' : 'no'}` : `uds=${SOCKET_PATH} bin=${bin} connected=${_connected ? 'yes' : 'no'}`
 }
 
 export async function disconnect() {

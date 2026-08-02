@@ -1,11 +1,11 @@
-use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::net::UnixListener;
-use tokio::signal;
 use tokio::sync::broadcast;
 use tracing::{info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+#[cfg(unix)]
+use tokio::net::UnixListener;
 
 mod protocol;
 mod parser_pool;
@@ -15,21 +15,38 @@ mod simplify;
 mod classify;
 mod cache;
 
+// r31：三平台支持——Unix 保持 Unix socket + pid 文件；Windows 用 TCP 127.0.0.1 端口
+// （无 uid/无 Unix socket/无 SIGTERM 语义）。环境变量 MALONG_SOCKET / MALONG_PORT 覆盖默认值。
+
+#[cfg(unix)]
 fn get_socket_path() -> PathBuf {
+    if let Ok(p) = std::env::var("MALONG_SOCKET") {
+        return PathBuf::from(p);
+    }
     let uid = unsafe { libc::getuid() };
     PathBuf::from(format!("/tmp/malong-parse-{}.sock", uid))
 }
 
+#[cfg(unix)]
 fn get_pid_path() -> PathBuf {
     let uid = unsafe { libc::getuid() };
     PathBuf::from(format!("/tmp/malong-parse-{}.pid", uid))
 }
 
+#[cfg(windows)]
+fn get_listen_addr() -> std::net::SocketAddr {
+    let port = std::env::var("MALONG_PORT").ok()
+        .and_then(|p| p.parse::<u16>().ok())
+        .unwrap_or(31001);
+    std::net::SocketAddr::from(([127, 0, 0, 1], port))
+}
+
 fn get_data_dir() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).unwrap_or_else(|_| ".".to_string());
     PathBuf::from(format!("{}/.local/share/malong", home))
 }
 
+#[cfg(unix)]
 fn write_pid_file() -> std::io::Result<()> {
     let pid_path = get_pid_path();
     let pid = std::process::id();
@@ -38,11 +55,21 @@ fn write_pid_file() -> std::io::Result<()> {
     Ok(())
 }
 
+#[cfg(windows)]
+fn write_pid_file() -> std::io::Result<()> {
+    Ok(())
+}
+
+#[cfg(unix)]
 fn remove_pid_file() {
     let pid_path = get_pid_path();
     let _ = std::fs::remove_file(&pid_path);
 }
 
+#[cfg(windows)]
+fn remove_pid_file() {}
+
+#[cfg(unix)]
 fn check_existing_instance() -> bool {
     let pid_path = get_pid_path();
     if let Ok(content) = std::fs::read_to_string(&pid_path) {
@@ -52,6 +79,11 @@ fn check_existing_instance() -> bool {
             }
         }
     }
+    false
+}
+
+#[cfg(windows)]
+fn check_existing_instance() -> bool {
     false
 }
 
@@ -102,64 +134,96 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    let socket_path = get_socket_path();
-    let _ = std::fs::remove_file(&socket_path);
-
-    let listener = UnixListener::bind(&socket_path)?;
-    std::fs::set_permissions(&socket_path, std::fs::Permissions::from_mode(0o600))?;
-    info!("listening on {:?} (0600)", socket_path);
-
-    write_pid_file()?;
-
     let state = Arc::new(server::ServerState::new());
     let (shutdown_tx, _) = broadcast::channel::<()>(1);
     let shutdown_rx = shutdown_tx.subscribe();
 
-    let state_clone = state.clone();
-    let shutdown_tx_clone = shutdown_tx.clone();
-    tokio::spawn(async move {
-        signal::ctrl_c().await.ok();
-        info!("received Ctrl+C, shutting down");
-        log_crash(&format!("shutdown pid={}", std::process::id()), None);
-        let _ = shutdown_tx_clone.send(());
-    });
+    #[cfg(unix)]
+    let socket_path = get_socket_path();
+    #[cfg(unix)]
+    let _ = std::fs::remove_file(&socket_path);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&socket_path, std::fs::Permissions::from_mode(0o600));
+    }
 
-    tokio::spawn(async move {
-        signal::unix::signal(signal::unix::SignalKind::terminate())
-            .expect("failed to register SIGTERM")
-            .recv()
-            .await;
-        info!("received SIGTERM, shutting down");
-        log_crash(&format!("SIGTERM pid={}", std::process::id()), None);
-        let _ = shutdown_tx.send(());
-    });
+    write_pid_file()?;
+
+    // r31：SIGTERM 注册仅 Unix；Windows 无该信号语义（Ctrl+C 由 ctrl_c 分支覆盖）
+    #[cfg(unix)]
+    {
+        use tokio::signal;
+        tokio::spawn(async move {
+            signal::unix::signal(signal::unix::SignalKind::terminate())
+                .expect("failed to register SIGTERM")
+                .recv()
+                .await;
+            info!("received SIGTERM, shutting down");
+            log_crash(&format!("SIGTERM pid={}", std::process::id()), None);
+            let _ = shutdown_tx.send(());
+        });
+    }
 
     info!("malong-parse v{} started, pid={}", env!("CARGO_PKG_VERSION"), std::process::id());
 
-    let mut shutdown_rx = shutdown_rx;
-    loop {
-        tokio::select! {
-            accept_result = listener.accept() => {
-                match accept_result {
-                    Ok((stream, _)) => {
-                        let state = state_clone.clone();
-                        tokio::spawn(async move {
-                            server::handle_connection(stream, state).await;
-                        });
-                    }
-                    Err(e) => {
-                        warn!("accept error: {}", e);
+    #[cfg(unix)]
+    {
+        let listener = UnixListener::bind(&socket_path)?;
+        info!("listening on {:?} (0600)", socket_path);
+        let state_clone = state.clone();
+        let mut shutdown_rx = shutdown_rx;
+        loop {
+            tokio::select! {
+                accept_result = listener.accept() => {
+                    match accept_result {
+                        Ok((stream, _)) => {
+                            let state = state_clone.clone();
+                            tokio::spawn(async move {
+                                server::handle_connection(stream, state).await;
+                            });
+                        }
+                        Err(e) => { warn!("accept error: {}", e); }
                     }
                 }
+                _ = shutdown_rx.recv() => {
+                    info!("shutdown signal received");
+                    break;
+                }
             }
-            _ = shutdown_rx.recv() => {
-                info!("shutdown signal received");
-                break;
+        }
+        let _ = std::fs::remove_file(&socket_path);
+    }
+
+    #[cfg(windows)]
+    {
+        use tokio::net::{TcpListener, TcpStream};
+        let addr = get_listen_addr();
+        let listener = TcpListener::bind(addr).await?;
+        info!("listening on {} (TCP)", addr);
+        let state_clone = state.clone();
+        let mut shutdown_rx = shutdown_rx;
+        loop {
+            tokio::select! {
+                accept_result = listener.accept() => {
+                    match accept_result {
+                        Ok((stream, _)) => {
+                            let state = state_clone.clone();
+                            tokio::spawn(async move {
+                                server::handle_connection(stream, state).await;
+                            });
+                        }
+                        Err(e) => { warn!("accept error: {}", e); }
+                    }
+                }
+                _ = shutdown_rx.recv() => {
+                    info!("shutdown signal received");
+                    break;
+                }
             }
         }
     }
 
-    let _ = std::fs::remove_file(&socket_path);
     remove_pid_file();
     info!("malong-parse stopped");
 

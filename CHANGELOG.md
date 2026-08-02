@@ -2,6 +2,18 @@
 
 All notable changes to **Malong LiuHe** are documented here.
 
+## [0.3.33] - 2026-08-02
+
+### r31: Cross-platform support — Windows (TCP) + macOS ready
+
+- `malong-parse` now builds on **Linux / macOS / Windows**:
+  - Unix (Linux/macOS): Unix socket at `/tmp/malong-parse-{uid}.sock` (override with `MALONG_SOCKET`)
+  - Windows: TCP `127.0.0.1:31001` (override with `MALONG_PORT`); no pid file / SIGTERM / instance probe (client-side auto-restart degraded — start the daemon manually)
+- `handle_connection` genericized (`tokio::io::split`) to serve both stream types
+- `parse-client.js`: platform-aware endpoint (`process.getuid` guard, TCP connect on Windows)
+- Removed the unused `nix` crate (declared, never used)
+- New CI: GitHub Actions matrix (ubuntu / macos-13 x86 / macos-14 arm / windows) runs `cargo test` + `npm test` + dogfood suites; tag `v*` triggers cross-platform release artifacts
+
 ## [0.3.32] - 2026-08-02
 
 ### r30: Test blind-spot closure + two real `trace_symbol` bugs

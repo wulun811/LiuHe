@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-13, macos-14, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: cargo test
+        working-directory: malong-parse
+        run: cargo test
+
+      - name: cargo build (daemon, debug)
+        working-directory: malong-parse
+        run: cargo build
+
+      - name: Start daemon (unix)
+        if: runner.os != 'Windows'
+        run: |
+          ./malong-parse/target/debug/malong-parse > /tmp/malong-parse-ci.log 2>&1 &
+          for i in $(seq 1 30); do
+            [ -S "/tmp/malong-parse-$(id -u).sock" ] && break
+            sleep 1
+          done
+          [ -S "/tmp/malong-parse-$(id -u).sock" ] || { echo "daemon failed to start"; cat /tmp/malong-parse-ci.log; exit 1; }
+
+      - name: Start daemon (windows, TCP 127.0.0.1:31001)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Start-Process -FilePath "malong-parse\target\debug\malong-parse.exe" -WindowStyle Hidden
+          Start-Sleep -Seconds 5
+
+      - name: npm ci
+        working-directory: malong
+        run: npm ci --no-audit --no-fund
+
+      - name: npm test
+        working-directory: malong
+        run: npm test
+
+      - name: dogfood suites (unix)
+        if: runner.os != 'Windows'
+        working-directory: malong
+        run: |
+          node tests/test-dogfood-r14.js
+          node tests/test-dogfood-r30.js

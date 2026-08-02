@@ -137,7 +137,9 @@ cp target/release/malong-parse ~/.local/bin/   # or add to PATH
 malong-parse &                                   # daemon (Unix socket: /tmp/malong-parse-$(id -u).sock)
 ```
 
-Prebuilt binaries for Linux x86_64 are committed under [`releases/`](releases/) (with `.sha256` checksums) — pick one up instead of building if you prefer.
+Prebuilt binaries for Linux x86_64 are committed under
+**Platforms:** Linux and macOS use the Unix socket; on **Windows** the daemon listens on TCP `127.0.0.1:31001` (set `MALONG_PORT` to override) — start it manually (`malong-parse.exe`), the client will not auto-restart it. Set `MALONG_SOCKET` to override the Unix socket path.
+ [`releases/`](releases/) (with `.sha256` checksums) — pick one up instead of building if you prefer.
 
 ### Install the toolset
 

@@ -5,7 +5,6 @@ use std::collections::BinaryHeap;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::UnixStream;
 use tokio::sync::Semaphore;
 use tracing::{info, warn, error};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
@@ -75,8 +74,12 @@ impl PartialOrd for PrioritizedRequest {
     }
 }
 
-pub async fn handle_connection(stream: UnixStream, state: Arc<ServerState>) {
-    let (mut reader, mut writer) = stream.into_split();
+// r31：泛型化流类型——Unix socket（Unix）与 TCP（Windows）共用同一协议处理
+pub async fn handle_connection<S>(stream: S, state: Arc<ServerState>)
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    let (mut reader, mut writer) = tokio::io::split(stream);
     let mut buf = vec![0u8; 65536];
     let mut data = Vec::new();
     let mut request_queue: BinaryHeap<PrioritizedRequest> = BinaryHeap::new();

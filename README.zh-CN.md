@@ -138,7 +138,9 @@ cp target/release/malong-parse ~/.local/bin/   # 或加入 PATH
 malong-parse &                                   # 启动 daemon（Unix socket: /tmp/malong-parse-$(id -u).sock）
 ```
 
-Linux x86_64 预编译二进制已随仓库提交在 [`releases/`](releases/)（附 `.sha256` 校验）——不想编译可以直接下载。
+Linux x86_64 预编译二进制已随仓库提交在
+**平台说明：** Linux/macOS 走 Unix socket；**Windows** 上 daemon 监听 TCP `127.0.0.1:31001`（可用 `MALONG_PORT` 覆盖）——需手动启动 `malong-parse.exe`，客户端不自动重启。Unix socket 路径可用 `MALONG_SOCKET` 覆盖。
+ [`releases/`](releases/)（附 `.sha256` 校验）——不想编译可以直接下载。
 
 ### 安装工具集
 

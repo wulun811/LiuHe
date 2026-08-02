@@ -1,6 +1,6 @@
 [package]
 name = "malong-parse"
-version = "0.3.32"
+version = "0.3.33"
 edition = "2021"
 description = "Rust tree-sitter multi-language symbol extraction engine for the Malong LiuHe (码龙·六合工具) LLM-native code toolkit"
 license = "MIT"
@@ -25,7 +25,6 @@ rayon = "1.10"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 libc = "0.2"
-nix = { version = "0.29", features = ["fs", "signal"] }
 lru = "0.12"
 human-panic = "2"
 
