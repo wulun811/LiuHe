@@ -81,6 +81,24 @@ sys.exit(0 if ok else 1)
 PY
 ) || echo "NOTE: some adaptations skipped — review before committing"
 
+echo "== protect OSS metadata (dev repo carries different values) =="
+python3 - "$ROOT" << 'PY'
+import sys
+root = sys.argv[1]
+def sub(path, old, new, tag):
+    s = open(path).read()
+    if old not in s:
+        print(f"WARN: metadata anchor missing in {path} ({tag}) — check manually", file=sys.stderr)
+        return False
+    open(path, 'w').write(s.replace(old, new))
+    return True
+ok = True
+# Cargo.toml: version/license/repository are OSS-side only (dev stays at 0.1.0, no metadata)
+ok &= sub(f"{root}/malong-parse/Cargo.toml",
+    'version = "0.1.0"\nedition = "2021"',
+    'version = "0.3.32"\nedition = "2021"\ndescription = "Rust tree-sitter multi-language symbol extraction engine for the Malong LiuHe (码龙·六合工具) LLM-native code toolkit"\nlicense = "MIT"\nrepository = "https://github.com/wulun811/LiuHe"', "cargo metadata")
+sys.exit(0 if ok else 1)
+PY
 echo "== align package.json version with OSS changelog =="
 OPEN_VER=$(grep -m1 '^## \[' "$ROOT/CHANGELOG.md" | sed 's/## \[\([0-9.]*\)\].*/\1/')
 python3 - "$ROOT" "$OPEN_VER" << 'PY'

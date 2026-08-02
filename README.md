@@ -2,7 +2,7 @@
 
 **LLM-Native Code Operations Toolkit** — Code tooling reinvented for the LLM that has no hands, no eyes, and no memory.
 
-**English** | [简体中文](README.zh-CN.md)
+**English** | [简体中文](README.zh-CN.md) | [Docs](https://www.ttimmortal.com/) | [GitHub](https://github.com/wulun811/LiuHe)
 
 ![tests](https://img.shields.io/badge/tests-200%2B%20assertions%20passed-brightgreen)
 ![tools](https://img.shields.io/badge/tools-38%20MCP-blue)
@@ -94,6 +94,40 @@ Traditional tools (git, sed, IDE) assume a user with hands, eyes, and memory. An
 
 ## Quick Start
 
+### 10-second taste
+
+```bash
+# 1) Get the parsing daemon — download a prebuilt binary from releases/, or build:
+cd malong-parse && cargo build --release && cp target/release/malong-parse ~/.local/bin
+malong-parse &                                   # start the daemon (Unix socket)
+
+# 2) Install the toolset
+cd ../malong && npm ci
+
+# 3) Register the MCP server (works with any MCP client, e.g. opencode / Claude Desktop)
+#    config:
+#    {
+#      "mcpServers": {
+#        "malong": { "command": "node", "args": ["/path/to/malong/mcp-server.js"] }
+#      }
+#    }
+
+# 4) Ask your LLM: "search for the symbol 'handle' in my workspace"
+```
+
+What the LLM sees back:
+
+```json
+{
+  "results": [
+    { "name": "handle", "type": "function", "start_line": 6, "end_line": 12, "file": "app.js" },
+    { "name": "handle_login", "type": "function", "start_line": 5, "end_line": 9, "file": "src/auth.py" }
+  ],
+  "count": 2,
+  "next_step": "Before modifying found symbols, check blast radius: impact_analysis(...)"
+}
+```
+
 ### Build the Rust parsing service
 
 ```bash
@@ -102,6 +136,8 @@ cargo build --release
 cp target/release/malong-parse ~/.local/bin/   # or add to PATH
 malong-parse &                                   # daemon (Unix socket: /tmp/malong-parse-$(id -u).sock)
 ```
+
+Prebuilt binaries for Linux x86_64 are committed under [`releases/`](releases/) (with `.sha256` checksums) — pick one up instead of building if you prefer.
 
 ### Install the toolset
 

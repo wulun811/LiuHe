@@ -2,7 +2,7 @@
 
 **LLM-Native 代码操作工具链** — 为无手、无眼、无记忆的 LLM 重新发明代码操作。
 
-[English](README.md) | **简体中文**
+[English](README.md) | **简体中文** | [官方文档](https://www.ttimmortal.com/) | [GitHub](https://github.com/wulun811/LiuHe)
 
 ![tests](https://img.shields.io/badge/tests-200%2B%20assertions%20passed-brightgreen)
 ![tools](https://img.shields.io/badge/tools-38%20MCP-blue)
@@ -95,6 +95,40 @@
 
 ## 快速开始
 
+### 10 秒体验
+
+```bash
+# 1) 获取解析服务——从 releases/ 下载预编译二进制，或自己编译：
+cd malong-parse && cargo build --release && cp target/release/malong-parse ~/.local/bin
+malong-parse &                                   # 启动 daemon（Unix socket）
+
+# 2) 安装工具集
+cd ../malong && npm ci
+
+# 3) 注册 MCP 服务（任何 MCP 客户端通用，如 opencode / Claude Desktop）
+#    配置：
+#    {
+#      "mcpServers": {
+#        "malong": { "command": "node", "args": ["/path/to/malong/mcp-server.js"] }
+#      }
+#    }
+
+# 4) 让 LLM 问一句："search for the symbol 'handle' in my workspace"
+```
+
+LLM 收到的真实输出：
+
+```json
+{
+  "results": [
+    { "name": "handle", "type": "function", "start_line": 6, "end_line": 12, "file": "app.js" },
+    { "name": "handle_login", "type": "function", "start_line": 5, "end_line": 9, "file": "src/auth.py" }
+  ],
+  "count": 2,
+  "next_step": "Before modifying found symbols, check blast radius: impact_analysis(...)"
+}
+```
+
 ### 构建 Rust 解析服务
 
 ```bash
@@ -103,6 +137,8 @@ cargo build --release
 cp target/release/malong-parse ~/.local/bin/   # 或加入 PATH
 malong-parse &                                   # 启动 daemon（Unix socket: /tmp/malong-parse-$(id -u).sock）
 ```
+
+Linux x86_64 预编译二进制已随仓库提交在 [`releases/`](releases/)（附 `.sha256` 校验）——不想编译可以直接下载。
 
 ### 安装工具集
 
