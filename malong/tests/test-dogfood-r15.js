@@ -9,6 +9,7 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import Database from 'better-sqlite3'
+import { tmpdir } from 'node:os'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const imp = (p) => import(pathToFileURL(p).href)
@@ -19,9 +20,9 @@ function assert(cond, msg) {
   if (cond) { pass++ } else { fail++; console.error('  FAIL:', msg) }
 }
 
-const WS = '/tmp/opencode/r15-ws'
-const DATA = '/tmp/opencode/r15-data'
-const SOCK = '/tmp/opencode/r15-code-index.sock'
+const WS = join(tmpdir(), 'opencode', 'r15-ws')
+const DATA = join(tmpdir(), 'opencode', 'r15-data')
+const SOCK = join(tmpdir(), 'opencode', 'r15-code-index.sock')
 
 rmSync(WS, { recursive: true, force: true })
 rmSync(DATA, { recursive: true, force: true })

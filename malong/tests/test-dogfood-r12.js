@@ -14,9 +14,9 @@ function assert(c, m) { if (c) { pass++ } else { fail++; console.error('  FAIL:'
 
 // ── #1 references/getReferences 返回行号（fresh CodeIndex + 运行中 daemon）──
 {
-  const WS = '/tmp/opencode/r12-refline'
-  const DATA = '/tmp/opencode/r12-refline-data'
-  const SOCK = '/tmp/opencode/r12-refline.sock'
+  const WS = join(tmpdir(), 'opencode', 'r12-refline')
+  const DATA = join(tmpdir(), 'opencode', 'r12-refline-data')
+  const SOCK = join(tmpdir(), 'opencode', 'r12-refline.sock')
   rmSync(WS, { recursive: true, force: true }); rmSync(DATA, { recursive: true, force: true })
   mkdirSync(join(WS, 'src'), { recursive: true }); mkdirSync(DATA, { recursive: true })
   writeFileSync(join(WS, 'src/caller.js'), `import { helper } from './lib.js'\nexport function a() {\n  helper(1)\n  const x = helper(2)\n  return helper(3) + x\n}\n`)
@@ -48,6 +48,7 @@ function assert(c, m) { if (c) { pass++ } else { fail++; console.error('  FAIL:'
   const out = execFileSync('python3', ['-c', `
 import sys; sys.path.insert(0, ${JSON.stringify(dirname(py))})
 import batch_edit_mvp as m
+import { tmpdir } from 'node:os'
 d = m.generate_diff('a\\nb\\n', 'a\\nc\\n', 'f.txt')
 print(d.startswith('--- a/f.txt\\n+++ b/f.txt\\n@@'))
 `], { encoding: 'utf-8' }).trim()
@@ -56,7 +57,7 @@ print(d.startswith('--- a/f.txt\\n+++ b/f.txt\\n@@'))
 
 // ── #4 mock_sync 认得类/对象方法 ──
 {
-  const WS = '/tmp/opencode/r12-mock'
+  const WS = join(tmpdir(), 'opencode', 'r12-mock')
   rmSync(WS, { recursive: true, force: true }); mkdirSync(join(WS, 'src'), { recursive: true })
   writeFileSync(join(WS, 'src/svc.js'), `class Svc {\n  async getImpactAnalysis(filePath, opts) {\n    return null\n  }\n}\n`)
   const { handle } = await imp(join(MALONG, 'tools/tool-mock-syncer/handler.js'))
@@ -68,7 +69,7 @@ print(d.startswith('--- a/f.txt\\n+++ b/f.txt\\n@@'))
 
 // ── #5 exception_guard 同语言过滤（JS 目标不吃 Python 异常）──
 {
-  const WS = '/tmp/opencode/r12-eg'
+  const WS = join(tmpdir(), 'opencode', 'r12-eg')
   rmSync(WS, { recursive: true, force: true }); mkdirSync(join(WS, 'src'), { recursive: true })
   writeFileSync(join(WS, 'src/app.js'), `export function f(x) { if (!x) throw new Error('not found') }\n`)
   writeFileSync(join(WS, 'code-index.db'), '')
@@ -83,7 +84,7 @@ print(d.startswith('--- a/f.txt\\n+++ b/f.txt\\n@@'))
 
 // ── #6 find_tests 文本反查（动态 import 的测试）──
 {
-  const WS = '/tmp/opencode/r12-ft'
+  const WS = join(tmpdir(), 'opencode', 'r12-ft')
   rmSync(WS, { recursive: true, force: true }); mkdirSync(join(WS, 'src'), { recursive: true }); mkdirSync(join(WS, 'tests'), { recursive: true })
   writeFileSync(join(WS, 'src/health-check.js'), `export function run() { return 1 }\n`)
   writeFileSync(join(WS, 'tests/test-dyn.js'), `const m = await import('../src/health-check.js')\nconsole.log(m.run())\n`)

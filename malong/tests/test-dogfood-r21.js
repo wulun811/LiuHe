@@ -5,13 +5,14 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import Database from 'better-sqlite3'
+import { tmpdir } from 'node:os'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const imp = (p) => import(pathToFileURL(p).href)
 const MALONG_DIR = join(__dirname, '..')
-const WS = '/tmp/opencode/r21-ws'
-const DATA = '/tmp/opencode/r21-data'
-const SOCK = '/tmp/opencode/r21-code-index.sock'
+const WS = join(tmpdir(), 'opencode', 'r21-ws')
+const DATA = join(tmpdir(), 'opencode', 'r21-data')
+const SOCK = join(tmpdir(), 'opencode', 'r21-code-index.sock')
 
 rmSync(WS, { recursive: true, force: true })
 rmSync(DATA, { recursive: true, force: true })

@@ -3,6 +3,7 @@
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const imp = (p) => import(pathToFileURL(p).href)
@@ -13,9 +14,9 @@ function assert(cond, msg) {
   if (cond) { pass++ } else { fail++; console.error('  FAIL:', msg) }
 }
 
-const WS = '/tmp/opencode/rfix-ws'
-const DATA = '/tmp/opencode/rfix-data'
-const SOCK = '/tmp/opencode/rfix-code-index.sock'
+const WS = join(tmpdir(), 'opencode', 'rfix-ws')
+const DATA = join(tmpdir(), 'opencode', 'rfix-data')
+const SOCK = join(tmpdir(), 'opencode', 'rfix-code-index.sock')
 
 // ── 准备 fixture workspace ──
 rmSync(WS, { recursive: true, force: true })

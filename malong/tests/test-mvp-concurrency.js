@@ -7,6 +7,7 @@
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { mkdirSync, writeFileSync, readFileSync, rmSync, openSync, closeSync, writeSync, unlinkSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const imp = (p) => import(pathToFileURL(p).href)
@@ -18,9 +19,9 @@ function assert(cond, msg) {
   if (cond) { pass++ } else { fail++; console.error('  FAIL:', msg) }
 }
 
-const WS = '/tmp/opencode/mvp-conc-ws'
-const DATA = '/tmp/opencode/mvp-conc-data'
-const SOCK = '/tmp/opencode/mvp-conc.sock'
+const WS = join(tmpdir(), 'opencode', 'mvp-conc-ws')
+const DATA = join(tmpdir(), 'opencode', 'mvp-conc-data')
+const SOCK = join(tmpdir(), 'opencode', 'mvp-conc.sock')
 
 rmSync(WS, { recursive: true, force: true })
 rmSync(DATA, { recursive: true, force: true })

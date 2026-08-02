@@ -16,8 +16,8 @@ function assert(cond, msg) {
   if (cond) { pass++ } else { fail++; console.error('  FAIL:', msg) }
 }
 
-const WS = '/tmp/opencode/gatekeeper-ws'
-const DATA = '/tmp/opencode/gatekeeper-data'
+const WS = join(tmpdir(), 'opencode', 'gatekeeper-ws')
+const DATA = join(tmpdir(), 'opencode', 'gatekeeper-data')
 rmSync(WS, { recursive: true, force: true })
 rmSync(DATA, { recursive: true, force: true })
 mkdirSync(`${WS}/src`, { recursive: true })
@@ -386,6 +386,7 @@ const jsParserCtx = { codeIndexService, getWorkspaceDir: () => DATA, langParserS
 writeFileSync(`${WS}/src/js_scope.js`, `import net from 'node:net'
 import { existsSync, readFileSync } from 'node:fs'
 import { helper } from './util.js'
+import { tmpdir } from 'node:os'
 
 export function connect(sockPath) {
   return new Promise((resolve, reject) => {

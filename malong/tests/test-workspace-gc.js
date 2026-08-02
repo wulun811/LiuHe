@@ -3,6 +3,7 @@
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { mkdirSync, writeFileSync, rmSync, existsSync, utimesSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const imp = (p) => import(pathToFileURL(p).href)
@@ -11,7 +12,7 @@ const { cleanupStaleWorkspaces } = await imp(join(__dirname, '..', 'health-check
 let pass = 0, fail = 0
 function assert(c, m) { if (c) { pass++ } else { fail++; console.error('  FAIL:', m) } }
 
-const ROOT = '/tmp/opencode/ws-gc-test'
+const ROOT = join(tmpdir(), 'opencode', 'ws-gc-test')
 const WS = join(ROOT, 'workspaces')
 rmSync(ROOT, { recursive: true, force: true })
 
@@ -57,7 +58,7 @@ const noProtect = cleanupStaleWorkspaces(WS, { maxAgeDays: 14, dryRun: true })
 assert(noProtect.deleted.some(d => d.workspace === 'protect00000'), '⑥ 无 protect 时 60 天老库会被标记删')
 
 // ④ 不存在目录：安全 no-op
-const noop = cleanupStaleWorkspaces('/tmp/opencode/no-such-ws-dir-xyz', { maxAgeDays: 14 })
+const noop = cleanupStaleWorkspaces(join(tmpdir(), 'opencode', 'no-such-ws-dir-xyz'), { maxAgeDays: 14 })
 assert(noop.status === 'no_workspaces_dir', `④ 不存在目录 no-op（得 ${noop.status}）`)
 assert(noop.deleted_count === 0, '④ no-op 0 删')
 

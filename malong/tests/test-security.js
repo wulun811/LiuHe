@@ -1,10 +1,11 @@
 // 安全测试：路径穿越 + 符号链接穿越
 import { existsSync, symlinkSync, unlinkSync, writeFileSync, mkdirSync, rmdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { createConnection } from 'node:net'
 
 const SOCKET = `/tmp/malong-parse-${process.getuid()}.sock`
-const TMP = '/tmp/security-test-' + process.pid
+const TMP = join(tmpdir(), 'security-test-' + process.pid)
 const WS_DIR = join(TMP, 'workspace')
 const EVIL_LINK = join(TMP, 'link_to_etc')
 const SAFE_FILE = join(WS_DIR, 'test.js')

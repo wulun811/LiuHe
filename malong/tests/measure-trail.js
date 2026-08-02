@@ -5,15 +5,16 @@
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const imp = (p) => import(pathToFileURL(p).href)
 const MALONG_DIR = join(__dirname, '..')
 const TOOLS_DIR = join(MALONG_DIR, 'tools')
 
-const WS = '/tmp/opencode/mvp-trail-ws'
-const DATA = '/tmp/opencode/mvp-trail-data'
-const SOCK = '/tmp/opencode/mvp-trail.sock'
+const WS = join(tmpdir(), 'opencode', 'mvp-trail-ws')
+const DATA = join(tmpdir(), 'opencode', 'mvp-trail-data')
+const SOCK = join(tmpdir(), 'opencode', 'mvp-trail.sock')
 
 rmSync(WS, { recursive: true, force: true })
 rmSync(DATA, { recursive: true, force: true })

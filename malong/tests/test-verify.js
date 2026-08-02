@@ -2,9 +2,10 @@
 import { createConnection } from 'node:net'
 import { writeFileSync, mkdirSync, unlinkSync, rmdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 
 const SOCKET = `/tmp/malong-parse-${process.getuid()}.sock`
-const TMP = '/tmp/p3-verify-' + process.pid
+const TMP = join(tmpdir(), 'p3-verify-' + process.pid)
 const WS = join(TMP, 'workspace')
 
 let passed = 0, failed = 0

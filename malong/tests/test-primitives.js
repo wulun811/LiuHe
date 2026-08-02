@@ -3,6 +3,7 @@
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync, statSync, unlinkSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const imp = (p) => import(pathToFileURL(p).href)
@@ -14,9 +15,9 @@ function assert(cond, msg) {
   if (cond) { pass++ } else { fail++; console.error('  FAIL:', msg) }
 }
 
-const WS = '/tmp/opencode/prim-ws'
-const DATA = '/tmp/opencode/prim-data'
-const SOCK = '/tmp/opencode/prim-code-index.sock'
+const WS = join(tmpdir(), 'opencode', 'prim-ws')
+const DATA = join(tmpdir(), 'opencode', 'prim-data')
+const SOCK = join(tmpdir(), 'opencode', 'prim-code-index.sock')
 
 rmSync(WS, { recursive: true, force: true })
 rmSync(DATA, { recursive: true, force: true })

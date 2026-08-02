@@ -1,6 +1,7 @@
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const imp = (p) => import(pathToFileURL(p).href)
@@ -15,7 +16,7 @@ function assert(cond, msg) {
 
 const mockContext = {
   codeIndexService: null,
-  getWorkspaceDir: () => '/tmp/malong-test-ws',
+  getWorkspaceDir: () => join(tmpdir(), 'malong-test-ws'),
 }
 
 async function loadTool(name) {
@@ -56,7 +57,7 @@ console.log('\n═══ T2: exception_guard ═══')
 console.log('\n═══ T2b: exception_guard Rust panic-family（第 8 轮） ═══')
 {
   const handle = await loadTool('tool-exception-guard')
-  const RWS = '/tmp/opencode/eg-rust-ws'
+  const RWS = join(tmpdir(), 'opencode', 'eg-rust-ws')
   rmSync(RWS, { recursive: true, force: true })
   mkdirSync(join(RWS, 'src'), { recursive: true })
   mkdirSync(join(RWS, 'tests'), { recursive: true })
@@ -173,7 +174,7 @@ console.log('\n═══ T7: sweep_dead_code ═══')
 console.log('\n═══ T7b: sweep_dead_code Rust use（第 8 轮） ═══')
 {
   const handle = await loadTool('tool-dead-code-sweeper')
-  const RWS = '/tmp/opencode/dc-rust-ws'
+  const RWS = join(tmpdir(), 'opencode', 'dc-rust-ws')
   rmSync(RWS, { recursive: true, force: true })
   mkdirSync(join(RWS, 'src'), { recursive: true })
   writeFileSync(join(RWS, 'src/lib.rs'), `use std::collections::HashMap;

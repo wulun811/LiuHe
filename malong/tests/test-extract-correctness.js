@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { connect, extractAll, extractTopLevel, extractSymbols } from '../parse-client.js'
+import { tmpdir } from 'node:os'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -108,8 +109,8 @@ const tpl = \`import('./in-template.js')\`
     '}',
     'const doc = "function fake() { return 1 }"',
   ].join('\n') + '\n'
-  const cjkPath = '/tmp/opencode/cjk/中文固化.js'
-  mkdirSync('/tmp/opencode/cjk', { recursive: true })
+  const cjkPath = join(tmpdir(), 'opencode', 'cjk', '中文固化.js')
+  mkdirSync(join(tmpdir(), 'opencode', 'cjk'), { recursive: true })
   writeFileSync(cjkPath, cjkSrc)
   const r7 = await extractAll(cjkSrc, '.js', cjkPath)
   const names7 = Object.fromEntries(r7.symbols.map(s => [s.name, s.type]))

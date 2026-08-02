@@ -1463,7 +1463,14 @@ class CodeIndex {
 
     const udsPath = core.get('codeIndex.udsPath', join(process.cwd(), 'data', 'code-index.sock'))
     const udsToken = core.get('codeIndex.udsToken', '')
-    try { unlinkSync(udsPath) } catch {}
+    const isWin = process.platform === 'win32'
+    let listenPath = udsPath
+    if (isWin) {
+      let h = 5381
+      for (const ch of udsPath) h = ((h << 5) + h + ch.charCodeAt(0)) >>> 0
+      listenPath = `\\\\.\\pipe\\malong-code-index-${h.toString(16)}`
+    }
+    if (!isWin) { try { unlinkSync(udsPath) } catch {} }
     this._udsServer = createServer((req, res) => {
       if (udsToken) {
         const token = new URL(req.url, 'http://localhost').searchParams.get('token') || req.headers['x-auth-token'] || ''
@@ -1520,9 +1527,9 @@ class CodeIndex {
         }
       })
     })
-    this._udsServer.listen(udsPath, () => {
-      try { chmodSync(udsPath, 0o600) } catch {}
-      core.log('info', `[code-index] UDS server on ${udsPath}`)
+    this._udsServer.listen(listenPath, () => {
+      if (!isWin) { try { chmodSync(udsPath, 0o600) } catch {} }
+      core.log('info', `[code-index] UDS server on ${listenPath}`)
     })
   }
 
