@@ -13,7 +13,7 @@ function assert(cond, msg) {
 }
 
 const WS = join(os.tmpdir(), 'opencode', 'b13-tb-run-ws')
-rmSync(WS, { recursive: true, force: true })
+try { rmSync(WS, { recursive: true, force: true }) } catch {}
 mkdirSync(WS, { recursive: true })
 writeFileSync(join(WS, 'pytest.ini'), '')
 writeFileSync(join(WS, 'test_demo.py'), [
@@ -78,12 +78,12 @@ const { handle } = await import(pathToFileURL(join(__dirname, '..', 'tools', 'to
   assert(rFileOk.exit_code === 0, `④f file 参数作为默认 scope 生效（得 ${rFileOk.exit_code}）`)
 }
 
-rmSync(WS, { recursive: true, force: true })
+try { rmSync(WS, { recursive: true, force: true }) } catch {}
 
 // ⑤ r10d：discover 三层覆盖——tests/ 目录但命名不合约定的测试文件经文本兜底扫出
 {
   const dws = join(os.tmpdir(), 'opencode', 'b13-tb-discover-ws')
-  rmSync(dws, { recursive: true, force: true })
+  try { rmSync(dws, { recursive: true, force: true }) } catch {}
   mkdirSync(join(dws, 'src'), { recursive: true })
   mkdirSync(join(dws, 'tests'), { recursive: true })
   writeFileSync(join(dws, 'src', 'health-check.js'), 'export function readUsageStats() { return 1 }\n')
@@ -95,13 +95,13 @@ rmSync(WS, { recursive: true, force: true })
   assert(after.tests.some(t => t.name === 'finds me via text fallback'), `⑤ 测试名正确（${JSON.stringify(after.tests.map(t => t.name))}）`)
   assert(after.search_methods.includes('import_graph/text_fallback'), `⑤ search_methods 标注 import 层（${JSON.stringify(after.search_methods)}）`)
   assert(after.tests.some(t => t.file === 'tests/zz-custom.js'), `⑤ 文件路径为实际测试文件`)
-  rmSync(dws, { recursive: true, force: true })
+  try { rmSync(dws, { recursive: true, force: true }) } catch {}
 }
 
 // ⑥ r10e(F2)：裸 assert 风格兜底（malong 全量测试都是裸 assert 无 test() 包裹）+ 不存在文件错误透传
 {
   const dws = join(os.tmpdir(), 'opencode', 'b13-tb-discover-ws2')
-  rmSync(dws, { recursive: true, force: true })
+  try { rmSync(dws, { recursive: true, force: true }) } catch {}
   mkdirSync(join(dws, 'src'), { recursive: true })
   mkdirSync(join(dws, 'tests'), { recursive: true })
   writeFileSync(join(dws, 'src', 'util.js'), 'export const n = 1\n')
@@ -114,7 +114,7 @@ rmSync(WS, { recursive: true, force: true })
   const mockCtx = { codeIndexService: { resolveFileArg: () => ({ ok: false, error: { code: 'FILE_NOT_FOUND', message: 'No such file' } }) } }
   const missing2 = await handle({ action: 'discover', workspace_dir: dws, file: 'src/does-not-exist.js' }, mockCtx)
   assert(missing2.error === 'FILE_NOT_FOUND', `⑥ 有 service → 守卫错误透传（得 ${missing2.error || missing2.message}）`)
-  rmSync(dws, { recursive: true, force: true })
+  try { rmSync(dws, { recursive: true, force: true }) } catch {}
 }
 
 console.log(`== test-test-bridge-run: ${pass} passed, ${fail} failed ==`)

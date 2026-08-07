@@ -14,7 +14,7 @@ function assert(cond, msg) {
 }
 
 const TMP = join(os.tmpdir(), 'opencode', 'handler-smoke-test')
-rmSync(TMP, { recursive: true, force: true })
+try { rmSync(TMP, { recursive: true, force: true }) } catch {}
 mkdirSync(TMP, { recursive: true })
 const WS = join(TMP, 'ws')
 mkdirSync(join(WS, 'src'), { recursive: true })
@@ -141,6 +141,6 @@ CREATE TABLE symbols (id INTEGER PRIMARY KEY AUTOINCREMENT, file_id INTEGER NOT 
   assert(notFound.error?.code === 'FILE_NOT_FOUND', 'write-symbols 文件不存在返回 FILE_NOT_FOUND')
 }
 
-rmSync(TMP, { recursive: true, force: true })
+try { rmSync(TMP, { recursive: true, force: true }) } catch {}
 console.log(`== test-handler-smoke: ${pass} passed, ${fail} failed ==`)
 if (fail > 0) process.exit(1)

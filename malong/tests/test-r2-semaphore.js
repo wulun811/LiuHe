@@ -18,7 +18,7 @@ const THROW_DIR = join(__dirname, '..', 'tools', 'tool-r2-throw')
 // 自建探针工具（handler 直接 throw），结束后删除——不依赖外部预置
 {
   const { writeFileSync } = await import('node:fs')
-  rmSync(THROW_DIR, { recursive: true, force: true })
+  try { rmSync(THROW_DIR, { recursive: true, force: true }) } catch {}
   mkdirSync(THROW_DIR, { recursive: true })
   writeFileSync(join(THROW_DIR, 'manifest.json'), JSON.stringify({
     name: 'r2_throw_probe',
@@ -37,7 +37,7 @@ const THROW_DIR = join(__dirname, '..', 'tools', 'tool-r2-throw')
 const WS = join(os.tmpdir(), 'opencode', 'r2-sem-ws')
 const STATE = join(os.tmpdir(), 'opencode', 'r2-sem-state')
 rmSync(WS, { recursive: true, force: true }); mkdirSync(WS, { recursive: true })
-rmSync(STATE, { recursive: true, force: true })
+try { rmSync(STATE, { recursive: true, force: true }) } catch {}
 
 const child = spawn(process.execPath, [join(__dirname, '..', 'mcp-server.js'), '--workspace', WS], {
   stdio: ['pipe', 'pipe', 'pipe'], cwd: WS, env: { ...process.env, MALONG_STATE_DIR: STATE },
@@ -100,7 +100,7 @@ assert(!pingOk.error, `后续请求正常响应`)
 child.stdin.end()
 await sleep(500)
 child.kill()
-rmSync(THROW_DIR, { recursive: true, force: true })
+try { rmSync(THROW_DIR, { recursive: true, force: true }) } catch {}
 
 console.log(`== test-r2-semaphore: ${pass} passed, ${fail} failed ==`)
 process.exit(fail > 0 ? 1 : 0)

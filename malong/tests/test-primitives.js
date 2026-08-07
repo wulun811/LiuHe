@@ -19,8 +19,8 @@ const WS = join(tmpdir(), 'opencode', 'prim-ws')
 const DATA = join(tmpdir(), 'opencode', 'prim-data')
 const SOCK = join(tmpdir(), 'opencode', 'prim-code-index.sock')
 
-rmSync(WS, { recursive: true, force: true })
-rmSync(DATA, { recursive: true, force: true })
+try { rmSync(WS, { recursive: true, force: true }) } catch {}
+try { rmSync(DATA, { recursive: true, force: true }) } catch {}
 for (const d of [`${WS}/src`, DATA]) mkdirSync(d, { recursive: true })
 
 // ── fixture：Python 嵌套 + 装饰器 + 同名兄弟 ──
@@ -76,9 +76,9 @@ assert(connected, 'parse-client 连接到 malong-parse')
 
 const { default: codeIndex } = await imp(join(MALONG_DIR, 'code-index.js'))
 const langParser = {
-  extractAllAsync: (source, ext, filePath) => pc.extractAll(source, ext, filePath),
-  hasErrorsAsync: (source, ext, filePath) => pc.hasErrors(source, ext, filePath),
-  batchExtractAsync: (files) => pc.batchExtract(files),
+  extractAllAsync: (source, ext, filePath, ws) => pc.extractAll(source, ext, filePath, ws),
+  hasErrorsAsync: (source, ext, filePath, ws) => pc.hasErrors(source, ext, filePath, ws),
+  batchExtractAsync: (files, ws) => pc.batchExtract(files, ws),
 }
 const services = { langParser }
 const core = {
@@ -400,7 +400,7 @@ assert(hNow.length === 2 && hNow.every(h => h.body_hash && h.body_hash.length ==
 const { recoverJournals, createJournal, updateJournalState } = await imp(join(MALONG_DIR, 'write-journal.js'))
 const { sha256 } = await imp(join(MALONG_DIR, 'hash-utils.js'))
 const recWS = `${WS}/rec`
-rmSync(recWS, { recursive: true, force: true })
+try { rmSync(recWS, { recursive: true, force: true }) } catch {}
 mkdirSync(join(recWS, '.malong', 'journal'), { recursive: true })
 // 场景 A：当前 == 写前（dryRun 残留/崩溃在 rename 前）→ abandoned，文件不动
 writeFileSync(`${recWS}/a.txt`, 'v1')

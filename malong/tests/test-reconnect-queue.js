@@ -2,8 +2,10 @@
 import { execSync } from 'node:child_process'
 import { readFileSync, existsSync } from 'node:fs'
 
-const SOCKET = `/tmp/malong-parse-${process.getuid()}.sock`
-const PID_FILE = `/tmp/malong-parse-${process.getuid()}.pid`
+const IS_WIN = process.platform === 'win32'
+const UID = IS_WIN ? 0 : (process.getuid?.() ?? 0)
+const SOCKET = `/tmp/malong-parse-${UID}.sock`
+const PID_FILE = `/tmp/malong-parse-${UID}.pid`
 const BIN = process.env.MALONG_PARSE_BIN || 'malong-parse'
 
 let passed = 0, failed = 0
@@ -32,6 +34,11 @@ function ensureService() {
 
 async function main() {
   console.log('重连期间请求排队测试\n')
+
+  if (process.platform === 'win32') {
+    console.log('  ⚠  Windows：进程生命周期语义（kill/setsid/pid-file）为 Unix 专用，跳过')
+    process.exit(0)
+  }
 
   // 确保服务运行
   ensureService()

@@ -2,7 +2,9 @@
 import { createConnection } from 'node:net'
 import { existsSync } from 'node:fs'
 
-const SOCKET = `/tmp/malong-parse-${process.getuid()}.sock`
+const IS_WIN = process.platform === 'win32'
+const TCP_PORT = parseInt(process.env.MALONG_PORT || '31001', 10)
+const SOCKET = IS_WIN ? { host: '127.0.0.1', port: TCP_PORT } : `/tmp/malong-parse-${process.getuid?.() ?? 0}.sock`
 
 let passed = 0, failed = 0, errors = []
 function assert(label, ok, detail) {
@@ -96,7 +98,7 @@ function genRs() {
 async function main() {
   console.log('模糊测试: 1000 随机文件\n')
 
-  if (!existsSync(SOCKET)) {
+  if (!IS_WIN && !existsSync(SOCKET)) {
     console.log('  ⚠  malong-parse 未运行\n')
     process.exit(1)
   }

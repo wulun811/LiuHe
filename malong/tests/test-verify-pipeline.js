@@ -14,7 +14,7 @@ function assert(cond, msg) {
 }
 
 const WS = join(os.tmpdir(), 'opencode', 'b13-vp-ws')
-rmSync(WS, { recursive: true, force: true })
+try { rmSync(WS, { recursive: true, force: true }) } catch {}
 mkdirSync(join(WS, 'sub'), { recursive: true })
 writeFileSync(join(WS, 'package.json'), JSON.stringify({
   name: 'b13-vp-fixture',
@@ -163,7 +163,7 @@ const ctx = { getWorkspaceDir: (d) => d }
   try { markerExists = readFileSync(escMarker, 'utf-8').length > 0 } catch {}
   assert(!markerExists, `⑮ workspace 外 package.json 不被执行（无逃逸标记）`)
   assert(r.status === 'fail' || (r.results?.test && r.results?.test?.ran), `⑮ 返回了结果（${r.status}）`)
-  rmSync(outer, { recursive: true, force: true })
+  try { rmSync(outer, { recursive: true, force: true }) } catch {}
   try { rmSync(escMarker, { force: true }) } catch {}
 }
 
@@ -173,6 +173,6 @@ const ctx = { getWorkspaceDir: (d) => d }
   assert(r.results?.lint?.ran === true && !r.error, `⑯ 超大 timeout 被钳到 110s 仍正常执行（结果 ${r.status}）`)
 }
 
-rmSync(WS, { recursive: true, force: true })
+try { rmSync(WS, { recursive: true, force: true }) } catch {}
 console.log(`== test-verify-pipeline: ${pass} passed, ${fail} failed ==`)
 process.exit(fail > 0 ? 1 : 0)

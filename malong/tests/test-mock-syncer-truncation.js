@@ -18,7 +18,7 @@ function assert(cond, msg) {
 // 构造 n 个测试文件；trailDir=true 时追加一个字母序靠后、不含测试文件的目录
 function buildWs(n, trailDir) {
   const ws = join(os.tmpdir(), 'opencode', `ms-trunc-${n}-${trailDir ? 'trail' : 'clean'}-${process.pid}`)
-  rmSync(ws, { recursive: true, force: true })
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
   mkdirSync(join(ws, 'tests'), { recursive: true })
   writeFileSync(join(ws, 'src.js'), 'function target(a, b) { return a + b }\nmodule.exports = { target }\n')
   for (let i = 0; i < n; i++) writeFileSync(join(ws, 'tests', `t${String(i).padStart(3, '0')}.test.js`), `const target = () => ${i}\n`)
@@ -34,7 +34,7 @@ async function run(n, trailDir) {
   try {
     return await handle({ workspace_dir: ws, file: 'src.js', function: 'target' }, {})
   } finally {
-    rmSync(ws, { recursive: true, force: true })
+    try { rmSync(ws, { recursive: true, force: true }) } catch {}
   }
 }
 

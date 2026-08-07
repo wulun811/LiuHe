@@ -54,7 +54,7 @@ assert(isIgnored('a/secret.key', ['secret.key'], false) === false, '精确规则
 
 // 注释与空行
 const TMP = join(os.tmpdir(), 'opencode', 'file-collector-test')
-rmSync(TMP, { recursive: true, force: true })
+try { rmSync(TMP, { recursive: true, force: true }) } catch {}
 mkdirSync(TMP, { recursive: true })
 writeFileSync(join(TMP, '.malongignore'), '# comment\n\nnode_modules\n*.log\n')
 assert(parseMalongignore(join(TMP, '.malongignore')).length === 2, '解析忽略注释和空行')
@@ -106,6 +106,6 @@ const withRule = collectFiles(WS, { ignoreRules: ['src/deep/er/'] })
 assert(!withRule.some(f => f.path.includes('er/nest')), '自定义目录规则生效')
 assert(withRule.some(f => f.path.replace(/\\/g, '/').includes('src/deep/c.js')), '自定义规则不误伤其他')
 
-rmSync(TMP, { recursive: true, force: true })
+try { rmSync(TMP, { recursive: true, force: true }) } catch {}
 console.log(`== test-file-collector: ${pass} passed, ${fail} failed ==`)
 if (fail > 0) process.exit(1)

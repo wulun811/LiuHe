@@ -58,7 +58,7 @@ console.log('\n═══ T2b: exception_guard Rust panic-family（第 8 轮） �
 {
   const handle = await loadTool('tool-exception-guard')
   const RWS = join(tmpdir(), 'opencode', 'eg-rust-ws')
-  rmSync(RWS, { recursive: true, force: true })
+  try { rmSync(RWS, { recursive: true, force: true }) } catch {}
   mkdirSync(join(RWS, 'src'), { recursive: true })
   mkdirSync(join(RWS, 'tests'), { recursive: true })
   writeFileSync(join(RWS, 'src/lib.rs'), `use std::fs::File;
@@ -175,7 +175,7 @@ console.log('\n═══ T7b: sweep_dead_code Rust use（第 8 轮） ═══'
 {
   const handle = await loadTool('tool-dead-code-sweeper')
   const RWS = join(tmpdir(), 'opencode', 'dc-rust-ws')
-  rmSync(RWS, { recursive: true, force: true })
+  try { rmSync(RWS, { recursive: true, force: true }) } catch {}
   mkdirSync(join(RWS, 'src'), { recursive: true })
   writeFileSync(join(RWS, 'src/lib.rs'), `use std::collections::HashMap;
 use serde::Serialize;

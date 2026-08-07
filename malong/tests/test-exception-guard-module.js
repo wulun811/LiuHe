@@ -14,7 +14,7 @@ function assert(cond, msg) {
 }
 
 const WS = join(os.tmpdir(), 'opencode', 'r12-eg-ws')
-rmSync(WS, { recursive: true, force: true })
+try { rmSync(WS, { recursive: true, force: true }) } catch {}
 mkdirSync(join(WS, 'module-a'), { recursive: true })
 mkdirSync(join(WS, 'module-b'), { recursive: true })
 

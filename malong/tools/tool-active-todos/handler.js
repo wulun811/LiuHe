@@ -21,7 +21,7 @@ function walkFiles(baseDir, dir, files, maxFiles) {
     if (entry.isDirectory()) {
       walkFiles(baseDir, fullPath, files, maxFiles)
     } else if (entry.isFile() && SOURCE_EXTS.has(extname(entry.name))) {
-      files.push(fullPath.startsWith(baseDir + '/') ? fullPath.slice(baseDir.length + 1) : fullPath)
+      files.push((fullPath.startsWith(baseDir + sep) ? fullPath.slice(baseDir.length + 1) : fullPath).replace(/\\/g, '/'))
     }
   }
 }

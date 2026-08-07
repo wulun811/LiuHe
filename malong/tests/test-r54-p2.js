@@ -16,7 +16,7 @@ function assert(cond, msg) {
 }
 const tmp = (tag) => {
   const ws = join(os.tmpdir(), 'opencode', `r54-p2-${tag}-${process.pid}`)
-  rmSync(ws, { recursive: true, force: true })
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
   mkdirSync(ws, { recursive: true })
   return ws
 }
@@ -30,7 +30,7 @@ console.log('\u2500\u2500 test_bridge node \u76ee\u5f55 scope \u2500\u2500')
   writeFileSync(join(ws, 'tests', 'a.test.js'), 'console.log("x")\n')
   let r = await handle({ action: 'run', workspace_dir: ws, framework: 'node', scope: 'tests' }, {})
   assert(r.error === 'unsupported_framework' && /test file scope/.test(r.message || ''), `node \u76ee\u5f55 scope \u5e94 unsupported+hint\uff08\u5f97 ${r.error}\uff09`)
-  rmSync(ws, { recursive: true, force: true })
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
 }
 
 // ── security-review：dotenv 引号含空格密钥 ──
@@ -41,7 +41,7 @@ console.log('\u2500\u2500 security-review dotenv \u7a7a\u683c\u5bc6\u94a5 \u2500
   writeFileSync(join(ws, '.env'), 'API_SECRET="my secret value here"\n')
   const r = await handle({ workspace_dir: ws, file: '.env' }, {})
   assert((r.findings || []).some(f => f.id === 'dotenv-secret'), `\u5f15\u53f7\u542b\u7a7a\u683c\u5bc6\u94a5\u5e94\u88ab\u68c0\u51fa\uff08\u5f97 ${JSON.stringify((r.findings || []).map(f => f.id))}\uff09`)
-  rmSync(ws, { recursive: true, force: true })
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
 }
 
 // ── exception-guard：行尾注释内三引号不干扰 raise 检测 ──
@@ -54,7 +54,7 @@ console.log('\u2500\u2500 exception-guard \u6ce8\u91ca\u4e09\u5f15\u53f7 \u2500\
   const r = await handle({ workspace_dir: ws, file: 'a.py' }, {})
   const checked = r.summary?.raises_checked ?? 0
   assert(checked >= 1, `\u6ce8\u91ca\u540e\u7684 raise \u5e94\u88ab\u68c0\u51fa\uff08raises_checked=${checked}\uff09`)
-  rmSync(ws, { recursive: true, force: true })
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
 }
 
 // ── edit-sandbox：尾斜杠 workspace 不误拒 ──
@@ -77,7 +77,7 @@ console.log('\u2500\u2500 verify-pipeline test \u65e0\u811a\u672c skipped \u2500
   const testStage = (r.stages || []).find(s => s.stage === 'test') || r.test || r
   const skipped = testStage?.skipped === true || r.skipped === true || (r.results && r.results.test && r.results.test.skipped)
   assert(skipped || r.error, `\u65e0 test \u811a\u672c\u5e94 skipped\u800c\u975e\u5047 passed\uff08\u5f97 ${JSON.stringify(testStage || r).slice(0, 120)}\uff09`)
-  rmSync(ws, { recursive: true, force: true })
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
 }
 
 // ── active-todos：scope .. 拒绝 ──
@@ -87,7 +87,7 @@ console.log('\u2500\u2500 active-todos scope .. \u62d2\u7edd \u2500\u2500')
   const ws = tmp('todos')
   const r = await handle({ workspace_dir: ws, scope: '../../etc' }, {})
   assert(r.error === 'invalid_input', `scope .. \u5e94 invalid_input\uff08\u5f97 ${r.error}\uff09`)
-  rmSync(ws, { recursive: true, force: true })
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
 }
 
 console.log(`\n=== test-r54-p2: ${pass} passed, ${fail} failed ===`)

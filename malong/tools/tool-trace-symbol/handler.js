@@ -1,4 +1,4 @@
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { isFunctionName } from '../misuse-helpers.js'
 import { validateFilePath } from '../../error-codes.js'
@@ -243,7 +243,7 @@ function walkDir(baseDir, currentDir, literalValue, excludeSymbol, results, scan
           if (isInCommentOrString(line, literalValue)) continue
           const confidence = calcConfidence(line, literalValue)
           if (confidence >= 0.5) {
-            const relPath = fullPath.startsWith(baseDir + '/') ? fullPath.slice(baseDir.length + 1) : fullPath
+            const relPath = (fullPath.startsWith(baseDir + sep) ? fullPath.slice(baseDir.length + 1) : fullPath).replace(/\\/g, '/')
             results.push({ file: relPath, line: i + 1, context: line.trim(), confidence: Math.round(confidence * 100) / 100, level: confidence >= 0.8 ? 'high' : 'medium' })
           }
         }
@@ -321,7 +321,7 @@ function walkDirForSymbol(baseDir, currentDir, re, excludeFile, excludeLine, res
       const ext = fullPath.slice(fullPath.lastIndexOf('.'))
       if (!SOURCE_EXTS.has(ext)) continue
       scanned.files++
-      const relPath = fullPath.startsWith(baseDir + '/') ? fullPath.slice(baseDir.length + 1) : fullPath
+      const relPath = (fullPath.startsWith(baseDir + sep) ? fullPath.slice(baseDir.length + 1) : fullPath).replace(/\\/g, '/')
       // 10（F3）：不再整文件排除定义文件——同文件引用（常量在自己文件里被用）旧实现全漏；只跳定义行本身
       const isDefFile = relPath === excludeFile
       try {

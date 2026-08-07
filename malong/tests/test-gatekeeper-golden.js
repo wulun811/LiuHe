@@ -20,8 +20,8 @@ function assert(cond, msg) {
 const { tmpdir } = os
 const WS = join(tmpdir(), 'opencode', 'gatekeeper-ws')
 const DATA = join(tmpdir(), 'opencode', 'gatekeeper-data')
-rmSync(WS, { recursive: true, force: true })
-rmSync(DATA, { recursive: true, force: true })
+try { rmSync(WS, { recursive: true, force: true }) } catch {}
+try { rmSync(DATA, { recursive: true, force: true }) } catch {}
 mkdirSync(`${WS}/src`, { recursive: true })
 mkdirSync(DATA, { recursive: true })
 writeFileSync(join(DATA, 'code-index.db'), '')

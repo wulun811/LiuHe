@@ -20,7 +20,7 @@ const inspect = await imp(join(__dirname, '..', 'tools', 'tool-inspect', 'handle
 const { sha256 } = await imp(join(__dirname, '..', 'hash-utils.js'))
 
 const ws = join(os.tmpdir(), 'opencode', 'wfc-test-ws')
-rmSync(ws, { recursive: true, force: true })
+try { rmSync(ws, { recursive: true, force: true }) } catch {}
 mkdirSync(ws, { recursive: true })
 const ctx = {}
 
@@ -129,6 +129,6 @@ const ctx = {}
   assert(r.outline && r.outline.total_symbols === 1, `⑥ 降级不影响正常返回（得 ${JSON.stringify(r.outline)}）`)
 }
 
-rmSync(ws, { recursive: true, force: true })
+try { rmSync(ws, { recursive: true, force: true }) } catch {}
 console.log(`== test-workflow-closure: ${pass} passed, ${fail} failed ==`)
 if (fail > 0) process.exit(1)

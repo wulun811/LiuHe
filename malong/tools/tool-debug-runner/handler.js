@@ -1,6 +1,7 @@
 import { spawnWithGroup } from '../../spawn-guard.js'
+import { getPythonCmd } from '../../python-cmd.js'
 import { existsSync, mkdtempSync, rmSync } from 'node:fs'
-import { join, extname, resolve } from 'node:path'
+import { join, extname, resolve, sep } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 
@@ -9,7 +10,8 @@ function guardPath(root, userPath) {
   if (typeof root !== 'string' || typeof userPath !== 'string' || userPath === '') return null
   const rootResolved = resolve(root)
   const resolved = resolve(rootResolved, userPath)
-  return resolved === rootResolved || resolved.startsWith(rootResolved + '/') ? resolved : null
+  // Windows 反斜杠：startsWith(root + '/') 恒 false → 用 sep
+  return resolved === rootResolved || resolved.startsWith(rootResolved + sep) ? resolved : null
 }
 
 function runCmd(cmd, args, opts = {}) {
@@ -20,6 +22,7 @@ function runCmd(cmd, args, opts = {}) {
     env: opts.env,
     timeout,
     maxBuffer: 4 * 1024 * 1024,
+    shell: opts.shell,
   }).then(({ code, stdout, stderr, killed }) => ({
     stdout,
     stderr,
@@ -163,12 +166,12 @@ export async function handle(args, context) {
     let run
     // r23-fix: 全部补 cwd=workspace_dir（原版只对 command/test 传了 cwd，脚本内相对路径读不到）
     if (['.js', '.mjs', '.cjs'].includes(ext)) run = runCmd(process.execPath, [filePath], { cwd: runCwd, timeout })
-    else if (ext === '.py') run = runCmd('python3', [filePath], { cwd: runCwd, timeout })
+    else if (ext === '.py') run = runCmd(getPythonCmd(), [filePath], { cwd: runCwd, timeout })
     else if (ext === '.go') run = runCmd('go', ['run', filePath], { cwd: runCwd, timeout })
     else if (ext === '.rs') {
       // r23-fix: 原固定 /tmp/debug_runner_${pid} 并发互相覆盖 → 唯一临时目录，运行后清理
       const binDir = mkdtempSync(join(tmpdir(), 'dr-rust-'))
-      const bin = join(binDir, `run-${process.pid}-${randomUUID().slice(0, 8)}`)
+      const bin = join(binDir, `run-${process.pid}-${randomUUID().slice(0, 8)}`) + (process.platform === 'win32' ? '.exe' : '')
       const compiled = await runCmd('rustc', ['--edition', '2021', '-o', bin, filePath], { cwd: runCwd, timeout })
       if (compiled.exitCode !== 0) {
         rmSync(binDir, { recursive: true, force: true })
@@ -186,14 +189,17 @@ export async function handle(args, context) {
   }
 
   // command 模式：bash -c 执行，保留引号语义（split 会拆碎引号导致 SyntaxError）
+  // Windows 无 bash：cmd.exe /d /s /c + shell:true 原样传串（数组 spawn 的 argv 引号转义会破坏引号组）
   if (args?.command) {
-    const result = await runCmd('bash', ['-c', args.command], { cwd: runCwd, timeout })
+    const isWin = process.platform === 'win32'
+    const result = await runCmd(isWin ? 'cmd.exe' : 'bash', isWin ? ['/d', '/s', '/c', args.command] : ['-c', args.command], { cwd: runCwd, timeout, shell: isWin })
     return buildResponse(result, { mode: 'command', command: args.command, cwd: runCwd, next_step: analyzeError(result).error_type ? analyzeError(result).suggested_action : 'Command ran successfully.' })
   }
 
   // test 模式
   if (args?.test) {
-    const result = await runCmd('bash', ['-c', args.test], { cwd: runCwd, timeout })
+    const isWin = process.platform === 'win32'
+    const result = await runCmd(isWin ? 'cmd.exe' : 'bash', isWin ? ['/d', '/s', '/c', args.test] : ['-c', args.test], { cwd: runCwd, timeout, shell: isWin })
     return buildResponse(result, { mode: 'test', command: args.test, cwd: runCwd, next_step: analyzeError(result).error_type ? analyzeError(result).suggested_action : 'Tests passed.' })
   }
 

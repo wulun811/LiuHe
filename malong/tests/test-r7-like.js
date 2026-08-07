@@ -16,7 +16,7 @@ const imp = (p) => import(pathToFileURL(p).href)
 
 const WS = join(tmpdir(), 'opencode', 'ob-r7-like')
 const SOCK = join(tmpdir(), 'opencode', 'ob-r7-like.sock')
-rmSync(WS, { recursive: true, force: true })
+try { rmSync(WS, { recursive: true, force: true }) } catch {}
 mkdirSync(join(WS, 'src'), { recursive: true })
 writeFileSync(join(WS, 'src/app.js'), [
   'export function foo_bar() { return 1 }',
@@ -30,9 +30,9 @@ await pc.init({ log: () => {} })
 try { await pc.connect() } catch {}
 const { default: codeIndex } = await imp(join(__dirname, '..', 'code-index.js'))
 const langParser = {
-  extractAllAsync: (s, e, f) => pc.extractAll(s, e, f),
-  hasErrorsAsync: (s, e, f) => pc.hasErrors(s, e, f),
-  batchExtractAsync: (f) => pc.batchExtract(f),
+  extractAllAsync: (s, e, f, ws) => pc.extractAll(s, e, f, ws),
+  hasErrorsAsync: (s, e, f, ws) => pc.hasErrors(s, e, f, ws),
+  batchExtractAsync: (f, ws) => pc.batchExtract(f, ws),
 }
 const services = { langParser }
 const core = {
@@ -67,6 +67,6 @@ assert(bar.length === 3, `query=bar 命中 3（foo_bar/fooXbar/plain_bar，得 $
 const fooUnder = (await svc.searchSymbols('foo_')).map(r => r.name)
 assert(fooUnder.length === 1 && fooUnder[0] === 'foo_bar', `query=foo_ 只命中 foo_bar（得 ${fooUnder.join(',')}）`)
 
-rmSync(WS, { recursive: true, force: true })
+try { rmSync(WS, { recursive: true, force: true }) } catch {} // Windows: db 句柄占用 EBUSY，best-effort
 console.log(`== test-r7-like: ${pass} passed, ${fail} failed ==`)
 process.exit(fail > 0 ? 1 : 0)

@@ -21,8 +21,8 @@ const WS = join(tmpdir(), 'opencode', 'r16-ws')
 const DATA = join(tmpdir(), 'opencode', 'r16-data')
 const SOCK = join(tmpdir(), 'opencode', 'r16-code-index.sock')
 
-rmSync(WS, { recursive: true, force: true })
-rmSync(DATA, { recursive: true, force: true })
+try { rmSync(WS, { recursive: true, force: true }) } catch {}
+try { rmSync(DATA, { recursive: true, force: true }) } catch {}
 for (const d of [WS, DATA]) mkdirSync(d, { recursive: true })
 
 writeFileSync(`${WS}/lib.js`, `function process(data, attempt) {\n  return { ok: true }\n}\nmodule.exports = { process }\n`)
@@ -37,9 +37,9 @@ assert(await pc.connect(), 'parse-client 连接到 malong-parse')
 
 const { default: codeIndex } = await imp(join(MALONG_DIR, 'code-index.js'))
 const langParser = {
-  extractAllAsync: (source, ext, filePath) => pc.extractAll(source, ext, filePath),
+  extractAllAsync: (source, ext, filePath, ws) => pc.extractAll(source, ext, filePath, ws),
   extractReferencesAsync: (source, ext) => pc.extractReferences(source, ext),
-  batchExtractAsync: (files) => pc.batchExtract(files),
+  batchExtractAsync: (files, ws) => pc.batchExtract(files, ws),
 }
 const services = { langParser }
 const core = {

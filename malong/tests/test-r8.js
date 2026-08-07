@@ -17,7 +17,7 @@ function assert(cond, msg) {
 }
 const tmp = (tag) => {
   const ws = join(os.tmpdir(), 'opencode', `r8-${tag}-${process.pid}`)
-  rmSync(ws, { recursive: true, force: true })
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
   mkdirSync(ws, { recursive: true })
   return ws
 }
@@ -36,7 +36,7 @@ console.log('── B1 transaction-store symlink escape ──')
   const r = await store.applyEdits(txnId, 'victim.py', [{ old_string: 'original-external', new_string: 'PWNED' }])
   assert(r.error_code === 'PATH_BLOCKED' && /symlink escape/.test(r.message || ''), `写穿 symlink 应 PATH_BLOCKED（得 ${r.error_code}:${r.message}）`)
   assert(readFileSync(outside, 'utf-8') === 'original-external', `外部文件不应被改`)
-  rmSync(ws, { recursive: true, force: true })
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
   rmSync(outside, { force: true })
 }
 
@@ -59,7 +59,7 @@ console.log('── B2 planted manifest escape blocked ──')
   assert(readFileSync(outside, 'utf-8') === 'safe', `植入 manifest 不应越界写（得 ${readFileSync(outside, 'utf-8')}）`)
   const r2 = await store.undoCommit('../../..')
   assert(r2.error_code === 'TXN_NOT_FOUND', `穿越 txnId 应被拒（得 ${r2.error_code}）`)
-  rmSync(ws, { recursive: true, force: true })
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
   rmSync(outside, { force: true })
 }
 
@@ -74,7 +74,7 @@ console.log('── B3 read-symbol symlink guard ──')
   try { symlinkSync(secret, join(ws, 'notes.py')) } catch {}
   let r = await handle({ workspace_dir: ws, locator: { file_path: 'notes.py' } }, {})
   assert(r.error === 'PATH_BLOCKED', `symlink 指向 .key 应 PATH_BLOCKED（得 ${r.error}:${r.message}）`)
-  rmSync(ws, { recursive: true, force: true })
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
   rmSync(secret, { force: true })
 }
 
@@ -92,7 +92,7 @@ console.log('── C1 security-review glob backtracking cap ──')
   const elapsed = Date.now() - t0
   assert(elapsed < 3000, `9 段 ** glob 不应指数回溯（耗时 ${elapsed}ms）`)
   assert(Array.isArray(r.results), `扫描应正常返回`)
-  rmSync(ws, { recursive: true, force: true })
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
 }
 
 // ── D4：_cleanRecent 按 commit 时间淘汰 ──
@@ -125,7 +125,7 @@ console.log('── D4 cleanRecent commit-time eviction ──')
   const r = await store.undoCommit(A)
   assert(r.status === 'undone', `A（次新提交）应可 undo（得 ${r.status}:${r.error_code || r.message || ''}）`)
   assert(readFileSync(join(ws, 'a.txt'), 'utf-8') === 'aaa', `A 的内容应被还原`)
-  rmSync(ws, { recursive: true, force: true })
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
 }
 
 // ── F10：write_symbols 成功后批次标记清理 ──
@@ -149,7 +149,7 @@ console.log('── F10 batch marker cleanup ──')
   const left = existsSync(batches) ? readdirSync(batches).filter(f => f.endsWith('.json')) : []
   assert(left.length === 0, `批次标记应被清理（残留 ${left.length}）`)
   assert(readFileSync(join(ws, 'f1.txt'), 'utf-8') === 'hello1\n', `f1 内容正确`)
-  rmSync(ws, { recursive: true, force: true })
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
 }
 
 // ── E1：锁续租（心跳期间 mtime 刷新） ──
@@ -165,7 +165,7 @@ console.log('── E1 lock heartbeat keeps lock fresh ──')
   const mtime2 = statSync(`${f}.mlock`).mtimeMs
   assert(mtime2 > mtime1, `持锁 17s 后锁 mtime 应被心跳刷新（${mtime1} → ${mtime2}）`)
   l1.release()
-  rmSync(ws, { recursive: true, force: true })
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
 }
 
 console.log(`\ntest-r8: ${pass} passed, ${fail} failed`)

@@ -112,7 +112,7 @@ const tpl = \`import('./in-template.js')\`
   const cjkPath = join(tmpdir(), 'opencode', 'cjk', '中文固化.js')
   mkdirSync(join(tmpdir(), 'opencode', 'cjk'), { recursive: true })
   writeFileSync(cjkPath, cjkSrc)
-  const r7 = await extractAll(cjkSrc, '.js', cjkPath)
+  const r7 = await extractAll(cjkSrc, '.js', cjkPath, join(tmpdir(), 'opencode', 'cjk'))
   const names7 = Object.fromEntries(r7.symbols.map(s => [s.name, s.type]))
   assert(names7['前缀'] === 'variable', `中文变量: 前缀（得 ${JSON.stringify(names7)}）`)
   assert(names7['函数甲'] === 'function', '中文函数: 函数甲')

@@ -26,10 +26,14 @@ const escapeLike = (s) => String(s).replace(/[\\%_]/g, (c) => '\\' + c)
 // 13#1：提取器版本戳 = 二进制文件 sha256。二进制内容变（重新部署）→ 版本变 → 触发索引自愈。
 // 路径解析与 mcp-server.js 的 PARSE_SERVICE_BIN / _ALT 对齐（primary 优先，dev 回退 target/release）。
 export function resolveExtractorBin() {
-  const primary = join(os.homedir(), '.local', 'bin', 'malong-parse')
-  if (existsSync(primary)) return primary
-  const alt = join(__dirname, '..', 'malong-parse', 'target', 'release', 'malong-parse')
-  if (existsSync(alt)) return alt
+  const candidates = [
+    join(os.homedir(), '.local', 'bin', 'malong-parse'),
+    join(__dirname, '..', 'malong-parse', 'target', 'release', 'malong-parse'),
+  ]
+  for (const c of candidates) {
+    if (existsSync(c)) return c
+    if (process.platform === 'win32' && existsSync(c + '.exe')) return c + '.exe'
+  }
   return null
 }
 
@@ -271,10 +275,17 @@ async function openHealthy(dbPath) {
   const attempt = async () => {
     // 7：锁冲突≠损坏——busy_timeout 5s 让并发进程的写锁先等再判，SQLITE_BUSY 不删库
     const db = await createDb(dbPath, { timeout: 5000 })
-    const r = db.pragma('integrity_check')
-    const ok = Array.isArray(r) && r.length === 1 && r[0]?.integrity_check === 'ok'
-    if (!ok) { db.close(); throw new Error('integrity_check failed') }
-    return db
+    try {
+      const r = db.pragma('integrity_check')
+      const ok = Array.isArray(r) && r.length === 1 && r[0]?.integrity_check === 'ok'
+      if (!ok) throw new Error('integrity_check failed')
+      return db
+    } catch (e) {
+      // pragma 抛错（如垃圾文件 "file is not a database"）也必须 close——Windows 上
+      // 残留句柄会让后续 renameSync(.corrupt-*) 失败（EBUSY），重建便永远打不开
+      db.close()
+      throw e
+    }
   }
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
   try {

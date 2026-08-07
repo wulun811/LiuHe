@@ -1,4 +1,4 @@
-import { join, extname } from 'node:path'
+import { join, extname, sep } from 'node:path'
 import { readFileSync, readdirSync } from 'node:fs'
 import { validateFilePath } from '../../error-codes.js'
 
@@ -25,7 +25,7 @@ function walkTestFiles(baseDir, dir, files, limit) {
     if (entry.isDirectory()) {
       walkTestFiles(baseDir, fullPath, files, limit)
     } else if (entry.isFile() && isTestFile(fullPath)) {
-      files.push(fullPath.startsWith(baseDir + '/') ? fullPath.slice(baseDir.length + 1) : fullPath)
+      files.push((fullPath.startsWith(baseDir + sep) ? fullPath.slice(baseDir.length + 1) : fullPath).replace(/\\/g, '/'))
     }
   }
 }

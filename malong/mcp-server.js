@@ -93,8 +93,14 @@ async function ensureParseService() {
 
   // 查找二进制
   let binPath = PARSE_SERVICE_BIN
+  if (!existsSync(binPath) && process.platform === 'win32' && existsSync(binPath + '.exe')) {
+    binPath = binPath + '.exe'
+  }
   if (!existsSync(binPath)) {
     binPath = PARSE_SERVICE_BIN_ALT
+    if (!existsSync(binPath) && process.platform === 'win32' && existsSync(binPath + '.exe')) {
+      binPath = binPath + '.exe'
+    }
     if (!existsSync(binPath)) {
       crashLog('malong-parse binary not found, parse service unavailable')
       return

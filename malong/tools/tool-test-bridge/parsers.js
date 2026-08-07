@@ -72,18 +72,23 @@ function extractPytestTraceback(lines, startIdx) {
 
 function parsePytestSummary(output) {
   const summary = { total: 0, passed: 0, failed: 0, error: 0, skipped: 0 }
-  const m = output.match(/=+\s*(.+?)\s*(?:in\s+[\d.]+s)?\s*=+\s*$/)
-  if (m) {
-    const parts = m[1]
-    const passed = parts.match(/(\d+) passed/)
-    const failed = parts.match(/(\d+) failed/)
-    const error = parts.match(/(\d+) error/)
-    const skipped = parts.match(/(\d+) skipped/)
-    if (passed) summary.passed = parseInt(passed[1])
-    if (failed) summary.failed = parseInt(failed[1])
-    if (error) summary.error = parseInt(error[1])
-    if (skipped) summary.skipped = parseInt(skipped[1])
-    summary.total = summary.passed + summary.failed + summary.error + summary.skipped
+  // 逐行扫描带计数的 ==== 行：开头 `test session starts` 也是 ==== 行，且 stderr（如
+  // pytest-asyncio warnings）可能追加在尾部——首行匹配/尾锚都会选错或落空
+  for (const line of output.split('\n')) {
+    const m = /^=+\s*(.+?)\s*(?:in\s+[\d.]+s)?\s*=+\s*$/.exec(line)
+    if (m && /\d+\s+(passed|failed|error|skipped)/.test(m[1])) {
+      const parts = m[1]
+      const passed = parts.match(/(\d+) passed/)
+      const failed = parts.match(/(\d+) failed/)
+      const error = parts.match(/(\d+) error/)
+      const skipped = parts.match(/(\d+) skipped/)
+      if (passed) summary.passed = parseInt(passed[1])
+      if (failed) summary.failed = parseInt(failed[1])
+      if (error) summary.error = parseInt(error[1])
+      if (skipped) summary.skipped = parseInt(skipped[1])
+      summary.total = summary.passed + summary.failed + summary.error + summary.skipped
+      break
+    }
   }
   return summary
 }

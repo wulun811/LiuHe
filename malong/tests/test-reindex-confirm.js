@@ -4,11 +4,11 @@
 import { join, dirname } from 'node:path'
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const MALONG = join(__dirname, '..')
-const { handle } = await import(join(MALONG, 'tools/tool-reindex/handler.js'))
+const { handle } = await import(pathToFileURL(join(MALONG, 'tools/tool-reindex/handler.js')).href)
 
 let passed = 0, failed = 0
 function assert(cond, msg) {
@@ -47,7 +47,7 @@ console.log('── ① 阈值内直接索引（无 confirm 摩擦） ──')
   const r = await handle({ workspace_dir: ws, threshold: 3, blocking: true }, { codeIndexService: svc, log: () => {} })
   assert(r.status === 'completed' && r.files_indexed === 2, `小项目直接索引（得 ${r.status}/${r.files_indexed}）`)
   assert(!r.confirm_required, '阈值内不要求确认')
-  rmSync(ws, { recursive: true, force: true })
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
 }
 
 console.log('── ② 超阈值 → needs_review + token + 时间估算 ──')
@@ -62,7 +62,7 @@ console.log('── ② 超阈值 → needs_review + token + 时间估算 ──
   assert(r.estimated_time_seconds <= 30, `估算量级合理（7 文件得 ${r.estimated_time_seconds}s ≤ 30s）`)
   assert(typeof r.estimated_time_human === 'string' && r.estimated_time_human.startsWith('~'), `人类可读估算（${r.estimated_time_human}）`)
   assert(svc.lastBatch === null, '未确认时绝不索引')
-  rmSync(ws, { recursive: true, force: true })
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
 }
 
 console.log('── ③ 错误/过期 token 拒绝 ──')
@@ -73,7 +73,7 @@ console.log('── ③ 错误/过期 token 拒绝 ──')
   const r = await handle({ workspace_dir: ws, threshold: 3, confirm: 'deadbeef' }, { codeIndexService: svc, log: () => {} })
   assert(r.status === 'needs_review' && r.confirm_error === 'invalid_or_expired_confirm_token', `伪造 token 拒绝（得 ${r.confirm_error}）`)
   assert(svc.lastBatch === null, '伪造 token 不触发索引')
-  rmSync(ws, { recursive: true, force: true })
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
 }
 
 console.log('── ④ 正确 token → blocking 全量索引 ──')
@@ -84,7 +84,7 @@ console.log('── ④ 正确 token → blocking 全量索引 ──')
   const r = await handle({ workspace_dir: ws, threshold: 3, confirm: first.confirm_token, blocking: true }, { codeIndexService: svc, log: () => {} })
   assert(r.status === 'completed' && r.files_indexed === 7, `确认后全量索引（得 ${r.status}/${r.files_indexed}）`)
   assert(!r.warning, '未截断无警告')
-  rmSync(ws, { recursive: true, force: true })
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
 }
 
 console.log('── ⑤ maxFiles 截断（索引上限语义）──')
@@ -96,7 +96,7 @@ console.log('── ⑤ maxFiles 截断（索引上限语义）──')
   const r = await handle({ workspace_dir: ws, threshold: 3, maxFiles: 4, confirm: first.confirm_token, blocking: true }, { codeIndexService: svc, log: () => {} })
   assert(r.status === 'completed' && r.files_indexed === 4, `仅索引前 maxFiles 个（得 ${r.files_indexed}）`)
   assert(r.warning && r.warning.includes('truncated'), `截断警告明确（得 ${(r.warning || '').slice(0, 40)}...）`)
-  rmSync(ws, { recursive: true, force: true })
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
 }
 
 console.log('── ⑥ maxFiles 非数字 → 安全回退默认 ──')
@@ -107,7 +107,7 @@ console.log('── ⑥ maxFiles 非数字 → 安全回退默认 ──')
   assert(r.status === 'needs_review' && typeof r.confirm_token === 'string', `maxFiles 非法不崩（得 ${r.status}）`)
   const r2 = await handle({ workspace_dir: ws, threshold: 1, maxFiles: 'abc', confirm: r.confirm_token, blocking: true }, { codeIndexService: svc, log: () => {} })
   assert(r2.status === 'completed' && r2.files_indexed === 3, `非法 maxFiles 回退默认索引全部（得 ${r2.status}/${r2.files_indexed}）`)
-  rmSync(ws, { recursive: true, force: true })
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
 }
 
 console.log(`\n=== test-reindex-confirm: ${passed} passed, ${failed} failed ===`)

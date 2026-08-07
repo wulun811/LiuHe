@@ -12,8 +12,8 @@ const WS = join(os.tmpdir(), 'opencode', 'crash-injection-ws')
 const TMP = join(os.tmpdir(), 'opencode', 'crash-injection-tmp')
 const MOD = pathToFileURL(join(__dirname, '..', 'write-journal.js')).href
 
-rmSync(WS, { recursive: true, force: true })
-rmSync(TMP, { recursive: true, force: true })
+try { rmSync(WS, { recursive: true, force: true }) } catch {}
+try { rmSync(TMP, { recursive: true, force: true }) } catch {}
 mkdirSync(WS, { recursive: true })
 mkdirSync(TMP, { recursive: true })
 
@@ -93,7 +93,7 @@ process.kill(process.pid, 'SIGKILL')`
   const res = spawnSync(process.execPath, ['-e', child], {
     env: { ...process.env, MOD: join(__dirname, '..', 'write-journal.js'), WS: ws },
   })
-  assert(res.signal === 'SIGKILL', '子进程确被 SIGKILL 杀死')
+  assert(res.signal === 'SIGKILL' || (process.platform === 'win32' && res.status !== 0), '子进程确被 SIGKILL 杀死')
   const r = await recoverJournals(ws)
   assert(r.some(x => x.action === 'rolled_back'), `created 残留 → rolled_back（得 ${JSON.stringify(r.map(x => x.action))}）`)
   assert(readFileSync(join(ws, 't.js'), 'utf-8') === 'let a = 1;', '目标文件未被修改')
@@ -119,7 +119,7 @@ process.kill(process.pid, 'SIGKILL')`
   const res = spawnSync(process.execPath, ['-e', child], {
     env: { ...process.env, MOD: join(__dirname, '..', 'write-journal.js'), WS: ws, NEW_HASH: newHash, NEW_CONTENT: newContent },
   })
-  assert(res.signal === 'SIGKILL', '子进程确被 SIGKILL 杀死')
+  assert(res.signal === 'SIGKILL' || (process.platform === 'win32' && res.status !== 0), '子进程确被 SIGKILL 杀死')
   const r = await recoverJournals(ws)
   assert(r.some(x => x.action === 'committed'), `staged+已改名 → committed（得 ${JSON.stringify(r.map(x => x.action))}）`)
   assert(readFileSync(join(ws, 't.js'), 'utf-8') === newContent, '新内容保留（不误回滚）')

@@ -3,8 +3,10 @@ import { createConnection } from 'node:net'
 import { existsSync, readFileSync } from 'node:fs'
 import { execSync } from 'node:child_process'
 
-const SOCKET = `/tmp/malong-parse-${process.getuid()}.sock`
-const PID_FILE = `/tmp/malong-parse-${process.getuid()}.pid`
+const IS_WIN = process.platform === 'win32'
+const UID = IS_WIN ? 0 : (process.getuid?.() ?? 0)
+const SOCKET = `/tmp/malong-parse-${UID}.sock`
+const PID_FILE = `/tmp/malong-parse-${UID}.pid`
 
 let passed = 0, failed = 0
 function assert(label, ok, detail) {
@@ -14,6 +16,11 @@ function assert(label, ok, detail) {
 
 async function main() {
   console.log('kill -9 恢复测试\n')
+
+  if (process.platform === 'win32') {
+    console.log('  ⚠  Windows：进程生命周期语义（kill/setsid/pid-file）为 Unix 专用，跳过')
+    process.exit(0)
+  }
 
   // 读取当前 PID
   const pidBefore = parseInt(readFileSync(PID_FILE, 'utf-8').trim())

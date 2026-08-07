@@ -22,7 +22,7 @@ const WS = join(tmpdir(), 'opencode', 'r22-trunc-ws')
 const WS2 = join(tmpdir(), 'opencode', 'r22-trunc-ws2')
 const WS3 = join(tmpdir(), 'opencode', 'r22-trunc-ws3')
 for (const w of [WS, WS2, WS3]) {
-  rmSync(w, { recursive: true, force: true })
+  try { rmSync(w, { recursive: true, force: true }) } catch {}
   mkdirSync(join(w, 'src'), { recursive: true })
   writeFileSync(join(w, 'code-index.db'), '')
 }

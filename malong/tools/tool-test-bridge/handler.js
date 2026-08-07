@@ -1,6 +1,7 @@
 import { join, extname, basename, resolve, sep } from 'node:path'
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { spawnWithGroup } from '../../spawn-guard.js'
+import { getPythonCmd } from '../../python-cmd.js'
 import { parseOutput } from './parsers.js'
 // r10d：discover 三层覆盖（约定 + 索引反查 + 文本兜底）——复用 find_tests 的 import 反查/文本扫描，
 // 命名约定不符的测试文件（如 tests/test-dogfood-r12.js import health-check.js）不再漏找
@@ -92,7 +93,7 @@ function findPython(workspaceDir) {
     const full = join(workspaceDir, p)
     if (existsSync(full)) return `"${full}"`
   }
-  return 'python3'
+  return getPythonCmd()
 }
 
 function buildCommand(framework, scope, workspaceDir) {

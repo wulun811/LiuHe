@@ -16,6 +16,7 @@ import { guardRealPath } from '../../path-guard.js'
 import { createJournal, updateJournalState, pruneJournals } from '../../write-journal.js'
 import { registerWriter } from '../../writer-registry.js'
 import { sha256 } from '../../hash-utils.js'
+import { getPythonCmd } from '../../python-cmd.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 import { ensureStateDir, resolveStateFile, readStateFile } from '../../host-config.js'
@@ -64,7 +65,7 @@ async function syntaxCheck(filePath) {
   }
   if (ext === '.py') {
     // r43: py_compile 会在项目里生成 __pycache__/*.pyc 垃圾文件（实测副作用）——改内存 ast.parse 零副作用
-    const err = await runCheck('python3', ['-c', 'import ast,sys; ast.parse(open(sys.argv[1], encoding="utf-8").read())', filePath])
+    const err = await runCheck(getPythonCmd(), ['-c', 'import ast,sys; ast.parse(open(sys.argv[1], encoding="utf-8").read())', filePath])
     return err ? { ok: false, error: err, suggestion: SUGGESTION } : { ok: true }
   }
   if (ext === '.json') {
@@ -230,7 +231,7 @@ export async function handle(args, context) {
     // r11(H2)：execFile 异步化——旧 execFileSync 同步子进程最长 30s 冻结整个 MCP 事件循环
     // （含 120s 请求超时定时器、parse-client 心跳、stdin 分发），所有并发请求静默排队
     const { stdout } = await new Promise((resolve, reject) => {
-      execFile('python3', cmdArgs, {
+      execFile(getPythonCmd(), cmdArgs, {
         encoding: 'utf-8',
         maxBuffer: 10 * 1024 * 1024,
         timeout: 30_000,

@@ -4,7 +4,9 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createConnection } from 'node:net'
 
-const SOCKET = `/tmp/malong-parse-${process.getuid()}.sock`
+const IS_WIN = process.platform === 'win32'
+const TCP_PORT = parseInt(process.env.MALONG_PORT || '31001', 10)
+const SOCKET = IS_WIN ? { host: '127.0.0.1', port: TCP_PORT } : `/tmp/malong-parse-${process.getuid?.() ?? 0}.sock`
 const TMP = join(tmpdir(), 'security-test-' + process.pid)
 const WS_DIR = join(TMP, 'workspace')
 const EVIL_LINK = join(TMP, 'link_to_etc')
@@ -51,7 +53,7 @@ function rawRequest(method, params, timeoutMs = 5000) {
 async function main() {
   console.log('安全测试: 路径穿越 + 符号链接穿越\n')
 
-  if (!existsSync(SOCKET)) {
+  if (!IS_WIN && !existsSync(SOCKET)) {
     console.log('  ⚠  malong-parse 未运行，跳过测试\n')
     assert('路径穿越', true, 'skipped')
     assert('符号链接穿越', true, 'skipped')
@@ -74,11 +76,21 @@ async function main() {
   // Test 3: symlink traversal
   try {
     if (existsSync(EVIL_LINK)) unlinkSync(EVIL_LINK)
-    symlinkSync('/etc/passwd', EVIL_LINK)
+    const target = process.platform === 'win32' ? join(TMP, 'outside-target.txt') : '/etc/passwd'
+    if (process.platform === 'win32') writeFileSync(target, 'secret')
+    symlinkSync(target, EVIL_LINK)
     const r3 = await rawRequest('extract_all', { file_path: EVIL_LINK, workspace_root: WS_DIR, ext: '.js' })
-    assert('符号链接穿越: 指向 `/etc/passwd` 的链接被拒绝', r3 === null, JSON.stringify(r3))
+    assert('符号链接穿越: 指向 workspace 外的链接被拒绝', r3 === null, JSON.stringify(r3))
+  } catch (e) {
+    if (e.code === 'EPERM' || e.code === 'EACCES' || e.code === 'UNKNOWN') {
+      console.log('  ⚠  无 symlink 权限，跳过链接用例')
+      assert('符号链接穿越', true, 'skipped (no symlink privilege)')
+    } else {
+      assert('符号链接穿越', false, e.message)
+    }
   } finally {
     try { unlinkSync(EVIL_LINK) } catch {}
+    if (process.platform === 'win32') { try { unlinkSync(join(TMP, 'outside-target.txt')) } catch {} }
   }
 
   // Test 4: relative path traversal

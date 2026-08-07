@@ -1,4 +1,4 @@
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 import { readFileSync, readdirSync } from 'node:fs'
 import { TransactionStore } from '../tool-edit-transaction/transaction-store.js'
 import { recoverTransactions } from '../../write-journal.js'
@@ -143,7 +143,7 @@ function walk(baseDir, dir, re, results, scanned, maxFiles, maxResults) {
       const ext = fullPath.slice(fullPath.lastIndexOf('.'))
       if (!SOURCE_EXTS.has(ext)) continue
       scanned.files++
-      const relPath = fullPath.startsWith(baseDir + '/') ? fullPath.slice(baseDir.length + 1) : fullPath
+      const relPath = (fullPath.startsWith(baseDir + sep) ? fullPath.slice(baseDir.length + 1) : fullPath).replace(/\\/g, '/')
       try {
         const lines = readFileSync(fullPath, 'utf-8').split('\n')
         for (let i = 0; i < lines.length; i++) {

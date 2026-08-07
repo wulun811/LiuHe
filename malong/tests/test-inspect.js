@@ -17,8 +17,8 @@ function assert(cond, msg) {
 
 const WS = join(os.tmpdir(), 'opencode', `inspect-test-${process.pid}`)
 const DATA = join(os.tmpdir(), 'opencode', `inspect-data-${process.pid}`)
-rmSync(WS, { recursive: true, force: true })
-rmSync(DATA, { recursive: true, force: true })
+try { rmSync(WS, { recursive: true, force: true }) } catch {}
+try { rmSync(DATA, { recursive: true, force: true }) } catch {}
 mkdirSync(WS, { recursive: true })
 mkdirSync(DATA, { recursive: true })
 writeFileSync(join(DATA, 'code-index.db'), '')
@@ -83,8 +83,8 @@ console.log('\u2500\u2500 ⑤ \u7a7a\u5f15\u7528 fuzzy \u5efa\u8bae \u2500\u2500
   assert(r.suggestions?.length === 1 && r.suggestions[0].name === 'hello2', `⑤ 空引用时 fuzzy 建议（得 ${JSON.stringify(r.suggestions)}）`)
 }
 
-rmSync(WS, { recursive: true, force: true })
-rmSync(DATA, { recursive: true, force: true })
+try { rmSync(WS, { recursive: true, force: true }) } catch {}
+try { rmSync(DATA, { recursive: true, force: true }) } catch {}
 
 console.log(`\n=== test-inspect: ${pass} passed, ${fail} failed ===`)
 process.exit(fail > 0 ? 1 : 0)

@@ -90,7 +90,7 @@ export function collectFiles(rootDir, opts = {}) {
       if (maxFiles > 0 && files.length >= maxFiles) return
       if (ignoreDirs.has(e.name) || e.name.startsWith('.')) continue
       const full = join(d, e.name)
-      const relPath = relative(rootDir, full)
+      const relPath = relative(rootDir, full).replace(/\\/g, '/')
       if (e.isDirectory()) {
         if (skipSet.has(relPath)) continue
         const dirPath = relPath.endsWith('/') ? relPath : relPath + '/'
@@ -100,7 +100,7 @@ export function collectFiles(rootDir, opts = {}) {
       } else if (e.isFile()) {
         if (isIgnored(relPath, ignoreRules, false)) continue
         if (cachedExt.has(extname(e.name))) {
-          files.push({ path: full, name: e.name, isCode: true })
+          files.push({ path: full.replace(/\\/g, '/'), name: e.name, isCode: true })
         }
       }
     }
@@ -136,7 +136,7 @@ export function collectFilesWithDirStats(rootDir, opts = {}) {
       if (hardCap > 0 && files.length >= hardCap) { truncated = true; return }
       if (ignoreDirs.has(e.name) || e.name.startsWith('.')) continue
       const full = join(d, e.name)
-      const relPath = relative(rootDir, full)
+      const relPath = relative(rootDir, full).replace(/\\/g, '/')
       if (e.isDirectory()) {
         if (skipSet.has(relPath)) continue
         const dirPath = relPath.endsWith('/') ? relPath : relPath + '/'
@@ -146,7 +146,7 @@ export function collectFilesWithDirStats(rootDir, opts = {}) {
       } else if (e.isFile()) {
         if (isIgnored(relPath, ignoreRules, false)) continue
         if (cachedExt.has(extname(e.name))) {
-          files.push({ path: full, name: e.name, isCode: true })
+          files.push({ path: full.replace(/\\/g, '/'), name: e.name, isCode: true })
           const parentDir = relPath.includes('/') ? relPath.slice(0, relPath.lastIndexOf('/')) : '.'
           dirStats[parentDir] = (dirStats[parentDir] || 0) + 1
         }

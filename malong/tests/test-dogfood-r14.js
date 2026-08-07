@@ -21,8 +21,8 @@ const WS = join(tmpdir(), 'opencode', 'r14-ws')
 const DATA = join(tmpdir(), 'opencode', 'r14-data')
 const SOCK = join(tmpdir(), 'opencode', 'r14-code-index.sock')
 
-rmSync(WS, { recursive: true, force: true })
-rmSync(DATA, { recursive: true, force: true })
+try { rmSync(WS, { recursive: true, force: true }) } catch {}
+try { rmSync(DATA, { recursive: true, force: true }) } catch {}
 for (const d of [WS, DATA]) mkdirSync(d, { recursive: true })
 
 // ①④ 夹具：CJS 解构别名 + 普通 require + 注释/字符串里的假 require
@@ -46,9 +46,9 @@ assert(connected, 'parse-client 连接到 malong-parse')
 
 const { default: codeIndex } = await imp(join(MALONG_DIR, 'code-index.js'))
 const langParser = {
-  extractAllAsync: (source, ext, filePath) => pc.extractAll(source, ext, filePath),
+  extractAllAsync: (source, ext, filePath, ws) => pc.extractAll(source, ext, filePath, ws),
   extractReferencesAsync: (source, ext) => pc.extractReferences(source, ext),
-  batchExtractAsync: (files) => pc.batchExtract(files),
+  batchExtractAsync: (files, ws) => pc.batchExtract(files, ws),
 }
 const services = { langParser }
 const core = {

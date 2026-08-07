@@ -15,7 +15,7 @@ function assert(cond, msg) {
 const adapter = await import(pathToFileURL(join(__dirname, '..', 'db-adapter.js')).href)
 
 const TMP = join(os.tmpdir(), 'opencode', 'db-adapter-test')
-rmSync(TMP, { recursive: true, force: true })
+try { rmSync(TMP, { recursive: true, force: true }) } catch {}
 mkdirSync(TMP, { recursive: true })
 const DB = join(TMP, 't.db')
 
@@ -163,6 +163,6 @@ console.log(`  backend: ${adapter.getBackendName()}`)
   ro.close()
 }
 
-rmSync(TMP, { recursive: true, force: true })
+try { rmSync(TMP, { recursive: true, force: true }) } catch {}
 console.log(`== test-db-adapter: ${pass} passed, ${fail} failed ==`)
 if (fail > 0) process.exit(1)

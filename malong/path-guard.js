@@ -85,7 +85,8 @@ export function atomicWrite(absPath, content, opts = {}) {
   // 掉电时未落盘的页可能在 rename 后丢失；fsync 后 rename 保证要么旧要么新且可恢复。
   // 普通编辑路径不传 fsync（每次多一次磁盘同步，高频写入感知明显）。
   if (opts.fsync === true) {
-    const fd = openSync(tmp, 'r')
+    // Windows：fsync 需要句柄带写访问（FlushFileBuffers 要求 GENERIC_WRITE），只读 'r' 必 EPERM
+    const fd = openSync(tmp, 'r+')
     try { fsyncSync(fd) } finally { closeSync(fd) }
   }
   renameSync(tmp, absPath)

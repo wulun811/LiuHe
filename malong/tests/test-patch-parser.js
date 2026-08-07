@@ -14,7 +14,7 @@ function assert(cond, msg) {
 }
 
 const WS = join(os.tmpdir(), 'opencode', 'b13-pp-ws')
-rmSync(WS, { recursive: true, force: true })
+try { rmSync(WS, { recursive: true, force: true }) } catch {}
 mkdirSync(WS, { recursive: true })
 writeFileSync(join(WS, 'a.js'), 'const x = 1\nconsole.log(x)\n')
 
@@ -89,6 +89,6 @@ const ctx = { getWorkspaceDir: (d) => d }
   assert(r.error === 'path_blocked', `⑨ file 逃逸 → path_blocked（得 ${r.error}）`)
 }
 
-rmSync(WS, { recursive: true, force: true })
+try { rmSync(WS, { recursive: true, force: true }) } catch {}
 console.log(`== test-patch-parser: ${pass} passed, ${fail} failed ==`)
 process.exit(fail > 0 ? 1 : 0)

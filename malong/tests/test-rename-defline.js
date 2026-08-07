@@ -21,8 +21,8 @@ const WS = join(tmpdir(), 'opencode', 'rename-defline-ws')
 const DATA = join(tmpdir(), 'opencode', 'rename-defline-data')
 const SOCK = join(tmpdir(), 'opencode', 'rename-defline-code-index.sock')
 
-rmSync(WS, { recursive: true, force: true })
-rmSync(DATA, { recursive: true, force: true })
+try { rmSync(WS, { recursive: true, force: true }) } catch {}
+try { rmSync(DATA, { recursive: true, force: true }) } catch {}
 for (const d of [WS, DATA]) mkdirSync(d, { recursive: true })
 
 // a-fill.js：101 处文本匹配，字典序在 z-def.js 之前 → 文本扫描在到达定义文件前命中 maxResults=100 截断
@@ -38,9 +38,9 @@ assert(connected, 'parse-client 连接到 malong-parse')
 
 const { default: codeIndex } = await imp(join(MALONG_DIR, 'code-index.js'))
 const langParser = {
-  extractAllAsync: (source, ext, filePath) => pc.extractAll(source, ext, filePath),
+  extractAllAsync: (source, ext, filePath, ws) => pc.extractAll(source, ext, filePath, ws),
   extractReferencesAsync: (source, ext) => pc.extractReferences(source, ext),
-  batchExtractAsync: (files) => pc.batchExtract(files),
+  batchExtractAsync: (files, ws) => pc.batchExtract(files, ws),
 }
 const services = { langParser }
 const core = {

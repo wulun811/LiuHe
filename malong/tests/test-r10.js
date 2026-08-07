@@ -10,7 +10,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const MALONG = dirname(__dirname)
 const imp = (p) => import(pathToFileURL(p).href)
 const TMP = join(os.tmpdir(), 'opencode', 'r10-tmp')
-rmSync(TMP, { recursive: true, force: true })
+try { rmSync(TMP, { recursive: true, force: true }) } catch {}
 mkdirSync(TMP, { recursive: true })
 
 let pass = 0, fail = 0

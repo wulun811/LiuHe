@@ -14,7 +14,7 @@ function assert(cond, msg) {
 }
 
 const WS = join(os.tmpdir(), 'opencode', 'b13-cq-ws')
-rmSync(WS, { recursive: true, force: true })
+try { rmSync(WS, { recursive: true, force: true }) } catch {}
 mkdirSync(join(WS, 'src'), { recursive: true })
 writeFileSync(join(WS, 'src/simple.js'), 'export function add(a, b) { return a + b }\nexport const NAME = "x"\n')
 writeFileSync(join(WS, 'src/complex.js'), [
@@ -86,6 +86,6 @@ const ctx = { langParserService, getWorkspaceDir: () => WS }
   assert(r.error === 'path_blocked', `⑥ file 逃逸 → path_blocked（得 ${r.error}）`)
 }
 
-rmSync(WS, { recursive: true, force: true })
+try { rmSync(WS, { recursive: true, force: true }) } catch {}
 console.log(`== test-code-quality: ${pass} passed, ${fail} failed ==`)
 process.exit(fail > 0 ? 1 : 0)

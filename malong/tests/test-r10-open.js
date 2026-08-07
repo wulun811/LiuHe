@@ -22,9 +22,9 @@ async function bootService(WS) {
   try { await pc.connect() } catch {}
   const { default: codeIndex } = await imp(join(__dirname, '..', 'code-index.js'))
   const langParser = {
-    extractAllAsync: (s, e, f) => pc.extractAll(s, e, f),
-    hasErrorsAsync: (s, e, f) => pc.hasErrors(s, e, f),
-    batchExtractAsync: (f) => pc.batchExtract(f),
+    extractAllAsync: (s, e, f, ws) => pc.extractAll(s, e, f, ws),
+    hasErrorsAsync: (s, e, f, ws) => pc.hasErrors(s, e, f, ws),
+    batchExtractAsync: (f, ws) => pc.batchExtract(f, ws),
   }
   const services = { langParser }
   const core = {
@@ -43,7 +43,7 @@ async function bootService(WS) {
 // ① corrupt 场景：垃圾 code-index.db → openHealthy rename 到 .corrupt-* + 重建
 {
   const WS = join(tmpdir(), 'opencode', 'r10-corrupt')
-  rmSync(WS, { recursive: true, force: true })
+  try { rmSync(WS, { recursive: true, force: true }) } catch {}
   mkdirSync(WS, { recursive: true })
   writeFileSync(join(WS, 'code-index.db'), 'this is not a sqlite database at all')
   const svc = await bootService(WS)
@@ -54,13 +54,13 @@ async function bootService(WS) {
   const ok = await svc.searchSymbols('x')
   assert(Array.isArray(ok), `重建后服务可用（searchSymbols 返回数组）`)
   assert(existsSync(join(WS, 'code-index.db')), `重建的 db 存在`)
-  rmSync(WS, { recursive: true, force: true })
+  try { rmSync(WS, { recursive: true, force: true }) } catch {} // Windows: db 句柄占用 EBUSY，best-effort
 }
 
 // ② BUSY 场景：另一连接持写锁 → initWorkspace 抛错，原库不删
 {
   const WS = join(tmpdir(), 'opencode', 'r10-busy')
-  rmSync(WS, { recursive: true, force: true })
+  try { rmSync(WS, { recursive: true, force: true }) } catch {}
   mkdirSync(WS, { recursive: true })
   const dbPath = join(WS, 'code-index.db')
   // 先构造一个健康库
@@ -93,7 +93,7 @@ async function bootService(WS) {
   assert(existsSync(dbPath), `BUSY 后原库保留（未删）`)
   const wsDirFiles = readdirSync(WS)
   assert(!wsDirFiles.some(f => f.includes('.corrupt-')), `BUSY 不产生 .corrupt- 备份（未误判损坏）`)
-  rmSync(WS, { recursive: true, force: true })
+  try { rmSync(WS, { recursive: true, force: true }) } catch {} // Windows: db 句柄占用 EBUSY，best-effort
 }
 
 console.log(`== test-r10-open: ${pass} passed, ${fail} failed ==`)

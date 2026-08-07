@@ -14,8 +14,8 @@ const WS = join(tmpdir(), 'opencode', 'r21-ws')
 const DATA = join(tmpdir(), 'opencode', 'r21-data')
 const SOCK = join(tmpdir(), 'opencode', 'r21-code-index.sock')
 
-rmSync(WS, { recursive: true, force: true })
-rmSync(DATA, { recursive: true, force: true })
+try { rmSync(WS, { recursive: true, force: true }) } catch {}
+try { rmSync(DATA, { recursive: true, force: true }) } catch {}
 for (const d of [WS, DATA]) mkdirSync(d, { recursive: true })
 
 let pass = 0, fail = 0
@@ -34,9 +34,9 @@ await pc.connect()
 
 const { default: codeIndex } = await imp(join(MALONG_DIR, 'code-index.js'))
 const langParser = {
-  extractAllAsync: (source, ext, filePath) => pc.extractAll(source, ext, filePath),
+  extractAllAsync: (source, ext, filePath, ws) => pc.extractAll(source, ext, filePath, ws),
   extractReferencesAsync: (source, ext) => pc.extractReferences(source, ext),
-  batchExtractAsync: (files) => pc.batchExtract(files),
+  batchExtractAsync: (files, ws) => pc.batchExtract(files, ws),
 }
 const services = { langParser }
 const core = {
@@ -99,6 +99,6 @@ db.close()
 await pc.close?.()
 
 console.log(`\n== test-dogfood-r21: ${pass} passed, ${fail} failed ==`)
-rmSync(WS, { recursive: true, force: true })
-rmSync(DATA, { recursive: true, force: true })
+try { rmSync(WS, { recursive: true, force: true }) } catch {}
+try { rmSync(DATA, { recursive: true, force: true }) } catch {}
 process.exit(fail > 0 ? 1 : 0)

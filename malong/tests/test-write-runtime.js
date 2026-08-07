@@ -14,7 +14,7 @@ function assert(cond, msg) {
 const wr = await import(pathToFileURL(join(__dirname, '..', 'write-runtime.js')).href)
 
 const TMP = join(os.tmpdir(), 'opencode', 'write-runtime-test')
-rmSync(TMP, { recursive: true, force: true })
+try { rmSync(TMP, { recursive: true, force: true }) } catch {}
 mkdirSync(TMP, { recursive: true })
 
 // ── 成功路径：一次调用 ──
@@ -97,6 +97,6 @@ mkdirSync(TMP, { recursive: true })
   assert(r3.success === true && !r3.items?.[0]?.warning && !readFileSync(join(wsDir, 'f.js'), 'utf-8').includes('const b = 3'), '显式空串（合法删除）不挂 warning 且删除生效')
 }
 
-rmSync(TMP, { recursive: true, force: true })
+try { rmSync(TMP, { recursive: true, force: true }) } catch {}
 console.log(`== test-write-runtime: ${pass} passed, ${fail} failed ==`)
 if (fail > 0) process.exit(1)

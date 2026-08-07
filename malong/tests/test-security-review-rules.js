@@ -168,7 +168,7 @@ console.log('── r12.1 预期管理 ──')
 // ── r39: 误报抑制（行级 malong-ignore + 配置 securityIgnore；自包含 temp WS，不依赖 MALONG 配置）──
 console.log('── r39: 误报抑制 ──')
 const WS = join(os.tmpdir(), 'opencode', 'sec-suppress-ws')
-rmSync(WS, { recursive: true, force: true })
+try { rmSync(WS, { recursive: true, force: true }) } catch {}
 mkdirSync(WS, { recursive: true })
 
 // 行级（WS 无 .ai-patterns.json，纯行级行为）

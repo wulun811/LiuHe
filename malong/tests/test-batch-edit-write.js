@@ -14,7 +14,7 @@ function assert(cond, msg) {
 const { handle } = await import(pathToFileURL(join(__dirname, '..', 'tools', 'tool-batch-edit', 'handler.js')).href)
 
 const ws = join(os.tmpdir(), 'opencode', 'be-write-ws')
-rmSync(ws, { recursive: true, force: true })
+try { rmSync(ws, { recursive: true, force: true }) } catch {}
 mkdirSync(ws, { recursive: true })
 const src = join(ws, 'src')
 mkdirSync(src, { recursive: true })
@@ -122,7 +122,7 @@ const ctx = { codeIndexService: { indexFile: async () => { indexed++; return { s
   assert(typeof bad.syntax_check.suggestion === 'string', '⑦ 坏语法带 suggestion')
 }
 
-rmSync(ws, { recursive: true, force: true })
+try { rmSync(ws, { recursive: true, force: true }) } catch {}
 
 console.log(`== test-batch-edit-write: ${pass} passed, ${fail} failed ==`)
 if (fail > 0) process.exit(1)

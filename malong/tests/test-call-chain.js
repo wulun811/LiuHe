@@ -15,7 +15,7 @@ const mod = await import(pathToFileURL(join(__dirname, '..', 'tools', 'tool-call
 const { handle, checkRecentModifications } = mod
 
 const ws = join(os.tmpdir(), 'opencode', 'cc-test-ws')
-rmSync(ws, { recursive: true, force: true })
+try { rmSync(ws, { recursive: true, force: true }) } catch {}
 mkdirSync(ws, { recursive: true })
 writeFileSync(join(ws, 'code-index.db'), '')
 
@@ -124,7 +124,7 @@ function makeCtx(overrides = {}, wsDir = ws) {
   assert(noIndex.error === 'workspace_not_indexed', '⑦ 无索引')
 }
 
-rmSync(ws, { recursive: true, force: true })
+try { rmSync(ws, { recursive: true, force: true }) } catch {}
 
 console.log(`== test-call-chain: ${pass} passed, ${fail} failed ==`)
 if (fail > 0) process.exit(1)

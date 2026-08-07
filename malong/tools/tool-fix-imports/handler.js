@@ -3,6 +3,7 @@ import { existsSync, readFileSync, writeFileSync, statSync, unlinkSync } from 'n
 import { execFile } from 'node:child_process'
 import os from 'node:os'
 import { validateFilePath, ErrorCodes, makeError } from '../../error-codes.js'
+import { getPythonCmd } from '../../python-cmd.js'
 import { checkBracketBalance } from '../../write-edit.js'
 import { attachStalenessWarning } from '../../staleness.js'
 import { acquireLock } from '../../write-runtime.js'
@@ -638,7 +639,7 @@ async function verifySyntax(text, lang) {
     const tmp = join(os.tmpdir(), `fiximports-${process.pid}-${Date.now()}.py`)
     writeFileSync(tmp, text)
     try {
-      const err = await runSyntaxCheck('python3', ['-c', `import ast; ast.parse(open(${JSON.stringify(tmp)}).read())`])
+      const err = await runSyntaxCheck(getPythonCmd(), ['-c', `import ast; ast.parse(open(${JSON.stringify(tmp)}).read())`])
       return err ? { ok: false, detail: err } : { ok: true }
     } finally {
       try { unlinkSync(tmp) } catch {}

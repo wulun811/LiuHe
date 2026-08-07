@@ -319,7 +319,9 @@ export async function handle(args, context) {
           let cm
           while ((cm = classRe.exec(c)) !== null) {
             if (/Error|Exception/.test(cm[2])) {
-              const relPath = filePath.startsWith(workspaceDir + '/') ? filePath.slice(workspaceDir.length + 1) : filePath
+              const abs = resolve(filePath)
+              const wsAbs = resolve(workspaceDir) + sep
+              const relPath = abs.startsWith(wsAbs) ? abs.slice(wsAbs.length) : filePath
               found.push({ name: cm[1], base: cm[2], relPath, line: c.slice(0, cm.index).split('\n').length })
             }
           }

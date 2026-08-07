@@ -12,7 +12,7 @@ function assert(cond, msg) {
 }
 
 const root = join(os.tmpdir(), 'opencode', 'fb-list-test')
-rmSync(root, { recursive: true, force: true })
+try { rmSync(root, { recursive: true, force: true }) } catch {}
 const stateDir = join(root, 'state')        // 新路径（MALONG_STATE_DIR）
 const legacyHome = join(root, 'home')       // 旧路径家目录（HOME）
 mkdirSync(legacyHome, { recursive: true })
@@ -71,7 +71,7 @@ try {
 } finally {
   process.env.MALONG_STATE_DIR = saved.state
   process.env.HOME = saved.home
-  rmSync(root, { recursive: true, force: true })
+  try { rmSync(root, { recursive: true, force: true }) } catch {}
 }
 
 console.log(`== test-feedback-list: ${pass} passed, ${fail} failed ==`)

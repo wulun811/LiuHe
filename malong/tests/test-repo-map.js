@@ -15,7 +15,7 @@ function assert(cond, msg) {
 }
 
 const WS = join(os.tmpdir(), 'opencode', 'repo-map-test-ws')
-rmSync(WS, { recursive: true, force: true })
+try { rmSync(WS, { recursive: true, force: true }) } catch {}
 mkdirSync(WS, { recursive: true })
 
 // ── 建 code-index.db（schema 对齐 code-index.js）──
@@ -127,6 +127,6 @@ assert(String(e1.suggestion).includes('reindex'), '未索引返回 reindex 建�
 await repoMap.stop()
 assert(svc.getSummary() === null, 'stop 后缓存清空')
 
-rmSync(WS, { recursive: true, force: true })
+try { rmSync(WS, { recursive: true, force: true }) } catch {}
 console.log(`== test-repo-map: ${pass} passed, ${fail} failed ==`)
 if (fail > 0) process.exit(1)

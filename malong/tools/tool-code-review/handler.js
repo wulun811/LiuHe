@@ -1,4 +1,4 @@
-import { basename, extname, resolve } from 'node:path'
+import { basename, extname, resolve, sep } from 'node:path'
 import { readFileSync, existsSync } from 'node:fs'
 import { detectPromptInjection, buildInjectionWarning } from '../../injection-guard.js'
 import { stripStrings } from '../../string-utils.js'
@@ -8,7 +8,8 @@ function guardPath(root, userPath) {
   if (typeof root !== 'string' || typeof userPath !== 'string' || userPath === '') return null
   const rootResolved = resolve(root)
   const resolved = resolve(rootResolved, userPath)
-  return resolved === rootResolved || resolved.startsWith(rootResolved + '/') ? resolved : null
+  const rootPrefix = rootResolved.endsWith(sep) ? rootResolved : rootResolved + sep
+  return resolved === rootResolved || resolved.startsWith(rootPrefix) ? resolved : null
 }
 
 const KEYWORDS = new Set(['let', 'const', 'var', 'function', 'return', 'if', 'for', 'while', 'switch', 'case', 'break', 'continue', 'new', 'typeof', 'instanceof', 'import', 'export', 'from', 'class', 'extends', 'async', 'await', 'this', 'throw', 'try', 'catch', 'finally', 'else', 'default', 'in', 'of', 'do', 'void', 'delete', 'yield'])

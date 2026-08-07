@@ -3,7 +3,7 @@
 // 全项目唯一维护点：服务层（getImpactAnalysis/getModuleDependencies/getFileOutline）与
 // handler 层（references/inspect/find-tests/rename-symbol）全部复用本函数。
 
-import { join } from 'node:path'
+import { join, isAbsolute } from 'node:path'
 import { existsSync, statSync } from 'node:fs'
 
 // 归一化：剥 workspace 前缀 / 前导 ./ / 尾斜杠，绝对路径 → 相对（DB 存相对路径）
@@ -29,7 +29,7 @@ export function resolveFileArg({ db, workspaceDir, file }) {
     return { ok: false, error: { code: 'invalid_input', message: `"${file}" is not a valid file path`, suggestion: 'Provide a file path relative to workspace_dir (e.g. "src/auth.py")' } }
   }
   // 目录判定优先（基于原始输入，不归一化）：绝对目录或工作区内相对目录都命中
-  const absRaw = workspaceDir ? (raw.startsWith('/') ? raw : join(workspaceDir, raw)) : raw
+  const absRaw = workspaceDir ? (isAbsolute(raw) ? raw : join(workspaceDir, raw)) : raw
   if (existsSync(absRaw)) {
     try {
       if (statSync(absRaw).isDirectory()) {

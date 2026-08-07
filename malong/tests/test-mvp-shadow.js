@@ -21,8 +21,8 @@ const WS = join(tmpdir(), 'opencode', 'mvp-shadow-ws')
 const DATA = join(tmpdir(), 'opencode', 'mvp-shadow-data')
 const SOCK = join(tmpdir(), 'opencode', 'mvp-shadow.sock')
 
-rmSync(WS, { recursive: true, force: true })
-rmSync(DATA, { recursive: true, force: true })
+try { rmSync(WS, { recursive: true, force: true }) } catch {}
+try { rmSync(DATA, { recursive: true, force: true }) } catch {}
 mkdirSync(`${WS}/src`, { recursive: true })
 mkdirSync(DATA, { recursive: true })
 
@@ -101,9 +101,9 @@ assert(connected, 'parse-client 连接 malong-parse')
 
 const { default: codeIndex } = await imp(join(MALONG_DIR, 'code-index.js'))
 const langParser = {
-  extractAllAsync: (source, ext, filePath) => pc.extractAll(source, ext, filePath),
-  hasErrorsAsync: (source, ext, filePath) => pc.hasErrors(source, ext, filePath),
-  batchExtractAsync: (files) => pc.batchExtract(files),
+  extractAllAsync: (source, ext, filePath, ws) => pc.extractAll(source, ext, filePath, ws),
+  hasErrorsAsync: (source, ext, filePath, ws) => pc.hasErrors(source, ext, filePath, ws),
+  batchExtractAsync: (files, ws) => pc.batchExtract(files, ws),
 }
 const services = { langParser }
 const core = {

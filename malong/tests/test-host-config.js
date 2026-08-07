@@ -14,7 +14,7 @@ function assert(cond, msg) {
 const hc = await import(pathToFileURL(join(__dirname, '..', 'host-config.js')).href)
 
 const TMP = join(os.tmpdir(), 'opencode', 'host-config-test')
-rmSync(TMP, { recursive: true, force: true })
+try { rmSync(TMP, { recursive: true, force: true }) } catch {}
 mkdirSync(TMP, { recursive: true })
 const oldHome = process.env.HOME
 const oldState = process.env.MALONG_STATE_DIR
@@ -93,6 +93,6 @@ const oldState = process.env.MALONG_STATE_DIR
   else delete process.env.MALONG_STATE_DIR
 }
 
-rmSync(TMP, { recursive: true, force: true })
+try { rmSync(TMP, { recursive: true, force: true }) } catch {}
 console.log(`== test-host-config: ${pass} passed, ${fail} failed ==`)
 if (fail > 0) process.exit(1)

@@ -13,7 +13,7 @@ function assert(cond, msg) {
 const hc = await import(pathToFileURL(join(__dirname, '..', 'health-check.js')).href)
 
 const TMP = join(os.tmpdir(), 'opencode', 'health-check-test')
-rmSync(TMP, { recursive: true, force: true })
+try { rmSync(TMP, { recursive: true, force: true }) } catch {}
 mkdirSync(join(TMP, '.config', 'malong'), { recursive: true })
 
 // ── readUsageStats：聚合与 success_rate ──
@@ -119,7 +119,7 @@ mkdirSync(join(TMP, '.config', 'malong'), { recursive: true })
   //（原代码引用未定义变量 Database → ReferenceError 被 catch 吞 → 永假 WARN）
   {
     const wsDir = join(TMP, 'ws-real')
-    rmSync(wsDir, { recursive: true, force: true })
+    try { rmSync(wsDir, { recursive: true, force: true }) } catch {}
     mkdirSync(join(wsDir, 'w1'), { recursive: true })
     writeFileSync(join(wsDir, 'w1', 'code-index.db'), 'not a real db')
     const r2 = await hc.runHealthCheck({
@@ -127,7 +127,7 @@ mkdirSync(join(TMP, '.config', 'malong'), { recursive: true })
     })
     const dbc = r2.checks.find(c => c.name === 'DB integrity')
     assert(dbc && !String(dbc.detail).includes('cannot scan'), `DB integrity 不再恒 WARN cannot scan（得 ${dbc?.status} | ${dbc?.detail}）`)
-    rmSync(wsDir, { recursive: true, force: true })
+    try { rmSync(wsDir, { recursive: true, force: true }) } catch {}
   }
 }
 
@@ -135,7 +135,7 @@ mkdirSync(join(TMP, '.config', 'malong'), { recursive: true })
 {
   const oldHome = process.env.HOME
   const dup = join(os.tmpdir(), 'opencode', 'health-check-dup')
-  rmSync(dup, { recursive: true, force: true })
+  try { rmSync(dup, { recursive: true, force: true }) } catch {}
   mkdirSync(join(dup, '.config', 'malong'), { recursive: true })
   mkdirSync(join(dup, '.config', 'opencode'), { recursive: true })
   process.env.HOME = dup
@@ -147,7 +147,7 @@ mkdirSync(join(TMP, '.config', 'malong'), { recursive: true })
   assert(s.by_tool.health.calls === 1 && s.by_tool.edit_batch.calls === 1, `by_tool 不含 legacy 工具（得 ${JSON.stringify(Object.keys(s.by_tool))}）`)
   assert(!s.by_tool.read_symbol && !s.by_tool.reindex, 'legacy 数据不混入')
   process.env.HOME = oldHome
-  rmSync(dup, { recursive: true, force: true })
+  try { rmSync(dup, { recursive: true, force: true }) } catch {}
 }
 
 // ── Y002-S0 复盘：大 usage 文件不爆栈（旧实现 `push(...arr)` 对 25 万行 spread
@@ -155,7 +155,7 @@ mkdirSync(join(TMP, '.config', 'malong'), { recursive: true })
 {
   const oldHome = process.env.HOME
   const big = join(os.tmpdir(), 'opencode', 'health-check-big')
-  rmSync(big, { recursive: true, force: true })
+  try { rmSync(big, { recursive: true, force: true }) } catch {}
   mkdirSync(join(big, '.config', 'malong'), { recursive: true })
   mkdirSync(join(big, '.config', 'opencode'), { recursive: true })
   process.env.HOME = big
@@ -170,9 +170,9 @@ mkdirSync(join(TMP, '.config', 'malong'), { recursive: true })
   assert(s !== null && s.total_calls === n, `15 万行新路径不爆栈全量统计（得 ${s?.total_calls}，期望 ${n}）`)
   assert(s.by_tool.read_symbol.calls === n, `by_tool 计数完整（得 ${s?.by_tool?.read_symbol?.calls}）`)
   process.env.HOME = oldHome
-  rmSync(big, { recursive: true, force: true })
+  try { rmSync(big, { recursive: true, force: true }) } catch {}
 }
 
-rmSync(TMP, { recursive: true, force: true })
+try { rmSync(TMP, { recursive: true, force: true }) } catch {}
 console.log(`== test-health-check: ${pass} passed, ${fail} failed ==`)
 if (fail > 0) process.exit(1)

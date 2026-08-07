@@ -15,7 +15,7 @@ function assert(cond, msg) {
 
 const WS = join(os.tmpdir(), 'opencode', 'b13-ts-ws')
 const SOCK = join(os.tmpdir(), 'opencode', 'b13-ts.sock')
-rmSync(WS, { recursive: true, force: true })
+try { rmSync(WS, { recursive: true, force: true }) } catch {}
 mkdirSync(join(WS, 'src'), { recursive: true })
 writeFileSync(join(WS, 'src/app.js'), [
   'export function hot(a, b) { return a + b }',
@@ -57,9 +57,9 @@ await pc.init({ log: () => {} })
 try { await pc.connect() } catch {}
 const { default: codeIndex } = await import(pathToFileURL(join(__dirname, '..', 'code-index.js')).href)
 const langParser = {
-  extractAllAsync: (s, e, f) => pc.extractAll(s, e, f),
-  hasErrorsAsync: (s, e, f) => pc.hasErrors(s, e, f),
-  batchExtractAsync: (f) => pc.batchExtract(f),
+  extractAllAsync: (s, e, f, ws) => pc.extractAll(s, e, f, ws),
+  hasErrorsAsync: (s, e, f, ws) => pc.hasErrors(s, e, f, ws),
+  batchExtractAsync: (f, ws) => pc.batchExtract(f, ws),
 }
 const services = { langParser }
 const core = {
@@ -118,6 +118,6 @@ const specCtx = { codeIndexService: svc, getWorkspaceDir: () => WS }
   assert(esc.error === 'invalid_input', `⑧ 逃逸拦截（得 ${esc.error}）`)
 }
 
-rmSync(WS, { recursive: true, force: true })
+try { rmSync(WS, { recursive: true, force: true }) } catch {} // Windows: db 句柄占用 EBUSY，best-effort
 console.log(`== test-tsc-spec: ${pass} passed, ${fail} failed ==`)
 process.exit(fail > 0 ? 1 : 0)

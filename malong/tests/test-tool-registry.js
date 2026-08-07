@@ -14,7 +14,7 @@ function assert(cond, msg) {
 }
 
 const TMP = join(os.tmpdir(), 'opencode', 'tool-registry-test')
-rmSync(TMP, { recursive: true, force: true })
+try { rmSync(TMP, { recursive: true, force: true }) } catch {}
 mkdirSync(join(TMP, 'tools'), { recursive: true })
 
 // ── 构造各种形态的工具目录 ──
@@ -167,6 +167,6 @@ assert(extractMetrics('health', { error: 'x' }) === undefined, 'error 结果不�
   { const noErr = await reg.callTool('good_tool', { x: 1 }, {}); assert(noErr.note && noErr.from === 'dupe', 'R13: 二次调用仍检测到（ESM 缓存未热加载）') }
 }
 
-rmSync(TMP, { recursive: true, force: true })
+try { rmSync(TMP, { recursive: true, force: true }) } catch {}
 console.log(`== test-tool-registry: ${pass} passed, ${fail} failed ==`)
 if (fail > 0) process.exit(1)

@@ -18,7 +18,7 @@ const imp = (p) => import(pathToFileURL(p).href)
 
 const WS = join(tmpdir(), 'opencode', 'ob-fresh')
 const SOCK = join(tmpdir(), 'opencode', 'ob-fresh.sock')
-rmSync(WS, { recursive: true, force: true })
+try { rmSync(WS, { recursive: true, force: true }) } catch {}
 mkdirSync(join(WS, 'src'), { recursive: true })
 const APP = join(WS, 'src', 'app.js')
 writeFileSync(APP, 'export function alpha() { return 1 }\n')
@@ -28,9 +28,9 @@ await pc.init({ log: () => {} })
 try { await pc.connect() } catch {}
 const { default: codeIndex } = await imp(join(__dirname, '..', 'code-index.js'))
 const langParser = {
-  extractAllAsync: (s, e, f) => pc.extractAll(s, e, f),
-  hasErrorsAsync: (s, e, f) => pc.hasErrors(s, e, f),
-  batchExtractAsync: (f) => pc.batchExtract(f),
+  extractAllAsync: (s, e, f, ws) => pc.extractAll(s, e, f, ws),
+  hasErrorsAsync: (s, e, f, ws) => pc.hasErrors(s, e, f, ws),
+  batchExtractAsync: (f, ws) => pc.batchExtract(f, ws),
 }
 const services = { langParser }
 const core = {
@@ -98,6 +98,6 @@ await svc.indexBatch([APP], WS)
   assert(outline && Array.isArray(outline.outline) && outline.outline.length >= 1, `getFileOutline 接线后正常（outline=${outline?.outline?.length}）`)
 }
 
-rmSync(WS, { recursive: true, force: true })
+try { rmSync(WS, { recursive: true, force: true }) } catch {}
 console.log(`== test-freshness: ${pass} passed, ${fail} failed ==`)
 process.exit(fail > 0 ? 1 : 0)

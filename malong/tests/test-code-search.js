@@ -14,7 +14,7 @@ function assert(cond, msg) {
 
 const WS = join(os.tmpdir(), 'opencode', 'b13-cs-ws')
 const SOCK = join(os.tmpdir(), 'opencode', 'b13-cs.sock')
-rmSync(WS, { recursive: true, force: true })
+try { rmSync(WS, { recursive: true, force: true }) } catch {}
 mkdirSync(join(WS, 'src'), { recursive: true })
 writeFileSync(join(WS, 'src/app.js'), [
   'export function hot() { return 1 }',
@@ -31,9 +31,9 @@ await pc.init({ log: () => {} })
 try { await pc.connect() } catch {}
 const { default: codeIndex } = await import(pathToFileURL(join(__dirname, '..', 'code-index.js')).href)
 const langParser = {
-  extractAllAsync: (s, e, f) => pc.extractAll(s, e, f),
-  hasErrorsAsync: (s, e, f) => pc.hasErrors(s, e, f),
-  batchExtractAsync: (f) => pc.batchExtract(f),
+  extractAllAsync: (s, e, f, ws) => pc.extractAll(s, e, f, ws),
+  hasErrorsAsync: (s, e, f, ws) => pc.hasErrors(s, e, f, ws),
+  batchExtractAsync: (f, ws) => pc.batchExtract(f, ws),
 }
 const services = { langParser }
 const core = {
@@ -110,6 +110,6 @@ const ctx = { codeSearchService, getWorkspaceDir: () => WS }
   assert(leaked.length === 0, `⑦ 分 token 后仍无全表误命中（leaked=${leaked.join(',') || '无'}）`)
 }
 
-rmSync(WS, { recursive: true, force: true })
+try { rmSync(WS, { recursive: true, force: true }) } catch {} // Windows：db 连接未关闭时删除被占用文件报 EBUSY——best-effort，路径固定开头会重建
 console.log(`== test-code-search: ${pass} passed, ${fail} failed ==`)
 process.exit(fail > 0 ? 1 : 0)

@@ -130,17 +130,20 @@ function walkSourceFiles(workspaceDir, dir, files, maxFiles) {
   if (files.length >= maxFiles) return
   // R22-⑱（第五轮核实）：尾斜杠归一化——workspaceDir 带尾斜杠时 `ws + '/'` 拼成 `//` 恒不匹配，
   // 全扫模式全文件被 push 绝对路径 → join(ws, f) 对绝对路径无效 → ENOENT 静默跳过 → 假报 Config is in sync
-  const wsPrefix = workspaceDir.endsWith('/') ? workspaceDir : workspaceDir + '/'
+  const wsNorm = workspaceDir.replace(/\\/g, '/')
+  const wsPrefix = wsNorm.endsWith('/') ? wsNorm : wsNorm + '/'
   let entries
   try { entries = readdirSync(dir, { withFileTypes: true }) } catch { return }
   for (const entry of entries) {
     if (files.length >= maxFiles) break
     if (entry.name.startsWith('.') || SKIP_DIRS.has(entry.name)) continue
     const fullPath = join(dir, entry.name)
+    // Windows：反斜杠绝对路径匹配不了 `/` 前缀 → 归一化后判断与切片
+    const normPath = fullPath.replace(/\\/g, '/')
     if (entry.isDirectory()) {
       walkSourceFiles(workspaceDir, fullPath, files, maxFiles)
     } else if (entry.isFile() && SOURCE_EXTS.has(extname(entry.name))) {
-      files.push(fullPath.startsWith(wsPrefix) ? fullPath.slice(wsPrefix.length) : fullPath)
+      files.push(normPath.startsWith(wsPrefix) ? normPath.slice(wsPrefix.length) : normPath)
     }
   }
 }

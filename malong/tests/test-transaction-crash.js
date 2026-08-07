@@ -19,7 +19,7 @@ const { recoverTransactions } = await imp(join(__dirname, '..', 'write-journal.j
 const { sha256 } = await imp(join(__dirname, '..', 'hash-utils.js'))
 
 const WS = join(tmpdir(), 'opencode', 'txn-crash')
-rmSync(WS, { recursive: true, force: true })
+try { rmSync(WS, { recursive: true, force: true }) } catch {}
 mkdirSync(WS, { recursive: true })
 const txnRoot = join(WS, '.ai-transactions')
 
@@ -104,6 +104,6 @@ function makeTxn(txnId, { state = 'staged', files = {}, fileContent = null }) {
   assert(!r2.some(x => x.txn_id === 't3' || x.txn_id === 't4'), `终态事务不重复处理`)
 }
 
-rmSync(WS, { recursive: true, force: true })
+try { rmSync(WS, { recursive: true, force: true }) } catch {}
 console.log(`== test-transaction-crash: ${pass} passed, ${fail} failed ==`)
 process.exit(fail > 0 ? 1 : 0)

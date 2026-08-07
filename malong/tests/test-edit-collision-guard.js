@@ -19,7 +19,7 @@ const { registerWriter } = await import(pathToFileURL(join(__dirname, '..', 'wri
 
 // Y002-S1：测试定向 stateDir，避免快照持久化写进真实 ~/.config/malong
 const TMP = join(os.tmpdir(), 'opencode', 'ecg-test-state')
-rmSync(TMP, { recursive: true, force: true })
+try { rmSync(TMP, { recursive: true, force: true }) } catch {}
 mkdirSync(TMP, { recursive: true })
 const oldStateDir = process.env.MALONG_STATE_DIR
 process.env.MALONG_STATE_DIR = TMP
@@ -127,14 +127,14 @@ const ctx = {}
 // ── ⑧ 无 .ai-transactions 时 classify 空吞不崩（external 兜底） ──
 {
   const bare = join(os.tmpdir(), 'opencode', 'ecg-test-bare')
-  rmSync(bare, { recursive: true, force: true })
+  try { rmSync(bare, { recursive: true, force: true }) } catch {}
   mkdirSync(bare, { recursive: true })
   writeFileSync(join(bare, file), 'v1')
   await handle({ workspace_dir: bare, file, action: 'record_read' }, ctx)
   writeFileSync(join(bare, file), 'v2')
   const c = await handle({ workspace_dir: bare, file, action: 'check' }, ctx)
   assert(c.status === 'modified' && c.modified_by === 'external', `⑧ 无事务目录 → external 不崩（得 ${c.status}/${c.modified_by}）`)
-  rmSync(bare, { recursive: true, force: true })
+  try { rmSync(bare, { recursive: true, force: true }) } catch {}
 }
 
 // ── ⑨⑩⑪ classify 四态：写者 registry 识别（Y002-S1 写路径契约） ──
@@ -182,7 +182,7 @@ const ctx = {}
   const snapPath = join(TMP, 'collision-guard-snapshots.json')
   rmSync(snapPath, { force: true })
   const persistWs = join(os.tmpdir(), 'opencode', 'ecg-test-persist')
-  rmSync(persistWs, { recursive: true, force: true })
+  try { rmSync(persistWs, { recursive: true, force: true }) } catch {}
   mkdirSync(persistWs, { recursive: true })
   const pf = join(persistWs, file)
   writeFileSync(pf, 'persist-v1')
@@ -212,12 +212,12 @@ console.log(JSON.stringify(r))`)
   const r2 = JSON.parse(out2.trim().split('\n').pop())
   assert(r2.status === 'modified' && r2.modified_by === 'external', `⑬ 重启后外部改 → external 不崩（得 ${r2.status}/${r2.modified_by}）`)
 
-  rmSync(persistWs, { recursive: true, force: true })
+  try { rmSync(persistWs, { recursive: true, force: true }) } catch {}
 }
 
-rmSync(ws, { recursive: true, force: true })
-rmSync(ws2, { recursive: true, force: true })
-rmSync(TMP, { recursive: true, force: true })
+try { rmSync(ws, { recursive: true, force: true }) } catch {}
+try { rmSync(ws2, { recursive: true, force: true }) } catch {}
+try { rmSync(TMP, { recursive: true, force: true }) } catch {}
 process.env.MALONG_STATE_DIR = oldStateDir
 
 console.log(`== test-edit-collision-guard: ${pass} passed, ${fail} failed ==`)

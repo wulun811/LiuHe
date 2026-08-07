@@ -8,7 +8,8 @@ function guardPath(root, userPath) {
   if (typeof root !== 'string' || typeof userPath !== 'string' || userPath === '') return null
   const rootResolved = resolve(root)
   const resolved = resolve(rootResolved, userPath)
-  return resolved === rootResolved || resolved.startsWith(rootResolved + '/') ? resolved : null
+  const rootPrefix = rootResolved.endsWith(sep) ? rootResolved : rootResolved + sep
+  return resolved === rootResolved || resolved.startsWith(rootPrefix) ? resolved : null
 }
 
 const CACHED_EXT = new Set(['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.mts', '.cts', '.py', '.go', '.rs', '.c', '.cpp', '.cc', '.cxx', '.hpp', '.hh', '.hxx', '.java', '.sh', '.bash'])

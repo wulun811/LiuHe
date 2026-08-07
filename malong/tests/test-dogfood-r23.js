@@ -405,6 +405,6 @@ const debugRunner = (await imp(join(MALONG, 'tools/tool-debug-runner/handler.js'
   assert(!ssSrc.includes('tusunsun'), 'style_sniffer: 无通天私有目录名遗留')
 }
 
-rmSync(WS, { recursive: true, force: true })
+try { rmSync(WS, { recursive: true, force: true }) } catch {}
 console.log(`\n== test-dogfood-r23: ${passed} passed, ${failed} failed ==`)
 process.exit(failed ? 1 : 0)

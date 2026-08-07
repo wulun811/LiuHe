@@ -15,7 +15,7 @@ function assert(cond, msg) {
 const { handle } = await import(pathToFileURL(join(__dirname, '..', 'tools', 'tool-edit-transaction', 'handler.js')).href)
 
 const ws = join(os.tmpdir(), 'opencode', 'txn-ext-ws')
-rmSync(ws, { recursive: true, force: true })
+try { rmSync(ws, { recursive: true, force: true }) } catch {}
 mkdirSync(ws, { recursive: true })
 const ctx = { codeIndexService: null }
 const f = (n, c) => writeFileSync(join(ws, n), c)
@@ -238,7 +238,7 @@ const f = (n, c) => writeFileSync(join(ws, n), c)
   assert(u3.error_code === 'TXN_NOT_FOUND', `⑬ 顶层 abandoned 不误撤（得 ${u3.status}:${u3.error_code || ''}）`)
 }
 
-rmSync(ws, { recursive: true, force: true })
+try { rmSync(ws, { recursive: true, force: true }) } catch {}
 
 console.log(`== test-edit-transaction-ext: ${pass} passed, ${fail} failed ==`)
 if (fail > 0) process.exit(1)

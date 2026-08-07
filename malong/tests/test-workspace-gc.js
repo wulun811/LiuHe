@@ -14,7 +14,7 @@ function assert(c, m) { if (c) { pass++ } else { fail++; console.error('  FAIL:'
 
 const ROOT = join(tmpdir(), 'opencode', 'ws-gc-test')
 const WS = join(ROOT, 'workspaces')
-rmSync(ROOT, { recursive: true, force: true })
+try { rmSync(ROOT, { recursive: true, force: true }) } catch {}
 
 const DAY = 86400000
 const now = Date.now()
@@ -84,6 +84,6 @@ assert(!wide.deleted.some(d => d.workspace === 'stale0000000'), '⑤ 阈值 45d 
   rmSync(join(WS, touchWs), { recursive: true, force: true })
 }
 
-rmSync(ROOT, { recursive: true, force: true })
+try { rmSync(ROOT, { recursive: true, force: true }) } catch {}
 console.log(`\n=== test-workspace-gc: ${pass} passed, ${fail} failed ===`)
 process.exit(fail ? 1 : 0)

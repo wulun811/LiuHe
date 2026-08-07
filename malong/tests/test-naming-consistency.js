@@ -15,7 +15,7 @@ function assert(cond, msg) {
 const { handle } = await import(pathToFileURL(join(__dirname, '..', 'tools', 'tool-naming-consistency', 'handler.js')).href)
 
 const ws = join(os.tmpdir(), 'opencode', 'nc-test-ws')
-rmSync(ws, { recursive: true, force: true })
+try { rmSync(ws, { recursive: true, force: true }) } catch {}
 mkdirSync(ws, { recursive: true })
 const dbPath = join(ws, 'code-index.db')
 
@@ -105,7 +105,7 @@ const ctx = { getWorkspaceDir: () => ws }
   assert(emptyProject.note && emptyProject.note.includes('insufficient'), `⑥ 项目无该语言符号 note（得 ${emptyProject.note}）`)
 }
 
-rmSync(ws, { recursive: true, force: true })
+try { rmSync(ws, { recursive: true, force: true }) } catch {}
 
 console.log(`== test-naming-consistency: ${pass} passed, ${fail} failed ==`)
 if (fail > 0) process.exit(1)

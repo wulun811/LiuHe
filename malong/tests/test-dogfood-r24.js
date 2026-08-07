@@ -43,9 +43,9 @@ await pc.connect()
 
 const { default: codeIndex } = await imp(join(MALONG, 'code-index.js'))
 const langParser = {
-  extractAllAsync: (source, ext, filePath) => pc.extractAll(source, ext, filePath),
-  hasErrorsAsync: (source, ext, filePath) => pc.hasErrors(source, ext, filePath),
-  batchExtractAsync: (files) => pc.batchExtract(files),
+  extractAllAsync: (source, ext, filePath, ws) => pc.extractAll(source, ext, filePath, ws),
+  hasErrorsAsync: (source, ext, filePath, ws) => pc.hasErrors(source, ext, filePath, ws),
+  batchExtractAsync: (files, ws) => pc.batchExtract(files, ws),
 }
 const services = { langParser }
 const core = {
@@ -118,7 +118,7 @@ const okRes = await writeSymbols({
 }, ctx)
 assert(okRes.success !== false, `带 base_version 正常写入（${okRes.success === true ? 'ok' : JSON.stringify(okRes.failed || okRes).slice(0, 120)}）`)
 
-rmSync(WS, { recursive: true, force: true })
+try { rmSync(WS, { recursive: true, force: true }) } catch {}
 
 console.log(`\n== test-dogfood-r24: ${passed} passed, ${failed} failed ==`)
 process.exit(failed > 0 ? 1 : 0)

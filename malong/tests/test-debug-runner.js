@@ -3,7 +3,7 @@
 //       timeout 优先 / handle 端到端（全绿命令不再被标 TestFailure）
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { mkdirSync, rmSync } from 'node:fs'
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -46,28 +46,40 @@ const { analyzeError, handle } = await import(pathToFileURL(join(__dirname, '..'
 {
   const ws = join(os.tmpdir(), 'opencode', 'dr-test-ws')
   mkdirSync(ws, { recursive: true })
-  const res = await handle({ command: "echo '77 passed, 0 failed'; echo '[code-index] noise' >&2", workspace_dir: ws }, {})
+  const isWin = process.platform === 'win32'
+  // Windows 无 bash：用 cmd 内建等价命令（echo/& 重定向语义一致）
+  const res = await handle({ command: isWin ? "echo 77 passed, 0 failed & echo [code-index] noise 1>&2" : "echo '77 passed, 0 failed'; echo '[code-index] noise' >&2", workspace_dir: ws }, {})
   assert(res.exit_code === 0, `④ 端到端 exit_code 0（得 ${res.exit_code}）`)
   assert(res.error_type === null, `④ 端到端全绿不再判失败（得 ${res.error_type}）`)
   assert(res.next_step === 'Command ran successfully.', '④ next_step 为成功文案')
-  const bad = await handle({ command: "node -e \"throw new TypeError('boom')\"", workspace_dir: ws }, {})
+  let bad
+  if (isWin) {
+    // cmd 下 node -e 引号会被 cmd 剥掉外双引号 → JS 里剩字符串字面量（exit 0 不分类）
+    // script 模式走 process.execPath 参数化 spawn，无引号歧义
+    writeFileSync(join(ws, 'boom.js'), "throw new TypeError('boom')\n")
+    bad = await handle({ script: 'boom.js', workspace_dir: ws }, {})
+    rmSync(join(ws, 'boom.js'), { force: true })
+  } else {
+    bad = await handle({ command: "node -e \"throw new TypeError('boom')\"", workspace_dir: ws }, {})
+  }
   assert(bad.exit_code !== 0 && bad.error_type === 'TypeError', `④ 真失败仍正确分类 TypeError（得 ${bad.error_type}）`)
-  rmSync(ws, { recursive: true, force: true })
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
 }
 
 // ── ⑤ r10e：cwd 参数——子目录脚本不必 cd 绕路径 ──
 {
   const ws = join(os.tmpdir(), 'opencode', 'dr-cwd-ws')
   mkdirSync(join(ws, '0FTYcloud'), { recursive: true })
-  const root = await handle({ command: 'pwd', workspace_dir: ws }, {})
+  const pwdCmd = process.platform === 'win32' ? 'echo %cd%' : 'pwd'
+  const root = await handle({ command: pwdCmd, workspace_dir: ws }, {})
   assert(root.stdout.trim() === ws, `⑤ 默认 cwd=workspace_dir（得 ${root.stdout.trim()}）`)
-  const sub = await handle({ command: 'pwd', workspace_dir: ws, cwd: '0FTYcloud' }, {})
+  const sub = await handle({ command: pwdCmd, workspace_dir: ws, cwd: '0FTYcloud' }, {})
   assert(sub.stdout.trim() === join(ws, '0FTYcloud'), `⑤ cwd=0FTYcloud 生效（得 ${sub.stdout.trim()}）`)
   const esc = await handle({ command: 'pwd', workspace_dir: ws, cwd: '../outside' }, {})
   assert(esc.error === 'cwd_not_found', `⑤ 越界 cwd 拒绝（得 ${esc.error}）`)
   const notStr = await handle({ command: 'pwd', workspace_dir: ws, cwd: 42 }, {})
   assert(notStr.error === 'invalid_input', `⑤ 非字符串 cwd 拒绝（得 ${notStr.error}）`)
-  rmSync(ws, { recursive: true, force: true })
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
 }
 
 console.log(`== test-debug-runner: ${pass} passed, ${fail} failed ==`)

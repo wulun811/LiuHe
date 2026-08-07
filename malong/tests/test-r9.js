@@ -18,7 +18,7 @@ function assert(cond, msg) {
 }
 const tmp = (tag) => {
   const ws = join(os.tmpdir(), 'opencode', `r9-${tag}-${process.pid}`)
-  rmSync(ws, { recursive: true, force: true })
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
   mkdirSync(ws, { recursive: true })
   return ws
 }
@@ -48,7 +48,7 @@ console.log('── P1 lock timeout safe object ──')
   assert(l.locked === true, '300ms 争用超时返回 locked')
   assert(typeof l.release === 'function', '超时对象带安全空 release（旧实现 undefined → TypeError）')
   l.release()
-  rmSync(ws, { recursive: true, force: true })
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
 }
 
 // ── P2/P3：batch-edit delegateWrite symlink 守卫 + 不写穿 ──
@@ -69,7 +69,7 @@ console.log('── P2 batch-edit write guard ──')
   assert(r.error?.code === 'PATH_BLOCKED', `symlink 写穿被拒（得 ${JSON.stringify(r.error)}）`)
   assert(readFileSync(outside, 'utf-8') === 'ORIGINAL', '外部文件未被写入')
   rmSync(outside, { force: true })
-  rmSync(ws, { recursive: true, force: true })
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
 }
 
 // ── P6/P7：rollback 植入绝对 backupName → 跳过+计数，不读穿 ──
@@ -92,7 +92,7 @@ console.log('── P6/P7 rollback backupName guard + honest count ──')
   assert(r.files_restored === 0, `恶意 backupName 不算恢复数（得 ${r.files_restored}）`)
   assert(Array.isArray(r.skipped) && r.skipped.some(s => s.reason === 'backup_escape'), `skipped 列出 backup_escape（得 ${JSON.stringify(r.skipped)}）`)
   assert(readFileSync(join(ws, 'a.txt'), 'utf-8') === 'v2', '文件保持 v2 未被 /etc/hostname 内容覆盖')
-  rmSync(ws, { recursive: true, force: true })
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
 }
 
 // ── F4：best_effort 批次崩溃恢复不回滚已提交文件 ──
@@ -115,7 +115,7 @@ console.log('── F4 best_effort batch no-rollback ──')
   const rec = await jr.recoverJournals(ws)
   assert(!rec.some(r => r.action === 'batch_partial_rollback'), 'best_effort 批次不回滚已提交文件')
   assert(readFileSync(join(ws, 'a1.txt'), 'utf-8') === 'v2', 'a1 保持 v2（用户可见的成功结果未被撤销）')
-  rmSync(ws, { recursive: true, force: true })
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
 }
 
 // ── F4b：strict 批次崩溃于 marker.txnIds 滞后窗口（f1 已提交、f2 journal 未建）必须回滚 f1 ──
@@ -137,7 +137,7 @@ console.log('── F4b strict batch marker-lag window rollback ──')
   assert(rec.some(r => r.action === 'batch_partial_rollback'), 'F4b: strict 批次 marker 滞后窗口必须回滚已提交 f1')
   assert(readFileSync(join(ws, 'a1.txt'), 'utf-8') === 'v1', 'F4b: a1 回滚到 v1（半批不残留）')
   // 旧 marker 无 files 字段（兼容）：退化为 txnIds 判定（1<1 不回滚——保持旧行为，不误回滚）
-  rmSync(ws, { recursive: true, force: true })
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
   const ws2 = tmp('lag2')
   mkdirSync(join(ws2, '.malong', 'journal'), { recursive: true })
   writeFileSync(join(ws2, 'a1.txt'), 'v2')
@@ -153,7 +153,7 @@ console.log('── F4b strict batch marker-lag window rollback ──')
   jr.releaseBatchLock(ws2)
   const rec2 = await jr.recoverJournals(ws2)
   assert(!rec2.some(r => r.action === 'batch_partial_rollback'), 'F4b: 旧 marker 无 files 退化 txnIds 判定（不误回滚）')
-  rmSync(ws2, { recursive: true, force: true })
+  try { rmSync(ws2, { recursive: true, force: true }) } catch {}
 }
 
 // ── F4c：R22-⑯ 批次锁——存活批次不被并发恢复踩踏；锁释放后恢复正常回滚；并发建批次 BATCH_LOCK_BUSY ──
@@ -185,7 +185,7 @@ console.log('── F4c batch lock: live batch protected, stale batch recoverabl
   try { jr.createBatchMarker(ws, ['b'], 'strict') } catch (e) { busy = e.code === 'BATCH_LOCK_BUSY' }
   jr.finishBatchMarker(ws, m1.batchId)
   assert(busy, 'F4c: 并发建批次 → BATCH_LOCK_BUSY')
-  rmSync(ws, { recursive: true, force: true })
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
 }
 console.log('── H11 stale txn sweep ──')
 {
@@ -202,7 +202,7 @@ console.log('── H11 stale txn sweep ──')
   const store = new TransactionStore(ws)
   assert(!existsSync(stale), '超龄（8 天）孤儿事务目录被清扫')
   assert(existsSync(fresh), '新鲜事务目录保留')
-  rmSync(ws, { recursive: true, force: true })
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
 }
 
 // ── H6：security-review glob 超限跳过计数 ──
@@ -214,7 +214,7 @@ console.log('── H6 ignored_glob_entries visible ──')
   writeFileSync(join(ws, 'x.js'), 'let a = 1;')
   const r = await sr.handle({ workspace_dir: ws, scope: '.' }, {})
   assert(r.ignored_glob_entries === 1, `glob ** 段>3 跳过计数可见（得 ${r.ignored_glob_entries}）`)
-  rmSync(ws, { recursive: true, force: true })
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
 }
 
 // ── H10：错误契约归一化（嵌套 {success:false, error:{code}} → error_code 取 code） ──

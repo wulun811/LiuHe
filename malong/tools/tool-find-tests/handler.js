@@ -128,9 +128,11 @@ function findTestImportersByText(workspaceDir, baseName, maxFiles = 800, maxResu
       if (scanned >= maxFiles || results.length >= maxResults) break
       if (e.name.startsWith('.') || SKIP_SCAN_DIRS.has(e.name)) continue
       const full = join(dir, e.name)
+      // Windows：绝对路径反斜杠会让 TEST_PATH_RE（/tests|.test. 语义）与 wsPrefix 拼接全落空 → 先归一化
+      const norm = full.replace(/\\/g, '/')
       if (e.isDirectory()) {
         walk(full)
-      } else if (e.isFile() && TEST_PATH_RE.test(full)) {
+      } else if (e.isFile() && TEST_PATH_RE.test(norm)) {
         scanned++
         // R22-⑪：>1MB 跳过该文件（行级 import 扫描不值整读大文件）
         try { if (statSync(full).size > MAX_STAT_FILE_SIZE) continue } catch { continue }
@@ -140,8 +142,9 @@ function findTestImportersByText(workspaceDir, baseName, maxFiles = 800, maxResu
             const ln = lines[i]
             if (/(?:\bfrom\b|import\s*\(|require\s*\()\s*['"`]/.test(ln) && ln.includes(baseName)) {
               // R22-⑯：尾斜杠 workspace 前缀归一化（r11(L11) 同款——`ws + '/'` 在尾斜杠时拼成 `//` 恒不匹配）
-              const wsPrefix = workspaceDir.endsWith('/') ? workspaceDir : workspaceDir + '/'
-              const rel = full.startsWith(wsPrefix) ? full.slice(wsPrefix.length) : full
+              const wsNorm = workspaceDir.replace(/\\/g, '/')
+              const wsPrefix = wsNorm.endsWith('/') ? wsNorm : wsNorm + '/'
+              const rel = norm.startsWith(wsPrefix) ? norm.slice(wsPrefix.length) : norm
               results.push({ path: rel, kind: 'import', target_name: baseName, line: i + 1 })
               break
             }

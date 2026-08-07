@@ -467,8 +467,8 @@ async function testA25() {
   try { symlinkSync(outside, join(ws, 'extdir'), 'dir') } catch { assert(false, 'dir symlink 创建'); return }
   const rDir = await at({ workspace_dir: ws, scope: 'extdir' }, { ...mockContext, codeIndexService: null })
   assert(rDir.error === 'path_blocked', `scope 指向外部目录 symlink → path_blocked（得 ${rDir.error}）`)
-  rmSync(ws, { recursive: true, force: true })
-  rmSync(outside, { recursive: true, force: true })
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
+  try { rmSync(outside, { recursive: true, force: true }) } catch {}
 }
 
 // Run all
@@ -498,12 +498,12 @@ async function testA23() {
   const { writeFileSync, mkdirSync, rmSync } = await import('node:fs')
   const { handle } = await import('../tools/tool-diff-facts/handler.js')
   const ws = join(FIXTURES, '..', '.a23-txn-ws')
-  rmSync(ws, { recursive: true, force: true })
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
   mkdirSync(join(ws, '.ai-transactions', 'txn1', 'backup'), { recursive: true })
   writeFileSync(join(ws, '.ai-transactions', 'txn1', 'manifest.json'), JSON.stringify({ txnId: 'a23t1', created: Date.now(), files: { '../../etc/passwd': { backupName: 'p' } } }))
   const r = await handle({ workspace_dir: ws, since: 'a23t1' }, {})
   assert(JSON.stringify(r.warnings || []).includes('path_blocked'), `A23: ../ fileRel 报 path_blocked（得 ${JSON.stringify(r.warnings)}）`)
-  rmSync(ws, { recursive: true, force: true })
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
 }
 
 // ═══ A24: R22-⑪ 拷打发现——4 工具非字符串参数裸抛 + find-tests 无服务守卫绕过 ═══

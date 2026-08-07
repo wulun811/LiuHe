@@ -7,7 +7,9 @@ function guardPath(root, userPath) {
   if (typeof root !== 'string' || typeof userPath !== 'string' || userPath === '') return null
   const rootResolved = resolve(root)
   const resolved = resolve(rootResolved, userPath)
-  return resolved === rootResolved || resolved.startsWith(rootResolved + '/') ? resolved : null
+  // Windows：resolve 产出反斜杠——前缀必须用 sep（'/' 字面量在 Windows 永不匹配，file 模式全被误判 path_escape）
+  const rootPrefix = rootResolved.endsWith(sep) ? rootResolved : rootResolved + sep
+  return resolved === rootResolved || resolved.startsWith(rootPrefix) ? resolved : null
 }
 
 const SOURCE_EXTS = new Set(['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.mts', '.cts', '.py', '.go', '.rs', '.java', '.c', '.cpp', '.cc', '.cxx', '.hpp', '.hh', '.hxx', '.sh', '.bash'])
@@ -259,7 +261,8 @@ function walkFiles(baseDir, dir, files, maxFiles) {
     if (entry.isDirectory()) {
       walkFiles(baseDir, fullPath, files, maxFiles)
     } else if (entry.isFile() && (SOURCE_EXTS.has(extname(entry.name)) || DOTENV_RE.test(entry.name))) {
-      files.push(fullPath.startsWith(base + '/') ? fullPath.slice(base.length + 1) : fullPath)
+      // Windows：join 产出反斜杠——前缀判断必须用 sep（'/' 字面量在 Windows 不匹配，绝对路径混入后 join(ws, abs) 拼错、文件被静默丢弃）
+      files.push(fullPath.startsWith(base + sep) ? fullPath.slice(base.length + sep.length) : fullPath)
     }
   }
 }

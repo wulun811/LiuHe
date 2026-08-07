@@ -35,7 +35,7 @@ const imp = (p) => import(pathToFileURL(p).href)
   assert(calls[2]?.maxCallers === 9, `① max_callers 兼容别名（得 ${calls[2]?.maxCallers}）`)
   await impact.handle({ workspace_dir: ws, file: 'a.js', symbol: 'foo' }, ctx)
   assert(calls[3]?.maxCallers === 20, `① 默认 20（得 ${calls[3]?.maxCallers}）`)
-  rmSync(ws, { recursive: true, force: true })
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
 }
 
 // ── ② context_mode 透传：none|snippet|full + 非法值回退 snippet ──
@@ -59,7 +59,7 @@ const imp = (p) => import(pathToFileURL(p).href)
   assert(calls[2]?.contextMode === 'snippet', `② 默认 snippet（得 ${calls[2]?.contextMode}）`)
   await impact.handle({ workspace_dir: ws, file: 'a.js', symbol: 'foo', context_mode: 'huge' }, ctx)
   assert(calls[3]?.contextMode === 'snippet', `② 非法值回退 snippet（得 ${calls[3]?.contextMode}）`)
-  rmSync(ws, { recursive: true, force: true })
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
 }
 
 // ── ③ references kind 过滤：call-only 剔除 import/use 噪声 + kind_filtered 计数 ──
@@ -89,14 +89,14 @@ const imp = (p) => import(pathToFileURL(p).href)
   assert(r3.count === 2, `③ kind 逗号组合（得 ${r3.count}）`)
   const r4 = await refsHandler.handle({ workspace_dir: ws, symbol: 'get', kind: 'bogus' }, ctx)
   assert(r4.count === 4 && r4.kind_filter_note, `③ 非法 kind → 提示且不误伤（得 ${r4.count} ${r4.kind_filter_note}）`)
-  rmSync(ws, { recursive: true, force: true })
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
 }
 
 // ── ④ 真实 getImpactAnalysis context_mode 三态（真实索引 + live daemon） ──
 {
   const WS = join(tmpdir(), 'opencode', 'ob-ws4')
   const SOCK = join(tmpdir(), 'opencode', 'ob-r24.sock')
-  rmSync(WS, { recursive: true, force: true })
+  try { rmSync(WS, { recursive: true, force: true }) } catch {}
   mkdirSync(join(WS, 'src'), { recursive: true })
   writeFileSync(join(WS, 'src/app.js'), [
     'export function hot() { return 1 }',
@@ -113,9 +113,9 @@ const imp = (p) => import(pathToFileURL(p).href)
   try { await pc.connect() } catch {}
   const { default: codeIndex } = await imp(join(__dirname, '..', 'code-index.js'))
   const langParser = {
-    extractAllAsync: (s, e, f) => pc.extractAll(s, e, f),
-    hasErrorsAsync: (s, e, f) => pc.hasErrors(s, e, f),
-    batchExtractAsync: (f) => pc.batchExtract(f),
+    extractAllAsync: (s, e, f, ws) => pc.extractAll(s, e, f, ws),
+    hasErrorsAsync: (s, e, f, ws) => pc.hasErrors(s, e, f, ws),
+    batchExtractAsync: (f, ws) => pc.batchExtract(f, ws),
   }
   const services = { langParser }
   const core = {
@@ -152,7 +152,7 @@ const imp = (p) => import(pathToFileURL(p).href)
   const noneSnippet = await svc.getImpactAnalysis('src/app.js', { symbol: 'hot', contextMode: 'none', maxCallers: 2 })
   assert(noneSnippet.callees.every(c => c.context === null), `④ none+maxCallers → callees context 仍 null`)
 
-  rmSync(WS, { recursive: true, force: true })
+  try { rmSync(WS, { recursive: true, force: true }) } catch {} // Windows: db 句柄占用 EBUSY，best-effort
 }
 
 console.log(`== test-output-budget: ${pass} passed, ${fail} failed ==`)

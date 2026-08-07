@@ -13,7 +13,7 @@ function assert(cond, msg) {
 }
 
 const WS = join(os.tmpdir(), 'opencode', 'r12-dcs-ws')
-rmSync(WS, { recursive: true, force: true })
+try { rmSync(WS, { recursive: true, force: true }) } catch {}
 mkdirSync(join(WS, 'src'), { recursive: true })
 mkdirSync(join(WS, 'scripts'), { recursive: true })
 mkdirSync(join(WS, 'docs'), { recursive: true })
@@ -37,9 +37,9 @@ await pc.init({ log: () => {} })
 try { await pc.connect() } catch {}
 const { default: codeIndex } = await import(pathToFileURL(join(__dirname, '..', 'code-index.js')).href)
 const langParser = {
-  extractAllAsync: (s, e, f) => pc.extractAll(s, e, f),
-  hasErrorsAsync: (s, e, f) => pc.hasErrors(s, e, f),
-  batchExtractAsync: (f) => pc.batchExtract(f),
+  extractAllAsync: (s, e, f, ws) => pc.extractAll(s, e, f, ws),
+  hasErrorsAsync: (s, e, f, ws) => pc.hasErrors(s, e, f, ws),
+  batchExtractAsync: (f, ws) => pc.batchExtract(f, ws),
 }
 const services = { langParser }
 const core = {

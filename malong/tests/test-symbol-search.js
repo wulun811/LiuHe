@@ -13,7 +13,7 @@ function assert(cond, msg) {
 const { handle } = await import(pathToFileURL(join(__dirname, '..', 'tools', 'tool-symbol-search', 'handler.js')).href)
 
 const ws = join(os.tmpdir(), 'opencode', 'ss-test-ws')
-rmSync(ws, { recursive: true, force: true })
+try { rmSync(ws, { recursive: true, force: true }) } catch {}
 mkdirSync(ws, { recursive: true })
 writeFileSync(join(ws, 'code-index.db'), '')
 
@@ -68,7 +68,7 @@ function makeCtx(searchImpl) {
   assert(noSvc.error === 'service_unavailable', '⑤ 无 service → service_unavailable')
 }
 
-rmSync(ws, { recursive: true, force: true })
+try { rmSync(ws, { recursive: true, force: true }) } catch {}
 
 console.log(`== test-symbol-search: ${pass} passed, ${fail} failed ==`)
 if (fail > 0) process.exit(1)

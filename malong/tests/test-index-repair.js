@@ -20,7 +20,7 @@ const { recoverJournals, recoverTransactions, createJournal, updateJournalState,
 const { sha256 } = await imp(join(__dirname, '..', 'hash-utils.js'))
 
 const WS = join(tmpdir(), 'opencode', 'index-repair')
-rmSync(WS, { recursive: true, force: true })
+try { rmSync(WS, { recursive: true, force: true }) } catch {}
 mkdirSync(join(WS, 'src'), { recursive: true })
 
 function makeState(txnDir, state) {
@@ -41,7 +41,7 @@ const svcOk = {
 }
 const r1 = await recoverJournals(WS, { codeIndexService: svcOk })
 const t1State = JSON.parse(readFileSync(join(WS, JOURNAL_ROOT, 'journal', 't1', 'state.json'), 'utf-8'))
-assert(repaired?.endsWith('src/app.js'), `① recoverJournals 补抽调用 indexFile（${repaired || 'null'}）`)
+assert((repaired || '').replace(/\\/g, '/').endsWith('src/app.js'), `① recoverJournals 补抽调用 indexFile（${repaired || 'null'}）`)
 assert(t1State.index_pending === false, '① 补抽成功清除 index_pending')
 assert(r1.some(x => x.action === 'index_repaired'), '① recovered 记录 index_repaired')
 
@@ -129,7 +129,7 @@ assert(repairedE2E === APP, `⑤ 补抽命中真实 APP 路径（${repairedE2E}�
 const st5 = JSON.parse(readFileSync(join(e2e.journal.dir, 'state.json'), 'utf-8'))
 assert(st5.index_pending === false, '⑤ 端到端补抽后标记清除')
 
-rmSync(WS, { recursive: true, force: true })
+try { rmSync(WS, { recursive: true, force: true }) } catch {}
 
 // ── ⑥ recoverTransactions：终态 manifest index_pending 补抽 + backupName 越界守卫 ──
 mkdirSync(join(WS, 'src'), { recursive: true })
@@ -152,7 +152,7 @@ writeFileSync(join(t3, 'backup', 'b3'), 'backup-content')
 writeFileSync(join(WS, 'src', 'app.js'), 'new-content')
 let repaired3 = null
 const r6 = await recoverTransactions(WS, { codeIndexService: { async indexFile(absPath) { repaired3 = absPath; return {} } } })
-assert(repaired3?.endsWith('src/app.js'), `⑥ recoverTransactions 补抽 index_pending（${repaired3 || 'null'}）`)
+assert((repaired3 || '').replace(/\\/g, '/').endsWith('src/app.js'), `⑥ recoverTransactions 补抽 index_pending（${repaired3 || 'null'}）`)
 const m3 = JSON.parse(readFileSync(join(t3, 'manifest.json'), 'utf-8'))
 assert(m3.index_pending === undefined, '⑥ 补抽成功清除 manifest index_pending')
 assert(r6.some(x => x.action === 'index_repaired'), '⑥ recovered 记录 index_repaired')
@@ -169,6 +169,6 @@ assert(t4Rec?.action === 'needs_review' && t4Rec?.reason === 'insufficient recov
 const m4 = JSON.parse(readFileSync(join(t4, 'manifest.json'), 'utf-8'))
 assert(m4.state === 'needs_review' && existsSync(t4), '⑦ 越界事务未删、未误判 abandoned/committed（外部文件未被读取）')
 
-rmSync(WS, { recursive: true, force: true })
+try { rmSync(WS, { recursive: true, force: true }) } catch {}
 console.log(`\n== test-index-repair: ${pass} passed, ${fail} failed ==`)
 if (fail > 0) process.exit(1)

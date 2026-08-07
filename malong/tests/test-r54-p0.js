@@ -17,7 +17,7 @@ function assert(cond, msg) {
 
 const tmp = (tag) => {
   const ws = join(os.tmpdir(), 'opencode', `r54-p0-${tag}-${process.pid}`)
-  rmSync(ws, { recursive: true, force: true })
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
   mkdirSync(ws, { recursive: true })
   return ws
 }
@@ -51,7 +51,7 @@ console.log('\u2500\u2500 P0-2 rename-symbol symbol \u6d88\u6bd2 \u2500\u2500')
   assert(r.error === 'invalid_input', `symbol \u542b .. \u5e94 invalid_input\uff08\u5f97 ${r.error}\uff09`)
   r = await handle({ workspace_dir: ws, symbol: 'a/b', new_name: 'validName', file: 'a.js' }, {})
   assert(r.error === 'invalid_input', `symbol \u542b / \u5e94 invalid_input\uff08\u5f97 ${r.error}\uff09`)
-  rmSync(ws, { recursive: true, force: true })
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
 }
 
 // ── P0-2: transaction-store begin 消毒（纵深防御）──
@@ -66,7 +66,7 @@ console.log('\u2500\u2500 P0-2 transaction-store begin \u6d88\u6bd2 \u2500\u2500
   const entries = existsSync(txnRoot) ? readdirSync(txnRoot) : []
   assert(entries.some(e => e === txnId), `\u4e8b\u52a1\u76ee\u5f55\u5728 .ai-transactions \u5185`)
   assert(!existsSync(join(ws, 'etc')), `\u672a\u9003\u9038\u5230 workspace/etc`)
-  rmSync(ws, { recursive: true, force: true })
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
 }
 
 // ── P0-4 + P1: security-review exec-cmd-member / SKIP_DIRS / \u5c3e\u659c\u6760 ──
@@ -90,7 +90,7 @@ console.log('\u2500\u2500 security-review exec-cmd-member + SKIP_DIRS \u2500\u25
   // 尾斜杠 workspace：scope 扫描仍工作
   r = await handle({ workspace_dir: ws + '/', scope: '.' }, {})
   assert(!r.error, `\u5c3e\u659c\u6760 workspace \u4e0d\u5e94\u62a5\u9519\uff08\u5f97 ${r.error}\uff09`)
-  rmSync(ws, { recursive: true, force: true })
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
 }
 
 // ── P0-4: spec-gen / config-drift \u5c3e\u659c\u6760\u5f52\u4e00\u5316\uff08\u65e0 daemon \u4e0b\u4ec5\u9a8c\u8bc1\u4e0d\u8bef\u62a5\u9003\u9038\uff09──
@@ -106,7 +106,7 @@ console.log('\u2500\u2500 P0-4 config-drift \u5c3e\u659c\u6760\u4e0d\u8bef\u62e6
   const rScan = await handle({ workspace_dir: ws + '/' }, {})
   const refs = (rScan.config_references || []).filter(x => x.type === 'env_var')
   assert(refs.length === 1, `R22-⑱ \u5168\u626b+\u5c3e\u659c\u6760 \u6b63\u5e38\u63d0\u53d6 refs\uff08\u5f97 ${refs.length}\uff09`)
-  rmSync(ws, { recursive: true, force: true })
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
 }
 
 console.log(`\n=== test-r54-p0: ${pass} passed, ${fail} failed ===`)

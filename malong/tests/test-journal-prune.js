@@ -14,7 +14,7 @@ function assert(cond, msg) {
 const { pruneJournals } = await import(pathToFileURL(join(__dirname, '..', 'write-journal.js')).href)
 
 const TMP = join(os.tmpdir(), 'opencode', 'journal-prune-test')
-rmSync(TMP, { recursive: true, force: true })
+try { rmSync(TMP, { recursive: true, force: true }) } catch {}
 mkdirSync(TMP, { recursive: true })
 
 const OLD = new Date(Date.now() - 48 * 3600 * 1000).toISOString()   // 48h 前，超 24h 默认 TTL
@@ -111,6 +111,6 @@ function jroot(ws) { return join(ws, '.malong', 'journal') }
   assert(r2.pruned === 0, '⑦ workspace 不存在 no-op 不抛')
 }
 
-rmSync(TMP, { recursive: true, force: true })
+try { rmSync(TMP, { recursive: true, force: true }) } catch {}
 console.log(`== test-journal-prune: ${pass} passed, ${fail} failed ==`)
 if (fail > 0) process.exit(1)

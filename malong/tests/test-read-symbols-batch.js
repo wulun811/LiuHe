@@ -14,7 +14,7 @@ function assert(cond, msg) {
 const { handle } = await import(pathToFileURL(join(__dirname, '..', 'tools', 'tool-read-symbol', 'handler.js')).href)
 
 const ws = join(os.tmpdir(), 'opencode', 'rsb-test-ws')
-rmSync(ws, { recursive: true, force: true })
+try { rmSync(ws, { recursive: true, force: true }) } catch {}
 mkdirSync(ws, { recursive: true })
 writeFileSync(join(ws, 'a.js'), 'function alpha() {\n  return 1\n}\nfunction beta() {\n  return 2\n}\n')
 writeFileSync(join(ws, 'b.py'), 'def gamma():\n    return 3\n')
@@ -82,6 +82,6 @@ const ctx = {}
   assert(rMiss.code === 'FILE_NOT_FOUND', `⑥ FILE_NOT_FOUND 带 code（得 ${rMiss.code}）`)
 }
 
-rmSync(ws, { recursive: true, force: true })
+try { rmSync(ws, { recursive: true, force: true }) } catch {}
 console.log(`== test-read-symbols-batch: ${pass} passed, ${fail} failed ==`)
 if (fail > 0) process.exit(1)

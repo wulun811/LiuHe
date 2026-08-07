@@ -14,12 +14,12 @@ function assert(cond, msg) {
 }
 
 const WS = join(os.tmpdir(), 'opencode', 'mcp-test-ws')
-rmSync(WS, { recursive: true, force: true })
+try { rmSync(WS, { recursive: true, force: true }) } catch {}
 mkdirSync(WS, { recursive: true })
 mkdirSync(join(WS, 'data'), { recursive: true })
 
 const STATE_DIR = join(os.tmpdir(), 'opencode', 'mcp-test-state')
-rmSync(STATE_DIR, { recursive: true, force: true })
+try { rmSync(STATE_DIR, { recursive: true, force: true }) } catch {}
 const child = spawn(process.execPath, [join(__dirname, '..', 'mcp-server.js'), '--workspace', WS], {
   stdio: ['pipe', 'pipe', 'pipe'],
   cwd: WS,
@@ -186,12 +186,12 @@ if (child.exitCode === null) await new Promise(r => { child.on('exit', r); setTi
   await new Promise(r => { child3.on('exit', r); setTimeout(r, 3000) })
 }
 
-rmSync(WS, { recursive: true, force: true })
+try { rmSync(WS, { recursive: true, force: true }) } catch {}
 
 // ── r37-fix3：干净 cwd（无 data/ 目录）启动不崩——宿主（codex/claude 等）以任意 cwd 启动的场景 ──
 {
   const WS2 = join(os.tmpdir(), 'opencode', 'mcp-test-ws-clean')
-  rmSync(WS2, { recursive: true, force: true })
+  try { rmSync(WS2, { recursive: true, force: true }) } catch {}
   mkdirSync(WS2, { recursive: true }) // 只建 ws 根，不建 data/ —— 复现 UDS EACCES 崩溃场景
   const child2 = spawn(process.execPath, [join(__dirname, '..', 'mcp-server.js'), '--workspace', WS2], {
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -225,7 +225,7 @@ rmSync(WS, { recursive: true, force: true })
   // r39-fix: 等子进程真正退出再清理——SIGTERM 后 mcp-server 仍在 flush 状态目录(data/malong-mcp)，
   // 立即 rmSync(recursive) 与其写入竞态 → rimraf ENOTEMPTY 崩测试（flaky：dev 侥幸未触发，liuhe 复现）
   if (child2.exitCode === null) await new Promise(r => { child2.on('exit', r); setTimeout(r, 3000) })
-  rmSync(WS2, { recursive: true, force: true })
+  try { rmSync(WS2, { recursive: true, force: true }) } catch {}
 }
 
 console.log(`== test-mcp-server: ${pass} passed, ${fail} failed ==`)

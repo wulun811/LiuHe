@@ -16,7 +16,7 @@ function assert(cond, msg) {
 }
 const tmp = (tag) => {
   const ws = join(os.tmpdir(), 'opencode', `r54-p1-${tag}-${process.pid}`)
-  rmSync(ws, { recursive: true, force: true })
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
   mkdirSync(ws, { recursive: true })
   return ws
 }
@@ -57,7 +57,7 @@ console.log('\u2500\u2500 edit-transaction \u5355 edit \u5931\u8d25\u4e0d\u8fde\
   // 事务仍存在，edit A 的改动仍在盘上
   assert(existsSync(join(ws, '.ai-transactions', txnId)), `\u4e8b\u52a1\u76ee\u5f55\u5e94\u4fdd\u7559`)
   assert(readFileSync(join(ws, 'a.js'), 'utf-8').includes('const alpha = 100'), `edit A \u7684 stage \u6539\u52a8\u5e94\u4fdd\u7559`)
-  rmSync(ws, { recursive: true, force: true })
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
 }
 
 // ── dep-gatekeeper：poetry pyproject 解析 ──
@@ -89,7 +89,7 @@ console.log('\u2500\u2500 dep-gatekeeper poetry \u89e3\u6790 \u2500\u2500')
   } else {
     console.log('  (parsePyprojectToml \u672a\u5bfc\u51fa\uff0c\u8df3\u8fc7\u76f4\u63a5\u9a8c\u8bc1)')
   }
-  rmSync(ws, { recursive: true, force: true })
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
 }
 
 // ── dep-gatekeeper：R22-⑧ 本地模块弱映射修复（同仓库包不报 unknown_mapping + unresolved 中性标注） ──
@@ -101,9 +101,9 @@ console.log('\u2500\u2500 dep-gatekeeper \u672c\u5730\u6a21\u5757 + unresolved \
   const connected = await pc.connect()
   assert(connected, 'parse-client \u8fde\u63a5\u5230 malong-parse')
   const langParser = {
-    extractAllAsync: (source, ext, filePath) => pc.extractAll(source, ext, filePath),
+    extractAllAsync: (source, ext, filePath, ws) => pc.extractAll(source, ext, filePath, ws),
     extractReferencesAsync: (source, ext) => pc.extractReferences(source, ext),
-    batchExtractAsync: (files) => pc.batchExtract(files),
+    batchExtractAsync: (files, ws) => pc.batchExtract(files, ws),
   }
   const ws = tmp('localmod')
   writeFileSync(join(ws, 'pyproject.toml'), '[project]\nname = "demo"\nversion = "0.1.0"\ndependencies = []\n')
@@ -120,7 +120,7 @@ console.log('\u2500\u2500 dep-gatekeeper \u672c\u5730\u6a21\u5757 + unresolved \
   assert(r.dependencies_found?.util?.local_module === true, '\u672c\u5730\u6587\u4ef6 util \u5e94\u6807 local_module')
   const zzz = unknown.find(i => i.module === 'zzz_nonexistent_xyz')
   assert(!!zzz && r.dependencies_found?.zzz_nonexistent_xyz?.unresolved === true && r.dependencies_found?.zzz_nonexistent_xyz?.in_manifest === undefined, '\u771f\u672a\u77e5\u6a21\u5757\u5e94 unresolved\u4e2d\u6027\u6807\u6ce8\uff08\u5f97 ' + JSON.stringify(r.dependencies_found?.zzz_nonexistent_xyz) + '\uff09')
-  rmSync(ws, { recursive: true, force: true })
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
 }
 
 // ── R22-⑪：3 分档工具 P2 修复锁定（guard-patterns 三引号/空文件 + code-quality 注释污染 + code-review 字符串花括号 + style-sniffer 撇号/聚合 + active-todos read_errors） ──
@@ -141,9 +141,9 @@ console.log('\u2500\u2500 R22-⑪ 3 \u5206\u6863\u4fee\u590d\u9501\u5b9a \u2500\
   const connected = await pc.connect()
   assert(connected, 'parse-client \u8fde\u63a5\u5230 malong-parse')
   const langParser = {
-    extractAllAsync: (s, e, f) => pc.extractAll(s, e, f),
+    extractAllAsync: (s, e, f, ws) => pc.extractAll(s, e, f, ws),
     extractReferencesAsync: (s, e) => pc.extractReferences(s, e),
-    batchExtractAsync: (f) => pc.batchExtract(f),
+    batchExtractAsync: (f, ws) => pc.batchExtract(f, ws),
   }
   const rGpA = await gp.handle({ workspace_dir: ws, file: 'a.py' }, { langParserService: langParser })
   const rGpB = await gp.handle({ workspace_dir: ws, file: 'b.py' }, { langParserService: langParser })
@@ -170,12 +170,12 @@ console.log('\u2500\u2500 R22-⑪ 3 \u5206\u6863\u4fee\u590d\u9501\u5b9a \u2500\
   const rSs = await ss.handle({ workspace_dir: wsSs }, {})
   assert(rSs.styles?.quotes === 'single', `撇号不污染且全文件聚合选单引号（得 ${rSs.styles?.quotes}）`)
   assert(!!rSs.sample_note && rSs.sample_note.includes('small sample'), `sample_note 低置信度声明（得 ${rSs.sample_note}）`)
-  rmSync(wsSs, { recursive: true, force: true })
+  try { rmSync(wsSs, { recursive: true, force: true }) } catch {}
   // active-todos: read_errors 字段
   writeFileSync(join(ws, 'todo.js'), '// TODO: fix\n')
   const rAt = await at.handle({ workspace_dir: ws }, {})
   assert(typeof rAt.read_errors === 'number' && typeof rAt.files_truncated === 'boolean', `active-todos read_errors/files_truncated 字段（得 ${rAt.read_errors}/${rAt.files_truncated}）`)
-  rmSync(ws, { recursive: true, force: true })
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
 }
 
 console.log(`\n=== test-r54-p1: ${pass} passed, ${fail} failed ===`)
