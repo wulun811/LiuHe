@@ -14,7 +14,7 @@
 ![throughput](https://img.shields.io/badge/throughput-588%20calls%2Fs-blue)
 ![token](https://img.shields.io/badge/token%20savings-65%25-brightgreen)
 ![license](https://img.shields.io/badge/license-MIT-blue)
-![version](https://img.shields.io/badge/version-0.4.1-blue)
+![version](https://img.shields.io/badge/version-0.4.2-blue)
 ![commits](https://img.shields.io/badge/commits-264-blue)
 
 **Malong LiuHe** is a toolkit built for LLMs rather than humans. It ships two components:
@@ -105,8 +105,8 @@ Deterministic scanners only — regex pattern matching and reference graphs. **N
 ### Zero-build deployment (sandbox / offline environments)
 
 For environments with **Node >= 20 and no npm access** (no `npm ci`, no native
-compilation), everything runs from the repo files as-is (Linux only — the
-prebuilt binary is `linux-x86_64`):
+compilation), everything runs from the repo files as-is (Linux/Windows — the
+prebuilt binaries are `linux-x86_64` and `windows-x86_64`):
 
 ```bash
 # 0) Clone, then enter the toolset directory:
@@ -114,7 +114,7 @@ git clone <repo-url> liuhe && cd liuhe/malong
 
 # 1) Parse daemon — prebuilt binary from releases/ (no cargo needed):
 mkdir -p ~/.local/bin
-tar -xzf ../releases/malong-liuhe-0.4.1-linux-x86_64.tar.gz
+tar -xzf ../releases/malong-liuhe-0.4.2-linux-x86_64.tar.gz
 cp malong-parse/target/release/malong-parse ~/.local/bin
 malong-parse &                                   # start the daemon (socket: /tmp/malong-parse-$UID.sock)
 

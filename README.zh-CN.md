@@ -14,7 +14,7 @@
 ![throughput](https://img.shields.io/badge/throughput-588%20calls%2Fs-blue)
 ![token](https://img.shields.io/badge/token%20savings-65%25-brightgreen)
 ![license](https://img.shields.io/badge/license-MIT-blue)
-![version](https://img.shields.io/badge/version-0.4.1-blue)
+![version](https://img.shields.io/badge/version-0.4.2-blue)
 ![commits](https://img.shields.io/badge/commits-264-blue)
 
 **码龙·六合工具** 是一套**为 LLM 而非人类设计**的代码操作工具链，包含两个组件：
@@ -105,7 +105,7 @@
 
 ### 零构建部署（沙盒 / 离线环境）
 
-适用于 **Node ≥ 20 且无法 npm 安装**的环境（不能 `npm ci`、不能原生编译）——全部从仓库文件直接运行（**仅 Linux**，预编译二进制为 linux-x86_64）：
+适用于 **Node ≥ 20 且无法 npm 安装**的环境（不能 `npm ci`、不能原生编译）——全部从仓库文件直接运行（**Linux / Windows**，预编译二进制为 linux-x86_64 / windows-x86_64）：
 
 ```bash
 # 0) 克隆后进入工具集目录：
@@ -113,7 +113,7 @@ git clone <repo-url> liuhe && cd liuhe/malong
 
 # 1) 解析 daemon——用 releases/ 里的预编译二进制（无需 cargo）：
 mkdir -p ~/.local/bin
-tar -xzf ../releases/malong-liuhe-0.4.1-linux-x86_64.tar.gz
+tar -xzf ../releases/malong-liuhe-0.4.2-linux-x86_64.tar.gz
 cp malong-parse/target/release/malong-parse ~/.local/bin
 malong-parse &                                   # 启动 daemon（socket: /tmp/malong-parse-$UID.sock）
 

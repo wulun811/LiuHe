@@ -1154,7 +1154,7 @@ mod tests {
         // r9(B3)：协议层随机畸形帧（固定 seed 确定性伪随机）——服务端必须存活、跳过垃圾、仍能服务合法请求
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let mut st = ServerState::new();
-        let (mut client, server) = tokio::net::UnixStream::pair().unwrap();
+        let (mut client, server) = tokio::io::duplex(65536);
         let h = tokio::spawn(async move {
             handle_connection(server, Arc::new(st)).await;
         });
@@ -1206,7 +1206,7 @@ mod tests {
     // ── r8(F1)：__hello 握手认证 ──
 
     // 完整读一帧（单次 read 可能只拿到部分字节）
-    async fn read_frame(sock: &mut tokio::net::UnixStream) -> serde_json::Value {
+    async fn read_frame(sock: &mut tokio::io::DuplexStream) -> serde_json::Value {
         use tokio::io::AsyncReadExt;
         let mut hdr = [0u8; 4];
         sock.read_exact(&mut hdr).await.unwrap();
@@ -1221,7 +1221,7 @@ mod tests {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let mut st = ServerState::new();
         st.auth_token = Some("secret-token".into());
-        let (mut client, server) = tokio::net::UnixStream::pair().unwrap();
+        let (mut client, server) = tokio::io::duplex(65536);
         let h = tokio::spawn(async move {
             handle_connection(server, Arc::new(st)).await;
         });
@@ -1237,7 +1237,7 @@ mod tests {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let mut st = ServerState::new();
         st.auth_token = Some("secret-token".into());
-        let (mut client, server) = tokio::net::UnixStream::pair().unwrap();
+        let (mut client, server) = tokio::io::duplex(65536);
         let h = tokio::spawn(async move {
             handle_connection(server, Arc::new(st)).await;
         });
@@ -1261,7 +1261,7 @@ mod tests {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let mut st = ServerState::new();
         st.auth_token = None;
-        let (mut client, server) = tokio::net::UnixStream::pair().unwrap();
+        let (mut client, server) = tokio::io::duplex(65536);
         let h = tokio::spawn(async move {
             handle_connection(server, Arc::new(st)).await;
         });

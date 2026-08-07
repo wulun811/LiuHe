@@ -74,6 +74,12 @@ fn remove_pid_file() {
 #[cfg(windows)]
 fn remove_pid_file() {}
 
+// Windows：pid 文件落盘为 no-op，实例共存检查无意义（返回 false 允许启动）
+#[cfg(windows)]
+fn check_existing_instance() -> bool {
+    false
+}
+
 #[cfg(unix)]
 fn check_existing_instance() -> bool {
     let pid_path = get_pid_path();
