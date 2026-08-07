@@ -55,7 +55,13 @@ export function isIgnored(relPath, rules, isDir) {
       if (relPath.startsWith(pre)) return true
     } else if (rule.endsWith('/')) {
       const ruleDir = rule.slice(0, -1)
-      if (relPath === ruleDir || relPath.startsWith(rule)) return true
+      // R22-⑱（第五轮核实）：旧只匹配顶层（relPath === ruleDir || startsWith(rule)）——
+      // gitignore 语义 `build/` 应匹配任意层级的 build 目录（src/build/x.js）
+      if (relPath === ruleDir || relPath.startsWith(rule) || relPath.split('/').some(seg => seg === ruleDir)) return true
+    } else if (rule.startsWith('/')) {
+      // R22-⑯：前导斜杠规则（/foo）——relPath 无前导 /，旧实现落入 else 分支恒不匹配
+      const cleaned = rule.slice(1)
+      if (relPath === cleaned || relPath.startsWith(cleaned + '/')) return true
     } else {
       if (relPath === rule || relPath === rule + '/') return true
     }
@@ -75,8 +81,9 @@ export function collectFiles(rootDir, opts = {}) {
   const skipSet = new Set(skipDirs)
 
   const files = []
+  const depthTruncated = { value: false }
   function walk(d, depth = 0) {
-    if (depth > 8) return
+    if (depth > 8) { depthTruncated.value = true; return }
     let entries
     try { entries = readdirSync(d, { withFileTypes: true }) } catch { return }
     for (const e of entries) {
@@ -99,6 +106,8 @@ export function collectFiles(rootDir, opts = {}) {
     }
   }
   walk(rootDir)
+  // R17-2：深度 >8 截断标记（数组挂字段，调用方可读）
+  if (depthTruncated.value) files.truncated = true
   return files
 }
 
@@ -119,7 +128,7 @@ export function collectFilesWithDirStats(rootDir, opts = {}) {
   let truncated = false
 
   function walk(d, depth = 0) {
-    if (depth > 8) return
+    if (depth > 8) { truncated = true; return }
     let entries
     try { entries = readdirSync(d, { withFileTypes: true }) } catch { return }
     for (const e of entries) {

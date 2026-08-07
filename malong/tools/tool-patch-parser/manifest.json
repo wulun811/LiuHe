@@ -1,0 +1,31 @@
+{
+  "name": "patch_parser",
+  "version": "1.0.0",
+  "description": "Parse SEARCH/REPLACE patch text (text=...), dry-run apply. For external patch blocks.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "workspace_dir": {
+        "type": "string"
+      },
+      "text": {
+        "type": "string",
+        "description": "SEARCH/REPLACE"
+      },
+      "file": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "workspace_dir",
+      "text"
+    ]
+  },
+  "handler": "./handler.js",
+  "protocol_version": "1.0",
+  "tags": [
+    "patch",
+    "parse"
+  ],
+  "dependencies": []
+}

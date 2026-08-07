@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, appendFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, appendFileSync, writeFileSync, statSync, openSync, renameSync, unlinkSync } from 'node:fs'
 import { join, resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawn } from 'node:child_process'
@@ -10,12 +10,16 @@ import os from 'node:os'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
-import { Semaphore } from './semaphore.js'
+import { Semaphore, heavyToolWeight } from './semaphore.js'
 
 const REQUEST_TIMEOUT_MS = 120_000
 const SEMAPHORE_TIMEOUT_MS = 60_000
 const RECOMMENDED_HEAP_MB = 512
-const DEFAULT_CONCURRENCY = 3
+// r10e(F3)：并发 3 → 5——实测 RSS 194MB/heap 12MB 内存充足（上限 480MB），3 槽在 verify_pipeline 120s 长任务占 1 槽时
+// reindex(weight=3) 永远凑不齐 3 槽 → 排队 60s 超时；5 槽下长任务占 1 槽仍有 4 槽供其余工具，reindex 也能并行等待
+// r11(H1)：weight 改为 heavyToolWeight(concurrency)（=max(3, floor(n/2))）——旧实现 weight=concurrency 使 5 槽下
+// reindex 需 5 槽全空，比 3 槽更难凑齐，r10e 修复实际无效；现在 weight 恒 < 槽数，普通工具与 reindex 永可并行
+const DEFAULT_CONCURRENCY = 5
 const HEAVY_TOOLS = new Set(['reindex'])
 const MEMORY_CHECK_INTERVAL_MS = 30_000
 const MEMORY_DANGER_MB = 480
@@ -24,9 +28,50 @@ const MEMORY_DANGER_MB = 480
 // r35-fix: Windows 无 getuid → UID 兜底 0（与 parse-client.js 同款守卫）
 
 const UID = typeof process.getuid === 'function' ? process.getuid() : 0
-const PARSE_SERVICE_SOCKET = `/tmp/malong-parse-${UID}.sock`
-const PARSE_SERVICE_BIN = join(os.homedir(), '.local', 'bin', 'malong-parse')
+// r9(H14)：parse-client 的 socket 路径已跟随 env（r8 F4 pid 同步）——mcp-server 的检查/spawn 探测
+// 还硬编码默认路径 → 设了 MALONG_SOCKET 的会话双 spawn / 孤儿 daemon
+const PARSE_SERVICE_SOCKET = process.env.MALONG_SOCKET || `/tmp/malong-parse-${UID}.sock`
+// r53: MALONG_PARSE_BIN env 覆盖（与 parse-client 对齐——此前启动 daemon 用硬编码路径，运行期重启用 env 路径，用户设 env 后两个路径 daemon 可能并存）
+const PARSE_SERVICE_BIN = process.env.MALONG_PARSE_BIN || process.env.MALONG_PARSE_BIN_ALT || join(os.homedir(), '.local', 'bin', 'malong-parse')
 const PARSE_SERVICE_BIN_ALT = join(__dirname, '..', 'malong-parse', 'target', 'release', 'malong-parse')
+
+// r11(M3)：daemon stderr 落盘——旧实现 stdio ignore 把 tracing 日志（SLOW/PANIC/TIMEOUT 等排障关键）全丢 /dev/null，
+// r10-B 的 rotate_stdout_log_if_needed 只对 shell 重定向生效，程序化 spawn 是 no-op；
+// 此处打开 fd2 到 ~/.local/share/malong/parse-stderr.log（>50MB 简单轮转保留一份）
+function openParseStderrFd() {
+  const dir = join(os.homedir(), '.local', 'share', 'malong')
+  mkdirSync(dir, { recursive: true })
+  const logPath = join(dir, 'parse-stderr.log')
+  try {
+    const st = statSync(logPath)
+    if (st.size > 50 * 1024 * 1024) renameSync(logPath, `${logPath}.1`)
+  } catch {}
+  return openSync(logPath, 'a')
+}
+
+// R22-⑱（第五轮核实）：daemon spawn 无原子锁——两个 MCP 进程同时探测失败 → 双 spawn → 一个 EADDRINUSE 变孤儿。
+// O_EXCL 锁 + mtime stale（>10s 无 socket 视为崩溃残留）：获取失败 = 另一进程正在启动 → 等 socket 出现。
+const PARSE_SPAWN_LOCK = join(dirname(PARSE_SERVICE_SOCKET), '.parse-spawn.lock')
+
+function acquireSpawnLock() {
+  try {
+    writeFileSync(PARSE_SPAWN_LOCK, `${process.pid} ${Date.now()}`, { flag: 'wx' })
+    return true
+  } catch {
+    try {
+      const st = statSync(PARSE_SPAWN_LOCK)
+      if (Date.now() - st.mtimeMs > 10_000) {
+        try { unlinkSync(PARSE_SPAWN_LOCK) } catch {}
+        return acquireSpawnLock()
+      }
+    } catch {}
+    return false
+  }
+}
+
+function releaseSpawnLock() {
+  try { unlinkSync(PARSE_SPAWN_LOCK) } catch {}
+}
 
 async function ensureParseService() {
   // 检查是否已运行
@@ -40,7 +85,10 @@ async function ensureParseService() {
       })
       crashLog('malong-parse already running')
       return
-    } catch {}
+    } catch (e) {
+      // r11(L4)：probe 失败记录——旧实现静默落入 spawn 分支，慢 daemon（>1s 未 accept）被误判死亡 → 二次 spawn 竞态
+      crashLog(`malong-parse probe failed (${e.message}); will spawn new daemon`)
+    }
   }
 
   // 查找二进制
@@ -55,9 +103,21 @@ async function ensureParseService() {
 
   // 启动服务
   try {
+    if (!acquireSpawnLock()) {
+      // 另一进程正在启动 daemon——等 socket 出现（最多 2s），不重复 spawn
+      for (let i = 0; i < 20; i++) {
+        await new Promise(r => setTimeout(r, 100))
+        if (existsSync(PARSE_SERVICE_SOCKET)) {
+          crashLog('malong-parse socket ready (other process)')
+          return
+        }
+      }
+      crashLog('malong-parse spawn lock held but socket never appeared; giving up')
+      return
+    }
     const child = spawn(binPath, [], {
       detached: true,
-      stdio: ['ignore', 'ignore', 'ignore'],
+      stdio: ['ignore', 'ignore', openParseStderrFd()],
     })
     child.on('error', (e) => {
       // 二进制不可执行（EACCES/损坏 ELF 等）：异步错误，必须监听否则 uncaughtException 崩服务
@@ -71,11 +131,14 @@ async function ensureParseService() {
       await new Promise(r => setTimeout(r, 100))
       if (existsSync(PARSE_SERVICE_SOCKET)) {
         crashLog('malong-parse socket ready')
+        releaseSpawnLock()
         return
       }
     }
     crashLog('malong-parse failed to start within 2s')
+    releaseSpawnLock()
   } catch (e) {
+    releaseSpawnLock()
     crashLog(`malong-parse spawn error: ${e.message}`)
   }
 }
@@ -131,7 +194,7 @@ function crashLog(msg) {
 }
 
 function getWorkspaceDir(workspaceDir) {
-  const hash = crypto.createHash('md5').update(resolve(workspaceDir)).digest('hex').slice(0, 12)
+  const hash = crypto.createHash('md5').update(resolve(workspaceDir)).digest('hex').slice(0, 12) // malong-ignore: 仅用于生成缓存目录名，非安全用途
   const wsDir = join(workspacesDir, hash)
   if (!existsSync(wsDir)) mkdirSync(wsDir, { recursive: true })
   return wsDir
@@ -174,6 +237,8 @@ async function initModules() {
   await codeIndexMod.init(core)
   repoMapMod = await import('./repo-map.js')
   await repoMapMod.init(core)
+  // r46: code-search 服务此前从未接线——initModules 只加载三个模块，code_search 工具在 MCP 下恒报 service_unavailable
+  await (await import('./code-search.js')).init(core)
 
   const toolsDir = join(__dirname, 'tools')
   registry = new ToolRegistry(toolsDir, { log: core.log })
@@ -194,11 +259,15 @@ async function initModules() {
   }
 
   // 工作区索引库自清理（治本 B）：启动时按 last activity 清 stale 缓存（可重建，删了下次 reindex 恢复）。
-  // env MALONG_WS_GC_DAYS 控制阈值（默认 14 天，设 0 禁用）。
-  const gcDays = Number(process.env.MALONG_WS_GC_DAYS ?? 14)
+  // env MALONG_WS_GC_DAYS 控制阈值（r10：默认 3 天，设 0 禁用）。
+  const gcDays = Number(process.env.MALONG_WS_GC_DAYS ?? 3)
   if (gcDays > 0) {
     try {
-      const gc = cleanupStaleWorkspaces(workspacesDir, { maxAgeDays: gcDays })
+      // r9(F10/H12)：启动 GC 保护本进程全部已初始化 workspace（不只当前一个）——
+      // 多会话共享 stateDir 时，B 进程启动会把 A 进程在用但无写入的库删掉
+      const protect = []
+      try { protect.push(...(core.getService('codeIndex')?.getTouchedWorkspaceHashes?.() || [])) } catch {}
+      const gc = cleanupStaleWorkspaces(workspacesDir, { maxAgeDays: gcDays, protect })
       if (gc.deleted_count > 0) crashLog(`workspace GC: pruned ${gc.deleted_count} stale workspace cache(s), freed ${gc.freed_mb}MB (max_age=${gcDays}d)`)
     } catch (e) {
       safeLog(`[gc] workspace cleanup failed (non-fatal): ${e.message}`)
@@ -216,6 +285,8 @@ function buildContext() {
     codeIndexService: core.getService('codeIndex'),
     repoMapService: core.getService('repoMap'),
     langParserService: core.getService('langParser'),
+    // r46: code_search 工具的服务接线（此前 buildContext 漏暴露，handler 恒 undefined → service_unavailable）
+    codeSearchService: core.getService('codeSearch'),
     runHealthCheck: () => runHealthCheck({
       stateDir, toolsDir: join(__dirname, 'tools'), workspacesDir, registry, log: core.log, semaphore, activeRequests,
       parseService: core.getService('langParser'),
@@ -275,26 +346,47 @@ function handleRequest(req) {
         safeRespondError(id, -32000, 'Server still loading modules, please retry in a few seconds')
         break
       }
-      const { name, arguments: toolArgs } = params || {}
+      const { name, arguments: toolArgsRaw } = params || {}
+      // R21b：参数宽容层——某些客户端（通天插件等）可能把参数文本当字符串降级传参；
+      // 能解析则用解析结果，否则显式报错（opencode 不会这么传，parse 失败客户端即拒，零副作用）
+      let toolArgs = toolArgsRaw
+      if (typeof toolArgsRaw === 'string') {
+        try { toolArgs = JSON.parse(toolArgsRaw) } catch {
+          safeRespondError(id, -32603, 'Invalid tool arguments: expected object, received string that is not valid JSON')
+          break
+        }
+      }
 
       if (!registry.hasTool(name)) {
         safeRespondError(id, -32601, `Tool not found: ${name}`)
         break
       }
 
-      const weight = HEAVY_TOOLS.has(name) ? concurrency : 1
+      const weight = HEAVY_TOOLS.has(name) ? heavyToolWeight(concurrency) : 1
       const reqId = `${id}_${name}_${Date.now()}`
-      activeRequests.set(reqId, { name, startTime: Date.now() })
+      activeRequests.set(reqId, { name, startTime: Date.now(), weight })
 
       const callTool = async () => {
         const lock = await semaphore.acquire(weight, SEMAPHORE_TIMEOUT_MS)
         if (lock?.timedOut) {
           activeRequests.delete(reqId)
-          safeRespondError(id, -32603, `Semaphore wait timeout after ${SEMAPHORE_TIMEOUT_MS}ms — queue congestion or a stuck tool. Retry later.`)
+          // r10e(F3)：超时信息附当前占用者明细——旧文案只报 “stuck tool”，LLM 不知道谁占着槽/还要等多久 → 盲目重试撞同一窗口
+          const busy = Array.from(activeRequests.entries()).map(([k, v]) => `${v.name}(${Math.round((Date.now() - v.startTime) / 1000)}s)`)
+          const sem = semaphore.getStatus()
+          safeRespondError(id, -32603, `Semaphore wait timeout after ${SEMAPHORE_TIMEOUT_MS}ms — 槽位占用中：current=${sem.current}/${sem.max}，队列=${sem.queue.length}（weight ${sem.queue.map(q => q.weight).join(',')}）` + (busy.length ? `，正在执行：${busy.join(', ')}` : '') + `。建议：先调 health 看占用，或等 ${busy.join('/') || '当前请求'} 结束后重试。`)
           return
         }
         let timer
         let timedOut = false
+        // R2：released 标志——release 只执行一次。catch 里的 else 分支（handler/安全响应抛错）与
+        // safeRespond 内层 finally 的 release 可能同时触发，无标志会 double release（负计数污染探针）。
+        let released = false
+        const releaseSlot = () => {
+          if (!released) {
+            released = true
+            semaphore.release(weight)
+          }
+        }
         try {
           const context = buildContext()
           const timeoutPromise = new Promise((_, reject) => {
@@ -303,14 +395,23 @@ function handleRequest(req) {
               reject(new Error(`Request timeout after ${REQUEST_TIMEOUT_MS}ms`))
             }, REQUEST_TIMEOUT_MS)
           })
-          const toolPromise = registry.callTool(name, toolArgs, context)
-          toolPromise.catch(() => {})
-
-          await Promise.race([toolPromise, timeoutPromise])
+          // r8(F9)：信号量在工具真正结束时释放——旧实现超时即放账，僵尸工具仍在跑 → 并发超限 + 客户端重试与僵尸写交错
+          // r9(F9)：先响应后释放——finally 挂工具上会让 release 先于 safeRespond（大结果 stringify 可达百 ms 级同步），
+          // 期间新重工具（reindex weight=3）抢占全部槽位 → 旧响应被推迟 → 客户端超时重试 → 重复副作用
+          const rawPromise = registry.callTool(name, toolArgs, context)
+          rawPromise.catch(() => {})
+          await Promise.race([rawPromise, timeoutPromise])
           if (!timedOut) {
-            safeRespond(id, {
-              content: [{ type: 'text', text: JSON.stringify(await toolPromise, null, 2) }],
-            })
+            try {
+              safeRespond(id, {
+                content: [{ type: 'text', text: JSON.stringify(await rawPromise, null, 2) }],
+              })
+            } finally {
+              releaseSlot()
+            }
+          } else {
+            // 超时路径：release 挂到工具真正结束（r8 F9 语义保留）——僵尸未停槽位不放
+            rawPromise.then(releaseSlot, releaseSlot)
           }
         } catch (e) {
           if (timedOut) {
@@ -319,11 +420,13 @@ function handleRequest(req) {
             safeRespondError(id, -32603, `Request timeout after ${REQUEST_TIMEOUT_MS}ms`)
             crashLog(`tool ${name} completed AFTER timeout (${REQUEST_TIMEOUT_MS}ms) — result discarded`)
           } else {
-            safeRespondError(id, -32603, e.message)
+            // R2：handler 抛异常 = 工具已结束，槽位必须还（与超时路径释放语义一致）
+            releaseSlot()
+            // 审核补（R10）：DB 不可用（BUSY/损坏）透出 service_unavailable（-32001）而非笼统内部错误
+            safeRespondError(id, e?.code === 'service_unavailable' ? -32001 : -32603, e.message)
           }
         } finally {
           clearTimeout(timer)
-          semaphore.release(weight)
           activeRequests.delete(reqId)
         }
       }
@@ -521,7 +624,7 @@ initModules().then(() => {
         }
 
         // 自动软重启：单进程 MCP 无 supervisor，无法真重启自己 —— 诚实地报告并复位可复位状态，
-        // 由外层（opencode）重启进程（递归进化第 5 轮 P1#14：旧实现只打日志谎称已重启）
+        // 由外层（MCP 宿主）重启进程（递归进化第 5 轮 P1#14：旧实现只打日志谎称已重启）
         const now = Date.now()
         if (now - lastAutoRestart > 300_000 && watchdogRestarts < MAX_AUTO_RESTARTS) {
           watchdogRestarts++

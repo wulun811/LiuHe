@@ -1,5 +1,5 @@
 // 16：file 参数共用守卫——LLM 传错 file（目录/绝对路径/不存在）时给出精确归因，
-// 而不是静默返回空或掉 text_fallback（第二轮 UX 报告事故：把 workspace 根目录传成 file）。
+// 而不是静默返回空结果（第二轮 UX 报告事故：把 workspace 根目录传成 file）。
 // 全项目唯一维护点：服务层（getImpactAnalysis/getModuleDependencies/getFileOutline）与
 // handler 层（references/inspect/find-tests/rename-symbol）全部复用本函数。
 
@@ -49,7 +49,7 @@ export function resolveFileArg({ db, workspaceDir, file }) {
   }
   const abs = workspaceDir ? join(workspaceDir, path) : path
   if (existsSync(abs)) {
-    return { ok: false, error: { code: 'FILE_NOT_INDEXED', message: `File exists but is not indexed yet: ${path}`, suggestion: `Retry (auto-indexes on demand) or call reindex(workspace_dir=...)` } }
+    return { ok: false, error: { code: 'FILE_NOT_INDEXED', message: `File exists but is not indexed yet: ${path}`, suggestion: `Call reindex(workspace_dir=...) to index it (query tools auto-index on demand via ensureFreshFile; this error means the file was excluded or indexing failed)` } }
   }
   return { ok: false, error: { code: 'FILE_NOT_FOUND', message: `No such file: ${path}`, suggestion: 'Check the path is relative to workspace_dir, or use glob to find the file' } }
 }

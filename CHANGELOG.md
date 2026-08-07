@@ -1,253 +1,98 @@
-# Changelog
-
-All notable changes to **Malong LiuHe** are documented here.
-
-## [0.3.35] - 2026-08-02
-
-### r35: Sandbox edition — zero-dependency SQLite (db-adapter dual-backend)
-
-Branch product for extreme environments (Node >= 20, **no npm install, no native compilation**):
-
-- **`db-adapter.js`**: backend auto-detection — `better-sqlite3` when available (full version, behavior 100% unchanged); otherwise falls back to the **vendored sql.js WASM** (`malong/vendor/`, MIT, zero-dependency)
-- sql.js backend: read-only mtime-detected reload (auto re-reads after writer exports), transaction-granularity export with 500ms throttled merge, tmp+rename atomic write-back, `prepare/get/all/run/exec/close/transaction/pragma` shapes aligned with better-sqlite3
-- 6 files migrated to `createDb` (code-index / embedded-reader / repo-map / health-check / naming-consistency); `initWorkspace` async propagation across 17 handlers and 16 test files
-- `releases/` re-cut at 0.3.34 (previous 0.3.32 binary contained already-fixed bugs) — sandbox deployment: extract to `~/.local/bin`, zero cargo
-- Verified in a simulated sandbox (better-sqlite3 removed): full `npm test` (11 files, 338 assertions) + mcp-server + dogfood all green; full-version regression green; `test-db-adapter` (13 assertions) locks both backends
-- Third-party notice: `THIRD_PARTY_NOTICES.md` (sql.js 1.12.0, MIT)
-- README (EN/ZH): "Zero-build deployment" section
-
-## [0.3.34] - 2026-08-02
-
-### r34 + r34-fix: Test coverage drive-out — 5 real bugs fixed, 970+ JS / 68 Rust assertions
-
-Test coverage pushed into previously untested layers (protocol framing, server dispatch, MCP stdio, tool registry, repo-map, 7 orphan handlers, patch parser, file collector, NL code search, health stats). **Five real bugs found and fixed**:
-
-- **Fixed** `PrioritizedRequest::Ord` inverted priority comparison — `batch_extract` (priority=1) was queued *after* normal requests (BinaryHeap is a max-heap; pop() returns the largest)
-- **Fixed** `simplify.rs` byte-slice truncation `&text[..100]` panicked on UTF-8 multi-byte boundaries (CJK/emoji) — now char-based truncation
-- **Fixed** `patch-parser.js` — the P2-C9 lookahead made the standard SEARCH/REPLACE format parse **100% of the time to zero blocks**; also fixed replacement leaking trailing whitespace (normalized-length slicing) and fuzzy-match length misalignment (dynamic end expansion)
-- **Fixed** `code-search.js` intent ordering — `/depend.*/` in the whereUsed entry hijacked `dependency tree of X` queries
-- **Fixed** `health-check.js` `success_rate` counted `error` status as success (`(total-crash)/total` → now `ok/total`)
-
-Known limits locked by tests: `**/src/foo` multi-segment glob never matches; `generated_*` prefix rules only match at repo root.
-
-New suites: `test-mcp-server` (MCP stdio protocol, 18), `test-tool-registry` (41), `test-repo-map` (32), `test-handler-smoke` (7 orphan handlers, 28), `test-patch-parser` (20), `test-file-collector` (33), `test-code-search` (24), `test-health-check` (17), plus Rust inline tests in `protocol.rs`/`cache.rs`/`server.rs`/`simplify.rs`.
-
-`npm test` 130 → **325** assertions (10 files); `cargo test` 14 → **68**; 1038+ assertions across 45 test files.
-
-### r31: Cross-platform support — Windows (TCP) + macOS ready (see 0.3.33 for details)
-
-- Windows: TCP `127.0.0.1:31001` (`MALONG_PORT` override), no pid/SIGTERM; macOS/Windows build-ready via GitHub Actions matrix; release artifacts on tag
-- Windows path adaptation (r31-fix): `pathToFileURL` dynamic imports, `tmpdir()`-based test paths, `toDbRel` forward-slash normalization, UDS→named pipe on Windows, `sep`-aware workspace boundary check
-- Reverse-drift guard in `sync-from-dev.sh`: refuses to sync when OSS-only improvements are missing in the dev repo (checks 7 markers, `--skip-guard` escape hatch)
-
-## [0.3.33] - 2026-08-02
-
-### r31: Cross-platform support — Windows (TCP) + macOS ready
-
-- `malong-parse` now builds on **Linux / macOS / Windows**:
-  - Unix (Linux/macOS): Unix socket at `/tmp/malong-parse-{uid}.sock` (override with `MALONG_SOCKET`)
-  - Windows: TCP `127.0.0.1:31001` (override with `MALONG_PORT`); no pid file / SIGTERM / instance probe (client-side auto-restart degraded — start the daemon manually)
-- `handle_connection` genericized (`tokio::io::split`) to serve both stream types
-- `parse-client.js`: platform-aware endpoint (`process.getuid` guard, TCP connect on Windows)
-- Removed the unused `nix` crate (declared, never used)
-- New CI: GitHub Actions matrix (ubuntu / macos-13 x86 / macos-14 arm / windows) runs `cargo test` + `npm test` + dogfood suites; tag `v*` triggers cross-platform release artifacts
-
-## [0.3.32] - 2026-08-02
-
-### r30: Test blind-spot closure + two real `trace_symbol` bugs
-
-- Added functional tests for `edit_transaction`, `diff_facts`, `trace_symbol` (previously smoke-only) — new `test-dogfood-r30` with 16 assertions
-- **Fixed** `trace_symbol` value extraction leaving a trailing `;` (`const X = 3;` → `"3;"`), breaking `JSON.parse`
-- **Fixed** constant read-sites never found: index refs only record calls/imports, so an imported constant always has ≥1 (import) refs and the text fallback (only triggered at 0 refs) never ran — now runs and merges when all refs are `import` kind (`index_plus_text`)
-
-### r29: Directory-scope filtering + registration-pattern false positives
-
-- **Fixed** `sweep_dead_code` directory scope: DB-layer results leaked the whole workspace (scope-outside files reported); added prefix filtering
-- **Fixed** Rust `#[cfg(test)]` inline test functions (`test_*`) reported as dead code
-- **Fixed** `detectDeadCode` false positives for registration patterns (`registerService('x', { run: fn })` — zero refs); explicit `isExportReferenced` exemption (export forms like `module.exports` are still reported — dead exports are real dead code)
-- **Fixed** 5 `sql-concat` false positives in code-index: constant `ALIAS_LOCAL_MARKER` interpolation → parameterized queries
-
-### r28: Multi-language deep support
-
-- `malong-parse` added **C / C++ / Java / Bash** parsers (10 languages total, was 6)
-- **Fixed** Rust kind mapping: `impl` blocks no longer emit fake symbols; methods get `impl_for`; `trait` → interface; `enum` → class
-- Full-chain alignment: CACHED_EXT / langOf / symbol-anchors / style-sniffer / security_review
-- Follow-up fixes: `.jsx` index failure (parser mapping gap), `.hh/.hxx` set inconsistency, honest tool language claims (removed `.rb/.php` the parser can't parse), CJS `require(` only scanned for CJS files, `Cargo.lock` committed (bin project reproducibility), Rust dead-code warnings zeroed
-
-## [0.3.31] - 2026-08-02
-
-### r27: security_review false-positive governance + rule golden tests
-
-- `exec-cmd`: `(?<![\w.])` lookbehind excludes `RegExp.exec` member calls
-- `sql-concat`: no cross-line prose matching; real multi-line concatenation still caught
-- New rule golden tests (12 assertions): 8 true positives must fire, 4 false-positive patterns must not
-
-## [0.3.30] - 2026-08-01
-
-### r26: Dead-code cleanup + impact-analysis dedup (dogfooding)
-
-- Removed dead code across the codebase; deduplicated impact-analysis paths
-
-## [0.3.29] - 2026-08-01
-
-### r25: 512MB memory stress test + security_review governance
-
-- docker `--memory=512m`: 128 concurrent / 256 in-flight requests, zero OOM, RSS 134MB
-- security_review false-positive governance round 1 (16 → 7 findings on self-scan)
-
-## [0.3.28] - 2026-08-01
-
-### r24: Expert-review landing — implicit context
-
-- Tools become context-aware without new config languages (expert review adopted)
-
-## [0.3.27] - 2026-08-01
-
-### r23-fix5: Return-consistency / conflict parameters / private-convention leakage
-
-## [0.3.26] - 2026-08-01
-
-### r23-fix4: manifest ↔ handler contract audit
-
-## [0.3.25] - 2026-08-01
-
-### r23-fix3: Input-type robustness / ReDoS / performance / determinism
-
-## [0.3.24] - 2026-08-01
-
-### r23-fix2: LLM-user perspective — 9 gaps fixed
-
-## [0.3.23] - 2026-08-01
-
-### r23-fix: New 5 tools full review — 12 issues fixed
-
-## [0.3.22] - 2026-08-01
-
-### r23: 5 new tools added (33 → 38 MCP tools)
-
-## [0.3.21] - 2026-08-01
-
-### r23: Recursive evolution — dogfooding full scan
-
-## [0.3.20] - 2026-08-01
-
-### UX round-3 follow-ups (3 items) completed
-
-## [0.3.19] - 2026-08-01
-
-### UX round-3: 3 issues fixed
-
-## [0.3.18] - 2026-08-01
-
-### Test-framework fixes + `repo_map` reads from the index DB
-
-## [0.3.17] - 2026-08-01
-
-### Tool-description compression for all 33 tools (system prompt 1610t → 865t, ↓46%)
-
-## [0.3.16] - 2026-08-01
-
-### Unified `file` argument guard wired into all tools
-
-## [0.3.15] - 2026-08-01
-
-### "Write-then-read" index consistency root-fix + 5 UX issues
-
-## [0.3.14] - 2026-08-01
-
-### Full-tool trial round 2 — 4 fixes (incl. CJS `require` blind spot)
-
-## [0.3.13] - 2026-08-01
-
-### Index self-healing loop (extractor version stamp + dirty marking + open-DB check + force re-extract)
-
-## [0.3.12] - 2026-08-01
-
-### All-33-tool dogfood UX review — 7 bugs fixed (incl. a "fixed but never deployed" find)
-
-## [0.3.11] - 2026-08-01
-
-### Workspace index DB self-cleanup
-
-## [0.3.10] - 2026-08-01
-
-### All-tool dogfooding — 5 bugs (fix_imports / test_bridge / trace_symbol / call_chain / inspect)
-
-## [0.3.9] - 2026-08-01
-
-### Write-pipeline deep review + UDS multi-session concurrency safety
-
-## [0.3.8] - 2026-08-01
-
-### Rust support (triggered by dogfooding: indexing malong-parse's own source)
-
-## [0.3.7] - 2026-08-01
-
-### Four parallel review groups — 36 true positives fixed (service 15 / write-side 7 / QA 14)
-
-## [0.3.6] - 2026-08-01
-
-### Recursive evolution rounds 3–6 (regex literals / write pipeline / full review 18 issues / P2 debt 37)
-
-## [0.3.5] - 2026-08-01
-
-### Recursive evolution rounds 1–2 — 4 real bugs
-
-## [0.3.4] - 2026-08-01
-
-### Semaphore timeout fallback + repo_map weight relaxation
-
-## [0.3.3] - 2026-08-01
-
-### Self-reference trap fix + P2 false positives + UX polish
-
-## [0.3.2] - 2026-08-01
-
-### QA gatekeeper onboarding + production checkup (0-false-positive gate)
-
-## [0.3.1] - 2026-08-01
-
-### LiuHe philosophy v2: Body / Six Gated Constraints / Discipline three-layer structure
-
-## [0.3.0] - 2026-08-01
-
-### Primitivization P1+P2+P3 (MVP: `read_symbol` / `write_symbol` / `write_symbols` + embedded reader)
-
-- call reduction ↓50%, token ↓65% on the same task
-
-## [0.2.1] - 2026-07-31
-
-### End-to-end tests + runtime fixes + parse-performance optimization + extraction correctness
-
-## [0.2.0] - 2026-07-31
-
-### Five-round full code review + performance test suite
-
-## [0.1.0] - 2026-07-31
-
-### Rust parsing service — tree-sitter uninstalled from Node.js
-
-- All parsing moved to the `malong-parse` Rust daemon (Unix socket), batch 50 files/request
-
-## 0.0.x — 2026-07-18 → 2026-07-28 (early development)
-
-- **0.0.26** 30-tool mutual-reference system + orchestration guide
-- **0.0.25** P0/P2 tool inter-reference + three deep review rounds
-- **0.0.24** `test_bridge` (closing the loop)
-- **0.0.23** 9 pure-algorithm P2 tools (20 → 29 tools)
-- **0.0.22** resumable indexing + chain awareness + unified usage stats
-- **0.0.21** P1 quality-gate tools (5) + MCP concurrency scheduling
-- **0.0.20** tree-sitter native memory management (N-API finalizer + event-loop yield)
-- **0.0.19** stdin-close fix + `tree.delete()` fix
-- **0.0.18–17** memory optimization — tree-sitter native leak diagnostics
-- **0.0.16** MCP server stability
-- **0.0.15** auto-index + `undo_commit` + batch impact analysis + startup self-check
-- **0.0.14** startup self-check + implicit stats + explicit feedback
-- **0.0.13** `edit_transaction` `file_edits` + description optimization + staleness detection + incremental indexing
-- **0.0.12** expert review: edit safety + nearest-match + standard error codes + blocking reindex
-- **0.0.11** AST-based `fix_imports` + specifier-level precise deletion + index robustness
-- **0.0.10** description compression + real-LLM validation + misuse detection fallback
-- **0.0.9** LLM UX enhancements (5 items + `edit_validate`)
-- **0.0.7–8** P0 toolset (5 tools) + directory reorganization
-- **0.0.4–6** bug fixes (incl. Impact Lens fatal bug), additions
-- **0.0.1–3** initial toolset
+# 六合工具集 版本日志
+
+版本要点速览（详细历史见 git log）。
+
+## 变更速览
+
+- **[0.4.1]** (2026-08-07): R22 深度审查 + 冻结期——五轮审核 30 项修复、三条真实工作流 58 断言（多语言/崩溃恢复/双进程并发）暴露 2 项 P1 即修即锁；全链 81 测试文件 1874 断言 0 失败；零依赖容器包 malong-liuhe-0.4.1 发布
+
+- **[0.4.0]** (2026-08-06): R1-R21 全量生产级审查修复轮（缓存投毒/semaphore 泄漏/事务恢复/sql.js 写丢失等 21 项）
+- **[0.3.59]** (2026-08-06): r12.5：全工具冒烟（重启后 44 工具逐个试跑）——2 真 bug 修复 + 1 过时数字清零
+- **[0.3.58]** (2026-08-06): r12.4：边界内自查兑现——裸 spawn/execFile 命令名注入面补上
+- **[0.3.57]** (2026-08-06): r12.3：扫描边界冻结——承认局限，边界内承诺必做
+- **[0.3.56]** (2026-08-06): r12.2：描述层去夸大——移除过时/过度承诺的描述词
+- **[0.3.55]** (2026-08-06): r12.1：预期管理收尾——响应层残余过度承诺清零 + 统一 coverage 边界字段
+- **[0.3.54]** (2026-08-06): 第十二轮修复（r12）：隔壁实战反馈回灌——C1 命令注入漏报 + seedTasks 死代码误报 + 跨模块异常污染 + 打分误导 + 未接线信号
+- **[0.3.53]** (2026-08-06): 第十一轮审查（r11）：全面审查修复——并发权重真 bug + 同步子进程 + 任意文件读取洞 + 读-写闭环断裂
+- **[0.3.52]** (2026-08-05): 第十轮审计（r10）：健壮度收尾——运维韧性 + 崩溃时序 + 债务最小落地
+- **[0.3.51]** (2026-08-05): 第九轮审计（r9）：衍生回归深审（r7/r8 修复引入的问题）+ 新盲区，28 项修复
+- **[0.3.50]** (2026-08-05): 第八轮审计（r8）：4 agent 全新角度深审，去重后 37 项真阳性全部复核并修复
+- **[0.3.49]** (2026-08-05): 第七轮审计（r54）：4 agent 并行深审，去重后 40 项真阳性全部修复
+- **[0.3.48]** (2026-08-04): 三轮深审 + 两轮全量试用（r50-r53b，共 22 项真阳性修复）
+- **[0.3.47]** (2026-08-04): 两轮全量试用审查 + 自查修复（r40-r49，共 14 项）
+- **[0.3.46]** (2026-08-03): B13 通天 MCP 能力缺口（6 缺口 + dep_graph 死链修复）
+- **[0.3.45]** (2026-08-03): Y002 统一未做项全集（7 Sprint 全交付）
+- **[0.3.44]** (2026-08-03): Y001 债务清零（5/5）
+- **[0.3.43]** (2026-08-03): Y001：从最短板开始的成熟度修复（5/5 Sprint）
+- **[0.3.42]** (2026-08-03): r41：debug_runner 不再把全绿运行误判为 TestFailure（exit-0 守卫）
+- **[0.3.41]** (2026-08-03): r40：journal 自动清理——终态事务超节流 TTL 清扫（在途/待审永不自动删）
+- **[0.3.40]** (2026-08-03): r39：security_review 误报抑制机制（行级 malong-ignore + 配置 securityIgnore，precision-first）
+- **[0.3.39]** (2026-08-03): r38：自进化轮次——用 malong 查 malong（清陈旧根级文件 + db-adapter 不变式加固 + e2e 测试入链）
+- **[0.3.38]** (2026-08-02): r37-fix3：多宿主适配验证（codex / Claude Code）——修 UDS listen EACCES 启动崩溃（真实 bug）
+- **[0.3.37]** (2026-08-02): r37：去 opencode 专用化——MCP 宿主中立（新增 host-config.js 统一状态目录）
+- **[0.3.36]** (2026-08-02): r36：自进化轮次——malong 自查 malong（重点 r35/winfix 新代码）+ db-adapter 重载精度修复 + renameRetry 可测化
+- **[0.3.35]** (2026-08-02): r35：沙盒分支产品——零依赖 SQLite（db-adapter 双后端），完整版零影响
+- **[0.3.34]** (2026-08-02): r34 + r34-fix：测试覆盖补齐——补测抓出 5 个真实 bug，npm test 130→325、cargo 14→68
+- **[0.3.33]** (2026-08-02): r31 + r31-fix：三平台支持（Windows TCP + macOS 就绪）+ 开源侧改进回灌
+- **[0.3.32]** (2026-08-02): r30：malong 审查 malong——测试盲区补齐（edit_transaction/diff_facts/trace_symbol）+ trace_symbol 两个真实 bug
+- **[0.3.31]** (2026-08-02): r27：security_review 误报治理第二轮（dogfooding 驱动）+ 规则黄金测试
+- **[0.3.30]** (2026-08-02): r26：malong 自查 malong——死代码清理 + getImpactAnalysis 去重（dogfooding）
+- **[0.3.29]** (2026-08-01): r25：512MB 内存压测 + security_review 误报治理
+- **[0.3.28]** (2026-08-01): r24：专家意见落地——隐式上下文（不造语言，让工具更懂事）
+- **[0.3.27]** (2026-08-01): r23-fix5：五轮收尾审查——返回一致性 / 冲突参数 / 私有约定泄漏
+- **[0.3.26]** (2026-08-01): r23-fix4：四轮审查——manifest↔handler 契约审计
+- **[0.3.25]** (2026-08-01): r23-fix3：三轮审查——输入类型健壮性 / ReDoS / 性能 / 确定性
+- **[0.3.24]** (2026-08-01): r23-fix2：二轮审查——LLM 使用者视角 9 项缺口全修
+- **[0.3.23]** (2026-08-01): r23-fix：新 5 工具全面审查修复（12 项阳性问题全修）
+- **[0.3.22]** (2026-08-01): r23 通天特色组件整合：5 个新工具进 MCP（33 → 38）
+- **[0.3.21]** (2026-08-01): r23 递归进化：用 malong 找 malong 的问题（dogfood 全量扫描）
+- **[0.3.20]** (2026-08-01): UX 第三轮下轮建议 3 项全部完成（r22）
+- **[0.3.19]** (2026-08-01): UX 第三轮 3 问题修复（r21）
+- **[0.3.18]** (2026-08-01): 测试框架修正（r19c）+ repo_map 改读索引库（r20）
+- **[0.3.17]** (2026-08-01): 递归进化第 19 轮：33 工具描述统一压缩（系统提示词 1610t → 865t）
+- **[0.3.16]** (2026-08-01): 递归进化第 16 轮：file 参数防线（一个共用守卫，全工具接线）
+- **[0.3.15]** (2026-08-01): 递归进化第 15 轮：UX 报告二轮 → 「写后读」索引一致性根治 + 5 问题修复
+- **[0.3.14]** (2026-08-01): 递归进化第 14 轮：全工具试用第二轮 → 4 问题修复（含 CJS require 盲区根治）
+- **[0.3.13]** (2026-08-01): 递归进化第 13 轮：索引自愈闭环（提取器版本戳 + 认 dirty + 开库自检 + force 重抽入口）
+- **[0.3.12]** (2026-08-01): 递归进化第 12 轮：全 33 工具 dogfood 体验审查 → 7 bug 全修（含一个「修了但没上线」的重大发现）
+- **[0.3.11]** (2026-08-01): 递归进化第 11 轮：工作区索引库自清理（用户质疑「SQLite 会自己清理吧」当场抓到——不会）
+- **[0.3.10]** (2026-08-01): 递归进化第 10 轮：全工具 dogfooding 炸出 5 bug（fix_imports/test_bridge/trace_symbol/call_chain/inspect）
+- **[0.3.9]** (2026-08-01): 递归进化第 9 轮：写侧管线深审 + UDS 多会话并发安全
+- **[0.3.8]** (2026-07-31): 递归进化第 8 轮：Rust 全面支持（dogfooding 索引 malong-parse 自身源码触发）
+- **[0.3.7]** (2026-07-31): 递归进化第 7 轮：四组并行审查 36 个真阳性（服务 15 / 写侧 7 / 质检 14）
+- **[0.3.6]** (2026-07-31): 递归进化第 3-6 轮（malong 查 malong）：正则字面量 / 写侧管线 / 全量审查 18 处 / P2 debt 37 项
+- **[0.3.5]** (2026-07-31): 递归进化第 1+2 轮（malong 查 malong）：4 个真 bug
+- **[0.3.4]** (2026-07-31): Semaphore 超时兜底 + repo_map 权重放宽（资源测量驱动）
+- **[0.3.3]** (2026-07-31): 自指陷阱修复验证 + P2 误报全修 + 体验优化
+- **[0.3.2]** (2026-07-31): 质检员上岗考核 + 生产体检修复（0 误报门禁）
+- **[0.3.1]** (2026-07-31): 六合理念升级：体 / 六合 / 戒 三层结构
+- **[0.3.0]** (2026-07-31): 原语化 P1+P2+P3（MVP 第一刀，对应方案 v4 附录 A-F）
+- **[0.2.1]** (2026-07-31): 端到端测试 + 运行时 bug 修复 + 解析性能优化 + 提取正确性修复
+- **[0.2.0]** (2026-07-30): 五轮全面代码审查 + 性能测试套件
+- **[0.1.0]** (2026-07-30): P3 成熟计划完成：Rust 解析服务 + tree-sitter 卸载
+- **[0.0.26]** (2026-07-30): 30 工具全量互引体系 + 编排指南重构
+- **[0.0.25]** (2026-07-30): P0/P2 工具互引升级 + 三轮深度审核
+- **[0.0.24]** (2026-07-30): 新增: test_bridge 测试桥接器（闭环最后一环）
+- **[0.0.23]** (2026-07-30): 新增: 9 个 P2 纯算法工具（工具总数 20 → 29）
+- **[0.0.22]** (2026-07-30): 新增: 断点重续 + 连锁感知 + 统一使用统计
+- **[0.0.21]** (2026-07-30): 新增: P1 质量守门五工具 + MCP 并发调度
+- **[0.0.20]** (2026-07-29): 修复: N-API finalizer + 事件循环 yield — tree-sitter native 内存彻底治理
+- **[0.0.19]** (2026-07-29): 修复: stdin close 误触发 + tree.delete() 错误
+- **[0.0.18]** (2026-07-29): 内存优化 — tree-sitter native 内存泄漏初步诊断
+- **[0.0.17]** (2026-07-29): 内存优化
+- **[0.0.16]** (2026-07-29): MCP 服务稳定性修复
+- **[0.0.15]** (2026-07-29): 自动索引 + undo_commit + 批量影响分析 + 启动自检
+- **[0.0.14]** (2026-07-29): 启动自检 + 隐式统计 + 显式反馈
+- **[0.0.13]** (2026-07-29): edit_transaction file_edits + 工具描述优化 + 过期检测 + 增量索引
+- **[0.0.12]** (2026-07-29): 专家评审采纳：编辑安全 + 最近匹配 + 标准错误码 + reindex 阻塞模式
+- **[0.0.11]** (2026-07-29): fix_imports AST 化 + specifier 级精确删除 + 索引健壮性
+- **[0.0.10]** (2026-07-28): 工具描述压缩优化 + 真实 LLM 验证 + 误用检测兜底
+- **[0.0.9]** (2026-07-28): LLM 体验增强（5 项 + edit_validate）
+- **[0.0.8]** (2026-07-28): 目录重组
+- **[0.0.7]** (2026-07-28): 新增 P0 工具集（5 个）
+- **[0.0.6]** (2026-07-28): 新增
+- **[0.0.5]** (2026-07-28): 修复 (代码审计发现)
+- **[0.0.4]** (2026-07-28): 修复 (Impact Lens 致命 bug)
+- **[0.0.3]** (2026-07-27): 新增
+- **[0.0.2]** (2026-07-25): 新增
+- **[0.0.1]** (2026-07-18): 新增

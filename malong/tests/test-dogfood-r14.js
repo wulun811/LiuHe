@@ -114,6 +114,28 @@ const sweepWhole = await sweep.handle({ workspace_dir: WS, scope: '.' }, { codeI
 assert(sweepWhole.scanned_files === 7, `③ scope=. 扫全部 7 个文件（得 ${sweepWhole.scanned_files}）`)
 assert(sweepWhole.dead_code.some(d => d.type === 'unused_function' && d.name === 'testIt'), `③ 全仓扫描照常报 unused_function（${JSON.stringify(sweepWhole.summary)}）`)
 
+// ③'' r10d：DB 层返回 constructor（JS new 调用 refs 记类名）时 handler 必须豁免（MAGIC_METHODS）
+const sweepCons = await sweep.handle({ workspace_dir: WS, scope: 'lib.js' }, {
+  codeIndexService: {
+    ...svc,
+    detectDeadCode: async () => [
+      { name: 'constructor', type: 'method', file: 'lib.js', start_line: 1 },
+      { name: 'realDeadFn', type: 'function', file: 'lib.js', start_line: 3 },
+    ],
+  },
+  getWorkspaceDir: () => DATA,
+})
+assert(!sweepCons.dead_code.some(d => d.name === 'constructor'), `③'' constructor 豁免（得 ${JSON.stringify(sweepCons.dead_code.map(d => d.name))}）`)
+assert(sweepCons.dead_code.some(d => d.name === 'realDeadFn'), `③'' 真死代码仍报`)
+
+// ③''' r10d：isPropertyAccessed 属性访问豁免语义（code-index 层，直接 import 导出函数）
+const { isPropertyAccessed } = await imp(join(MALONG_DIR, 'code-index.js'))
+const ga = join(WS, 'getter-use.js')
+writeFileSync(ga, `const p = svc.indexProgress\nthis.lastIndexed = 1\n`)
+assert(isPropertyAccessed('indexProgress', ga), `③''' svc.indexProgress 属性读豁免`)
+assert(isPropertyAccessed('lastIndexed', ga), `③''' this.lastIndexed 赋值豁免`)
+assert(!isPropertyAccessed('getCallGraph', ga), `③''' 无属性访问不豁免`)
+
 // ③' r29：目录 scope 时 DB 层结果限定在 scope 内——旧实现把整仓 unused_function 混进来
 const sweepDir = await sweep.handle({ workspace_dir: WS, scope: 'src' }, { codeIndexService: svc, getWorkspaceDir: () => DATA })
 assert(sweepDir.scanned_files === 1, `③' scope=src 只扫 1 个文件（得 ${sweepDir.scanned_files}）`)

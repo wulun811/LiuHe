@@ -1,10 +1,17 @@
 {
   "name": "gc",
+  "version": "1.0.0",
   "description": "Trigger manual GC (needs --expose-gc). Use when memory is high.",
-  "handler": "handler.js",
   "inputSchema": {
     "type": "object",
     "properties": {},
     "additionalProperties": false
-  }
+  },
+  "handler": "./handler.js",
+  "protocol_version": "1.0",
+  "tags": [
+    "memory",
+    "maintenance"
+  ],
+  "dependencies": []
 }

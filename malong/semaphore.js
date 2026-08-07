@@ -1,4 +1,13 @@
 // semaphore.js — 工具调用排队信号量（FIFO，weight 模型）
+
+// r11(H1)：重工具（reindex）权重 = max(3, ceil(concurrency/2))，**恒小于并发槽数**。
+// 教训：旧实现 weight=concurrency（并发 3→5 后 weight 从 3 变 5），任一普通工具占 1 槽时
+// 重工具永远凑不齐槽 → 排队 60s 超时（r10e 想修的问题原样存在且更糟）。
+// 规则：并发 ≥5 时 weight 必须 < concurrency（普通请求总能和重工具并行）；并发 ≤3 时 cap 到槽数（旧语义）。
+export function heavyToolWeight(concurrency) {
+  return Math.min(concurrency, Math.max(3, Math.floor(concurrency / 2)))
+}
+
 export class Semaphore {
   constructor(max) {
     this.max = max
@@ -29,7 +38,9 @@ export class Semaphore {
   }
 
   release(weight = 1) {
-    this.current -= weight
+    // R22-⑰（第四轮审核 P1）：下界保护——release 超发（weight 超过已 acquire 量）不得把
+    // 计数打成负数：负计数会让后续 acquire 永远不排队（并发超限静默）。钳制在 0。
+    this.current = Math.max(0, this.current - weight)
     while (this.queue.length > 0) {
       const next = this.queue[0]
       if (this.current + next.weight <= this.max) {

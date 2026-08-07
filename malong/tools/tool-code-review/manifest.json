@@ -1,7 +1,7 @@
 {
   "name": "code_review",
   "version": "1.0.0",
-  "description": "Review code: naming, comment coverage, long functions (>50 lines), duplicated blocks, diff review. No LLM, deterministic regex. Pass file or source; use diff for SEARCH/REPLACE patch review.",
+  "description": "Shape-level code check (deterministic regex, zero LLM): naming, comment coverage, long functions, duplicated blocks, diff review (SEARCH/REPLACE). Clears shallow noise before deep review — not a correctness verdict.",
   "inputSchema": {
     "type": "object",
     "properties": {

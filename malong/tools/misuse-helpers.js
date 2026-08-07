@@ -26,20 +26,3 @@ export function isConstantName(symbol) {
   if (!symbol) return false
   return /^[A-Z][A-Z0-9_]*$/.test(symbol) && symbol.length > 2
 }
-
-/**
- * 构造误用警告
- */
-export function misuseWarning(suggestedTool, suggestion) {
-  return {
-    warning: 'likely_wrong_tool',
-    suggestion: suggestion
-  }
-}
-
-/**
- * 构造工具切换建议
- */
-export function suggestTool(toolName, reason) {
-  return `For ${reason}, use ${toolName}.`
-}

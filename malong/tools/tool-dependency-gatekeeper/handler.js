@@ -1,5 +1,5 @@
-import { join, dirname, basename, extname } from 'node:path'
-import { existsSync, readFileSync } from 'node:fs'
+import { join, dirname, basename, extname, sep } from 'node:path'
+import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { ErrorCodes, makeError, validateFilePath } from '../../error-codes.js'
 import { scanCjsRequires } from '../../cjs-imports.js'
 
@@ -152,6 +152,16 @@ function resolvePackage(importName, ext) {
   return { pkg: importName.replace(/_/g, '-'), confident: false }
 }
 
+// R22-⑧（3 分档抽样 debt）：同仓库包（如 import A1，本地有 A1/ 目录或 A1.py）被 resolvePackage 报 unknown_mapping——
+// 本地模块本就不该出现在 manifest，`in_manifest: false` 会被误读为缺依赖；目录/同名文件存在 → 判本地模块跳过
+function isLocalModule(workspaceDir, module, ext) {
+  const candidates = [join(workspaceDir, module)]
+  if (ext) candidates.push(join(workspaceDir, `${module}${ext}`))
+  return candidates.some((p) => {
+    try { return existsSync(p) } catch { return false }
+  })
+}
+
 function installHint(pkg, ext) {
   if (['.js', '.mjs', '.cjs', '.ts', '.tsx', '.mts', '.cts'].includes(ext)) return `npm install ${pkg}`
   if (ext === '.py') return `pip install ${pkg}`
@@ -189,18 +199,24 @@ function findManifest(workspaceDir, fileRel, ext) {
   return { path: null }
 }
 
-function parsePyprojectToml(path, deps) {
+export function parsePyprojectToml(path, deps) {
   const content = readFileSync(path, 'utf-8')
   const lines = content.split('\n')
   let inDeps = false
+  let inPoetryDeps = false // r54(P1): poetry 段内键=包名（requests = "^2.28"），不以 dependencies 开头，需全收
   let inArray = false
   for (const line of lines) {
     const trimmed = line.trim()
-    if (trimmed === '[project]' || trimmed === '[tool.poetry.dependencies]' || trimmed === '[project.dependencies]') {
-      inDeps = true
+    if (trimmed === '[project]' || trimmed === '[project.dependencies]') {
+      inDeps = true; inPoetryDeps = false
       continue
     }
-    if (trimmed.startsWith('[') && inDeps && !inArray) { inDeps = false; continue }
+    // r54(P1): [tool.poetry.dependencies] 与 [tool.poetry.group.*.dependencies] 都是 poetry 依赖段
+    if (trimmed === '[tool.poetry.dependencies]' || (trimmed.startsWith('[tool.poetry.group.') && trimmed.endsWith('dependencies]'))) {
+      inDeps = true; inPoetryDeps = true
+      continue
+    }
+    if (trimmed.startsWith('[') && inDeps && !inArray) { inDeps = false; inPoetryDeps = false; continue }
 
     if (inDeps && trimmed.startsWith('dependencies')) {
       const inline = trimmed.match(/dependencies\s*=\s*\[(.*)\]/)
@@ -222,8 +238,18 @@ function parsePyprojectToml(path, deps) {
     }
 
     if (!inDeps) continue
-    // P2-B4：key=value 分支只收 dependencies 相关键——旧实现把 [project] 段的
-    // name/version/requires-python/keywords 等元数据全部当依赖（declared_deps 虚高）
+    if (inPoetryDeps) {
+      // r54(P1): poetry 段——键即包名全收（跳过 python 运行时本身）；兼容 "x" 与 { version = "x" } 两种值形
+      const m = trimmed.match(/^["']?([a-zA-Z0-9_-]+)["']?\s*=\s*(.+)$/)
+      if (m && m[1] !== 'python') {
+        const val = m[2].trim()
+        const verStr = val.match(/^["']([^"']*)["']/)
+        const verTbl = val.match(/version\s*=\s*["']([^"']*)["']/)
+        deps[m[1]] = { required: verStr ? verStr[1] : (verTbl ? verTbl[1] : '*') }
+      }
+      continue
+    }
+    // P2-B4：PEP 621 [project] 段 key=value 只收 dependencies 相关键——防 name/version/requires-python 元数据虚高
     if (!trimmed.startsWith('dependencies')) continue
     const m = trimmed.match(/^["']?([a-zA-Z0-9_-]+)["']?\s*=\s*(.+)$/)
     if (m && m[1].startsWith('dependencies')) {
@@ -318,6 +344,10 @@ function enrichFromLock(dir, deps) {
   }
 }
 
+// R22-⑰（第四轮审核 P1）：支持的语言集合——空 refs 区分「无导入」与「不支持」：
+// 支持语言无导入是正常结果（imports: [] 无 warning）；不支持语言才报 unsupported_language
+const SUPPORTED_EXTS = new Set(['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.py', '.go', '.rs', '.java', '.rb', '.php', '.c', '.cpp', '.h', '.hpp', '.cs', '.swift', '.kt', '.m', '.mm', '.sh'])
+
 async function extractImports(file, content, langParser) {
   const ext = extname(file)
   let refs
@@ -326,9 +356,14 @@ async function extractImports(file, content, langParser) {
   } catch (e) {
     return { imports: [], warnings: [{ file, reason: `parse_failed: ${e.message}` }] }
   }
-  if (!refs || !refs.length) return { imports: [], warnings: [{ file, reason: 'unsupported_language' }] }
+  if (!refs || !refs.length) {
+    // R22-⑰：无导入 ≠ 不支持——.js 纯 env 引用文件此前被误报 unsupported_language
+    if (SUPPORTED_EXTS.has(ext)) return { imports: [], warnings: [] }
+    return { imports: [], warnings: [{ file, reason: 'unsupported_language' }] }
+  }
   const imports = refs.filter(r => r.type === 'import').map(r => {
-    let mod = r.module
+    // r52: r.module 可能缺失（Rust 解析器不保证该键）——同仓 fix-imports/code-index 均 || '' 兜底
+    let mod = r.module || ''
     if (mod.startsWith('.')) return { module: mod, raw: r.module, line: r.line, isRelative: true }
     if (ext === '.go' || ext === '.rs') {
       return { module: mod, raw: r.module, line: r.line, isRelative: false }
@@ -358,6 +393,8 @@ async function extractImports(file, content, langParser) {
 export async function handle(args, context) {
   const workspaceDir = args?.workspace_dir
   if (!workspaceDir) return makeError(ErrorCodes.INVALID_INPUT, 'workspace_dir is required')
+  // R22-⑯：非字符串 workspace_dir 让 join 裸抛 TypeError
+  if (typeof workspaceDir !== 'string') return makeError(ErrorCodes.INVALID_INPUT, `workspace_dir must be a string (got ${typeof workspaceDir})`)
 
   const file = args?.file
   if (!file) return makeError(ErrorCodes.INVALID_INPUT, 'file is required')
@@ -367,13 +404,27 @@ export async function handle(args, context) {
 
   const absPath = join(workspaceDir, file)
   if (!existsSync(absPath)) return makeError(ErrorCodes.FILE_NOT_FOUND, `File does not exist: ${file}`, { file, suggestion: 'check the file path, or use glob to locate it' })
+  // R22-⑯：symlink 逃逸守卫——file 指向 workspace 内 symlink 到外部文件时外部源码被解析为依赖
+  try {
+    const realWs = realpathSync(workspaceDir)
+    const realAbs = realpathSync(absPath)
+    if (realAbs !== realWs && !realAbs.startsWith(realWs + sep)) {
+      return makeError(ErrorCodes.PATH_BLOCKED, `file resolves outside workspace: ${absPath}`, { file, reason: 'symlink_escape' })
+    }
+  } catch {
+    return makeError(ErrorCodes.PATH_BLOCKED, `cannot resolve file path: ${absPath}`, { file, reason: 'resolve_failed' })
+  }
 
   const langParser = context?.langParserService
   if (!langParser) return makeError(ErrorCodes.SERVICE_UNAVAILABLE, 'lang-parser service not available', {
     suggestion: 'This tool requires the MCP server context. Ensure malong MCP server is running.'
   })
 
-  const content = readFileSync(absPath, 'utf-8')
+  // r54(P1): readFileSync 无 try/catch——file 为目录(EISDIR)/不可读时裸异常违反错误对象契约
+  let content
+  try { content = readFileSync(absPath, 'utf-8') } catch (e) {
+    return makeError(ErrorCodes.INVALID_INPUT, `Cannot read file: ${file} (${e.code || e.message})`, { file, suggestion: 'Provide a readable source file (not a directory).' })
+  }
   const ext = extname(file)
   const stdlib = getStdlib(ext)
 
@@ -408,6 +459,12 @@ export async function handle(args, context) {
 
     const { pkg, confident } = resolvePackage(imp.module, ext)
 
+    // R22-⑧：同仓库本地模块（目录/同名文件在 workspace 内）——不报 unknown_mapping/missing，标 local_module
+    if (isLocalModule(workspaceDir, imp.module, ext)) {
+      dependenciesFound[imp.module] = { local_module: true }
+      continue
+    }
+
     if (deps[pkg]) {
       dependenciesFound[imp.module] = { in_manifest: true, ...(deps[pkg].locked ? { locked: deps[pkg].locked } : {}) }
       continue
@@ -420,7 +477,8 @@ export async function handle(args, context) {
 
     if (!confident) {
       issues.push({ type: 'unknown_mapping', module: imp.module, line: imp.line, note: `cannot determine package for import '${imp.module}', please verify manually` })
-      dependenciesFound[imp.module] = { in_manifest: false }
+      // R22-⑧：in_manifest: false 会被误读为缺依赖（unknown_mapping 是解析不出而非确认缺）——改 unresolved 中性标注
+      dependenciesFound[imp.module] = { unresolved: true }
       continue
     }
 

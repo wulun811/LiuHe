@@ -26,7 +26,7 @@ const codeReview = (await imp(join(MALONG, 'tools/tool-code-review/handler.js'))
   const badSource = `function processUserData(name) {\n  if (name === 'a') { return name }\n  if (name === 'b') { return name }\n  if (name === 'c') { return name }\n  const tmp = name + 'x'\n  const tmp2 = name + 'y'\n  const tmp3 = name + 'z'\n  return tmp + tmp2 + tmp3\n}\n`
   const r = await codeReview({ workspace_dir: WS, source: badSource, file: 'bad_file_name.js' })
   assert(r.mode === 'source', 'code_review: source 模式')
-  assert(typeof r.summary.score === 'number' && r.summary.score >= 0 && r.summary.score <= 100, `code_review: score 在 0-100（得 ${r.summary.score}）`)
+  assert(typeof r.summary.shape_score === 'number' && r.summary.shape_score >= 0 && r.summary.shape_score <= 100, `code_review: shape_score 在 0-100（得 ${r.summary.shape_score}）`)
   assert(r.summary.warnings >= 0, 'code_review: warnings 汇总存在')
 
   // diff 模式
@@ -40,6 +40,14 @@ const codeReview = (await imp(join(MALONG, 'tools/tool-code-review/handler.js'))
   long += '  return v0\n}\n'
   const rl = await codeReview({ workspace_dir: WS, source: long, file: 'ok.js' })
   assert(rl.issues.some(i => i.category === 'complexity'), `code_review: 长函数被检出（得 ${JSON.stringify(rl.issues.map(i => i.category))}）`)
+
+  // r10e：语言惯例感知——Python snake_case 文件名不再报命名；注释率规则删除（>100 行无注释不再 info 噪声）
+  const rPy = await codeReview({ workspace_dir: WS, source: 'def build_gat_dataset():\n    return 1\n', file: 'build_gat_dataset.py' })
+  assert(!rPy.issues.some(i => i.category === 'naming'), `code_review: Python snake_case 文件名零命名噪声（得 ${JSON.stringify(rPy.issues.map(i => i.category))}）`)
+  const rNoComment = await codeReview({ workspace_dir: WS, source: Array.from({ length: 120 }, (_, i) => `const v${i} = ${i}`).join('\n'), file: 'no_comment.js' })
+  assert(!rNoComment.issues.some(i => i.category === 'documentation' && i.message.includes('注释比')), `code_review: 注释率规则已删（得 ${JSON.stringify(rNoComment.issues.map(i => i.message.slice(0, 30)))}）`)
+  const rJsSnake = await codeReview({ workspace_dir: WS, source: 'const a = 1\n', file: 'bad_file_name.js' })
+  assert(rJsSnake.issues.some(i => i.category === 'naming'), `code_review: JS snake_case 文件名仍报（语言惯例只豁免 Python）`)
 }
 
 // ── 2. style_sniffer ──
@@ -90,7 +98,8 @@ const securityReview = (await imp(join(MALONG, 'tools/tool-security-review/handl
   // 干净代码
   const clean = `export function add(a, b) {\n  return a + b\n}\n`
   const r3 = await securityReview({ workspace_dir: WS, source: clean, file: 'clean.js' })
-  assert(r3.summary.total === 0 && r3.summary.score === 100, `security_review: 干净代码 100 分（得 ${r3.summary.score}）`)
+  // r12：score→shape_score 语义降级——0 命中≠安全/干净（C1 教训）；干净代码 shape_score 应满且总数为 0
+  assert(r3.summary.total === 0 && r3.summary.shape_score === 100, `security_review: 干净代码 shape_score 100 分（得 ${r3.summary.shape_score}）`)
 }
 
 // ── 4. git_worktree ──

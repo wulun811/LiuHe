@@ -1,6 +1,7 @@
-import { join, extname } from 'node:path'
+import { join, extname, sep, resolve } from 'node:path'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { stripStrings } from '../../string-utils.js'
+import { guardReadPath } from '../../path-guard.js'
 
 const ENV_PATTERNS = [
   /os\.environ\[["'](\w+)["']\]/g,
@@ -25,8 +26,10 @@ const SERVICE_PATTERNS = [
 const SQL_CALL_RE = /(?:\.\s*)?(?:execute|executemany|executescript|query|prepare|run)\s*\(/i
 
 // r28-fix：移除 parser 不支持的 .rb，补 C/C++/Java/Bash
-const SOURCE_EXTS = new Set(['.js', '.mjs', '.cjs', '.ts', '.tsx', '.py', '.go', '.rs', '.java', '.c', '.cpp', '.cc', '.cxx', '.hpp', '.hh', '.hxx', '.sh', '.bash'])
-const SKIP_DIRS = new Set(['node_modules', '.git', '__pycache__', '.venv', 'venv', 'dist', 'build'])
+const SOURCE_EXTS = new Set(['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.mts', '.cts', '.py', '.go', '.rs', '.java', '.c', '.cpp', '.cc', '.cxx', '.hpp', '.hh', '.hxx', '.sh', '.bash'])
+// R22-③：全扫模式跳过测试/夹具目录——其 env 引用是故意模拟（fixture）与断言输入（测试），
+// 报为配置 drift 是噪音；file 模式（用户显式指定）不受影响。
+const SKIP_DIRS = new Set(['node_modules', '.git', '__pycache__', '.venv', 'venv', 'dist', 'build', 'tests', 'test', 'fixtures', '__tests__'])
 
 // CI / 平台内置注入变量（不属于项目配置，不应报 drift）
 const CI_BUILTIN_VARS = new Set([
@@ -125,6 +128,9 @@ function parseDockerCompose(workspaceDir) {
 
 function walkSourceFiles(workspaceDir, dir, files, maxFiles) {
   if (files.length >= maxFiles) return
+  // R22-⑱（第五轮核实）：尾斜杠归一化——workspaceDir 带尾斜杠时 `ws + '/'` 拼成 `//` 恒不匹配，
+  // 全扫模式全文件被 push 绝对路径 → join(ws, f) 对绝对路径无效 → ENOENT 静默跳过 → 假报 Config is in sync
+  const wsPrefix = workspaceDir.endsWith('/') ? workspaceDir : workspaceDir + '/'
   let entries
   try { entries = readdirSync(dir, { withFileTypes: true }) } catch { return }
   for (const entry of entries) {
@@ -134,7 +140,7 @@ function walkSourceFiles(workspaceDir, dir, files, maxFiles) {
     if (entry.isDirectory()) {
       walkSourceFiles(workspaceDir, fullPath, files, maxFiles)
     } else if (entry.isFile() && SOURCE_EXTS.has(extname(entry.name))) {
-      files.push(fullPath.startsWith(workspaceDir + '/') ? fullPath.slice(workspaceDir.length + 1) : fullPath)
+      files.push(fullPath.startsWith(wsPrefix) ? fullPath.slice(wsPrefix.length) : fullPath)
     }
   }
 }
@@ -147,9 +153,21 @@ export async function handle(args, context) {
 
   const file = args?.file
   let allRefs = []
+  let filesCapped = false
 
   if (file) {
-    const absPath = join(workspaceDir, file)
+    // r52: 逃逸拦截——file 可含 ../，直接 join 可读 workspace 外文件（同仓其他工具均有守卫）
+    // r54(P0-4): resolve 归一化——workspaceDir 带尾斜杠时 `ws + sep` = `/ws//` 恒不匹配，合法文件被误判逃逸
+    // R22-④（审核修复）：补 realpath 守卫——词法 resolve 拦不住工作区内 symlink 指向外部文件（全仓其他读路径均有）
+    const wsNorm = resolve(workspaceDir)
+    const absPath = resolve(wsNorm, file)
+    if (!absPath.startsWith(wsNorm + sep)) {
+      return { error: 'invalid_input', message: `File escapes workspace: ${file}` }
+    }
+    const guard = guardReadPath(workspaceDir, file)
+    if (guard.blocked) {
+      return { error: 'PATH_BLOCKED', message: guard.detail, file }
+    }
     let content
     try { content = readFileSync(absPath, 'utf-8') } catch {
       return { error: 'file_not_found', message: `Cannot read file: ${file}` }
@@ -158,6 +176,8 @@ export async function handle(args, context) {
   } else {
     const files = []
     walkSourceFiles(workspaceDir, workspaceDir, files, 200)
+    // R22-④：全扫 200 文件上限截断标注（readdir 顺序依赖，少扫必须告知）
+    filesCapped = files.length >= 200
     for (const f of files) {
       try {
         const content = readFileSync(join(workspaceDir, f), 'utf-8')
@@ -209,6 +229,9 @@ export async function handle(args, context) {
   return {
     file: file || '(project-wide)',
     config_references: allRefs.slice(0, 50),
+    // R22-④（审核修复）：全扫 200 文件上限 + 展示 50 条上限都标注——截断必标注（R17 精神）
+    ...(file ? {} : { scan_files_capped: filesCapped }),
+    ...(allRefs.length > 50 ? { config_references_truncated: allRefs.length - 50 } : {}),
     drifts: uniqueDrifts,
     config_manifest: {
       env_files: env.files,

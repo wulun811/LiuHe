@@ -128,6 +128,9 @@ pub fn compute_metrics(tree: &Tree, source: &str, language: &str) -> Metrics {
         branch_kinds: &[&str],
         branch_kinds_cog: &[&str],
     ) {
+        if depth > super::MAX_WALK_DEPTH {
+            return;
+        }
         let kind = node.kind();
 
         if func_kinds.contains(&kind) {

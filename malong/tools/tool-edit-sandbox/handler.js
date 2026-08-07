@@ -1,4 +1,4 @@
-import { join, extname } from 'node:path'
+import { extname, sep, resolve } from 'node:path'
 import { existsSync, readFileSync } from 'node:fs'
 
 function detectIndentStyle(content) {
@@ -144,6 +144,16 @@ function checkSymbolRefs(newContent, ext, codeIndexService) {
       .replace(/'(?:[^'\\]|\\.)*'/g, ' ')
     const ids = code.match(/\b[A-Z]\w+\b/g) || []
     for (const id of ids) used.add(id)
+    // R22-⑪：小写标识符 undefined 检测（此前只查大写开头——`validateUser()` 未定义永远不报）
+    // 仅 JS 系（Python 内建 print/len 噪音太大）；`(?:^|[^.\w])` 排除成员调用形态 obj.method()
+    if (['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx'].includes(ext)) {
+      const JS_KEYWORDS = new Set(['function', 'class', 'const', 'let', 'var', 'return', 'if', 'else', 'for', 'while', 'do', 'switch', 'case', 'break', 'continue', 'new', 'delete', 'typeof', 'instanceof', 'in', 'of', 'try', 'catch', 'finally', 'throw', 'import', 'export', 'from', 'default', 'async', 'await', 'yield', 'extends', 'super', 'void', 'with', 'debugger', 'this', 'typeof'])
+      const JS_GLOBALS = new Set(['console', 'window', 'document', 'process', 'require', 'module', 'exports', 'global', 'globalThis', 'JSON', 'Math', 'Date', 'setTimeout', 'setInterval', 'clearTimeout', 'clearInterval', 'fetch', 'structuredClone', 'queueMicrotask', 'eval', 'parseInt', 'parseFloat', 'isNaN', 'isFinite', 'Symbol', 'BigInt', 'RegExp', 'Function', 'Buffer', 'undefined', 'null', 'true', 'false'])
+      for (const m of code.matchAll(/(?:^|[^.\w])([a-z]\w*)\s*\(/g)) {
+        const id = m[1]
+        if (!JS_KEYWORDS.has(id) && !JS_GLOBALS.has(id)) used.add(id)
+      }
+    }
   }
 
   const BUILTINS = new Set(['String', 'Number', 'Boolean', 'Object', 'Array', 'Map', 'Set', 'Promise', 'Error', 'TypeError', 'ValueError', 'Exception', 'True', 'False', 'None', 'Dict', 'List', 'Optional', 'Tuple', 'Int', 'Float'])
@@ -169,9 +179,18 @@ export async function handle(args, context) {
   if (!file || !newContent) {
     return { error: 'missing_parameter', message: 'file and new_content are required' }
   }
+  // r54(P2): 非字符串 file/new_content 会让 extname/split 抛 TypeError（r23-fix3 同教训）
+  if (typeof file !== 'string' || typeof newContent !== 'string') {
+    return { error: 'invalid_input', message: 'file and new_content must be strings' }
+  }
 
   const ext = extname(file)
-  const absPath = join(workspaceDir, file)
+  // r54(P2): resolve 归一化——workspaceDir 带尾斜杠时 `ws + sep` = `/ws//` 恒不匹配，合法文件被误判逃逸
+  const wsNorm = resolve(workspaceDir)
+  const absPath = resolve(wsNorm, file)
+  if (!absPath.startsWith(wsNorm + sep)) {
+    return { error: 'invalid_input', message: `File escapes workspace: ${file}` }
+  }
 
   let originalContent = ''
   if (existsSync(absPath)) {

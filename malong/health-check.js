@@ -2,17 +2,48 @@ import { existsSync, readdirSync, readFileSync, writeFileSync, accessSync, const
 import net from 'node:net'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { homedir } from 'node:os'
+
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const SCHEMA_VERSION = 1
 
-export function readUsageStats() {
-  // r35-fix: Windows 上 os.homedir() 忽略 HOME 环境变量（读 USERPROFILE），测试/沙盒靠 HOME 定向 → HOME 优先
-  const usagePath = join(process.env.HOME || homedir(), '.config', 'opencode', 'malong-usage.jsonl')
-  if (!existsSync(usagePath)) return null
+import { readStateFile } from './host-config.js'
+
+// r37：宿主中立——默认 ~/.config/malong，读取兼容旧 ~/.config/opencode/ 回退（数据不丢）
+// Y001 债务3：双路径聚合——0AIT 等旧副本仍写旧路径（无 host-config 的版本滞后），
+// readStateFile 单路径回退会在新路径有数据时忽略旧路径 253K 条；此处两处都读、合并统计。
+// 注：两处若出现同一调用被复制到两文件（极端迁移场景）会双计，风险接受（只读聚合不做迁移）
+// Y002-S0 复盘发现（2026-08-03）：`lines.push(...arr)` 对 25 万行 spread 展开
+// 触发 Maximum call stack size exceeded 被 catch{} 静默吞掉——旧路径 253K 条从未进聚合，
+// 债务3 的双路径统计实际失效。改为逐行 push（concat 同因新建数组也无益）。
+function readUsageLines() {
+  // r10d：迁移完成后单一数据源——只读新路径。legacy（~/.config/opencode，通天侧旧版进程仍在写）
+  // 不再并入统计，避免双源混淆（其存量已一次性迁移并备份 .pre-migrate-<date>）。
+  const p = readStateFile('malong-usage.jsonl')
+  if (!existsSync(p)) return []
+  const lines = []
   try {
-    const lines = readFileSync(usagePath, 'utf-8').trim().split('\n').filter(Boolean)
+    const content = readFileSync(p, 'utf-8').trim()
+    if (content) {
+      for (const l of content.split('\n')) {
+        if (!l) continue
+        // r10：过滤历史故障注入测试污染——08-01 stress-fixture EACCES 风暴 251K 条
+        // 把 success_rate 拖到 0.01% 失真（legacy 文件合并统计必现）
+        try {
+          const r = JSON.parse(l)
+          if (typeof r.error_code === 'string' && r.error_code.includes('stress-fixture')) continue
+        } catch {}
+        lines.push(l)
+      }
+    }
+  } catch {}
+  return lines
+}
+
+export function readUsageStats() {
+  const lines = readUsageLines()
+  if (lines.length === 0) return null
+  try {
     const byTool = {}
     let totalCalls = 0, totalDuration = 0
     const breakdown = { ok: 0, error: 0, crash: 0 }
@@ -23,8 +54,9 @@ export function readUsageStats() {
         const r = JSON.parse(line)
         totalCalls++
         totalDuration += r.duration_ms || 0
-        if (!firstTs) firstTs = r.ts
-        lastTs = r.ts
+        // r10：迁移后 legacy 数据 append 在新路径尾部——首尾行≠时间极值，用 min/max
+        if (!firstTs || (r.ts && r.ts < firstTs)) firstTs = r.ts
+        if (!lastTs || (r.ts && r.ts > lastTs)) lastTs = r.ts
         const st = r.status || (r.success ? 'ok' : 'error')
         breakdown[st] = (breakdown[st] || 0) + 1
         if (!byTool[r.tool]) byTool[r.tool] = { calls: 0, ok: 0, error: 0, crash: 0, total_ms: 0 }
@@ -46,6 +78,23 @@ export function readUsageStats() {
     // r34-fix: 旧 `(total - crash)/total` 把 error 状态也计入成功率——
     // success_rate 应为 ok/total（error 是失败调用）
     const okCount = breakdown.ok
+    // r10：edit_batch 的节省走独立 stats 文件（estimated_tokens_saved = (numEdits-1)*fileSize/4），
+    // 与 usage 遥测的 tokens_saved（read_outline「省读文件」口径）是不同概念——独立字段展示，不混入 value
+    const editBatchStats = { calls: 0, edits: 0, tokens_saved: 0 }
+    try {
+      const ep = readStateFile('edit-batch-stats.jsonl')
+      if (existsSync(ep)) {
+        for (const l of readFileSync(ep, 'utf-8').split('\n')) {
+          if (!l) continue
+          try {
+            const r = JSON.parse(l)
+            editBatchStats.calls++
+            editBatchStats.edits += r.num_edits || 0
+            editBatchStats.tokens_saved += r.estimated_tokens_saved || 0
+          } catch {}
+        }
+      }
+    } catch {}
     return {
       total_calls: totalCalls,
       success_rate: totalCalls ? Math.round(okCount / totalCalls * 100) / 100 : 1,
@@ -54,6 +103,7 @@ export function readUsageStats() {
       period: firstTs && lastTs ? `${firstTs.slice(0, 10)} ~ ${lastTs.slice(0, 10)}` : null,
       value,
       by_tool: byTool,
+      edit_batch_stats: editBatchStats,
     }
   } catch { return null }
 }
@@ -83,10 +133,16 @@ export async function runHealthCheck({ stateDir, toolsDir, workspacesDir, regist
       add('Memory RSS', 'PASS', `${rssMB}MB RSS, ${heapMB}/${heapTotalMB}MB heap`)
     }
 
-    // 信号量检查（死锁检测）
+    // 信号量检查（死锁 + 槽位泄漏检测）
     const semStatus = semaphore.getStatus()
+    // R2：weight 感知——activeRequests 条目带 weight（mcp-server 写入），缺字段兜底 1。
+    // 等待中的请求（acquire 未完成）已入 activeRequests 但未占槽 → activeWeight 可能 > current，不触发泄漏。
+    const activeWeight = Array.from(activeRequests.values()).reduce((s, r) => s + (r.weight || 1), 0)
     if (semStatus.current > semStatus.max) {
       add('Semaphore', 'FAIL', `current=${semStatus.current} > max=${semStatus.max} (deadlock?)`)
+    } else if (activeWeight < semStatus.current) {
+      // 泄漏特征：槽位被占但无对应活跃请求（异常路径未 release）
+      add('Semaphore', 'FAIL', `${semStatus.current - activeWeight} slots leaked (active weight ${activeWeight} < current ${semStatus.current})`)
     } else if (semStatus.queue.length > 10) {
       add('Semaphore', 'WARN', `queue=${semStatus.queue.length} (stuck requests?)`)
     } else {
@@ -159,19 +215,24 @@ export async function runHealthCheck({ stateDir, toolsDir, workspacesDir, regist
           } catch {}
           databases.push({ workspace: e.name, size_mb: sizeMB, last_access: lastAccess })
           if (createDb) {
+            let db = null
             try {
               // 7（#18）：busy_timeout——恰逢 indexBatch 的 DROP/CREATE INDEX（schema 锁）时
               // SQLITE_BUSY 被旧实现当损坏计 WARN
-              const db = await createDb(dbPath, { timeout: 5000 })
+              db = await createDb(dbPath, { readonly: true, timeout: 5000 })
               const r = db.pragma('integrity_check')
               const integrityOk = Array.isArray(r) && r.length === 1 && r[0]?.integrity_check === 'ok'
-              db.close()
               if (!integrityOk) badCount++
-            } catch { badCount++ }
+            } catch { badCount++ } finally {
+              // 审核补：createDb 成功后 integrity_check 抛错（或路径）时 db 未 close——句柄泄漏；finally 兜底
+              try { db?.close() } catch {}
+            }
           }
         }
       }
-      if (Database) {
+      // r48: 原代码引用未定义变量 `Database`（只在 db-adapter.js 内部定义）→ 恒抛
+      // ReferenceError 被外层 catch 吞 → DB integrity 永远 WARN "cannot scan: Database is not defined"
+      if (createDb) {
         add('DB integrity', badCount === 0 ? 'PASS' : 'WARN', `${dbCount} workspace(s), ${badCount} corrupted, total ${Math.round(totalSizeMB)}MB`)
       } else {
         add('DB integrity', 'PASS', `${dbCount} workspace(s), total ${Math.round(totalSizeMB)}MB — sqlite3 not available for integrity check`)
@@ -264,12 +325,12 @@ export async function runHealthCheck({ stateDir, toolsDir, workspacesDir, regist
  * 避免误删「只读查询、未重新索引」的活跃库；无法判定时间一律保守保留。
  * @param {string} workspacesDir - stateDir/workspaces
  * @param {object} [opts]
- * @param {number} [opts.maxAgeDays=14] - 超期阈值（天）
+ * @param {number} [opts.maxAgeDays=3] - 超期阈值（天）
  * @param {boolean} [opts.dryRun=false] - 只报告不删
  * @param {string[]} [opts.protect=[]] - 永不删除的工作区 hash 列表
  */
 export function cleanupStaleWorkspaces(workspacesDir, opts = {}) {
-  const { maxAgeDays = 14, dryRun = false, protect = [] } = opts
+  const { maxAgeDays = 3, dryRun = false, protect = [] } = opts
   if (!workspacesDir || !existsSync(workspacesDir)) {
     return { status: 'no_workspaces_dir', max_age_days: maxAgeDays, deleted_count: 0, freed_mb: 0, deleted: [], kept_count: 0 }
   }
@@ -312,6 +373,34 @@ export function cleanupStaleWorkspaces(workspacesDir, opts = {}) {
     } else {
       keptCount++
     }
+  }
+  // R10：.corrupt-* 损坏备份文件清理——保留最近 10 个（无论 mtime），仅超龄且超上限者删除
+  {
+    const corruptFiles = []
+    for (const e of readdirSync(workspacesDir, { withFileTypes: true })) {
+      if (!e.isDirectory()) continue
+      const wsDir = join(workspacesDir, e.name)
+      let files
+      try { files = readdirSync(wsDir) } catch { continue }
+      for (const f of files) {
+        if (!f.startsWith('code-index.db.corrupt-')) continue
+        try {
+          const st = statSync(join(wsDir, f))
+          corruptFiles.push({ path: join(wsDir, f), mtimeMs: st.mtimeMs })
+        } catch {}
+      }
+    }
+    corruptFiles.sort((a, b) => b.mtimeMs - a.mtimeMs)
+    const keepCount = 10
+    corruptFiles.slice(keepCount).forEach((c, i) => {
+      const ageMs = now - c.mtimeMs
+      if (ageMs > maxAgeMs) {
+        if (!dryRun) {
+          try { rmSync(c.path, { force: true }) } catch {}
+        }
+        deleted.push({ corrupt_backup: c.path, age_days: Math.round(ageMs / 86400000 * 10) / 10 })
+      }
+    })
   }
   return {
     status: dryRun ? 'dry_run' : 'cleaned',

@@ -1,0 +1,11 @@
+{
+  "rules": [],
+  "securityIgnore": [
+    { "files": ["**/tool-security-review/handler.js"] },
+    { "files": ["**/tests/test-security-review-rules.js"] },
+    { "files": ["**/mcp-server.js"], "rules": ["process-exit"] },
+    { "files": ["**/tools/eval-e2e.js"], "rules": ["process-exit"] },
+    { "files": ["**/tools/eval-stability.js"], "rules": ["process-exit"] },
+    { "files": ["**/tests/measure-trail.js"], "rules": ["debug-log"] }
+  ]
+}

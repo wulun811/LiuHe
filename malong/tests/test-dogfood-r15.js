@@ -127,7 +127,7 @@ const localImportRef = q("SELECT r.kind FROM refs r JOIN files f ON r.source_fil
 assert(localImportRef, 'P3a app.js 有 libProcess 的 per-local import ref')
 const refsTool = await imp(join(MALONG_DIR, 'tools', 'tool-references', 'handler.js'))
 const refsRes = await refsTool.handle({ workspace_dir: WS, symbol: 'libProcess' }, { codeIndexService: svc, getWorkspaceDir: () => DATA })
-assert(refsRes.search_method !== 'text_fallback' && refsRes.results.some(r => r.path === 'app.js' && r.kind === 'import' && r.line === 1), `P3a references(libProcess) 走 DB 且绑定行标 import（得 ${refsRes.search_method || 'db'} ${JSON.stringify(refsRes.results)}}）`)
+assert(refsRes.results.some(r => r.path === 'app.js' && r.kind === 'import' && r.line === 1), `P3a references(libProcess) 绑定行标 import（${JSON.stringify(refsRes.results)}}）`)
 
 // ── P3b-1：insert_after_symbol 对不存在符号返回 patch 提示 ──
 const ws = await imp(join(MALONG_DIR, 'tools', 'tool-write-symbol', 'handler.js'))

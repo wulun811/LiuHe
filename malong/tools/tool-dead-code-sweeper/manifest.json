@@ -1,7 +1,7 @@
 {
   "name": "sweep_dead_code",
   "version": "1.0.0",
-  "description": "Detect dead code: unused imports/functions, orphan files. Remove via edit_transaction. Unused imports safe now.",
+  "description": "Detect dead code: unused imports/functions, orphan files, unused_guard signal. Text-reference fallback counts CLI-string refs as alive (miss-over-delete bias). Remove via edit_transaction. Out of scope: dynamic/reflection wiring.",
   "inputSchema": {
     "type": "object",
     "properties": {

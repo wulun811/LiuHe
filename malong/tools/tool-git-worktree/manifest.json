@@ -1,7 +1,7 @@
 {
   "name": "git_worktree",
   "version": "1.0.0",
-  "description": "Transactional multi-file changes via git worktree: isolated branch, apply changes, optional verify command, commit, ff-only merge, cleanup. Zero pollution of working tree; rollback on failure. For git repos.",
+  "description": "Multi-file changes on isolated git branch: zero working-tree pollution, auto commit + ff-merge, verify_cmd. Rollback on failure.",
   "inputSchema": {
     "type": "object",
     "properties": {

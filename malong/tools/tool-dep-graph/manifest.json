@@ -1,7 +1,7 @@
 {
   "name": "dep_graph",
-  "version": "1.0.0",
-  "description": "Import dependency graph of a file, transitive N levels. Circular deps? fix_imports. Changing a dep? impact_analysis first.",
+  "version": "1.1.0",
+  "description": "Import dependency graph of a file (transitive N levels) or the whole project (scope=project → nodes/edges/cycles). Circular deps? fix_imports. Changing a dep? impact_analysis first.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -11,16 +11,22 @@
       },
       "file": {
         "type": "string",
-        "description": "File path relative to workspace_dir (e.g. \"scripts/lib/tools/spawn.mjs\")"
+        "description": "File path relative to workspace_dir (e.g. \"scripts/lib/tools/spawn.mjs\"). Omit or use scope=project for whole-project graph."
+      },
+      "scope": {
+        "type": "string",
+        "enum": [
+          "project"
+        ],
+        "description": "B13: scope=project → whole-project module graph {nodes, edges, cycles}. Mutually exclusive with file."
       },
       "depth": {
         "type": "number",
-        "description": "Transitive depth (default 3, max 10)"
+        "description": "Transitive depth (default 3, max 10). File mode only."
       }
     },
     "required": [
-      "workspace_dir",
-      "file"
+      "workspace_dir"
     ]
   },
   "handler": "./handler.js",

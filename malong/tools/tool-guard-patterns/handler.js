@@ -1,5 +1,5 @@
-import { join, extname } from 'node:path'
-import { existsSync, readFileSync } from 'node:fs'
+import { join, extname, sep } from 'node:path'
+import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { ErrorCodes, makeError, validateFilePath } from '../../error-codes.js'
 
 const BUILTIN_RULES = [
@@ -45,6 +45,31 @@ function mkViolation(rule, location) {
   }
 }
 
+// R22-⑪：三引号打开判定——逐字符扫描，单/双引号单字符串内的 `"""`/`'''` 跳过不打开
+//（旧 regex `[^"']*?("""|''')` 会被 `x = '"""'` 内嵌三连污染 → 状态机错开 → 裸 except 漏报）
+function tripleOpenIndex(line) {
+  const n = line.length
+  let i = 0
+  while (i < n) {
+    const ch = line[i]
+    if (ch === '\\') { i += 2; continue }
+    if ((ch === '"' && line[i + 1] === '"' && line[i + 2] === '"') || (ch === "'" && line[i + 1] === "'" && line[i + 2] === "'")) return i
+    if (ch === '"' || ch === "'") {
+      const q = ch
+      i++
+      while (i < n) {
+        if (line[i] === '\\') { i += 2; continue }
+        if (line[i] === q) break
+        i++
+      }
+      i++
+      continue
+    }
+    i++
+  }
+  return -1
+}
+
 function matchesPrefix(name, prefixes) {
   if (!prefixes || !prefixes.length) return true
   return prefixes.some(p => name.startsWith(p))
@@ -52,6 +77,8 @@ function matchesPrefix(name, prefixes) {
 
 async function checkRules(file, content, rules, langParser) {
   const ext = extname(file)
+  // R22-⑪：空/纯空白文件不该报 unsupported_language（parse 空串无符号是预期，不是语言不支持）
+  if (!String(content).trim()) return { violations: [], warnings: [] }
   let refs = [], symbols = []
   try {
     const result = await langParser.extractAllAsync(content, ext)
@@ -106,9 +133,10 @@ async function checkRules(file, content, rules, langParser) {
               // 递归进化第 5 轮 P1#12
               // 7（T14）：[^"'#]*? 可空匹配 → 引擎可从注释内位置重新锚定，`x = 5  # """` 命中注释文本
               const codePart = trimmed.replace(/#.*$/, '')
-              const open = codePart.match(/(?:[frbu]{0,2})?[^"']*?(\"\"\"|''')/)?.[1]
-              if (open) {
-                const rest = trimmed.slice(trimmed.indexOf(open) + open.length)
+              const openIdx = tripleOpenIndex(codePart)
+              if (openIdx >= 0) {
+                const open = codePart.slice(openIdx, openIdx + 3)
+                const rest = codePart.slice(openIdx + 3)
                 if (!rest.includes(open)) { inString = true; openDelim = open }
                 continue
               }
@@ -150,6 +178,8 @@ async function checkRules(file, content, rules, langParser) {
 export async function handle(args, context) {
   const workspaceDir = args?.workspace_dir
   if (!workspaceDir) return makeError(ErrorCodes.INVALID_INPUT, 'workspace_dir is required')
+  // R22-⑯：非字符串 workspace_dir 让 join 裸抛 TypeError
+  if (typeof workspaceDir !== 'string') return makeError(ErrorCodes.INVALID_INPUT, `workspace_dir must be a string (got ${typeof workspaceDir})`)
 
   const file = args?.file
   if (!file) return makeError(ErrorCodes.INVALID_INPUT, 'file is required')
@@ -159,6 +189,16 @@ export async function handle(args, context) {
 
   const absPath = join(workspaceDir, file)
   if (!existsSync(absPath)) return makeError(ErrorCodes.FILE_NOT_FOUND, `File does not exist: ${file}`, { file, suggestion: 'check the file path, or use glob to locate it' })
+  // R22-⑯：symlink 逃逸守卫——file 指向 workspace 内 symlink 到外部文件时外部源码被规则扫描
+  try {
+    const realWs = realpathSync(workspaceDir)
+    const realAbs = realpathSync(absPath)
+    if (realAbs !== realWs && !realAbs.startsWith(realWs + sep)) {
+      return makeError(ErrorCodes.PATH_BLOCKED, `file resolves outside workspace: ${absPath}`, { file, reason: 'symlink_escape' })
+    }
+  } catch {
+    return makeError(ErrorCodes.PATH_BLOCKED, `cannot resolve file path: ${absPath}`, { file, reason: 'resolve_failed' })
+  }
 
   const langParser = context?.langParserService
   if (!langParser) return makeError(ErrorCodes.SERVICE_UNAVAILABLE, 'lang-parser service not available', {

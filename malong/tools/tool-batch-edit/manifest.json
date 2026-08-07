@@ -56,7 +56,7 @@
       }
     },
     "required": [
-      "file_path",
+      "file",
       "edits"
     ]
   },
@@ -68,9 +68,5 @@
     "atomic",
     "whitespace-tolerant"
   ],
-  "dependencies": [],
-  "required": [
-    "file",
-    "edits"
-  ]
+  "dependencies": []
 }

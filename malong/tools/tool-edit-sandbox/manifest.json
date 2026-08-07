@@ -1,7 +1,7 @@
 {
   "name": "sandbox_validate",
   "version": "1.0.0",
-  "description": "Pre-validate edits (syntax/indent/undefined) before writing. Zero-cost trial; then edit_transaction.",
+  "description": "Pre-validate edits: pass file + new_content (full new text), dry-run syntax check. Then edit_transaction.",
   "inputSchema": {
     "type": "object",
     "properties": {

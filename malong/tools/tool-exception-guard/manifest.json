@@ -1,7 +1,7 @@
 {
   "name": "exception_guard",
   "version": "1.0.0",
-  "description": "Check raise/throw uses project exceptions vs builtins. Fix → verify test_bridge. Pairs config_drift.",
+  "description": "Check raise/throw uses project exceptions vs builtins, module-scoped (falls back to project scope). Fix → verify test_bridge. Pairs config_drift.",
   "inputSchema": {
     "type": "object",
     "properties": {

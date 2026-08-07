@@ -1,6 +1,7 @@
 import { join } from 'node:path'
 import { readFileSync, readdirSync } from 'node:fs'
 import { TransactionStore } from '../tool-edit-transaction/transaction-store.js'
+import { recoverTransactions } from '../../write-journal.js'
 import { scanCjsRequires } from '../../cjs-imports.js'
 
 // r28-fix：诚实化——移除 parser 不支持的 .rb/.php（提取不到符号，扫描纯浪费），补 C/C++/Java/Bash
@@ -10,17 +11,46 @@ function escapeRegex(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
+function hasOddBackslashes(line, idx) {
+  let n = 0
+  for (let k = idx - 1; k >= 0 && line[k] === '\\'; k--) n++
+  return n % 2 === 1
+}
+
 function getStringRanges(line) {
   const ranges = []
   let i = 0
   while (i < line.length) {
     const ch = line[i]
     if (ch === '"' || ch === "'" || ch === '`') {
-      const start = i
+      let start = i
       i++
       while (i < line.length && line[i] !== ch) {
         if (line[i] === '\\') i++
         i++
+        // R22-⑰（第四轮审核 P1）+ R22-⑱（第五轮核实）：模板字面量（反引号）内 `${...}` 是代码不是字符串——
+        // 符号在模板插值里被引用（如 `hello ${old_name} world`）必须可重命名。
+        // 括号深度计数找匹配 }（跳过内层字符串/转义），把插值区间分割出字符串范围。
+        // 注意：`\${` 是转义字面量（不插值）——`$` 前奇数个反斜杠时不分割（否则字符串内容被误改）。
+        if (ch === '`' && line[i - 1] === '$' && line[i] === '{' && !hasOddBackslashes(line, i - 1)) {
+          ranges.push([start, i - 1]) // 插值前的字符串段（到 $ 为止）
+          let depth = 1
+          i++
+          while (i < line.length && depth > 0) {
+            const c = line[i]
+            if (c === '\\') { i += 2; continue }
+            if (c === '"' || c === "'" || c === '`') {
+              const q = c
+              i++
+              while (i < line.length && line[i] !== q) { if (line[i] === '\\') i++; i++ }
+              continue
+            }
+            if (c === '{') depth++
+            else if (c === '}') depth--
+            i++
+          }
+          start = i // 插值后重新开段（i 指向 } 之后）
+        }
       }
       ranges.push([start, i])
     } else if (ch === '/' && line[i + 1] === '/') {
@@ -59,9 +89,12 @@ function replaceOutsideStrings(line, re, replacement) {
 
 function findTextRefs(workspaceDir, symbol, maxFiles = 300, maxResults = 100) {
   const results = []
-  const re = new RegExp(`\\b${escapeRegex(symbol)}\\b`)
+  // R17-8：`(^|[^\w])` 替代 `\b`——中文/Unicode 符号名边界正确匹配（\b 对 CJK 恒失效）
+  const re = new RegExp(`(^|[^\\w])${escapeRegex(symbol)}([^\\w]|$)`)
   const scanned = { files: 0 }
   walk(workspaceDir, workspaceDir, re, results, scanned, maxFiles, maxResults)
+  // R22-④（审核修复）：300 文件/100 条上限截断标注——rename 是写操作，漏改名后果重，必须显式告知
+  if (scanned.files >= maxFiles || results.length >= maxResults) results.scanTruncated = true
   return results
 }
 
@@ -83,7 +116,7 @@ function computeScopeRestriction(content, symbol) {
     }
   }
 
-  const asRe = new RegExp(`\\b${escapeRegex(symbol)}\\s+as\\s+(\\w+)`, 'g')
+  const asRe = new RegExp(`(^|[^\\w])${escapeRegex(symbol)}\\s+as\\s+(\\w+)`, 'g')
   for (let i = 0; i < lines.length; i++) {
     let m
     asRe.lastIndex = 0
@@ -132,6 +165,10 @@ export async function handle(args, context) {
     return { error: 'missing_parameter', message: 'workspace_dir is required' }
   }
 
+  // R22-④（审核修复）：入口崩溃自愈——rename 用 TransactionStore 但入口无 recoverTransactions，
+  // 中途崩溃留 staged + 部分落盘只能等未来某次 edit_transaction begin 顺带恢复（R4a 设计漏实现）
+  try { await recoverTransactions(workspaceDir, { codeIndexService: context?.codeIndexService }) } catch {}
+
   const symbol = args?.symbol
   const newName = args?.new_name
   let file = args?.file
@@ -143,6 +180,11 @@ export async function handle(args, context) {
 
   if (symbol === newName) {
     return { error: 'invalid_input', message: 'new_name must differ from symbol' }
+  }
+
+  // r54(P0-2): symbol 进 txn 目录名——拒绝路径分隔符/`..`（store.begin 已消毒，此处提前给清晰错误）
+  if (/[/\\]|\.\./.test(symbol)) {
+    return { error: 'invalid_input', message: `symbol "${symbol}" contains path separators or ".."; must be a plain symbol name` }
   }
 
   // 验证 new_name 是合法标识符
@@ -161,14 +203,32 @@ export async function handle(args, context) {
 
   let semanticRefs = []
   if (codeIndexService) {
-    try { semanticRefs = await codeIndexService.getReferences(symbol) || [] } catch {}
+    // r8(F15)：引用集可能被 LIMIT 截断——rename 需要全集，传大 limit 并在截断时警告（防改名静默不完整）
+    try { semanticRefs = await codeIndexService.getReferences(symbol, undefined, { limit: 10000 }) || [] } catch {}
   }
 
   const textRefs = findTextRefs(workspaceDir, symbol)
+  const semanticTruncated = semanticRefs.length >= 10000
+  // R22-④：文本扫描 300 文件/100 条上限截断标注（漏改名不提示 = 静默不完整写操作）
+  const textTruncated = textRefs.scanTruncated === true
+
+  // 定义行解析提前：索引 refs 表只存 use/call 不存定义，文本扫描有 maxFiles 上限可能扫不到深层文件——
+  // 不显式补入定义行时改名会漏改定义行，应用后直接产生坏代码（使用点改名、定义未改 → ReferenceError）
+  let definition = null
+  if (codeIndexService) {
+    try {
+      const syms = await codeIndexService.getSymbols(file)
+      const def = (syms || []).find(s => s.name === symbol)
+      if (def) definition = { file, line: def.start_line, type: def.type }
+    } catch {}
+  }
 
   const seen = new Set()
   const allRefs = []
-  for (const r of [...textRefs, ...semanticRefs.map(s => ({ path: s.path, line: 0, context: '' }))]) {
+  const defRef = definition ? [{ path: definition.file, line: definition.line, context: '' }] : []
+  // r54(P1): 用索引返回的真实 line——旧实现恒映射 line:0，下方 lineIdx<0 全跳过，语义引用永远变不成编辑，
+  // 文本扫描超 maxFiles/maxResults 上限后唯一补漏来源被丢弃 → 改名静默不完整
+  for (const r of [...defRef, ...textRefs, ...semanticRefs.map(s => ({ path: s.path, line: s.line || 0, context: '' }))]) {
     const key = `${r.path}:${r.line}`
     if (!seen.has(key)) { seen.add(key); allRefs.push(r) }
   }
@@ -186,17 +246,19 @@ export async function handle(args, context) {
 
   const editsPerFile = []
   let totalEdits = 0
+  const unreadable = []
 
   for (const [relPath, refs] of byFile) {
     const absPath = join(workspaceDir, relPath)
     let content
-    try { content = readFileSync(absPath, 'utf-8') } catch { continue }
+    try { content = readFileSync(absPath, 'utf-8') } catch { unreadable.push(relPath); continue }
 
     // 15（P2）：别名绑定文件（局部名 ≠ symbol）只改 import 行，裸 token 不改
     const scopeRestriction = computeScopeRestriction(content, symbol)
 
     const lines = content.split('\n')
-    const wordRe = new RegExp(`\\b${escapeRegex(symbol)}\\b`, 'g')
+    // R22-⑯：CJK rename 零宽断言—— 对中文符号永不匹配（\w 不含 CJK），应用段与检测段同步
+    const wordRe = new RegExp(`(?<![A-Za-z0-9_])${escapeRegex(symbol)}(?![A-Za-z0-9_])`, 'g')
     const fileEdits = []
 
     for (const ref of refs) {
@@ -207,7 +269,15 @@ export async function handle(args, context) {
       if (!wordRe.test(line)) continue
       wordRe.lastIndex = 0
 
-      const stripped = line.replace(/(['"`])(?:(?!\1).)*\1/g, '""')
+      // R22-⑰（第四轮审核 P1）：旧 stripped 正则把整行模板字面量（含 `${}` 插值）连锅剥掉，
+      // 插值里的符号引用（`hello ${old_name} world`）被误判为字符串后跳过整行。
+      // 改用 getStringRanges：只剥字符串区间（插值不在 ranges 内），保留下方 replaceOutsideStrings 能改插值代码。
+      const ranges = getStringRanges(line)
+      const stripped = ranges.length > 0 ? (() => {
+        const chars = line.split('')
+        for (const [s, e] of ranges) for (let k = s; k < e && k < chars.length; k++) chars[k] = ' '
+        return chars.join('')
+      })() : line
       if (!wordRe.test(stripped)) continue
       wordRe.lastIndex = 0
 
@@ -225,15 +295,6 @@ export async function handle(args, context) {
 
   if (totalEdits === 0) {
     return { symbol, new_name: newName, files_changed: 0, total_edits: 0, message: 'No word-boundary matches found (all matches may be in strings/comments)' }
-  }
-
-  let definition = null
-  if (codeIndexService) {
-    try {
-      const syms = await codeIndexService.getSymbols(file)
-      const def = (syms || []).find(s => s.name === symbol)
-      if (def) definition = { file, line: def.start_line, type: def.type }
-    } catch {}
   }
 
   let conflictWarning = null
@@ -263,6 +324,9 @@ export async function handle(args, context) {
     edits_per_file: editsPerFile,
     definition,
     conflict_warning: conflictWarning,
+    ...(semanticTruncated ? { warning: 'Semantic reference set truncated at 10000 — text scan may cover more; rename could be incomplete.' } : {}),
+    // R22-④：文本扫描截断警告（与语义截断同字段，可叠加）
+    ...(textTruncated ? { warning: (semanticTruncated ? 'Semantic reference set truncated at 10000; ' : '') + `Text scan truncated (300 files / 100 results cap) — deep or late-alphabet files may be missed. Run reindex(workspace_dir=...) and retry for a complete rename.` } : {}),
     affected_callers: affectedCallers.length > 0 ? affectedCallers : undefined,
     next_step: dryRun
       ? `Apply: rename_symbol(..., dry_run=false). Then verify: test_bridge(action="run")`
@@ -274,13 +338,22 @@ export async function handle(args, context) {
     const txnId = store.begin(`rename_${symbol}_to_${newName}`)
     let failed = false
     for (const { file: f, edits } of editsPerFile) {
-      store.backupFile(txnId, f)
-      const editResult = store.applyEdits(txnId, f, edits.map(e => ({
+      // r52: backupFile 失败（大文件/文件缺失/路径拦截）必须中止——否则无备份仍写盘，后续失败 rollback 无法还原
+      const backupResult = await store.backupFile(txnId, f)
+      if (backupResult?.error_code) {
+        await store.rollback(txnId)
+        result.status = 'rolled_back'
+        result.error = backupResult.error
+        result.failed_file = f
+        failed = true
+        break
+      }
+      const editResult = await store.applyEdits(txnId, f, edits.map(e => ({
         old_string: e.old,
         new_string: e.new,
       })))
       if (editResult.error_code) {
-        store.rollback(txnId)
+        await store.rollback(txnId)
         result.status = 'rolled_back'
         result.error = editResult.error
         result.failed_file = f
@@ -289,10 +362,43 @@ export async function handle(args, context) {
       }
     }
     if (!failed) {
-      store.commit(txnId)
+      // R22-⑰（第四轮审核 P1）+ R22-⑱（第五轮核实）：commit 已 async——同步 try/catch 抓不住 rejection
+      // （_writeManifest fsync 抛错 → unhandledRejection 崩进程）且失败对象被丢弃谎报 committed。
+      // 改 await + 检查返回 error：失败 → staged_pending（文件已 staged 落盘，可 rollback 还原）。
+      let cr
+      try {
+        cr = await store.commit(txnId)
+      } catch (e) {
+        cr = { error: 'commit_failed', message: `Commit threw: ${e.message}` }
+      }
+      if (cr?.error) {
+        result.status = 'staged_pending'
+        result.txn_id = txnId
+        result.error = cr.error
+        result.warning = `Commit failed (${cr.message || cr.error}); edits are staged in transaction ${txnId} — use edit_transaction(action=rollback) to revert or retry commit`
+        return result
+      }
       result.status = 'committed'
       result.txn_id = txnId
+      // r8(F14)：写后同步重抽——否则按 next_step 立即验证（impact/references 查新名）会拿到旧索引 → 空 caller/低风险误判
+      if (codeIndexService) {
+        const reindexed = []
+        for (const { file: f } of editsPerFile) {
+          const abs = join(workspaceDir, f)
+          try {
+            await codeIndexService.indexFile(abs, workspaceDir)
+            reindexed.push(f)
+          } catch {
+            try { codeIndexService.markIndexDirty(f, 'rename_pending_reindex') } catch {}
+          }
+        }
+        if (reindexed.length > 0) result.reindexed = reindexed
+      }
     }
+  }
+
+  if (unreadable.length > 0) {
+    result.warning = (result.warning ? result.warning + '; ' : '') + `Unreadable files skipped: ${unreadable.join(', ')}`
   }
 
   return result

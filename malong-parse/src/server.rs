@@ -19,6 +19,23 @@ use crate::classify;
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_CONCURRENCY: usize = 16;
+const READ_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
+const FRAME_COMPLETION_TIMEOUT: Duration = Duration::from_secs(60); // r9(F2)：半帧累计时长上限（滴灌客户端防缓冲滞留）
+// r8(F1)：hello 握手超时——未认证连接限时完成 __hello，超时即断
+// r11(M4)：单请求超时预算动态化——旧固定 5s 包住整个 dispatch（含 batch_extract 50 文件批），
+// 大文件多批次必然超时 → indexBatch 静默 continue → 病态仓库永远索引不完。
+// 公式：5s 基准 + 批文件数 × 200ms（单文件解析预算），上限 60s 防无限。
+const MAX_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+fn request_timeout_budget(decoded: &DecodedRequest) -> Duration {
+    if decoded.request.method == "batch_extract" {
+        let n = decoded.request.params["files"].as_array().map(|a| a.len()).unwrap_or(0) as u64;
+        let extra = n.saturating_mul(200);
+        let secs = (5 + extra / 1000).min(MAX_REQUEST_TIMEOUT.as_secs());
+        return Duration::from_secs(secs);
+    }
+    REQUEST_TIMEOUT
+}
+const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub struct ServerState {
     pub parser_pool: ParserPool,
@@ -30,6 +47,8 @@ pub struct ServerState {
     pub lang_stats: std::sync::Mutex<HashMap<String, u64>>,
     pub sym_count_buckets: std::sync::Mutex<[u64; 5]>, // 0-10, 11-50, 51-200, 201-1000, 1000+
     pub hot_files: std::sync::Mutex<Vec<(String, u64)>>, // (file_path, access_count)
+    // r8(F1)：socket 认证 token。None = 不要求认证（测试/无 token 场景），Some = 每连接首帧必须是 __hello 且 token 匹配
+    pub auth_token: Option<String>,
 }
 
 impl ServerState {
@@ -44,6 +63,7 @@ impl ServerState {
             lang_stats: Mutex::new(HashMap::new()),
             sym_count_buckets: Mutex::new([0; 5]),
             hot_files: Mutex::new(Vec::new()),
+            auth_token: None,
         }
     }
 }
@@ -86,23 +106,72 @@ where
     let mut data = Vec::new();
     let mut request_queue: BinaryHeap<PrioritizedRequest> = BinaryHeap::new();
     let mut sequence = 0u64;
+    // r8(F1)：连接级认证——首帧必须是 __hello 且 token 匹配，否则断开
+    let mut authed = state.auth_token.is_none();
+    // r9(F2)：帧完成超时——READ_IDLE_TIMEOUT 只限「字节间间隔」，滴灌客户端（<30s/块）可长期持有
+    // 半帧缓冲（16MB×16 连接 ≈ 256MB）。记录当前半帧的首字节时刻，>60s 未完成整帧即断
+    let mut frame_start: Option<std::time::Instant> = None;
 
     loop {
-        let n = match reader.read(&mut buf).await {
-            Ok(0) => break,
-            Ok(n) => n,
-            Err(e) => {
+        // r8(F2)：读空闲超时（未认证连接用更短的 HELLO_TIMEOUT 限时完成握手）
+        let timeout = if authed { READ_IDLE_TIMEOUT } else { HELLO_TIMEOUT };
+        let read_res = tokio::time::timeout(timeout, reader.read(&mut buf)).await;
+        let n = match read_res {
+            Ok(Ok(0)) => break,
+            Ok(Ok(n)) => n,
+            Ok(Err(e)) => {
                 warn!("read error: {}", e);
+                break;
+            }
+            Err(_) => {
+                warn!("read idle timeout, closing connection");
                 break;
             }
         };
         data.extend_from_slice(&buf[..n]);
+
+        // r9(F2)：帧完成时限——数据缓冲非空即处于半帧状态；首字节距今 >60s 直接断开
+        if data.is_empty() {
+            frame_start = None;
+        } else if frame_start.is_none() {
+            frame_start = Some(std::time::Instant::now());
+        }
+        if let Some(fs) = frame_start {
+            if fs.elapsed() > FRAME_COMPLETION_TIMEOUT {
+                warn!("frame not completed in {}s, closing drip-fed connection", FRAME_COMPLETION_TIMEOUT.as_secs());
+                break;
+            }
+        }
 
         // Decode all available requests and add to priority queue
         loop {
             match decode_frame(&data) {
                 DecodeResult::Frame(decoded, consumed) => {
                     data.drain(..consumed);
+                    if !authed {
+                        // r8(F1)：握手帧校验
+                        if decoded.request.method == "__hello"
+                            && decoded.request.params.get("token").and_then(|t| t.as_str())
+                                == state.auth_token.as_deref()
+                        {
+                            authed = true;
+                            let ok = Response::success(decoded.request.id, serde_json::json!({ "status": "ok" }));
+                            if let Ok(frame) = encode_frame(&ok) {
+                                if let Err(e) = writer.write_all(&frame).await {
+                                    warn!("write error during hello: {}", e);
+                                    return;
+                                }
+                            }
+                        } else {
+                            warn!("auth failed: bad or missing token");
+                            let err = Response::error(decoded.request.id, "AUTH_FAILED", "invalid token");
+                            if let Ok(frame) = encode_frame(&err) {
+                                let _ = writer.write_all(&frame).await;
+                            }
+                            return;
+                        }
+                        continue;
+                    }
                     request_queue.push(PrioritizedRequest {
                         decoded,
                         sequence,
@@ -148,7 +217,7 @@ async fn handle_request(decoded: DecodedRequest, state: &Arc<ServerState>) -> Re
     let req_id = decoded.request.id.clone();
     let req_method = decoded.request.method.clone();
 
-    let result = tokio::time::timeout(REQUEST_TIMEOUT, async move {
+    let result = tokio::time::timeout(request_timeout_budget(&decoded), async move {
         match tokio::task::spawn_blocking(move || {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| dispatch(decoded, &state_arc)))
         })
@@ -220,7 +289,9 @@ fn resolve_source(params: &serde_json::Value, raw_source: Option<&[u8]>) -> Resu
                 return Err("file path is outside workspace root".to_string());
             }
         } else {
-            tracing::debug!("file_path mode without workspace_root, skipping path traversal check");
+            // r11(H3)：file_path 模式缺 workspace_root 一律拒绝——旧实现 debug 后直接放行，
+            // 任何调用方只要传 file_path 即可让 daemon 读取主机任意受支持扩展名文件（纵深防御缺口，已闭合）
+            return Err("file_path mode requires workspace_root for path traversal protection".to_string());
         }
 
         let path = Path::new(file_path);
@@ -310,6 +381,11 @@ fn dispatch(decoded: DecodedRequest, state: &ServerState) -> Response {
                     "hot_files": hot_files_json,
                 },
             }))
+        }
+
+        "__hello" => {
+            // r8.1：免认证模式下客户端可能带残留 token 发 hello——应答 ok，不判未知方法错（防客户端 authFailed 拒连）
+            Response::success(req.id, serde_json::json!({ "status": "ok" }))
         }
 
         "extract_all" => {
@@ -461,11 +537,11 @@ fn dispatch(decoded: DecodedRequest, state: &ServerState) -> Response {
 
             match state.parser_pool.parse(&source, language) {
                 Ok(tree) => {
-                    let has_errors = extract::has_error_node(tree.root_node());
+                    let (has_errors, truncated) = extract::has_error_node(tree.root_node());
                     if !file_path.is_empty() {
                         state.cache.lock().unwrap().insert(&file_path, tree, source, language.to_string());
                     }
-                    Response::success(req.id, serde_json::json!({ "has_errors": has_errors }))
+                    Response::success(req.id, serde_json::json!({ "has_errors": has_errors, "truncated": truncated }))
                 }
                 Err(e) => Response::error(req.id, "PARSE_ERROR", &e),
             }
@@ -476,7 +552,8 @@ fn dispatch(decoded: DecodedRequest, state: &ServerState) -> Response {
                 Ok(v) => v,
                 Err(e) => return Response::error(req.id, "BAD_REQUEST", &e),
             };
-            let max_depth = params["options"]["max_depth"].as_u64().unwrap_or(30) as u32;
+            // r8(A5)：客户端可控 max_depth 无上限钳制——u32::MAX 会移除简化保护导致深递归栈溢出
+            let max_depth = params["options"]["max_depth"].as_u64().unwrap_or(30).min(256) as u32;
 
             let language = match crate::parser_pool::ext_to_language(&ext) {
                 Some(l) => l,
@@ -532,11 +609,30 @@ fn dispatch(decoded: DecodedRequest, state: &ServerState) -> Response {
             }
 
             let files = files.unwrap();
+            // r11(H3)：batch_extract 的 file_path 模式同样必须受 workspace_root 约束——
+            // 旧实现此分支完全无路径校验（不走 resolve_source），可读主机任意文件；
+            // 顶层 workspace_root 是唯一合法来源，缺省拒绝
+            let batch_root = params["workspace_root"].as_str();
 
             let results: Vec<serde_json::Value> = files.par_iter()
                 .map(|f| {
                     let path = f["path"].as_str().unwrap_or("");
                     let file_path = f["file_path"].as_str().unwrap_or("");
+
+                    // r11(H3)：file_path 模式必须带 workspace_root 且文件须在 root 内
+                    if !file_path.is_empty() {
+                        let root = match batch_root {
+                            Some(r) => r,
+                            None => return serde_json::json!({ "path": path, "error": "WORKSPACE_ROOT_REQUIRED" }),
+                        };
+                        let (ok_canon, ok_root) = match (std::fs::canonicalize(file_path), std::fs::canonicalize(root)) {
+                            (Ok(c), Ok(r)) => (c, r),
+                            _ => (std::path::PathBuf::new(), std::path::PathBuf::new()),
+                        };
+                        if !ok_canon.starts_with(&ok_root) {
+                            return serde_json::json!({ "path": path, "error": "PATH_OUTSIDE_WORKSPACE" });
+                        }
+                    }
 
                     // try cache first (file_path mode)
                     if !file_path.is_empty() {
@@ -705,6 +801,18 @@ mod tests {
         assert!(resolve_source(&p, None).is_err(), "path outside workspace must be rejected");
         fs::remove_dir_all(&dir).ok();
         fs::remove_file(&outside).ok();
+    }
+
+    #[test]
+    fn resolve_source_file_path_requires_root() {
+        // r11(H3)：file_path 模式缺 workspace_root 必须拒绝（此前直接放行 → 任意文件读取洞）
+        let dir = std::env::temp_dir().join(format!("malong-ws3-test-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let inner = dir.join("a.py");
+        fs::write(&inner, "def f(): pass").unwrap();
+        let p = serde_json::json!({ "file_path": inner.to_string_lossy() });
+        assert!(resolve_source(&p, None).is_err(), "file_path without workspace_root must be rejected");
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -894,7 +1002,7 @@ mod tests {
     fn dispatch_extract_all_file_path_mode_with_cache() {
         let s = state();
         let path = tmp_file("dispatch-file.js", "function fileFn() {}");
-        let p = serde_json::json!({ "file_path": path });
+        let p = serde_json::json!({ "file_path": path, "workspace_root": std::env::temp_dir() });
         let r1 = result(call(&s, "extract_all", p.clone()));
         assert!(r1["result"]["symbols"].as_array().unwrap().len() >= 1, "file mode must extract");
         let before = s.cache.lock().unwrap().stats()["hits"].as_u64().unwrap();
@@ -910,6 +1018,7 @@ mod tests {
         let s = state();
         let path = tmp_file("batch-file.js", "function batchFn() {}");
         let p = serde_json::json!({
+            "workspace_root": std::env::temp_dir(),
             "files": [
                 { "path": "src/batch-file.js", "file_path": path }
             ]
@@ -929,6 +1038,7 @@ mod tests {
     fn dispatch_batch_extract_error_codes() {
         let s = state();
         let p = serde_json::json!({
+            "workspace_root": std::env::temp_dir(),
             "files": [
                 { "path": "a.js", "file_path": "/nonexistent/x.js" },
                 { "path": "big.js", "source": "x".repeat(1_000_001) },
@@ -940,6 +1050,41 @@ mod tests {
         assert_eq!(results[0]["error"], "FILE_NOT_FOUND", "不存在文件报 FILE_NOT_FOUND");
         assert_eq!(results[1]["error"], "FILE_TOO_LARGE", "超限报 FILE_TOO_LARGE");
         assert_eq!(results[2]["error"], "MISSING_SOURCE", "缺 source/file_path 报 MISSING_SOURCE");
+    }
+
+    #[test]
+    fn request_timeout_budget_dynamic() {
+        // r11(M4)：batch_extract 预算 = 5s + 文件数×200ms（50 文件 → 15s），单请求仍 5s，上限 60s
+        let single = DecodedRequest {
+            request: crate::protocol::Request {
+                method: "extract_all".to_string(),
+                id: "t1".to_string(),
+                params: serde_json::json!({}),
+                priority: 0,
+            },
+            raw_source: None,
+        };
+        assert_eq!(request_timeout_budget(&single).as_secs(), 5, "非 batch 请求保持 5s");
+        let batch50 = DecodedRequest {
+            request: crate::protocol::Request {
+                method: "batch_extract".to_string(),
+                id: "t2".to_string(),
+                params: serde_json::json!({ "files": vec![0u8; 50].iter().map(|_| serde_json::json!({ "path": "x" })).collect::<Vec<_>>() }),
+                priority: 0,
+            },
+            raw_source: None,
+        };
+        assert_eq!(request_timeout_budget(&batch50).as_secs(), 15, "50 文件批 → 15s");
+        let batch300 = DecodedRequest {
+            request: crate::protocol::Request {
+                method: "batch_extract".to_string(),
+                id: "t3".to_string(),
+                params: serde_json::json!({ "files": vec![0u8; 300].iter().map(|_| serde_json::json!({ "path": "x" })).collect::<Vec<_>>() }),
+                priority: 0,
+            },
+            raw_source: None,
+        };
+        assert_eq!(request_timeout_budget(&batch300).as_secs(), 60, "300 文件批 cap 60s");
     }
 
     #[test]
@@ -962,5 +1107,173 @@ mod tests {
         assert_eq!(top.decoded.request.method, "high-b", "priority 1 must pop first");
         let second = heap.pop().unwrap();
         assert_eq!(second.decoded.request.method, "low-a", "same priority must respect FIFO sequence");
+    }
+
+    // ── r8：深嵌套输入栈溢出修复（此前 14KB 输入杀整个 daemon，以下测试在修复前会 abort 测试进程） ──
+
+    #[test]
+    fn extract_all_deep_nesting_no_stack_overflow() {
+        let s = state();
+        let deep = format!("{}1{}", "(".repeat(7000), ")".repeat(7000));
+        let r = result(call(&s, "extract_all", serde_json::json!({"source": deep, "ext": ".js"})));
+        assert!(r["result"]["symbols"].is_array(), "extract_all must not crash on deep nesting");
+    }
+
+    #[test]
+    fn extract_references_deep_nesting_no_stack_overflow() {
+        let s = state();
+        let deep = format!("{}1{}", "(".repeat(10000), ")".repeat(10000));
+        let r = result(call(&s, "extract_references", serde_json::json!({"source": deep, "ext": ".js"})));
+        assert!(r["result"]["refs"].is_array(), "extract_references must not crash on deep nesting");
+    }
+
+    #[test]
+    fn has_errors_deep_nesting_no_stack_overflow() {
+        let s = state();
+        let deep = format!("{}1{}", "(".repeat(50000), ")".repeat(50000));
+        let r = result(call(&s, "has_errors", serde_json::json!({"source": deep, "ext": ".js"})));
+        assert!(r["result"].is_object(), "has_errors must not crash on deep nesting");
+    }
+
+    #[test]
+    fn has_errors_deep_nesting_flags_truncated_conservatively() {
+        // r9(A1)：>512 深的嵌套无法完整验证——has_errors 保守 true + truncated 标注（宁可报错不可静默失真）；
+        // 浅层正常代码不受影响
+        let s = state();
+        let deep = format!("{}1{}", "(".repeat(2000), ")".repeat(2000));
+        let r = result(call(&s, "has_errors", serde_json::json!({"source": deep, "ext": ".js"})));
+        assert_eq!(r["result"]["has_errors"], true, "unverifiable deep nesting must be conservative has_errors=true");
+        assert_eq!(r["result"]["truncated"], true, "deep nesting must set truncated flag");
+        let ok = result(call(&s, "has_errors", serde_json::json!({"source": "let a = 1;", "ext": ".js"})));
+        assert_eq!(ok["result"]["has_errors"], false);
+        assert_eq!(ok["result"]["truncated"], false);
+    }
+
+    #[tokio::test]
+    async fn fuzz_garbage_frames_never_kill_server() {
+        // r9(B3)：协议层随机畸形帧（固定 seed 确定性伪随机）——服务端必须存活、跳过垃圾、仍能服务合法请求
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let mut st = ServerState::new();
+        let (mut client, server) = tokio::net::UnixStream::pair().unwrap();
+        let h = tokio::spawn(async move {
+            handle_connection(server, Arc::new(st)).await;
+        });
+        let mut seed: u64 = 0x9E37_79B9_7F4A_7C15;
+        let mut rnd = move || { seed ^= seed << 13; seed ^= seed >> 7; seed ^= seed << 17; seed };
+        // 1) 零长度帧（r9 修复：旧实现 Skip(0) → drain(..0) 无限自旋）
+        let _ = client.write_all(&0u32.to_be_bytes()).await;
+        // 2) 300 轮自包含畸形帧——每块：4B 头 + 按需 payload，恒可解析（不残留 Incomplete 状态）
+        for _ in 0..300 {
+            let hdr = rnd();
+            let mut len = (hdr >> 32) as u32;
+            // len ∈ (64, 16MB] 且无 payload 会残留 Incomplete 吞后续字节——钳成超大帧（直接 Skip）
+            if len > 64 { len = u32::MAX }
+            let _ = client.write_all(&len.to_be_bytes()).await;
+            if len > 0 && len <= 64 {
+                let mut buf = Vec::with_capacity(len as usize);
+                for _ in 0..len { buf.push((rnd() & 0xFF) as u8) }
+                let _ = client.write_all(&buf).await;
+            }
+        }
+        // 3) 超大 frameLen（>16MB → Skip 4）与合法帧混合
+        let _ = client.write_all(&u32::MAX.to_be_bytes()).await;
+        let frame = encode_frame(&serde_json::json!({"id": "f1", "method": "health"})).unwrap();
+        let _ = client.write_all(&frame).await;
+        let resp = read_frame(&mut client).await;
+        assert!(resp["result"].is_object(), "server must survive garbage frames and still serve health");
+        h.await.unwrap();
+    }
+
+    #[test]
+    fn compute_metrics_deep_nesting_no_stack_overflow() {
+        let s = state();
+        let deep = format!("{}1{}", "(".repeat(20000), ")".repeat(20000));
+        let r = result(call(&s, "compute_metrics", serde_json::json!({"source": deep, "ext": ".js"})));
+        assert!(r["result"].is_object(), "compute_metrics must not crash on deep nesting");
+    }
+
+    #[test]
+    fn simplify_max_depth_clamped_no_stack_overflow() {
+        let s = state();
+        // 100k 层 if 链 + 客户端传 u32::MAX——钳制后不得崩溃
+        let src = format!("{}x", "if(a)".repeat(100000));
+        let r = result(call(&s, "simplify_ast", serde_json::json!({
+            "source": src, "ext": ".js", "options": {"max_depth": 4294967295u64}
+        })));
+        assert!(r["result"].is_object(), "simplify_ast must not crash with u32::MAX max_depth");
+    }
+
+    // ── r8(F1)：__hello 握手认证 ──
+
+    // 完整读一帧（单次 read 可能只拿到部分字节）
+    async fn read_frame(sock: &mut tokio::net::UnixStream) -> serde_json::Value {
+        use tokio::io::AsyncReadExt;
+        let mut hdr = [0u8; 4];
+        sock.read_exact(&mut hdr).await.unwrap();
+        let ln = u32::from_be_bytes(hdr) as usize;
+        let mut body = vec![0u8; ln];
+        sock.read_exact(&mut body).await.unwrap();
+        serde_json::from_slice(&body).unwrap()
+    }
+
+    #[tokio::test]
+    async fn hello_handshake_rejects_bad_token() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let mut st = ServerState::new();
+        st.auth_token = Some("secret-token".into());
+        let (mut client, server) = tokio::net::UnixStream::pair().unwrap();
+        let h = tokio::spawn(async move {
+            handle_connection(server, Arc::new(st)).await;
+        });
+        let frame = encode_frame(&serde_json::json!({"id": "1", "method": "__hello", "params": {"token": "wrong"}})).unwrap();
+        client.write_all(&frame).await.unwrap();
+        let resp = read_frame(&mut client).await;
+        assert_eq!(resp["error"]["code"], "AUTH_FAILED", "bad token must be rejected");
+        h.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn hello_handshake_accepts_correct_token_then_serves() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let mut st = ServerState::new();
+        st.auth_token = Some("secret-token".into());
+        let (mut client, server) = tokio::net::UnixStream::pair().unwrap();
+        let h = tokio::spawn(async move {
+            handle_connection(server, Arc::new(st)).await;
+        });
+        // 握手
+        let frame = encode_frame(&serde_json::json!({"id": "h", "method": "__hello", "params": {"token": "secret-token"}})).unwrap();
+        client.write_all(&frame).await.unwrap();
+        let resp = read_frame(&mut client).await;
+        assert_eq!(resp["result"]["status"], "ok", "hello must be acknowledged");
+        // 认证后正常请求
+        let frame2 = encode_frame(&serde_json::json!({"id": "h2", "method": "health"})).unwrap();
+        client.write_all(&frame2).await.unwrap();
+        let resp2 = read_frame(&mut client).await;
+        assert!(resp2["result"].is_object(), "post-auth request must be served");
+        h.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn hello_ignored_in_permissive_mode() {
+        // r8.1：免认证模式（auth_token=None）下客户端带残留 token 发 hello——必须应答 ok，
+        // 不能返回未知方法错（否则新客户端 _sendHello 超时判 authFailed 拒连）
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let mut st = ServerState::new();
+        st.auth_token = None;
+        let (mut client, server) = tokio::net::UnixStream::pair().unwrap();
+        let h = tokio::spawn(async move {
+            handle_connection(server, Arc::new(st)).await;
+        });
+        let frame = encode_frame(&serde_json::json!({"id": "h", "method": "__hello", "params": {"token": "stale"}})).unwrap();
+        client.write_all(&frame).await.unwrap();
+        let resp = read_frame(&mut client).await;
+        assert_eq!(resp["result"]["status"], "ok", "permissive mode must ack hello");
+        // 随后正常请求照常服务
+        let frame2 = encode_frame(&serde_json::json!({"id": "h2", "method": "health"})).unwrap();
+        client.write_all(&frame2).await.unwrap();
+        let resp2 = read_frame(&mut client).await;
+        assert!(resp2["result"].is_object(), "requests must be served after stale hello");
+        h.await.unwrap();
     }
 }

@@ -5,22 +5,34 @@
 import { join, basename, extname } from 'node:path'
 import {
   readFileSync, writeFileSync, existsSync, mkdirSync, renameSync,
-  openSync, closeSync, writeSync, unlinkSync, statSync, readdirSync, appendFileSync,
+  openSync, closeSync, writeSync, unlinkSync, statSync, readdirSync, appendFileSync, utimesSync,
 } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import { sha256 } from './hash-utils.js'
 import { validateFilePath } from './error-codes.js'
+import { guardRealPath } from './path-guard.js'
 import { extractSignatureLine, langOf } from './symbol-anchors.js'
 import { checkFileStaleness } from './staleness.js'
 import { countOccurrences, makeSimpleDiff, applyReplace, applyBodyEdit, applyInsertAfter, checkBracketBalance } from './write-edit.js'
-import { createJournal, updateJournalState, auditLog, recoverJournals, JOURNAL_ROOT } from './write-journal.js'
+import { createJournal, updateJournalState, auditLog, recoverJournals, recoverTransactions, pruneJournals, JOURNAL_ROOT, createBatchMarker, updateBatchMarker, finishBatchMarker } from './write-journal.js'
+import { registerWriter } from './writer-registry.js'
 
-const LOCK_TIMEOUT_MS = 2000
+const LOCK_TIMEOUT_MS = 35000 // r9(F3)：心跳续租使合法持锁可达 30s+——旧 2s 等待超时在长持有下高频 FILE_LOCKED（锁内 validateSyntax 可 30s）；等待者应给足健康长持有时间
 const STALE_LOCK_MS = 30000 // 7：10s 太短——锁内 await validateSyntax 异步解析可能 >10s，第二进程盗锁 → 双写覆盖
 const MAX_LIVE_READ = 1024 * 1024
 
 export function traceId() {
   return `trc_${Date.now()}_${randomBytes(3).toString('hex')}`
+}
+
+// syntax pass 是权威：合法语法 ⇒ 代码括号必平衡——bracket stripper 不识别正则字面量
+// （含引号字符类如 ['"`] 还会连带破坏字符串剥离），此时 bracket fail 必为误报；
+// 降级防 strict 模式阻断合法写入 / 误导 LLM 以为编辑坏了。syntax 非 pass（fail/skip）时 bracket 是唯一或佐证信号，保留原判。
+export function reconcileBracketWithSyntax(validation) {
+  if (validation?.syntax?.status === 'pass' && validation?.bracket?.status === 'fail') {
+    validation.bracket = { status: 'pass', false_positive_downgraded: 'syntax-pass is authoritative; bracket stripper misses regex literals', raw: validation.bracket.errors }
+  }
+  return validation
 }
 
 // ---------- 锁（附录 D：OS advisory 优先，fallback lockfile + pid；2s 超时） ----------
@@ -31,27 +43,41 @@ export async function acquireLock(absPath, timeoutMs = LOCK_TIMEOUT_MS) {
   for (;;) {
     try {
       const fd = openSync(lockPath, 'wx')
+      // r54(P1): 归属用随机 token 而非 pid——同进程并发(MCP 并行工具调用)pid 相同，pid 校验无法
+      // 区分持锁者：A 持锁超 30s 被 B 盗锁后，A release 见 pid 相等会删掉 B 的新锁 → C 闯入双写覆盖
+      const token = randomBytes(8).toString('hex')
       try {
-        writeSync(fd, JSON.stringify({ pid: process.pid, ts: Date.now() }))
+        writeSync(fd, JSON.stringify({ pid: process.pid, token, ts: Date.now() }))
       } finally {
         closeSync(fd) // 9（F3）：writeSync 抛错（ENOSPC）时旧实现跳过 closeSync → fd 泄漏 + 空锁文件残留
       }
       let released = false
+      // r8(E1)：持锁续租——锁内 await validateSyntax 可达 30s（恰等于 STALE_LOCK_MS），
+      // 无续租则活跃持锁者被误判陈旧 → 第二进程盗锁双写覆盖。每 15s 触摸锁 mtime。
+      const heartbeat = setInterval(() => {
+        try {
+          if (JSON.parse(readFileSync(lockPath, 'utf-8')).token === token) {
+            const now = new Date()
+            utimesSync(lockPath, now, now)
+          }
+        } catch {}
+      }, 15000)
+      // r9(F2 注)：心跳是 JS 定时器，锁区内同步长操作（>1GB 文件 sha256/慢盘 writeFileSync）会冻结事件循环
+      // 导致心跳无法触发、锁被误判陈旧盗走——本地盘场景 <1s 不受影响；慢盘/超大文件需 await 化后才算完整覆盖
+      if (heartbeat.unref) heartbeat.unref()
       return {
         release() {
           if (released) return
           released = true
-          // 7：锁归属校验——锁文件写了 pid 却从不校验，陈旧重建后 release 会删掉新所有者的锁
-          // → 三方并发 rename，后写胜出，静默覆盖。release 只删「自己还持有」的锁
+          clearInterval(heartbeat)
+          // r54(P1): token 比对——只删「自己还持有」的锁；锁已被盗/重建（token 不同）则不删
           try {
-            const st = statSync(lockPath)
-            if (Date.now() - st.mtimeMs > STALE_LOCK_MS) return // 已被判陈旧重建，锁已属于他人
             const content = readFileSync(lockPath, 'utf-8')
-            const holderPid = JSON.parse(content).pid
-            if (holderPid !== process.pid) return // 他人持有，不删
+            const holder = JSON.parse(content)
+            if (holder.token !== token) return // 他人持有，不删
             unlinkSync(lockPath)
           } catch {
-            try { unlinkSync(lockPath) } catch {}
+            // r54(P1): 读不到/解析失败不盲删——可能正是他人刚建好的新锁（旧 catch 盲删是盗锁帮凶）
           }
         },
       }
@@ -64,10 +90,15 @@ export async function acquireLock(absPath, timeoutMs = LOCK_TIMEOUT_MS) {
           continue
         }
       } catch { continue }
-      if (Date.now() - start > timeoutMs) return { locked: true }
+      if (Date.now() - start > timeoutMs) return { locked: true, release: () => {} } // r9(P1)：超时对象带安全空释放——防任何漏检 .locked 的调用方 finally 调 release() 抛 TypeError
       await new Promise(r => setTimeout(r, 50))
     }
   }
+}
+
+// r8(B5)：唯一 tmp 名——植入的 `<file>.tmp` symlink 会被 writeFileSync 穿写到外部；随机后缀永不同名
+function _uniqueTmp(absPath, tag) {
+  return `${absPath}.${tag}-${randomBytes(4).toString('hex')}`
 }
 
 // ---------- crash recovery（附录 D：启动扫 journal，未完成 txn 按 state 回滚） ----------
@@ -78,6 +109,11 @@ export async function acquireLock(absPath, timeoutMs = LOCK_TIMEOUT_MS) {
 export function classifyConflict(base, cur, isSymbolMode) {
   if (!base?.file?.hash) return { type: 'NO_BASE' }
   if (isSymbolMode && !cur.symbol) return { type: 'SYMBOL_DELETED' }
+  // r11(M5)：read_symbol 对 >1MB 文件只读前 1MB 算哈希（truncated_hash），与 write-runtime 的全量哈希无可比性——
+  // 文件级模式恒比对必 FAIL → 跳过（符号级模式仍靠 body_hash 判定，截断 base 的 body 与前 1MB 内符号自洽）
+  if (base.file.truncated_hash && !isSymbolMode) {
+    return { type: 'CLEAN', warning: 'truncated_hash_base: file-level conflict check skipped (>1MB truncated read)' }
+  }
   const fileSame = base.file.hash === cur.file.hash
   if (fileSame) {
     if (!isSymbolMode) return { type: 'CLEAN' }
@@ -120,8 +156,14 @@ async function validateSyntax(langParser, source, ext) {
   if (!langParser?.hasErrorsAsync) return { status: 'skip', reason: 'langParser unavailable' }
   try {
     // 注意：不传 filePath —— 校验的是内存中的 newContent，不是磁盘文件
-    const hasErr = await langParser.hasErrorsAsync(source, ext, null)
-    return hasErr ? { status: 'fail', errors: ['syntax errors detected by parser'] } : { status: 'pass' }
+    const res = await langParser.hasErrorsAsync(source, ext, null)
+    // r9(A1)：兼容布尔（旧 mock/实现）与 {has_errors, truncated}（r9 起 Rust daemon 返回）
+    const hasErr = res === true || (res && res.has_errors === true)
+    const truncated = res && res.truncated === true
+    if (hasErr) return { status: 'fail', errors: ['syntax errors detected by parser'] }
+    // r9(A1)：深度截断 = 未能完整验证——宁可拒绝写盘（用户决策：截断时报错不静默放行）
+    if (truncated) return { status: 'fail', errors: ['file too deeply nested to verify syntax (depth > 512); refusing write'] }
+    return { status: 'pass' }
   } catch (e) {
     return { status: 'skip', reason: `parse unavailable: ${e.message}` }
   }
@@ -130,9 +172,10 @@ async function validateSyntax(langParser, source, ext) {
 // ---------- 主编排 ----------
 
 // r35-fix: Windows rename 偶发 EPERM/EBUSY（杀软扫描/句柄短暂占用）→ 短暂重试后再放弃
-async function renameRetry(from, to) {
+// r36：导出 + 注入 renameFn（默认 renameSync，生产零变化）以便单测重试分支
+export async function renameRetry(from, to, renameFn = renameSync) {
   for (let i = 0; ; i++) {
-    try { renameSync(from, to); return } catch (e) {
+    try { renameFn(from, to); return } catch (e) {
       if (i >= 3 || !['EPERM', 'EBUSY', 'EACCES'].includes(e.code)) throw e
       await new Promise(r => setTimeout(r, 150))
     }
@@ -162,15 +205,28 @@ export async function writeSymbol(args, context) {
   if (!pathCheck.ok) {
     return { success: false, error: { code: 'PATH_BLOCKED', message: pathCheck.detail }, trace_id }
   }
+  // r9(P2)：主写路径 realpath 守卫——validateFilePath 只查字符串，workspace 内 symlink 指向外部时
+  // 字符串全通过 → 写穿仓库（edit_transaction 有守卫而 write_symbol 没有的不对称洞）
+  const guardW = guardRealPath(workspaceDir, filePath)
+  if (guardW.blocked) {
+    return { success: false, error: { code: 'PATH_BLOCKED', message: guardW.detail }, trace_id }
+  }
 
   const absPath = join(workspaceDir, filePath)
   if (!existsSync(absPath)) {
     return { success: false, error: { code: 'FILE_NOT_FOUND', message: `File not found: ${filePath}`, suggestion: 'write_symbol only edits existing files; use create capability for new files.' }, trace_id }
   }
 
-  // crash recovery 先行
-  const recovered = recoverJournals(workspaceDir)
+  // crash recovery 先行（r9：recoverJournals 内批次恢复已 async——取锁回滚）
+  // 审核修复：补传 codeIndexService——否则 R18 的 index_pending 启动补抽分支只有测试在消费（生产死代码）
+  const recovered = await recoverJournals(workspaceDir, { codeIndexService })
   if (recovered.length > 0) pipelineStep(pipeline, 'crash_recovery', 'warn', { recovered: recovered.length })
+  // R4a：TransactionStore 系崩溃恢复同入口（幂等，只处理 staged）
+  // 审核修复：补传 codeIndexService——R18 对齐（manifest index_pending 补抽消费）
+  const txnRecovered = await recoverTransactions(workspaceDir, { codeIndexService })
+  if (txnRecovered.length > 0) pipelineStep(pipeline, 'txn_crash_recovery', 'warn', { recovered: txnRecovered.length })
+  const pruned = pruneJournals(workspaceDir)
+  if (pruned.pruned > 0) pipelineStep(pipeline, 'journal_prune', 'ok', { pruned: pruned.pruned, kept: pruned.kept })
 
   const editMode = args?.edit_mode || (args?.patch ? 'patch' : 'replace_symbol')
   const boundary = args?.boundary || 'full'
@@ -238,6 +294,7 @@ export async function writeSymbol(args, context) {
   let journal = null
   let newBodyLineCount = null
   let successResult = null
+  let patchNewStringOmitted = false
   try {
     // 2) 锁内 resolve locator → 符号 / 降级模式
     if (locator.symbol_id && codeIndexService) {
@@ -336,6 +393,8 @@ export async function writeSymbol(args, context) {
       const patch = args.patch || {}
       const oldString = patch.old_string
       const newString = patch.new_string ?? ''
+      // R22-⑦（并发拷打）：patch 缺 new_string = 删除 old_string——显式空串是合法删除，缺省（undefined）多为误用，挂 warning 不阻断
+      patchNewStringOmitted = patch.new_string === undefined
       if (typeof oldString !== 'string' || oldString === '') {
         return { success: false, error: { code: 'missing_parameter', message: 'patch.old_string is required' }, trace_id }
       }
@@ -363,12 +422,13 @@ export async function writeSymbol(args, context) {
       } else {
         if (symbol && range) {
           const body = lines.slice(range[0] - 1, range[1]).join('\n')
-          const patchedBody = body.replace(oldString, newString)
+          // r54(P2): 函数替换器——字符串替换会解释 newString 里的 $&/$'/`$`/$$ 序列 → 写入内容被篡改
+          const patchedBody = body.replace(oldString, () => newString)
           newLines = [...lines.slice(0, range[0] - 1), ...patchedBody.split('\n'), ...lines.slice(range[1])]
           newBodyLineCount = patchedBody.split('\n').length
           diff = makeSimpleDiff(lines, newLines)
         } else {
-          const patched = content.replace(oldString, newString)
+          const patched = content.replace(oldString, () => newString)
           newLines = patched.split('\n')
           diff = makeSimpleDiff(lines, newLines)
         }
@@ -438,6 +498,7 @@ export async function writeSymbol(args, context) {
     } else {
       validation.syntax = { status: 'skip', reason: 'non-code file' }
     }
+    reconcileBracketWithSyntax(validation)
     pipelineStep(pipeline, 'validate', validation.syntax.status === 'pass' && validation.bracket.status === 'pass' ? 'ok' : 'warn', { syntax: validation.syntax.status, bracket: validation.bracket.status })
     if (safety.block_on_validation_error && (validation.syntax.status === 'fail' || validation.syntax.status === 'skip' || validation.bracket.status === 'fail')) {
       return { success: false, error: { code: 'VALIDATION_FAILED', message: 'validation failed and block_on_validation_error is set', validation }, trace_id }
@@ -469,7 +530,7 @@ export async function writeSymbol(args, context) {
     updateJournalState(journal.dir, { state: 'staged', new_hash: sha256(newContent) })
 
     // 8) 原子写：temp + rename（附录 D）
-    const tmpPath = `${absPath}.tmp`
+    const tmpPath = _uniqueTmp(absPath, 'tmp')
     try {
       // 7（F7）：旧 writeFileSync 在 try 外——磁盘满/权限错误裸异常逃逸，tmp 半写残留，错误契约破坏
       writeFileSync(tmpPath, newContent)
@@ -482,6 +543,8 @@ export async function writeSymbol(args, context) {
     }
     pipelineStep(pipeline, 'atomic_write', 'ok')
     updateJournalState(journal.dir, { state: 'committed', committed_at: new Date().toISOString() })
+    // Y002-S1：写后登记写者（collision_guard classify 识别 write_runtime）
+    registerWriter(workspaceDir, filePath, 'write_runtime')
 
     // 组装 new_version（锁内，行号用 apply 后的真实值）
     newVersion = {
@@ -511,6 +574,10 @@ export async function writeSymbol(args, context) {
       success: true,
       symbol_id: symbol?.stable_id || null,
       txn_id: journal.txnId,
+      ...(patchNewStringOmitted ? { warning: 'patch.new_string omitted — old_string will be removed (explicit empty string if deletion is intended)' } : {}),
+      // Y002-S2：LLM 工作流闭环——write_symbol 走 write-journal（非 .ai-transactions，diff_facts 不适用），
+      // 闭环为 test_bridge → debug_runner；经 edit_transaction 的改动才接 diff_facts
+      next_step: 'workflow: test_bridge(action="run") → debug_runner on failure; if edits went through edit_transaction, also diff_facts(since="last_txn")',
       new_version: newVersion,
       diff,
       safety_report: {
@@ -554,6 +621,10 @@ export async function writeSymbol(args, context) {
     } catch (e) {
       reindex = { status: 'failed', reason: e.message }
       codeIndexService.markIndexDirty(filePath, 'write_pending_reindex')
+      // R18：journal 记 index_pending——启动恢复时 recoverJournals 补抽（不依赖显式 reindex）
+      if (journal) {
+        try { updateJournalState(journal.dir, { index_pending: true, index_pending_reason: e.message }) } catch {}
+      }
       pipelineStep(pipeline, 'reindex', 'warn', { reason: e.message })
     }
   } else if (codeIndexService) {
@@ -561,7 +632,8 @@ export async function writeSymbol(args, context) {
     try {
       const row = codeIndexService.getFileByPath(filePath)
       if (row) {
-        codeIndexService._db.prepare("UPDATE files SET content_hash = ?, index_state = 'fresh' WHERE path = ?").run(sha256(newContent), filePath)
+        // r11(L6)：改用公共方法——旧实现直取 _db 私有字段（service stop 后 _db=null → TypeError）
+        codeIndexService.updateContentHash(filePath, sha256(newContent))
         reindex = { status: 'ok', note: 'non-code: content_hash updated' }
       } else {
         reindex = { status: 'ok', note: 'non-code: not_indexed' }
@@ -622,8 +694,15 @@ export async function writeSymbols(args, context) {
   const force = !!args?.allow_unsafe_no_base || !!safety.allow_unsafe_no_base
 
   const t0 = Date.now()
-  const recovered = recoverJournals(workspaceDir)
+  // 审核修复：补传 codeIndexService——R18 index_pending 启动补抽生产接线
+  const recovered = await recoverJournals(workspaceDir, { codeIndexService })
   if (recovered.length > 0) pipelineStep(pipeline, 'crash_recovery', 'warn', { recovered: recovered.length })
+  // R4a：TransactionStore 系崩溃恢复同入口
+  // 审核修复：补传 codeIndexService——R18 对齐（manifest index_pending 补抽消费）
+  const txnRecovered = await recoverTransactions(workspaceDir, { codeIndexService })
+  if (txnRecovered.length > 0) pipelineStep(pipeline, 'txn_crash_recovery', 'warn', { recovered: txnRecovered.length })
+  const pruned = pruneJournals(workspaceDir)
+  if (pruned.pruned > 0) pipelineStep(pipeline, 'journal_prune', 'ok', { pruned: pruned.pruned, kept: pruned.kept })
 
   // 按 file_path 分组（保输入序），组按 workspace-relative 路径字典序排序（§16.4 锁序防死锁）
   const groups = new Map()
@@ -638,6 +717,11 @@ export async function writeSymbols(args, context) {
     if (!pathCheck.ok) {
       return { success: false, error: { code: 'PATH_BLOCKED', message: pathCheck.detail }, trace_id }
     }
+    // r9(P2)：批量主写路径同样补 realpath 守卫
+    const guardW = guardRealPath(workspaceDir, fp)
+    if (guardW.blocked) {
+      return { success: false, error: { code: 'PATH_BLOCKED', message: guardW.detail }, trace_id }
+    }
     if (!groups.has(fp)) groups.set(fp, [])
     groups.get(fp).push(w)
   }
@@ -647,15 +731,35 @@ export async function writeSymbols(args, context) {
   const items = []
   const written = []   // 已写文件：{ absPath, filePath, backup, journalDir }
   let failed = null
+  const fileFailures = [] // r54(P1): best_effort 收集每文件失败后继续，不再首失败即停
   let allDiffs = []
+  // r8(F10)：批次标记——崩溃恢复时识别「部分提交的半批」并回滚（journal 每文件独立，无批次级记录会静默留下半批）
+  let batchId = null
+  const batchTxnIds = []
+  if (!dryRun) {
+    try {
+      // r9(F4)：标记批次模式——best_effort 崩溃后部分提交不回滚（用户可见的成功结果）
+      batchId = createBatchMarker(workspaceDir, groupFiles, allOrNothing ? 'strict' : 'best_effort').batchId
+    } catch (e) {
+      // R22-⑯：批次锁忙（另一个 writeSymbols 正在运行）→ 硬失败，不降级无锚点批
+      if (e?.code === 'BATCH_LOCK_BUSY') {
+        return { success: false, error: { code: 'BATCH_LOCK_BUSY', message: 'Another batch write is in progress. Retry when it completes.' }, trace_id }
+      }
+      batchId = null
+    }
+  }
 
   // ── 逐组（文件）执行：锁 → 组内逐项 resolve+判定+apply（共享 lines）→ 一次原子写 ──
+  // r54(P0-9): 整循环包 try/catch——createJournal(mkdirSync/writeFileSync ENOSPC/权限)、acquireLock(EMFILE)
+  // 等未捕获 throw 会穿透跳过下方回滚段，先写文件带 committed journal 留盘，all_or_nothing 静默破坏。
+  try {
   for (const fp of groupFiles) {
     if (failed && allOrNothing) break
     const absPath = absPathOf(fp)
     if (!existsSync(absPath)) {
-      failed = { file: fp, error: { code: 'FILE_NOT_FOUND', message: `File not found: ${fp}` } }
-      break
+      const err = { file: fp, error: { code: 'FILE_NOT_FOUND', message: `File not found: ${fp}` } }
+      if (allOrNothing) { failed = err; break }
+      fileFailures.push(err); continue // r54(P1): best_effort 记录后继续
     }
     // staleness 预热（锁外；批量内 resolve 需要新 range）
     if (codeIndexService) {
@@ -664,14 +768,16 @@ export async function writeSymbols(args, context) {
 
     const lock = await acquireLock(absPath)
     if (lock.locked) {
-      failed = { file: fp, error: { code: 'FILE_LOCKED', message: `File is locked by another writer: ${fp}`, suggestion: 'Retry after a moment.' } }
-      break
+      const err = { file: fp, error: { code: 'FILE_LOCKED', message: `File is locked by another writer: ${fp}`, suggestion: 'Retry after a moment.' } }
+      if (allOrNothing) { failed = err; break }
+      fileFailures.push(err); continue // r54(P1): best_effort 记录后继续
     }
     try {
       let content = ''
       try { content = readFileSync(absPath, 'utf-8') } catch (e) {
-        failed = { file: fp, error: { code: 'READ_FAILED', message: e.message } }
-        break
+        const err = { file: fp, error: { code: 'READ_FAILED', message: e.message } }
+        if (allOrNothing) { failed = err; break }
+        fileFailures.push(err); continue // r54(P1): best_effort 记录后继续
       }
       let lines = content.split('\n')
       const appliedEdits = [] // {endLine(原文件坐标), delta}——偏移只对位于先前编辑点之后的符号生效
@@ -723,7 +829,8 @@ export async function writeSymbols(args, context) {
 
         // §16.7 幂等预检：目标已是意图内容 → already_applied，跳过冲突判定与 apply
         // （重试整批时 base_version 已过期，冲突判定会误拒——预检必须在冲突之前）
-        if (w?.content && symbol && range) {
+        // r54(P2): insert_after 的 content 是要插入的新代码、scopeText 是锚点符号自身——两者恰同时误判 already_applied 静默跳过，该模式跳过预检
+        if (w?.content && symbol && range && editMode !== 'insert_after_symbol') {
           const scopeText = boundary === 'body' ? lines.slice(range[0], range[1]).join('\n') : lines.slice(range[0] - 1, range[1]).join('\n')
           if (scopeText.trim() === w.content.trim()) {
             groupResults.push({ file_path: fp, symbol_id: symbol.stable_id || null, edit_mode: editMode, status: 'already_applied', content: w.content })
@@ -746,7 +853,7 @@ export async function writeSymbols(args, context) {
           break
         }
         if (firstReal && itemBase) {
-          const conflict = classifyConflict({ file: { hash: itemBase.file?.hash }, symbol: itemBase.symbol || null }, current, !!symbol)
+          const conflict = classifyConflict({ file: { hash: itemBase.file?.hash, truncated_hash: itemBase.file?.truncated_hash }, symbol: itemBase.symbol || null }, current, !!symbol)
           pipelineStep(pipeline, 'version_check', conflict.type === 'CLEAN' ? 'ok' : 'warn', { conflict: conflict.type, file: fp })
           const policy_ = CONFLICT_POLICY[conflict.type] || 'reject'
           if (policy_ === 'reject') {
@@ -760,6 +867,12 @@ export async function writeSymbols(args, context) {
             failed = { file: fp, itemIndex: idx, error: { code: 'VERSION_CONFLICT', conflict_type: 'SYMBOL_CHANGED', message: `base_version mismatch: SYMBOL_CHANGED for ${symbol.stable_id}`, suggestion: 'Re-read the symbol and regenerate content.' } }
             break
           }
+          // r8(F13)：base_version 的符号与目标符号不一致（跨符号/陈旧 base）——符号级无意义，
+          // 降级为「批内当前内容 vs base 文件 hash」比较（对齐单发路径 L298-304 语义），不一致即拒
+          if (baseSymId && symbol && baseSymId !== symbol.stable_id && itemBase.file?.hash && itemBase.file.hash !== `sha256:${sha256(lines.join('\n'))}`) {
+            failed = { file: fp, itemIndex: idx, error: { code: 'VERSION_CONFLICT', conflict_type: 'FILE_CHANGED', message: `base_version symbol (${baseSymId}) does not match target (${symbol.stable_id}) and file changed since base`, suggestion: 'Re-read the file and regenerate the batch.' } }
+            break
+          }
         }
 
         // apply
@@ -769,9 +882,12 @@ export async function writeSymbols(args, context) {
         lines = itemResult.lines
         if (itemResult.delta) appliedEdits.push({ endLine: symbol ? symbol.end_line : null, delta: itemResult.delta })
         if (itemResult.diff) allDiffs.push({ file: fp, diff: itemResult.diff })
-        groupResults.push({ file_path: fp, symbol_id: symbol?.stable_id || null, edit_mode: editMode, status: itemResult.status, content: w.content })
+        groupResults.push({ file_path: fp, symbol_id: symbol?.stable_id || null, edit_mode: editMode, status: itemResult.status, content: w.content, ...(itemResult.warning ? { warning: itemResult.warning } : {}) })
       }
-      if (failed) break
+      if (failed) {
+        if (allOrNothing) break
+        fileFailures.push(failed); failed = null; continue // r54(P1): best_effort 记录后继续下一文件
+      }
 
       // 全组验证（一次）
       const newContent = lines.join('\n')
@@ -782,6 +898,7 @@ export async function writeSymbols(args, context) {
       } else {
         validation.syntax = { status: 'skip', reason: 'non-code file' }
       }
+      reconcileBracketWithSyntax(validation)
       pipelineStep(pipeline, 'validate', validation.syntax.status === 'pass' && validation.bracket.status === 'pass' ? 'ok' : 'warn', { syntax: validation.syntax.status, bracket: validation.bracket.status, file: fp })
       if (safety.block_on_validation_error && (validation.syntax.status === 'fail' || validation.syntax.status === 'skip' || validation.bracket.status === 'fail')) {
         failed = { file: fp, error: { code: 'VALIDATION_FAILED', message: `validation failed for ${fp}`, validation }, groupResults }
@@ -792,10 +909,12 @@ export async function writeSymbols(args, context) {
 
       // journal + 一次原子写（组 = 文件）
       const journal = createJournal(workspaceDir, fp, absPath, content, { editMode: 'write_symbols', state: 'staged', base_file_hash: groupItems[0]?.base_version?.file?.hash || null })
+      batchTxnIds.push(journal.txnId)
+      if (batchId) updateBatchMarker(workspaceDir, batchId, { txnIds: batchTxnIds })
       updateJournalState(journal.dir, { state: 'staged', new_hash: sha256(newContent) })
-      const tmpPath = `${absPath}.tmp`
+      const tmpPath = _uniqueTmp(absPath, 'tmp')
       try {
-        // 7（F7）：writeFileSync 在 try 外——异常逃逸跳过 failed 分支与回滚
+        // 7（F7）：writeFileSync 在 try 外——异常逃逸跳过 failed 分支与回滚；r8(B5)：唯一 tmp 防 symlink 穿透
         writeFileSync(tmpPath, newContent)
         await renameRetry(tmpPath, absPath)
       } catch (e) {
@@ -805,12 +924,19 @@ export async function writeSymbols(args, context) {
         break
       }
       updateJournalState(journal.dir, { state: 'committed', committed_at: new Date().toISOString() })
-      written.push({ absPath, filePath: fp, journalDir: journal.dir, txnId: journal.txnId, groupResults })
+      // r8(E2)：记录写后内容哈希——回滚时比对，防盖掉并行写者的合法改动
+      written.push({ absPath, filePath: fp, journalDir: journal.dir, txnId: journal.txnId, groupResults, newHash: sha256(newContent) })
       pipelineStep(pipeline, 'atomic_write', 'ok', { file: fp })
+      // Y002-S1：批量写后登记写者（collision_guard classify 识别 write_runtime）
+      registerWriter(workspaceDir, fp, 'write_runtime')
       items.push(...groupResults.map(r => ({ ...r, txn_id: journal.txnId })))
     } finally {
       lock.release()
     }
+  }
+  } catch (e) {
+    // r54(P0-9): 未捕获异常（ENOSPC/EMFILE 等）——置 failed 让下方补偿回滚已写文件
+    if (!failed) failed = { file: null, error: { code: 'INTERNAL', message: `unexpected error during batch write: ${e?.message || e}` } }
   }
 
   // ── 回滚（补偿事务，§16.4：非 FS 级原子，兜底靠 journal） ──
@@ -820,16 +946,46 @@ export async function writeSymbols(args, context) {
     for (const wf of written) {
       try {
         const backup = join(wf.journalDir, 'backup', basename(wf.filePath))
-        if (existsSync(backup)) {
-          writeFileSync(`${wf.absPath}.rollback-tmp`, readFileSync(backup))
-          await renameRetry(`${wf.absPath}.rollback-tmp`, wf.absPath)
-          updateJournalState(wf.journalDir, { state: 'rolled_back', rolled_back_at: new Date().toISOString() })
-          rolledBack.push(wf.filePath)
-          auditLog(workspaceDir, { event: 'batch_rollback', file: wf.filePath, reason: failed.error?.code })
-          // 恢复索引（文件已还原）
-          if (codeIndexService) {
-            try { await codeIndexService.indexFile(wf.absPath, workspaceDir) } catch { codeIndexService.markIndexDirty(wf.filePath, 'rollback_pending_reindex') }
+        if (!existsSync(backup)) continue
+        // r8(E2)：回滚前重取锁 + 哈希比对——写后锁已释放，并行写者可能已改文件，盲覆盖会摧毁其合法改动
+        const rl = await acquireLock(wf.absPath, 30000)
+        // r9(P1)：30s 争用超时 {locked:true} 无 release——旧代码 finally 调 release 抛 TypeError，回滚被静默放弃
+        if (rl.locked) {
+          pipelineStep(pipeline, 'rollback', 'warn', { reason: `SKIPPED (lock busy 30s): ${wf.filePath}`, file: wf.filePath })
+          auditLog(workspaceDir, { event: 'rollback_skipped', file: wf.filePath, reason: 'lock busy' })
+          continue
+        }
+        try {
+          const cur = readFileSync(wf.absPath, 'utf-8')
+          if (wf.newHash && sha256(cur) === wf.newHash) {
+            const rbTmp = _uniqueTmp(wf.absPath, 'rollback')
+            writeFileSync(rbTmp, readFileSync(backup))
+            await renameRetry(rbTmp, wf.absPath)
+            updateJournalState(wf.journalDir, { state: 'rolled_back', rolled_back_at: new Date().toISOString() })
+            rolledBack.push(wf.filePath)
+            auditLog(workspaceDir, { event: 'batch_rollback', file: wf.filePath, reason: failed.error?.code })
+            // 恢复索引（文件已还原）
+            if (codeIndexService) {
+              try { await codeIndexService.indexFile(wf.absPath, workspaceDir) } catch (e) {
+                codeIndexService.markIndexDirty(wf.filePath, 'rollback_pending_reindex')
+                // R18：rolled_back + index_pending——回滚后文件内容变了索引也脏，recoverJournals 启动补抽
+                try { updateJournalState(wf.journalDir, { index_pending: true, index_pending_reason: e.message }) } catch {}
+              }
+            }
+          } else if (!wf.newHash) {
+            // 旧路径兜底（无哈希记录）：直接恢复
+            const rbTmp = _uniqueTmp(wf.absPath, 'rollback')
+            writeFileSync(rbTmp, readFileSync(backup))
+            await renameRetry(rbTmp, wf.absPath)
+            updateJournalState(wf.journalDir, { state: 'rolled_back', rolled_back_at: new Date().toISOString() })
+            rolledBack.push(wf.filePath)
+            auditLog(workspaceDir, { event: 'batch_rollback', file: wf.filePath, reason: failed.error?.code })
+          } else {
+            pipelineStep(pipeline, 'rollback', 'warn', { reason: `SKIPPED (file changed since write): ${wf.filePath}`, file: wf.filePath })
+            auditLog(workspaceDir, { event: 'rollback_skipped', file: wf.filePath, reason: 'concurrent modification' })
           }
+        } finally {
+          rl.release()
         }
       } catch (e) {
         pipelineStep(pipeline, 'rollback', 'error', { reason: `ROLLBACK_FAILED: ${e.message}`, file: wf.filePath })
@@ -850,11 +1006,14 @@ export async function writeSymbols(args, context) {
         } catch (e) {
           perFile[wf.filePath] = { status: 'failed', reason: e.message }
           codeIndexService.markIndexDirty(wf.filePath, 'write_pending_reindex')
+          // R18：per-file journal 记 index_pending（批量每文件独立 txn）
+          try { updateJournalState(wf.journalDir, { index_pending: true, index_pending_reason: e.message }) } catch {}
         }
       } else if (codeIndexService) {
         const row = codeIndexService.getFileByPath(wf.filePath)
         if (row) {
-          codeIndexService._db.prepare("UPDATE files SET content_hash = ?, index_state = 'fresh' WHERE path = ?").run(sha256(readFileSync(wf.absPath, 'utf-8')), wf.filePath)
+          // r11(L6)：改用公共方法（旧实现直取 _db 私有字段）
+          codeIndexService.updateContentHash(wf.filePath, sha256(readFileSync(wf.absPath, 'utf-8')))
           perFile[wf.filePath] = { status: 'ok', note: 'non-code' }
         }
       }
@@ -863,7 +1022,9 @@ export async function writeSymbols(args, context) {
     pipelineStep(pipeline, 'reindex', 'ok', { files: Object.keys(perFile).length })
   }
 
-  const success = !failed
+  // r54(P1): best_effort 部分失败汇总——有文件写成即算成功，全失败才整体失败
+  const partialFailures = fileFailures.length > 0 ? fileFailures.map(f => ({ file: f.file, ...f.error })) : undefined
+  const success = !failed && (fileFailures.length === 0 || written.length > 0)
   const undo = written.length > 0 ? {
     token: written[0].txnId,
     txn_id: written[0].txnId,
@@ -871,20 +1032,28 @@ export async function writeSymbols(args, context) {
     reverse: written.map(wf => ({ file: wf.filePath, backup: `${JOURNAL_ROOT}/journal/${wf.txnId}/backup/${basename(wf.filePath)}` })),
   } : null
 
+  // r8(F10)：批次正常结束 → 移除标记
+  if (batchId) finishBatchMarker(workspaceDir, batchId)
+
   return {
     success,
     txn_id: written[0]?.txnId || null,
     mode: allOrNothing ? 'all_or_nothing' : 'best_effort',
     dry_run: dryRun || undefined,
     rolled_back: rolledBack.length > 0 ? rolledBack : undefined,
+    partial_failures: partialFailures,
     items,
     diff: allDiffs,
     undo,
     reindex,
+    // Y002-S2：写路径闭环（write_symbols 走 write-journal，同上）
+    ...(success && !dryRun ? { next_step: 'workflow: test_bridge(action="run") → debug_runner on failure; if edits went through edit_transaction, also diff_facts(since="last_txn")' } : {}),
     pipeline,
     trace_id,
     duration_ms: Date.now() - t0,
-    error: failed ? { ...failed.error, file: failed.file, itemIndex: failed.itemIndex } : undefined,
+    error: failed ? { ...failed.error, file: failed.file, itemIndex: failed.itemIndex }
+      : (fileFailures.length > 0 && written.length === 0) ? { code: 'ALL_FILES_FAILED', message: `${fileFailures.length} file(s) failed in best_effort mode`, failures: partialFailures }
+      : undefined,
   }
 }
 
@@ -913,13 +1082,16 @@ function applyBatchItem(lines, range, w, symbol, editMode, boundary, preserveDec
     }
     const before = lines.slice(0, range ? range[0] - 1 : 0)
     if (symbol && range) {
-      const body = scopeContent.replace(oldString, newString)
+      // r54(P2): 函数替换器防 newString 内 $&/$$ 等序列被解释
+      const body = scopeContent.replace(oldString, () => newString)
       const after = lines.slice(range[1])
       const newLines = [...before, ...body.split('\n'), ...after]
       return { lines: newLines, delta: body.split('\n').length - (range[1] - range[0] + 1), diff: makeSimpleDiff(lines, newLines), status: 'ok' }
     }
-    const patched = lines.join('\n').replace(oldString, newString)
+    const patched = lines.join('\n').replace(oldString, () => newString)
     const newLines = patched.split('\n')
+    // R22-⑦（并发拷打）：批量路径同款防御——缺省 new_string 挂 warning（显式空串 = 合法删除不提示）
+    if (w?.patch?.new_string === undefined) return { lines: newLines, status: 'patched', warning: 'patch.new_string omitted — old_string will be removed (explicit empty string if deletion is intended)' }
     // 9（F1）：文件级 patch 也要回 delta——旧实现无 delta → 不入 appliedEdits → 批内后续符号项
     // offset 计算（line ~674 的 endLine==null 全量偏移分支）拿不到这笔 → range 错位静默改错行。
     return { lines: newLines, delta: newLines.length - lines.length, diff: makeSimpleDiff(lines, newLines), status: 'ok' }

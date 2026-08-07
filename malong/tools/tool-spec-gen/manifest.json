@@ -1,0 +1,29 @@
+{
+  "name": "spec_gen",
+  "version": "1.0.0",
+  "description": "Generate module/API spec from a source file's symbols.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "workspace_dir": {
+        "type": "string"
+      },
+      "file": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "workspace_dir",
+      "file"
+    ]
+  },
+  "handler": "./handler.js",
+  "protocol_version": "1.0",
+  "tags": [
+    "spec",
+    "doc"
+  ],
+  "dependencies": [
+    "reindex"
+  ]
+}

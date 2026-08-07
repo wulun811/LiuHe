@@ -5,7 +5,11 @@ use lru::LruCache;
 use tree_sitter::Tree;
 
 const MAX_ENTRIES: usize = 100;
-const MAX_MEMORY_BYTES: u64 = 50 * 1024 * 1024;
+// r9(D1)：预算与核算修正——旧 ×32 低估 ~3 倍（实测 1MB 病态输入账上 52MB 实际 RSS +169MB），
+// 预算形同虚设。×128 贴近真实（node_count×32 已实测偏小），预算 128MB（真实驻留 ≈2× 核算）。
+// 后果透明化：单文件核算 >128MB 的病态大文件不入缓存、每次请求重解析（正确取舍——缓存它的代价是堆 OOM）
+const MAX_MEMORY_BYTES: u64 = 128 * 1024 * 1024;
+const TREE_BYTES_PER_NODE: u64 = 128;
 const TTL: Duration = Duration::from_secs(300);
 
 const SOURCE_CACHE_MAX: usize = 50;
@@ -89,7 +93,12 @@ impl TreeCache {
             size,
         };
 
-        let entry_size = (source.len() * 4) as u64 + language.len() as u64;
+        // r8(F5)：核算必须计入 tree-sitter Tree 内存——1MB 源码的 Tree 可达数十 MB，
+        // 只算 source×4 会导致“上限”实际数百 MB，病态输入堆 OOM
+        // r9(D1)：×32 → ×128（实测低估 ~3 倍），预算 50MB → 128MB
+        let node_count = tree.root_node().descendant_count() as u64;
+        let tree_bytes = node_count * TREE_BYTES_PER_NODE;
+        let entry_size = (source.len() * 4) as u64 + language.len() as u64 + tree_bytes;
         if entry_size > MAX_MEMORY_BYTES {
             return;
         }

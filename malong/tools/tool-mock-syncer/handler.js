@@ -1,5 +1,6 @@
 import { join, extname } from 'node:path'
 import { readFileSync, readdirSync } from 'node:fs'
+import { validateFilePath } from '../../error-codes.js'
 
 const SKIP_DIRS = new Set(['node_modules', '.git', '__pycache__', '.venv', 'venv', 'dist', 'build'])
 
@@ -11,16 +12,18 @@ function isTestFile(path) {
   return /(?:^|\/)(?:tests?|__tests__)\/|\.test\.|\.spec\.|_test\./.test(path)
 }
 
-function walkTestFiles(baseDir, dir, files, maxFiles) {
-  if (files.length >= maxFiles) return
+function walkTestFiles(baseDir, dir, files, limit) {
+  // r44: 哨兵法——收集到 maxFiles+1 即停；只有真拿到第 (maxFiles+1) 个测试文件才算截断。
+  //      恰好 maxFiles 个（哪怕其后还跟着非测试条目）不会误报 truncated。
+  if (files.length >= limit) return
   let entries
   try { entries = readdirSync(dir, { withFileTypes: true }) } catch { return }
   for (const entry of entries) {
-    if (files.length >= maxFiles) break
+    if (files.length >= limit) return
     if (entry.name.startsWith('.') || SKIP_DIRS.has(entry.name)) continue
     const fullPath = join(dir, entry.name)
     if (entry.isDirectory()) {
-      walkTestFiles(baseDir, fullPath, files, maxFiles)
+      walkTestFiles(baseDir, fullPath, files, limit)
     } else if (entry.isFile() && isTestFile(fullPath)) {
       files.push(fullPath.startsWith(baseDir + '/') ? fullPath.slice(baseDir.length + 1) : fullPath)
     }
@@ -58,9 +61,9 @@ function extractSignature(content, functionName, ext) {
       }
       let pm
       if (ext === '.py') {
-        pm = new RegExp(`def\\s+${fnEsc}\\s*\\((.+)\\)(?:\\s*->\\s*(.+?))?\\s*:`).exec(sigLine)
+        pm = new RegExp(`def\\s+${fnEsc}\\s*\\(([^)]*)\\)(?:\\s*->\\s*(.+?))?\\s*:`).exec(sigLine)
       } else {
-        pm = new RegExp(`\\((.+)\\)`).exec(sigLine)
+        pm = new RegExp(`\\(([^)]*)\\)`).exec(sigLine)
       }
       if (pm) {
         const params = pm[1]
@@ -172,6 +175,12 @@ export async function handle(args, context) {
     return { error: 'missing_parameter', message: 'file and function are required' }
   }
 
+  // r54(P0-3): file 无路径守卫——`../` 可读 workspace 外文件泄露签名。加 validateFilePath。
+  const v = validateFilePath(file, workspaceDir)
+  if (v.blocked) {
+    return { error: 'PATH_BLOCKED', message: `file blocked: ${v.detail}`, suggestion: 'Provide a file path inside workspace_dir (no "..", no absolute paths outside workspace)' }
+  }
+
   const absPath = join(workspaceDir, file)
   let content
   try { content = readFileSync(absPath, 'utf-8') } catch {
@@ -184,8 +193,12 @@ export async function handle(args, context) {
     return { error: 'symbol_not_found', message: `Function/method "${functionName}" definition not found in ${file}`, suggestion: 'Searches function declarations, function expressions, and class/object method definitions. Check the name and that it is a definition (not just a call site).' }
   }
 
-  const testFiles = []
-  walkTestFiles(workspaceDir, workspaceDir, testFiles, 100)
+  const MAX_TEST_FILES = 100
+  const found = []
+  // r44: 哨兵法收集 MAX+1——仅当真拿到第 101 个测试文件才 truncated（恰好 100 个不再误报，含其后跟非测试条目的边角）
+  walkTestFiles(workspaceDir, workspaceDir, found, MAX_TEST_FILES + 1)
+  const truncated = found.length > MAX_TEST_FILES
+  const testFiles = truncated ? found.slice(0, MAX_TEST_FILES) : found
 
   let allMocks = []
   for (const tf of testFiles) {
@@ -212,6 +225,8 @@ export async function handle(args, context) {
       line: signature.line,
     },
     mock_mismatches: mismatches,
+    truncated: truncated || undefined,
+    warnings: truncated ? [`Scanned ${testFiles.length} test files (limit reached). Increase limit for larger repositories.`] : [],
     summary: {
       total_mocks_checked: allMocks.length,
       mismatches_found: mismatches.length,

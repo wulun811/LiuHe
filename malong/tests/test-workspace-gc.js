@@ -67,6 +67,23 @@ mkWs('stale0000000', now - 30 * DAY, 4)
 const wide = cleanupStaleWorkspaces(WS, { maxAgeDays: 45, dryRun: true })
 assert(!wide.deleted.some(d => d.workspace === 'stale0000000'), '⑤ 阈值 45d 时 30 天前不算 stale')
 
+// ⑦ R16: tool-health cleanup 保护列表与 touched hashes 同源——长驻进程打开的库不删
+{
+  const { handle } = await imp(join(__dirname, '..', 'tools', 'tool-health', 'handler.js'))
+  const touchWs = 'touched12345'
+  mkWs(touchWs, now - 60 * DAY, 4)
+  const r = await handle({ action: 'cleanup', max_age_days: 14, dry_run: false }, {
+    runHealthCheck: async () => ({ status: 'ok', checks: [] }),
+    codeIndexService: {
+      getTouchedWorkspaceHashes: () => [touchWs],
+      getCurrentWorkspaceHash: () => 'other00000000',
+    },
+    workspacesDir: WS,
+  })
+  assert(existsSync(join(WS, touchWs)), `⑦ touched hash 保护的 60 天老库被豁免（R16 同源保护，得 ${r.status}）`)
+  rmSync(join(WS, touchWs), { recursive: true, force: true })
+}
+
 rmSync(ROOT, { recursive: true, force: true })
 console.log(`\n=== test-workspace-gc: ${pass} passed, ${fail} failed ===`)
 process.exit(fail ? 1 : 0)

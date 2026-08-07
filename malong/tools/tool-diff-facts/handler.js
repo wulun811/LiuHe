@@ -61,7 +61,12 @@ function collectChanges(workspaceDir, txnRoot, txn) {
 
   for (const [fileRel, meta] of toProcess) {
     if (meta.skipped) { warnings.push({ file: fileRel, reason: 'skipped_in_txn' }); continue }
-    const backupPath = join(txnRoot, txn.dirName, 'backup', meta.backupName || fileRel.replace(/\//g, '__'))
+    // R22-⑪：fileRel/backupName 来自 manifest（磁盘内容可被外部改动）——`../` 段越界读守卫
+    const relSegs = fileRel.split('/')
+    if (relSegs.includes('..')) { warnings.push({ file: fileRel, reason: 'path_blocked' }); continue }
+    const backupName = meta.backupName || fileRel.replace(/\//g, '__')
+    if (backupName.split('/').includes('..') || backupName.split('\\').includes('..')) { warnings.push({ file: fileRel, reason: 'path_blocked' }); continue }
+    const backupPath = join(txnRoot, txn.dirName, 'backup', backupName)
     if (!existsSync(backupPath)) { warnings.push({ file: fileRel, reason: 'backup_missing' }); continue }
     const currentPath = join(workspaceDir, fileRel)
     if (!existsSync(currentPath)) { warnings.push({ file: fileRel, reason: 'file_deleted' }); continue }
@@ -225,7 +230,21 @@ export async function handle(args, context) {
     if (!existsSync(txnRoot)) {
       return makeError(ErrorCodes.NO_MATCH, 'no .ai-transactions/ found', { suggestion: 'workflow: edit_transaction(begin) → edit_transaction(edit) → edit_transaction(commit) → diff_facts' })
     }
-    return makeError(ErrorCodes.TXN_NOT_FOUND, `transaction not found: ${since}`, { suggestion: 'use edit_transaction(action=begin) to create a new transaction' })
+    // Y002-S2：TXN_NOT_FOUND 给出可执行修复——列出当前可用事务（43% 错误率根因：
+    // 传了其他工具的 txn_id / journal txnId，或事务已被 cleanup/recent 轮换）
+    const available = _scanTxnDirs(txnRoot)
+      .map(({ dirName, absDir }) => {
+        try { return JSON.parse(readFileSync(join(absDir, 'manifest.json'), 'utf-8')).txnId } catch { return null }
+      })
+      .filter(Boolean)
+      .slice(0, 5)
+    return makeError(ErrorCodes.TXN_NOT_FOUND, `transaction not found: ${since}`, {
+      suggestion: available.length
+        ? `use an existing transaction id: ${available.join(', ')} (or since="last_txn" for the latest)`
+        : 'no transactions available yet: use edit_transaction(action=begin) to create one, then edit_transaction(action=edit)',
+      available_txns: available,
+      workflow: 'edit_transaction(begin) → edit_transaction(edit) → edit_transaction(commit) → diff_facts → test_bridge → debug_runner',
+    })
   }
 
   const { changes, warnings, truncated } = collectChanges(workspaceDir, txnRoot, txn)
@@ -254,7 +273,7 @@ export async function handle(args, context) {
   } else if (hasCallerIssues) {
     nextStep = 'Review affected callers with impact_analysis.'
   } else {
-    nextStep = 'No sync issues. Changes are self-contained.'
+    nextStep = 'No AST-level sync issues detected — data-flow wiring still needs review.'
   }
 
   return {

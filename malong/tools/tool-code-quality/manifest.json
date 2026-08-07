@@ -1,0 +1,27 @@
+{
+  "name": "code_quality",
+  "version": "1.0.0",
+  "description": "5-dim shape-level quality probe (techDebt/arch/blast): scores, not findings.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "workspace_dir": {
+        "type": "string"
+      },
+      "file": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "workspace_dir",
+      "file"
+    ]
+  },
+  "handler": "./handler.js",
+  "protocol_version": "1.0",
+  "tags": [
+    "quality",
+    "analysis"
+  ],
+  "dependencies": []
+}

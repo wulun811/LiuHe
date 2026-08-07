@@ -1,0 +1,33 @@
+{
+  "name": "code_search",
+  "version": "1.0.0",
+  "description": "NL intent search when symbol name unknown (known name? symbol_search).",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "workspace_dir": {
+        "type": "string"
+      },
+      "query": {
+        "type": "string",
+        "description": "NL/symbol"
+      },
+      "limit": {
+        "type": "number"
+      }
+    },
+    "required": [
+      "workspace_dir",
+      "query"
+    ]
+  },
+  "handler": "./handler.js",
+  "protocol_version": "1.0",
+  "tags": [
+    "search",
+    "symbol"
+  ],
+  "dependencies": [
+    "reindex"
+  ]
+}

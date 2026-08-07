@@ -112,7 +112,9 @@ assert(missing.error === 'file_not_found', `① 磁盘不存在 -> file_not_foun
 
 writeFileSync(`${WS}/src/fresh.rs`, `pub fn brand_new() -> u32 { 42 }\n`)
 const freshBefore = await svc.getFileOutline('src/fresh.rs')
-assert(freshBefore.error === 'not_indexed_yet', `① 磁盘存在未索引 -> not_indexed_yet（得 ${freshBefore.error}）`)
+// R22-④：R19 把保鲜下沉到服务层查询出口（ensureFreshFile 自动重抽）——未索引文件不再返回 not_indexed_yet，
+// 而是自动补齐索引后返回真实 outline（test-freshness 锁定的新契约；旧断言已腐化）
+assert(!freshBefore.error && freshBefore.outline?.some(s => s.name === 'brand_new'), `① 磁盘存在未索引 -> 查询出口自动重抽返回 outline（得 ${freshBefore.error || freshBefore.outline?.length + ' symbols'}）`)
 
 const { ensureIndexed, checkFileStaleness } = await imp(join(MALONG_DIR, 'staleness.js'))
 const ensured = await ensureIndexed(svc, WS, 'src/fresh.rs')

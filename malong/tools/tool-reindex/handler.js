@@ -1,10 +1,91 @@
 import { setImmediate } from 'node:timers'
+import { randomBytes } from 'node:crypto'
 import { DEFAULT_IGNORE_DIRS, collectFilesWithDirStats, parseMalongignore } from '../../file-collector.js'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import { ErrorCodes, makeError } from '../../error-codes.js'
 
 const DEFAULT_THRESHOLD = 2000
+const CONFIRM_TTL_MS = 10 * 60 * 1000
+
+// r10d：二次确认 token 表（workspace_dir → { token, expiresAt, userMaxFiles }）——
+// 超阈值索引必须回传首次调用返回的随机 token，LLM 无法编造，杜绝「看了警告直接跳过确认」的损失
+const _confirmTokens = new Map()
+
+// 估算基准（benchmarks/results/r10-reindex-baseline.json 的 full_index 段，r10e 实测 2026-08-05）:
+// 0FTYcloud 737 文件 × 3 次全量：collect 28ms + parse p50 1.5s + DB 写 p50 5.4s（占 ~95%）= 全流程 p50 5.63s → 131 files/s。
+// r10e(F1)：旧基准 files/30 高估 4.5x——「extract p50 3000 文件 ~11.6s→258 files/s→÷8.6」的 8.6 系数拍脑袋，且 DB 写从没实测。
+// 新公式：固定 1s（collect+启动）+ files/100（实测 131 × 0.76 保守），量级与实测吻合（737→9s，实测 5.6s）。
+function estimateIndexSeconds(totalFiles) {
+  return Math.ceil(1 + totalFiles / 100)
+}
+
+function formatDuration(seconds) {
+  if (seconds < 60) return `~${Math.max(1, seconds)}s`
+  const m = Math.ceil(seconds / 60)
+  if (m < 60) return `~${m} 分钟`
+  return `~${Math.floor(m / 60)}h${m % 60 ? ` ${m % 60}m` : ''}`
+}
+
+async function runIndexing(codeIndexService, filePaths, workspaceDir, totalFiles, opts, log) {
+  const { forceMarked = 0, blocking = false, note = null } = opts
+  const startTime = Date.now()
+  codeIndexService.indexing = true
+  codeIndexService.indexProgress = { workspaceDir, total: totalFiles, indexed: 0, startTime }
+  const progress = (indexed, total) => { codeIndexService.indexProgress = { ...codeIndexService.indexProgress, indexed, total } }
+
+  if (blocking) {
+    try {
+      await codeIndexService.indexBatch(filePaths, workspaceDir, progress)
+      codeIndexService.indexing = false
+      const durationMs = Date.now() - startTime
+      log('info', `[reindex] blocking done: ${totalFiles} files, ${durationMs}ms`)
+      const last = codeIndexService.lastIndexed || {}
+      return {
+        status: 'completed',
+        done: true,
+        workspace_dir: workspaceDir,
+        total_files: totalFiles,
+        files_indexed: filePaths.length,
+        symbols: last.symbols,
+        refs: last.refs,
+        // r11(M4)：parse 失败文件数（>0 说明有病态/超大文件未入索引，仍是 dirty 下次增量重试）
+        parse_errors: last.parse_errors || 0,
+        duration_seconds: Math.round(durationMs / 1000),
+        force_marked_dirty: forceMarked,
+        ...(note ? { warning: note } : {}),
+      }
+    } catch (e) {
+      codeIndexService.indexing = false
+      log('error', `[reindex] blocking failed: ${e.message}`)
+      return makeError(ErrorCodes.SERVICE_UNAVAILABLE, `Indexing failed: ${e.message}`)
+    }
+  }
+
+  setImmediate(async () => {
+    try {
+      await codeIndexService.indexBatch(filePaths, workspaceDir, progress)
+      codeIndexService.indexing = false
+      log('info', `[reindex] done: ${filePaths.length} files, ${Date.now() - startTime}ms`)
+    } catch (e) {
+      log('error', `[reindex] failed: ${e.message}`)
+      codeIndexService.indexing = false
+    }
+  })
+
+  return {
+    status: 'started',
+    done: false,
+    workspace_dir: workspaceDir,
+    total_files: totalFiles,
+    files_to_index: filePaths.length,
+    estimated_time_seconds: estimateIndexSeconds(filePaths.length),
+    estimated_time_human: formatDuration(estimateIndexSeconds(filePaths.length)),
+    force_marked_dirty: forceMarked,
+    next_action: 'Call reindex() to check progress, or pass blocking=true to wait for completion',
+    note: note || `Indexing ${filePaths.length} files in background. You can continue with other tasks.`,
+  }
+}
 
 export async function handle(args, context) {
   const { codeIndexService, log } = context
@@ -39,6 +120,7 @@ export async function handle(args, context) {
         refs: last.refs,
         completed_at: last.completed_at,
         suggestion: 'Call reindex(workspace_dir="...") to index a different workspace',
+        next_step: 'Index ready — read_symbol / symbol_search / references now work. Self-check: health(action="check")',
       }
     }
     return { status: 'not_started', done: false, suggestion: 'Call reindex(workspace_dir="...") to start indexing' }
@@ -73,118 +155,102 @@ export async function handle(args, context) {
   const malongignorePath = join(workspaceDir, '.malongignore')
   const ignoreRules = existsSync(malongignorePath) ? parseMalongignore(malongignorePath) : []
 
-  const userMaxFiles = args?.maxFiles ?? 5000
+  const userMaxFilesRaw = args?.maxFiles ?? 5000
+  const userMaxFiles = typeof userMaxFilesRaw === 'number' && Number.isFinite(userMaxFilesRaw) && userMaxFilesRaw > 0
+    ? Math.floor(userMaxFilesRaw)
+    : 5000
   const userSkipDirs = args?.skipDirs ?? []
   const userIgnoreDirs = args?.ignoreDirs ?? []
   const threshold = args?.threshold ?? DEFAULT_THRESHOLD
+  const confirmToken = typeof args?.confirm === 'string' && args.confirm ? args.confirm : null
 
   const mergedIgnoreDirs = new Set(DEFAULT_IGNORE_DIRS)
   for (const d of userIgnoreDirs) mergedIgnoreDirs.add(d)
 
-  // 第一次统计：获取真实文件总数（不限制 maxFiles），但硬上限 threshold+1——
-  // 17：排除后仍超阈值时秒回 needs_review（truncated），绝不再无上限同步 walk 全树导致请求超时
-  const { files: allFiles, dirStats, truncated } = collectFilesWithDirStats(workspaceDir, {
-    ignoreRules,
-    skipDirs: userSkipDirs,
-    maxFiles: 0,  // 不限制，获取真实总数
-    ignoreDirs: mergedIgnoreDirs,
-    hardCap: threshold + 1,
-  })
+  const scanOpts = { ignoreRules, skipDirs: userSkipDirs, ignoreDirs: mergedIgnoreDirs }
 
-  const totalFiles = allFiles.length
+  // 阶段一：预检统计——hardCap=threshold+1 秒回，绝不在未确认时无上限同步 walk 全树（防请求超时）
+  const pre = collectFilesWithDirStats(workspaceDir, { ...scanOpts, maxFiles: 0, hardCap: threshold + 1 })
+  const totalFiles = pre.files.length
+  const overThreshold = totalFiles > threshold || pre.truncated
 
-  if (totalFiles > threshold || truncated) {
-    const topDirs = Object.entries(dirStats)
+  // 阶段二：已带确认 token → 校验并执行
+  if (overThreshold && confirmToken) {
+    const rec = _confirmTokens.get(workspaceDir)
+    if (!rec || rec.token !== confirmToken || rec.expiresAt < Date.now()) {
+      _confirmTokens.delete(workspaceDir)
+      return {
+        status: 'needs_review',
+        done: false,
+        workspace_dir: workspaceDir,
+        total_files: totalFiles,
+        threshold,
+        maxFiles: userMaxFiles,
+        confirm_error: 'invalid_or_expired_confirm_token',
+        message: `确认 token 无效或已过期（TTL ${CONFIRM_TTL_MS / 60000} 分钟）。请重新调用 reindex(workspace_dir="${workspaceDir}") 获取新的确认信息后再提交确认。`,
+      }
+    }
+    _confirmTokens.delete(workspaceDir)
+
+    // maxFiles 即「索引上限」：收集到 maxFiles 个即截断；force 标记脏数据全量重抽
+    const { files, truncated } = collectFilesWithDirStats(workspaceDir, { ...scanOpts, maxFiles: userMaxFiles, hardCap: 0 })
+    const filePaths = files.map(f => f.path)
+    const forceMarked = args?.force === true ? codeIndexService.markAllDirty() : 0
+    if (forceMarked > 0) log('info', `[reindex] force=true: marked ${forceMarked} files dirty for full re-extract`)
+
+    const note = truncated
+      ? `文件总数 ${totalFiles} 超出 maxFiles=${userMaxFiles}，仅索引前 ${filePaths.length} 个文件（truncated）。其余文件未入索引；如需全部索引请提高 maxFiles 或用 ignoreDirs 排除目录。`
+      : null
+    return runIndexing(codeIndexService, filePaths, workspaceDir, totalFiles, {
+      forceMarked,
+      blocking: args?.blocking === true,
+      note,
+    }, log)
+  }
+
+  // 阶段三：超阈值且未确认 → needs_review + 二次确认（token 复用未过期值）
+  if (overThreshold) {
+    const estimateSec = estimateIndexSeconds(totalFiles)
+    const existing = _confirmTokens.get(workspaceDir)
+    const token = existing && existing.expiresAt >= Date.now()
+      ? existing.token
+      : randomBytes(6).toString('hex')
+    _confirmTokens.set(workspaceDir, { token, expiresAt: Date.now() + CONFIRM_TTL_MS, userMaxFiles })
+
+    const topDirs = Object.entries(pre.dirStats)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 15)
-      .map(([dir, count]) => ({
-        dir,
-        files: count,
-        pct: Math.round((count / totalFiles) * 100),
-      }))
+      .map(([dir, count]) => ({ dir, files: count, pct: Math.round((count / totalFiles) * 100) }))
+    const displayTotal = pre.truncated ? `>=${totalFiles}` : totalFiles
 
     return {
       status: 'needs_review',
       done: false,
       workspace_dir: workspaceDir,
-      total_files: truncated ? `>=${totalFiles}` : totalFiles,  // 截断时是下限
+      total_files: displayTotal,
       threshold,
       maxFiles: userMaxFiles,
-      truncated,
+      truncated: pre.truncated,
       top_directories: topDirs,
-      suggestion: `This project has ${totalFiles} code files (threshold=${threshold}). `
-        + 'Consider adding skipDirs=["dir1","dir2"] to exclude non-essential directories, '
-        + 'or ignoreDirs=["dirname"] to skip directories by name, '
-        + 'or increase maxFiles / threshold. '
-        + 'Call reindex again with adjusted parameters when ready.',
+      confirm_required: true,
+      confirm_token: token,
+      confirm_ttl_seconds: CONFIRM_TTL_MS / 1000,
+      estimated_time_seconds: estimateSec,
+      estimated_time_human: formatDuration(estimateSec),
+      estimation_note: '估算基准（benchmarks/results/r10-reindex-baseline.json）：collect 20000 文件 ~95ms；extract p50 3000 文件 ~11.6s；全流程按 30 files/s 保守估算。',
+      indexing_plan: (pre.truncated || totalFiles > userMaxFiles)
+        ? `文件总数 ${displayTotal} 可能超出 maxFiles=${userMaxFiles}：确认后将先收集（最多前 ${userMaxFiles} 个文件），超出即截断；要全部索引请提高 maxFiles 或用 ignoreDirs 排除非必要目录`
+        : `将索引全部 ${displayTotal} 个文件（含前 15 大目录明细，可用 skipDirs/ignoreDirs 剔除后再确认）`,
+      next_action: `二次确认：再次调用 reindex(workspace_dir="${workspaceDir}", confirm="${token}") 开始索引；或调整 maxFiles/ignoreDirs/skipDirs 后重新调用`,
     }
   }
 
-  // 文件数在阈值内，直接使用已收集的文件
-  const estimatedTimeSeconds = Math.ceil(totalFiles / 30)
-  const filePaths = allFiles.map(f => f.path)
-  const startTime = Date.now()
-
-  codeIndexService.indexing = true
-  codeIndexService.indexProgress = { workspaceDir, total: totalFiles, indexed: 0, startTime }
-
-  // 13#5：force=true → 全量标 dirty，indexBatch 无视 mtime 重抽所有文件（清陈旧/可疑索引数据）
-  let forceMarked = 0
-  if (args?.force === true) {
-    forceMarked = codeIndexService.markAllDirty()
-    log('info', `[reindex] force=true: marked ${forceMarked} files dirty for full re-extract`)
-  }
-
-  const blocking = args?.blocking === true
-
-  if (blocking) {
-    try {
-      await codeIndexService.indexBatch(filePaths, workspaceDir, (indexed, total) => {
-        codeIndexService.indexProgress = { ...codeIndexService.indexProgress, indexed, total }
-      })
-      codeIndexService.indexing = false
-      const durationMs = Date.now() - startTime
-      log('info', `[reindex] blocking done: ${totalFiles} files, ${durationMs}ms`)
-      const last = codeIndexService.lastIndexed || {}
-      return {
-        status: 'completed',
-        done: true,
-        workspace_dir: workspaceDir,
-        total_files: totalFiles,
-        files_indexed: totalFiles,
-        symbols: last.symbols,
-        refs: last.refs,
-        duration_seconds: Math.round(durationMs / 1000),
-        force_marked_dirty: forceMarked,
-      }
-    } catch (e) {
-      codeIndexService.indexing = false
-      log('error', `[reindex] blocking failed: ${e.message}`)
-      return makeError(ErrorCodes.SERVICE_UNAVAILABLE, `Indexing failed: ${e.message}`)
-    }
-  }
-
-  setImmediate(async () => {
-    try {
-      await codeIndexService.indexBatch(filePaths, workspaceDir, (indexed, total) => {
-        codeIndexService.indexProgress = { ...codeIndexService.indexProgress, indexed, total }
-      })
-      codeIndexService.indexing = false
-      log('info', `[reindex] done: ${allFiles.length} files, ${Date.now() - startTime}ms`)
-    } catch (e) {
-      log('error', `[reindex] failed: ${e.message}`)
-      codeIndexService.indexing = false
-    }
-  })
-
-  return {
-    status: 'started',
-    done: false,
-    workspace_dir: workspaceDir,
-    total_files: totalFiles,
-    estimated_time_seconds: estimatedTimeSeconds,
-    force_marked_dirty: forceMarked,
-    next_action: 'Call reindex() to check progress, or pass blocking=true to wait for completion',
-    note: `Indexing ${totalFiles} files in background. You can continue with other tasks.`,
-  }
+  // 阶段四：文件数在阈值内，直接索引（小项目无摩擦）
+  const filePaths = pre.files.map(f => f.path)
+  const forceMarked = args?.force === true ? codeIndexService.markAllDirty() : 0
+  if (forceMarked > 0) log('info', `[reindex] force=true: marked ${forceMarked} files dirty for full re-extract`)
+  return runIndexing(codeIndexService, filePaths, workspaceDir, totalFiles, {
+    forceMarked,
+    blocking: args?.blocking === true,
+  }, log)
 }

@@ -1,7 +1,7 @@
 {
   "name": "style_sniffer",
   "version": "1.0.0",
-  "description": "Sniff project code style (indent, quotes, semicolons, naming, trailing commas) from sample files, generate PROJECT_RULES.md content. Deterministic sampling, zero LLM. Pass output to write rules file.",
+  "description": "Sniff project code style from samples → PROJECT_RULES.md content (returns text; output dir optional).",
   "inputSchema": {
     "type": "object",
     "properties": {

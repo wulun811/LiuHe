@@ -2,7 +2,8 @@ import { join } from 'node:path'
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { isFunctionName } from '../misuse-helpers.js'
 import { validateFilePath } from '../../error-codes.js'
-import { checkFileStaleness, attachStalenessWarning } from '../../staleness.js'
+import { guardReadPath } from '../../path-guard.js'
+import { attachStalenessWarning } from '../../staleness.js'
 
 // r28-fix：诚实化——移除 parser 不支持的 .rb/.php，补 C/C++/Java/Bash
 const SOURCE_EXTS = new Set(['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.mts', '.cts', '.py', '.go', '.rs', '.java', '.c', '.cpp', '.cc', '.cxx', '.hpp', '.hh', '.hxx', '.sh', '.bash'])
@@ -25,7 +26,7 @@ export async function handle(args, context) {
   const { codeIndexService, getWorkspaceDir } = context
   const workspaceDir = args?.workspace_dir
 
-  if (!workspaceDir) {
+  if (typeof workspaceDir !== 'string' || !workspaceDir) {
     return { error: 'missing_parameter', message: 'workspace_dir is required', suggestion: 'Provide the absolute path to the project root directory. Call reindex first.' }
   }
 
@@ -52,6 +53,11 @@ export async function handle(args, context) {
   if (pathCheck.blocked) {
     return { error: 'PATH_BLOCKED', code: 'PATH_BLOCKED', message: pathCheck.detail }
   }
+  // r9(B1)：读侧 realpath 守卫（敏感文件链接名绕过 / 越界 symlink）
+  const guardR = guardReadPath(workspaceDir, file)
+  if (guardR.blocked) {
+    return { error: 'PATH_BLOCKED', code: 'PATH_BLOCKED', message: guardR.detail }
+  }
 
   const misuseWarning = detectMisuse(symbol)
 
@@ -59,7 +65,8 @@ export async function handle(args, context) {
   let fileMtime = 0
   try { fileMtime = statSync(absFilePath).mtimeMs } catch {}
 
-  const staleness = await checkFileStaleness(codeIndexService, workspaceDir, file)
+  // R19-②：getReferences(symbol) 无 filePath 不走服务层出口——显式调服务层统一入口（带守卫）
+  const staleness = await codeIndexService.ensureFreshFile?.(file)
   if (staleness?.auto_indexed) {
     try { fileMtime = statSync(absFilePath).mtimeMs } catch {}
   }
@@ -90,7 +97,9 @@ export async function handle(args, context) {
     }
   }
 
-  const refs = await codeIndexService.getReferences(symbol)
+  // R22-④（审核修复）：max_results>500 时服务层默认 limit=500 会静默截断——显式传 limit=maxResults+1，
+  // 服务层挂数组 truncated 属性（limit+1 探测），handler 的 length 判定随之正确
+  const refs = await codeIndexService.getReferences(symbol, null, { limit: maxResults + 1 })
   // getReferences 返回 { path, kind, target_name, line }（11#1：SQL 补 r.line，
   // 此前漏选行号列 → 同文件多处引用无法定位）
   result.direct_references = (refs || []).slice(0, maxResults).map(r => ({
@@ -103,15 +112,22 @@ export async function handle(args, context) {
 
   if (result.direct_references.length === 0) {
     const textRefs = findSymbolNameRefs(workspaceDir, symbol, file, result.value_line, maxResults)
+    // R22-④（审核修复）：扫描截断标注必须移出 length 判断——300 文件零命中但第 301+ 文件有命中时
+    // textRefs 为空数组但 scanTruncated=true，旧实现标注丢失 → 空结果无提示（R22 要消除的同类漏报）
+    if (textRefs.scanTruncated) result.search_truncated = true
     if (textRefs.length > 0) {
       result.direct_references = textRefs
-      result.search_method = 'text_fallback'
+      // R22-⑨：值名从 'text_fallback' 改为 'text_scan'——R22 已移除 references 的 text_fallback 机制，
+      // trace-symbol 自己的文本扫描（r30 常量特性）是保留功能，旧值名误导（误以为已移除机制死代码）
+      result.search_method = 'text_scan'
     }
   } else if (refs.every(r => r.kind === 'import')) {
     // r30：常量被 import 后 refs 只剩 import 行（变量读取不产 ref）——真实使用点全丢。
     // 旧实现只在 0 条时 fallback，常量永远 0 条以上（import）→ 读取点永远查不到。
     // 改：全部是 import 类 ref 时也跑文本扫描并去重合并。
     const textRefs = findSymbolNameRefs(workspaceDir, symbol, file, result.value_line, maxResults)
+    // R22-④：同上——零命中 + 截断时也要标注（索引侧还有 import 结果，但文本侧可能不完整）
+    if (textRefs.scanTruncated) result.search_truncated = true
     if (textRefs.length > 0) {
       const seen = new Set(result.direct_references.map(r => r.file + ':' + r.line))
       result.direct_references = [...result.direct_references, ...textRefs.filter(r => !seen.has(r.file + ':' + r.line))].slice(0, maxResults)
@@ -121,9 +137,12 @@ export async function handle(args, context) {
 
   if (includeLiterals && valueInfo) {
     const value = valueInfo.value
-    if (value !== null && value !== undefined) {
+    // r54(P0-8): 空串常量 `X = ""` 时 line.includes('') 恒真——每一行（含空行）都入列，仓库大文件内存爆炸。空串跳过 literal 扫描。
+    if (value !== null && value !== undefined && String(value) !== '') {
       const literals = findLiteralReferences(workspaceDir, String(value), symbol)
       result.suspected_literals = literals.slice(0, maxResults)
+      // R22-③：literal 扫描 200 文件/500 条上限截断标注
+      if (literals.scanTruncated) result.literals_truncated = true
     }
   }
 
@@ -189,17 +208,21 @@ function findLiteralReferences(workspaceDir, literalValue, excludeSymbol, maxFil
     walkDir(workspaceDir, workspaceDir, literalValue, excludeSymbol, results, scanned, maxFiles)
   } catch {}
 
+  // R22-③（审核补全）：200 文件上限 + 500 条硬上限截断不再静默
+  if (scanned.files >= maxFiles || results.length >= 500) results.scanTruncated = true
+
   results.sort((a, b) => b.confidence - a.confidence)
   return results
 }
 
 function walkDir(baseDir, currentDir, literalValue, excludeSymbol, results, scanned, maxFiles) {
-  if (scanned.files >= maxFiles) return
+  // r54(P0-8): results 无上限——短 literal 在大仓库可收集数万条撑爆内存。硬上限 500（调用方再 slice 到 maxResults）。
+  if (scanned.files >= maxFiles || results.length >= 500) return
   let entries
   try { entries = readdirSync(currentDir, { withFileTypes: true }) } catch { return }
 
   for (const entry of entries) {
-    if (scanned.files >= maxFiles) break
+    if (scanned.files >= maxFiles || results.length >= 500) break
     if (entry.name.startsWith('.') || entry.name === 'node_modules' || entry.name === '.ai-transactions') continue
     const fullPath = join(currentDir, entry.name)
 
@@ -265,7 +288,8 @@ function escapeRegex(str) {
 
 function hasBoundaryMatch(line, value) {
   if (/^\w+$/.test(value)) {
-    const re = new RegExp(`\\b${escapeRegex(value)}\\b`)
+    // R17-8：`(^|[^\w])` 替代 `\b`——`\b` 对 Unicode（中文）符号名不生效
+    const re = new RegExp(`(^|[^\\w])${escapeRegex(value)}([^\\w]|$)`)
     return re.test(line)
   }
   return line.includes(value)
@@ -273,9 +297,13 @@ function hasBoundaryMatch(line, value) {
 
 function findSymbolNameRefs(workspaceDir, symbol, excludeFile, excludeLine, maxResults) {
   const results = []
-  const re = new RegExp(`\\b${escapeRegex(symbol)}\\b`)
+  // R17-8：`(^|[^\w])` 替代 `\b`——中文/Unicode 符号名边界正确匹配
+  const re = new RegExp(`(^|[^\\w])${escapeRegex(symbol)}([^\\w]|$)`)
   const scanned = { files: 0 }
   walkDirForSymbol(workspaceDir, workspaceDir, re, excludeFile, excludeLine, results, scanned, 300, maxResults)
+  // R22-③（审核补全）：300 文件上限截断不再静默——挂数组属性，与 getReferences.truncated 同款模式
+  // （references 的同类静默扫描已随 R22 删除，trace-symbol 的文本扫描是 r30 特性保留，但截断必须标注）
+  if (scanned.files >= 300) results.scanTruncated = true
   return results
 }
 

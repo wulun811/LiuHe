@@ -9,5 +9,14 @@ export async function handle(args, context) {
   if (workspaceDir && codeIndexService) {
     await codeIndexService.initWorkspace(workspaceDir)
   }
-  return writeSymbol(args || {}, context)
+  try {
+    return await writeSymbol(args || {}, context)
+  } catch (e) {
+    // R22-⑪：四条写路径唯一裸异常出口——createJournal ENOSPC/EPERM 等此前裸抛到 MCP（错误对象契约违反）
+    return {
+      error: 'write_failed',
+      message: `write_symbol failed: ${e.message}`, ...(e.code ? { errno: e.code } : {}),
+      suggestion: 'Check disk space and file permissions; the file was not modified.',
+    }
+  }
 }

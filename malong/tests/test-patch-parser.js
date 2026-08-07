@@ -1,6 +1,10 @@
-// test-patch-parser.js — SEARCH/REPLACE 块解析与三级降级匹配（r34-fix 补测）
-// 重点：多行尾空格场景的精确匹配映射（normalized 索引 → 原文位置）
+// test-patch-parser.js — B13 patch_parser 工具测试
+// 覆盖：契约（缺 text）/ SEARCH/REPLACE 解析（标准 + patch 包裹）/
+//       插入块 / 应用到文件（精确匹配、fuzzy、no-match 错误）/
+//       文件不存在错误 / 纯解析模式
 import { join, dirname } from 'node:path'
+import { mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import os from 'node:os'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -8,86 +12,83 @@ let pass = 0, fail = 0
 function assert(cond, msg) {
   if (cond) { pass++ } else { fail++; console.error('  FAIL:', msg) }
 }
-const patch = await import(pathToFileURL(join(__dirname, '..', 'patch-parser.js')).href)
 
-// ── 解析 ──
-const blocks = patch.parseBlocks('<<<<<<< SEARCH\nconst a = 1\n=======\nconst a = 2\n>>>>>>> REPLACE\n<<<<<<< SEARCH\nfuncB()\n=======\nfuncB2()\n>>>>>>> REPLACE')
-assert(blocks.length === 2, `解析 2 个块（实际 ${blocks.length}）`)
-assert(blocks[0].search === 'const a = 1' && blocks[0].replace === 'const a = 2', '块 1 内容正确')
-assert(blocks[1].search === 'funcB()' && blocks[1].replace === 'funcB2()', '块 2 内容正确')
+const WS = join(os.tmpdir(), 'opencode', 'b13-pp-ws')
+rmSync(WS, { recursive: true, force: true })
+mkdirSync(WS, { recursive: true })
+writeFileSync(join(WS, 'a.js'), 'const x = 1\nconsole.log(x)\n')
 
-// SEARCH 内含 markdown 表格分隔行（|---|）不被误判
-const tableBlock = patch.parseBlocks('<<<<<<< SEARCH\n| a | b |\n|---|\n=======\n| a | b |\n>>>>>>> REPLACE')
-assert(tableBlock.length === 1 && tableBlock[0].search.includes('|---|'), 'SEARCH 内表格分隔行保留')
+const { handle } = await import(pathToFileURL(join(__dirname, '..', 'tools', 'tool-patch-parser', 'handler.js')).href)
+const ctx = { getWorkspaceDir: (d) => d }
 
-// 插入块（空 search → append）
-const insertBlocks = patch.parseBlocks('<<<<<<< SEARCH\n\n=======\nnew line\n>>>>>>> REPLACE')
-assert(insertBlocks.length === 1, '空 SEARCH 块可解析')
-
-// ── 应用：精确匹配 ──
+// ① 契约：缺 text
 {
-  const r = patch.applyBlocks('const a = 1\nconst b = 2', [{ search: 'const a = 1', replace: 'const a = 99' }])
-  assert(r.result === 'const a = 99\nconst b = 2', `精确替换（${JSON.stringify(r.result)}）`)
-  assert(r.applied[0].method === 'exact', '方法标记 exact')
-  assert(r.errors.length === 0, '无错误')
+  const r = await handle({ workspace_dir: WS }, ctx)
+  assert(r.error === 'missing_parameter', `① 缺 text → missing_parameter（得 ${r.error}）`)
+}
+// ② 标准 SEARCH/REPLACE 解析
+{
+  const text = '<<<<<<< SEARCH\nconst x = 1\n=======\nconst x = 2\n>>>>>>> REPLACE'
+  const r = await handle({ workspace_dir: WS, text }, ctx)
+  assert(r.block_count === 1, `② 解析 1 块（得 ${r.block_count}）`)
+  assert(r.blocks[0].old_string === 'const x = 1', `② old_string 正确（得 ${JSON.stringify(r.blocks[0].old_string)}）`)
+  assert(r.blocks[0].new_string === 'const x = 2', `② new_string 正确`)
+  assert(r.blocks[0].insert_only === false, `② 非插入块`)
+}
+// ③ 纯解析模式：不要求文件存在
+{
+  const r = await handle({ workspace_dir: WS, text: '<<<<<<< SEARCH\na\n=======\nb\n>>>>>>> REPLACE' }, ctx)
+  assert(r.block_count === 1 && !r.file, `③ 纯解析无 file 字段（得 ${JSON.stringify(r.file)}）`)
+}
+// ④ 应用到文件：精确匹配
+{
+  const text = '<<<<<<< SEARCH\nconst x = 1\n=======\nconst x = 2\n>>>>>>> REPLACE'
+  const r = await handle({ workspace_dir: WS, text, file: 'a.js' }, ctx)
+  assert(r.file === 'a.js', `④ 返回 file`)
+  assert(r.applied === 1, `④ applied=1（得 ${r.applied}）`)
+  assert(r.errors.length === 0, `④ 无错误`)
+  assert(r.dry_run === true, `④ dry_run=true（不写盘，写盘由调用方决定）`)
+  const orig = await (await import('node:fs/promises')).readFile(join(WS, 'a.js'), 'utf-8')
+  assert(orig === 'const x = 1\nconsole.log(x)\n', `④ 文件未被工具修改（得 ${JSON.stringify(orig)}）`)
+}
+// ⑤ no-match 错误：应用失败但错误列表有值
+{
+  const text = '<<<<<<< SEARCH\nnonexistent_line_zzz\n=======\nreplaced\n>>>>>>> REPLACE'
+  const r = await handle({ workspace_dir: WS, text, file: 'a.js' }, ctx)
+  assert(r.applied === 0, `⑤ applied=0（得 ${r.applied}）`)
+  assert(r.errors.length === 1 && r.errors[0].message === 'no match found', `⑤ no match 错误（得 ${JSON.stringify(r.errors)}）`)
+}
+// ⑥ 插入块（search 为空）
+{
+  const text = '<<<<<<< SEARCH\n\n=======\n// appended\n>>>>>>> REPLACE'
+  const r = await handle({ workspace_dir: WS, text }, ctx)
+  assert(r.blocks[0].insert_only === true, `⑥ insert_only=true（得 ${r.blocks[0].insert_only}）`)
+}
+// ⑦ 文件不存在
+{
+  const text = '<<<<<<< SEARCH\na\n=======\nb\n>>>>>>> REPLACE'
+  const r = await handle({ workspace_dir: WS, text, file: 'nope.js' }, ctx)
+  assert(r.error === 'file_not_found', `⑦ file_not_found（得 ${r.error}）`)
+}
+// ⑧ 无法识别的文本 → 0 块
+{
+  const r = await handle({ workspace_dir: WS, text: 'just some random prose without patch markers' }, ctx)
+  assert(r.block_count === 0, `⑧ 无标记 → 0 块（得 ${r.block_count}）`)
+  assert(r.parse_errors.length === 0, `⑧ parse_errors 为空数组`)
+  assert(r.note?.includes('no SEARCH/REPLACE markers'), `⑧ note 提示无标记（得 ${r.note}）`)
+}
+// ⑧b R22-⑦（拷打发现）：未闭合 block 必须显式报错，不得静默丢弃
+{
+  const r = await handle({ workspace_dir: WS, text: '<<<<<<< SEARCH\na\n=======\nb\n>>>>>>> REPLACE\n<<<<<<< SEARCH\nc\n=======\nd' }, ctx)
+  assert(r.block_count === 1, `⑧b 未闭合丢弃已闭合 block 保留（得 ${r.block_count}）`)
+  assert(r.parse_errors.some(e => e.includes('unclosed_block')), `⑧b 未闭合显式标注（得 ${JSON.stringify(r.parse_errors)}）`)
+}
+{
+  const text = '<<<<<<< SEARCH\na\n=======\nb\n>>>>>>> REPLACE'
+  const r = await handle({ workspace_dir: WS, text, file: '../outside.js' }, ctx)
+  assert(r.error === 'path_blocked', `⑨ file 逃逸 → path_blocked（得 ${r.error}）`)
 }
 
-// 无匹配 → errors 上报
-{
-  const r = patch.applyBlocks('hello', [{ search: 'nope', replace: 'x' }])
-  assert(r.errors.length === 1 && r.applied.length === 0, '无匹配上报 errors 且不篡改')
-  assert(r.result === 'hello', '无匹配时原文不变')
-}
-
-// ── CRLF / 行尾空白规范化 ──
-{
-  const r = patch.applyBlocks('const a = 1\r\nconst b = 2', [{ search: 'const a = 1', replace: 'const a = 7' }])
-  assert(r.result === 'const a = 7\r\nconst b = 2', `CRLF 内容可匹配且保留原文换行（${JSON.stringify(r.result)}）`)
-}
-
-// ── 多行尾空格匹配（r34-fix 目标：±5 窗口映射失败）──
-{
-  const content = Array.from({ length: 10 }, (_, i) => `line${i} `).join('\n')
-  const search = Array.from({ length: 10 }, (_, i) => `line${i} `).join('\n')
-  const r = patch.applyBlocks(content, [{ search, replace: 'REPLACED' }])
-  assert(r.errors.length === 0, `多行尾空格应匹配成功（errors=${JSON.stringify(r.errors)}）`)
-  assert(r.result === 'REPLACED', `多行尾空格替换生效（${JSON.stringify(r.result)}）`)
-}
-
-// ── 尾空格内容在中间位置 ──
-{
-  const content = 'prefix\n' + Array.from({ length: 8 }, (_, i) => `mid${i} `).join('\n') + '\nsuffix'
-  const search = Array.from({ length: 8 }, (_, i) => `mid${i} `).join('\n')
-  const r = patch.applyBlocks(content, [{ search, replace: 'MID' }])
-  assert(r.errors.length === 0, '中间位置尾空格块匹配（errors=' + JSON.stringify(r.errors) + '）')
-  assert(r.result === 'prefix\nMID\nsuffix', `中间替换生效（${JSON.stringify(r.result)}）`)
-}
-
-// ── fuzzy：空白差异（空格折叠）──
-{
-  const content = 'function  foo( a, b ) {\n  return  a + b\n}'
-  // fuzzy：折叠空白（含换行）后一致——单行 SEARCH 匹配多行内容
-  const search = 'function foo( a, b ) { return a + b }'
-  const r = patch.applyBlocks(content, [{ search, replace: 'function foo(x) { return x }' }])
-  assert(r.errors.length === 0, '空白差异走 fuzzy 匹配')
-  assert(r.result.includes('function foo(x) { return x }'), `fuzzy 替换生效（${JSON.stringify(r.result)}）`)
-  assert(r.applied[0].method === 'fuzzy', '方法标记 fuzzy')
-}
-
-// ── 多块依次应用（顺序语义）──
-{
-  const r = patch.applyBlocks('a\nb\nc', [
-    { search: 'a', replace: 'A' },
-    { search: 'b', replace: 'B' },
-  ])
-  assert(r.result === 'A\nB\nc', `多块顺序应用（${JSON.stringify(r.result)}）`)
-}
-
-// ── 插入块 append ──
-{
-  const r = patch.applyBlocks('base', [{ search: '', replace: 'tail' }])
-  assert(r.result === 'base\ntail', `插入块 append（${JSON.stringify(r.result)}）`)
-}
-
+rmSync(WS, { recursive: true, force: true })
 console.log(`== test-patch-parser: ${pass} passed, ${fail} failed ==`)
-if (fail > 0) process.exit(1)
+process.exit(fail > 0 ? 1 : 0)

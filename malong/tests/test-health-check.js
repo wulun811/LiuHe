@@ -14,13 +14,13 @@ const hc = await import(pathToFileURL(join(__dirname, '..', 'health-check.js')).
 
 const TMP = join(os.tmpdir(), 'opencode', 'health-check-test')
 rmSync(TMP, { recursive: true, force: true })
-mkdirSync(join(TMP, '.config', 'opencode'), { recursive: true })
+mkdirSync(join(TMP, '.config', 'malong'), { recursive: true })
 
 // ── readUsageStats：聚合与 success_rate ──
 {
   const oldHome = process.env.HOME
   process.env.HOME = TMP
-  const usagePath = join(TMP, '.config', 'opencode', 'malong-usage.jsonl')
+  const usagePath = join(TMP, '.config', 'malong', 'malong-usage.jsonl')
   const goodLines = [
     { ts: '2026-08-01T10:00:00Z', tool: 'read_symbol', success: true, status: 'ok', duration_ms: 10, metrics: { reads_saved: 3 } },
     { ts: '2026-08-01T11:00:00Z', tool: 'read_symbol', success: false, status: 'error', error_code: 'X', duration_ms: 5 },
@@ -49,7 +49,7 @@ mkdirSync(join(TMP, '.config', 'opencode'), { recursive: true })
 {
   const oldHome = process.env.HOME
   process.env.HOME = TMP
-  const usagePath = join(TMP, '.config', 'opencode', 'malong-usage.jsonl')
+  const usagePath = join(TMP, '.config', 'malong', 'malong-usage.jsonl')
   writeFileSync(usagePath, '')
   const s = hc.readUsageStats()
   assert(s === null || s.total_calls === 0, '空文件返回 null 或 0 调用')
@@ -90,6 +90,87 @@ mkdirSync(join(TMP, '.config', 'opencode'), { recursive: true })
   })
   const semCheck = dead.checks.find(c => c.name === 'Semaphore')
   assert(semCheck.status === 'FAIL', 'current>max 标记死锁 FAIL')
+
+  // R2: 槽位泄漏探针——activeWeight < current → FAIL（weight 感知）
+  {
+    const leak = await hc.runHealthCheck({
+      stateDir: TMP, workspacesDir: join(TMP, 'ws'),
+      semaphore: { getStatus: () => ({ current: 2, max: 3, queue: [] }) },
+      activeRequests: new Map([['r1', { name: 'read_symbol', startTime: Date.now() }]]),
+      log: () => {},
+    })
+    const lc = leak.checks.find(c => c.name === 'Semaphore')
+    assert(lc.status === 'FAIL' && lc.detail.includes('leaked'), `泄漏探针 FAIL（${lc.detail}）`)
+  }
+
+  // R2: weight 模型合法并行不误报——activeWeight === current 不触发泄漏
+  {
+    const ok = await hc.runHealthCheck({
+      stateDir: TMP, workspacesDir: join(TMP, 'ws'),
+      semaphore: { getStatus: () => ({ current: 3, max: 3, queue: [] }) },
+      activeRequests: new Map([['r1', { name: 'reindex', startTime: Date.now(), weight: 3 }]]),
+      log: () => {},
+    })
+    const oc = ok.checks.find(c => c.name === 'Semaphore')
+    assert(oc.status === 'PASS', `weight 3 单请求占满 3 槽不误报（${oc.detail}）`)
+  }
+
+  // r48: DB integrity 恒 WARN 回归——workspaces 有 db 文件时不得抛 "cannot scan: Database is not defined"
+  //（原代码引用未定义变量 Database → ReferenceError 被 catch 吞 → 永假 WARN）
+  {
+    const wsDir = join(TMP, 'ws-real')
+    rmSync(wsDir, { recursive: true, force: true })
+    mkdirSync(join(wsDir, 'w1'), { recursive: true })
+    writeFileSync(join(wsDir, 'w1', 'code-index.db'), 'not a real db')
+    const r2 = await hc.runHealthCheck({
+      stateDir: TMP, workspacesDir: wsDir, semaphore: sem, activeRequests: active, log: () => {},
+    })
+    const dbc = r2.checks.find(c => c.name === 'DB integrity')
+    assert(dbc && !String(dbc.detail).includes('cannot scan'), `DB integrity 不再恒 WARN cannot scan（得 ${dbc?.status} | ${dbc?.detail}）`)
+    rmSync(wsDir, { recursive: true, force: true })
+  }
+}
+
+// ── r10d：单一数据源——legacy（旧路径/通天侧旧版进程）存在也不并入统计（替代旧 Y001 债务3 双路径聚合）──
+{
+  const oldHome = process.env.HOME
+  const dup = join(os.tmpdir(), 'opencode', 'health-check-dup')
+  rmSync(dup, { recursive: true, force: true })
+  mkdirSync(join(dup, '.config', 'malong'), { recursive: true })
+  mkdirSync(join(dup, '.config', 'opencode'), { recursive: true })
+  process.env.HOME = dup
+  const entry = (tool, status, dur) => ({ ts: '2026-08-01T10:00:00Z', tool, success: status === 'ok', status, duration_ms: dur })
+  writeFileSync(join(dup, '.config', 'malong', 'malong-usage.jsonl'), [entry('health', 'ok', 8), entry('edit_batch', 'ok', 100)].map(l => JSON.stringify(l)).join('\n') + '\n')
+  writeFileSync(join(dup, '.config', 'opencode', 'malong-usage.jsonl'), [entry('read_symbol', 'ok', 10), entry('reindex', 'ok', 3), entry('read_symbol', 'error', 5)].map(l => JSON.stringify(l)).join('\n') + '\n')
+  const s = hc.readUsageStats()
+  assert(s.total_calls === 2, `只统计新路径 2 条（得 ${s.total_calls}）`)
+  assert(s.by_tool.health.calls === 1 && s.by_tool.edit_batch.calls === 1, `by_tool 不含 legacy 工具（得 ${JSON.stringify(Object.keys(s.by_tool))}）`)
+  assert(!s.by_tool.read_symbol && !s.by_tool.reindex, 'legacy 数据不混入')
+  process.env.HOME = oldHome
+  rmSync(dup, { recursive: true, force: true })
+}
+
+// ── Y002-S0 复盘：大 usage 文件不爆栈（旧实现 `push(...arr)` 对 25 万行 spread
+// 触发 Maximum call stack size exceeded 被 catch{} 吞掉——旧路径数据从未进聚合） ──
+{
+  const oldHome = process.env.HOME
+  const big = join(os.tmpdir(), 'opencode', 'health-check-big')
+  rmSync(big, { recursive: true, force: true })
+  mkdirSync(join(big, '.config', 'malong'), { recursive: true })
+  mkdirSync(join(big, '.config', 'opencode'), { recursive: true })
+  process.env.HOME = big
+  writeFileSync(join(big, '.config', 'malong', 'malong-usage.jsonl'), '')
+  const n = 150000
+  const lines = []
+  for (let i = 0; i < n; i++) {
+    lines.push(JSON.stringify({ ts: '2026-08-01T10:00:00Z', tool: 'read_symbol', success: true, status: 'ok', duration_ms: 1 }))
+  }
+  writeFileSync(join(big, '.config', 'malong', 'malong-usage.jsonl'), lines.join('\n') + '\n')
+  const s = hc.readUsageStats()
+  assert(s !== null && s.total_calls === n, `15 万行新路径不爆栈全量统计（得 ${s?.total_calls}，期望 ${n}）`)
+  assert(s.by_tool.read_symbol.calls === n, `by_tool 计数完整（得 ${s?.by_tool?.read_symbol?.calls}）`)
+  process.env.HOME = oldHome
+  rmSync(big, { recursive: true, force: true })
 }
 
 rmSync(TMP, { recursive: true, force: true })

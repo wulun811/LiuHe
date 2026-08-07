@@ -2,10 +2,10 @@
 // 自动发现 tools/*/manifest.json，动态加载 handler
 // 详见：PROTOCOL.md §工具注册协议
 
-import { readdirSync, readFileSync, existsSync, appendFileSync, mkdirSync } from 'node:fs'
+import { readdirSync, readFileSync, existsSync, appendFileSync, statSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { homedir } from 'node:os'
+
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -81,19 +81,23 @@ export function extractMetrics(name, result) {
   return Object.keys(m).length > 0 ? m : undefined
 }
 
+import { ensureStateDir, resolveStateFile } from './host-config.js'
+
 function getUsagePath() {
-  const dir = join(homedir(), '.config', 'opencode')
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-  return join(dir, 'malong-usage.jsonl')
+  ensureStateDir()
+  return resolveStateFile('malong-usage.jsonl')
 }
 
 class ToolRegistry {
   constructor(toolsDir, options = {}) {
     this.toolsDir = toolsDir || join(__dirname, 'tools')
     this.tools = new Map()
+    this._handlerMtimes = new Map() // R13: ESM 热更新检测——handler 磁盘 mtime
     this.log = options.log || ((level, msg) => process.stderr.write(`[registry] [${level}] ${msg}\n`))
-    // r34：usagePath 可注入（测试隔离；默认走 ~/.config/opencode/），行为不变
+    // r34：usagePath 可注入（测试隔离）；r37：默认走 ~/.config/malong（host-config）
     this._usagePath = options.usagePath || null
+    // r42：dependencies 声明式校验结果（loadAll 后填充）
+    this.dependencyIssues = []
   }
 
   async loadAll() {
@@ -150,6 +154,8 @@ class ToolRegistry {
           handler: handlerModule.handle,
           dir: toolDir,
         })
+        // R13: 记录 handler 磁盘 mtime——ESM 模块缓存不会热加载，callTool 时据此贴 note
+        try { this._handlerMtimes.set(manifest.name, statSync(handlerPath).mtimeMs) } catch {}
         loaded++
         this.log('info', `loaded: ${manifest.name} (${entry.name})`)
       } catch (e) {
@@ -158,6 +164,17 @@ class ToolRegistry {
     }
 
     this.log('info', `registry loaded: ${loaded} tools from ${this.toolsDir}`)
+
+    // r42：dependencies 声明式校验——声明的依赖工具必须已注册（与 S4 漏注册问题同源）
+    this.dependencyIssues = []
+    for (const [name, t] of this.tools) {
+      for (const dep of t.manifest.dependencies || []) {
+        if (typeof dep !== 'string' || !this.tools.has(dep)) {
+          this.dependencyIssues.push({ tool: name, missing_dep: dep })
+          this.log('warn', `tool ${name} declares dependency "${dep}" which is not registered`)
+        }
+      }
+    }
     return loaded
   }
 
@@ -167,10 +184,6 @@ class ToolRegistry {
       description: t.manifest.description,
       inputSchema: t.manifest.inputSchema,
     }))
-  }
-
-  getTool(name) {
-    return this.tools.get(name) || null
   }
 
   hasTool(name) {
@@ -188,7 +201,24 @@ class ToolRegistry {
     let result
     try {
       result = await tool.handler(args, context)
+      // R13: ESM 模块缓存——handler 代码磁盘变化不会热加载；stat 检测到变化时贴 note（不自动重载，避免热加载事务风险）
+      try {
+        const hp = join(tool.dir, tool.manifest.handler)
+        const curMtime = statSync(hp).mtimeMs
+        if (this._handlerMtimes.get(name) !== curMtime) {
+          if (result && typeof result === 'object' && !Array.isArray(result) && !result.error) {
+            result = { ...result, note: 'handler code changed on disk (mtime) — restart MCP to load new version' }
+          }
+        }
+      } catch {}
       if (result?.error) { status = 'error'; errorCode = result.error_code || result.error || '' }
+      // r8(F16)：write 系失败 shape 是 {success:false, error:{code}}——error 是对象，
+      // 直接落 usage JSONL 的 error_code 字段会破坏遥测 schema（其余工具全是字符串）
+      if (typeof errorCode !== 'string' || errorCode === '' || errorCode === '[object Object]') {
+        errorCode = (typeof result?.error === 'object' && result?.error?.code)
+          ? result.error.code
+          : (typeof result?.error === 'string' ? result.error : 'unknown')
+      }
       return result
     } catch (e) {
       status = 'crash'

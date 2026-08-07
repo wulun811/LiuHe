@@ -42,6 +42,12 @@ assert(isIgnored('src/app.min.js', ['*.min.js'], true) === false, '目录不按�
 assert(isIgnored('generated_foo.js', ['generated_*'], false) === true, 'generated_* 前缀匹配')
 assert(isIgnored('src/generated_foo.js', ['generated_*'], false) === false, '子目录文件当前不命中（已知缺陷，锁定现状）')
 
+// R22-⑱：dir/ 目录规则任意层级匹配（gitignore 语义——旧只匹配顶层）
+assert(isIgnored('src/build/x.js', ['build/'], false) === true, 'R22-⑱ src/build/ 任意层级命中 build/ 规则')
+assert(isIgnored('a/b/c/dist/f.js', ['dist/'], false) === true, 'R22-⑱ 深层 dist/ 命中')
+assert(isIgnored('src/app.js', ['build/'], false) === false, 'R22-⑱ 无关文件不命中')
+assert(isIgnored('src/build.py', ['build/'], false) === false, 'R22-⑱ 同名文件（非目录）不命中')
+
 // 精确规则
 assert(isIgnored('secret.key', ['secret.key'], false) === true, '精确文件名规则')
 assert(isIgnored('a/secret.key', ['secret.key'], false) === false, '精确规则不含子目录')

@@ -1,0 +1,30 @@
+{
+  "name": "tsc_check",
+  "version": "1.0.0",
+  "description": "TS type-check via tsc --noEmit.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "workspace_dir": {
+        "type": "string"
+      },
+      "dir": {
+        "type": "string",
+        "description": "subdir"
+      },
+      "timeout": {
+        "type": "number"
+      }
+    },
+    "required": [
+      "workspace_dir"
+    ]
+  },
+  "handler": "./handler.js",
+  "protocol_version": "1.0",
+  "tags": [
+    "tsc",
+    "typecheck"
+  ],
+  "dependencies": []
+}

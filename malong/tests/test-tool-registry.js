@@ -3,7 +3,7 @@
 //       usage 记录（注入临时路径，不污染真实 usage）/ extractMetrics 指标提取
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { mkdirSync, writeFileSync, rmSync, readFileSync, existsSync } from 'node:fs'
+import { mkdirSync, writeFileSync, rmSync, readFileSync, existsSync, utimesSync } from 'node:fs'
 import os from 'node:os'
 import ToolRegistry, { extractMetrics } from '../tool-registry.js'
 
@@ -57,6 +57,13 @@ mkdirSync(CRASH, { recursive: true })
 writeFileSync(join(CRASH, 'manifest.json'), JSON.stringify({ name: 'crash_tool', handler: 'handler.js' }))
 writeFileSync(join(CRASH, 'handler.js'), 'export async function handle() { throw new Error("boom") }')
 
+const BADDEP = join(TMP, 'tools', 'tool-baddep')
+mkdirSync(BADDEP, { recursive: true })
+writeFileSync(join(BADDEP, 'manifest.json'), JSON.stringify({
+  name: 'baddep_tool', handler: 'handler.js', dependencies: ['reindex', 'no_such_tool'],
+}))
+writeFileSync(join(BADDEP, 'handler.js'), 'export async function handle() { return { ok: true } }')
+
 const USAGE = join(TMP, 'usage.jsonl')
 const logs = []
 const reg = new ToolRegistry(join(TMP, 'tools'), {
@@ -66,7 +73,7 @@ const reg = new ToolRegistry(join(TMP, 'tools'), {
 
 // ── loadAll 校验 ──
 const loaded = await reg.loadAll()
-assert(loaded === 3, `loadAll 只加载合法工具（good/good2/crash=3，实际 ${loaded}）`)
+assert(loaded === 4, `loadAll 只加载合法工具（good/good2/crash/baddep=4，实际 ${loaded}）`)
 
 const errorLogs = logs.filter(([l]) => l === 'error')
 assert(errorLogs.some(([_, m]) => m.includes('missing')), '缺 name 的 manifest 报 error')
@@ -75,12 +82,17 @@ assert(errorLogs.some(([_, m]) => m.includes('not found')), 'handler 文件不�
 assert(errorLogs.some(([_, m]) => m.includes('export')), '非 handle 导出报 error')
 assert(logs.some(([l, m]) => l === 'warn' && m.includes('duplicate')), '重复工具名报 warn（覆盖）')
 
-assert(reg.getToolCount() === 2, 'getToolCount=2（good_tool 被重复名覆盖不新增，实际 '+reg.getToolCount()+'）')
+// r42: dependencies 声明式校验——缺失依赖 warn + dependencyIssues 记录
+assert(logs.some(([l, m]) => l === 'warn' && m.includes('no_such_tool')), '缺失依赖报 warn（no_such_tool）')
+assert(reg.dependencyIssues.some(i => i.tool === 'baddep_tool' && i.missing_dep === 'no_such_tool'), 'dependencyIssues 记录 baddep_tool→no_such_tool')
+assert(reg.dependencyIssues.some(i => i.missing_dep === 'reindex'), 'reindex 在 fixture 中不存在 → 同样记录缺失')
+
+assert(reg.getToolCount() === 3, 'getToolCount=3（good_tool 被重复名覆盖不新增 + crash + baddep，实际 '+reg.getToolCount()+'）')
 assert(reg.hasTool('good_tool'), 'hasTool(good_tool)')
 assert(!reg.hasTool('nohandler_tool'), 'hasTool(坏工具)=false')
 assert(reg.getToolNames().includes('good_tool'), 'getToolNames 含 good_tool')
 const list = reg.listTools()
-assert(list.length === 2 && list.some(t => t.name === 'good_tool'), 'listTools 返回 2 个工具描述（实际 '+list.length+'）')
+assert(list.length === 3 && list.some(t => t.name === 'good_tool'), 'listTools 返回 3 个工具描述（实际 '+list.length+'）')
 const goodDesc = list.find(t => t.name === 'good_tool')
 assert(goodDesc.inputSchema && goodDesc.description, 'listTools 含 inputSchema/description')
 
@@ -122,7 +134,7 @@ assert(notFound, '调用不存在工具抛 Tool not found')
 // ── 真实 tools 目录完整性（注册防线）──
 const realReg = new ToolRegistry(join(__dirname, '..', 'tools'), { log: () => {} })
 const realLoaded = await realReg.loadAll()
-assert(realLoaded === 38, `真实 tools 目录加载 38 个工具（实际 ${realLoaded}）`)
+assert(realLoaded === 44, `真实 tools 目录加载 44 个工具（B13 增 6，实际 ${realLoaded}）`)
 const realNames = realReg.getToolNames()
 for (const expect of ['read_symbol', 'write_symbol', 'edit_batch', 'edit_transaction', 'repo_map', 'sweep_dead_code', 'test_bridge', 'impact_analysis', 'call_chain', 'trace_symbol']) {
   assert(realNames.includes(expect), `真实工具表含 ${expect}`)
@@ -141,6 +153,19 @@ assert(mTrans?.rollbacks === 1, 'edit_transaction rollbacks')
 assert(extractMetrics('edit_transaction', { status: 'committed' }) === undefined, '非 rolled_back 不产指标')
 assert(extractMetrics('unknown_tool', { x: 1 }) === undefined, '未知工具不产指标')
 assert(extractMetrics('health', { error: 'x' }) === undefined, 'error 结果不产指标')
+
+// ── R13: ESM 热更新检测——改 handler mtime 后 callTool 结果带 note ──
+{
+  const before = await reg.callTool('good_tool', { x: 1 }, {})
+  assert(before.note === undefined, 'R13: mtime 未变不带 note')
+  const handlerFile = join(GOOD2, 'handler.js')
+  const past = new Date(Date.now() - 60000)
+  utimesSync(handlerFile, past, past)
+  const after = await reg.callTool('good_tool', { x: 1 }, {})
+  assert(after.note && String(after.note).includes('restart MCP'), `R13: mtime 变化贴 note（${String(after.note).slice(0, 50)}）`)
+  assert(after.from === 'dupe', 'R13: note 附加不覆盖原结果')
+  { const noErr = await reg.callTool('good_tool', { x: 1 }, {}); assert(noErr.note && noErr.from === 'dupe', 'R13: 二次调用仍检测到（ESM 缓存未热加载）') }
+}
 
 rmSync(TMP, { recursive: true, force: true })
 console.log(`== test-tool-registry: ${pass} passed, ${fail} failed ==`)

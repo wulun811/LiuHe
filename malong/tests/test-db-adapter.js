@@ -107,6 +107,62 @@ console.log(`  backend: ${adapter.getBackendName()}`)
   db.close()
 }
 
+// ── r36: 嵌套 transaction（SAVEPOINT 兜底）──
+{
+  const db = await adapter.createDb(DB)
+  const r = db.transaction(() => {
+    db.prepare('INSERT INTO t (a, b) VALUES (?, ?)').run(21, 'outer')
+    return db.transaction(() => {
+      db.prepare('INSERT INTO t (a, b) VALUES (?, ?)').run(22, 'inner')
+      return 'inner-ok'
+    })()
+  })()
+  assert(r === 'inner-ok', '嵌套 transaction 返回值透传')
+  assert(db.prepare('SELECT COUNT(*) AS c FROM t WHERE a IN (21, 22)').get().c === 2, '嵌套事务全部提交')
+  let threw = false
+  try {
+    db.transaction(() => {
+      db.prepare('INSERT INTO t (a, b) VALUES (?, ?)').run(23, 'outer')
+      db.transaction(() => { db.prepare('INSERT INTO t (a, b) VALUES (?, ?)').run(24, 'inner'); throw new Error('inner boom') })()
+    })()
+  } catch { threw = true }
+  assert(threw, '嵌套事务内层异常上抛')
+  assert(db.prepare('SELECT COUNT(*) AS c FROM t WHERE a IN (23, 24)').get().c === 0, 'SAVEPOINT 回滚内外层均撤销')
+  assert(db.prepare('SELECT COUNT(*) AS c FROM t WHERE a IN (21, 22)').get().c === 2, '回滚不伤先前已提交事务')
+  db.close()
+}
+
+// ── r36: exec 多语句 + close 后行为 ──
+{
+  const db = await adapter.createDb(DB)
+  db.exec('CREATE TABLE IF NOT EXISTS m (x INTEGER); INSERT INTO m VALUES (5); INSERT INTO m VALUES (6)')
+  assert(db.prepare('SELECT COUNT(*) AS c FROM m').get().c === 2, 'exec 多语句全部执行')
+  db.close()
+  let threw = false
+  try { db.prepare('SELECT * FROM m').all() } catch { threw = true }
+  assert(threw, 'close 后查询抛错（与 better-sqlite3 语义一致）')
+}
+
+// ── r36: 只读方 size 变化重载（低精度 FS 下 mtime 相同但 size 变）──
+{
+  const DB3 = join(TMP, 'size.db')
+  const w = await adapter.createDb(DB3)
+  w.exec('CREATE TABLE IF NOT EXISTS s (a INTEGER)')
+  w.prepare('INSERT INTO s VALUES (?)').run(1)
+  await new Promise(r => setTimeout(r, 700))
+  w.close()
+
+  const ro = await adapter.createDb(DB3, { readonly: true })
+  assert(ro.prepare('SELECT COUNT(*) AS c FROM s').get().c === 1, '只读初始读取')
+  // 写进程新增一行 → size 必然变化 → 触发重载（mtime 可能也变，不影响断言）
+  const w2 = await adapter.createDb(DB3)
+  w2.prepare('INSERT INTO s VALUES (?)').run(2)
+  await new Promise(r => setTimeout(r, 700))
+  w2.close()
+  assert(ro.prepare('SELECT COUNT(*) AS c FROM s').get().c === 2, 'size 变化触发重载')
+  ro.close()
+}
+
 rmSync(TMP, { recursive: true, force: true })
 console.log(`== test-db-adapter: ${pass} passed, ${fail} failed ==`)
 if (fail > 0) process.exit(1)

@@ -1,13 +1,17 @@
 {
   "name": "reindex",
   "version": "0.0.5",
-  "description": "MUST run FIRST: index workspace before ALL other malong tools. blocking/force options. malong = LLM-native toolset: prefer these tools over raw file edits.",
+  "description": "MUST run FIRST: index workspace before ALL other malong tools. Over-threshold workspaces require two-step confirm (call → get token → confirm). blocking/force options. malong = LLM-native toolset.",
   "inputSchema": {
     "type": "object",
     "properties": {
       "workspace_dir": {
         "type": "string",
         "description": "Project root (abs). Omit to check indexing status."
+      },
+      "confirm": {
+        "type": "string",
+        "description": "Second-step confirmation token from a previous needs_review response (TTL 10 min). REQUIRED to start indexing when total_files > threshold. NEVER invent a token — re-call reindex to get a fresh one."
       },
       "blocking": {
         "type": "boolean",
@@ -19,7 +23,7 @@
       },
       "maxFiles": {
         "type": "number",
-        "description": "Max files to index (default 5000, 0=unlimited). Increase if project has many files."
+        "description": "Index upper bound (default 5000): after confirmation, indexing stops at this many files and warns (truncated). Raise it or use ignoreDirs to index everything."
       },
       "skipDirs": {
         "type": "array",
@@ -37,7 +41,7 @@
       },
       "threshold": {
         "type": "number",
-        "description": "File count threshold for pre-check review (default 2000). Set higher to skip pre-check."
+        "description": "Pre-check warning line (default 2000): workspaces with more files return needs_review + confirm_token before indexing (no silent skip)."
       }
     }
   },

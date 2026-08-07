@@ -1,0 +1,32 @@
+{
+  "name": "verify_pipeline",
+  "version": "1.0.0",
+  "description": "Run lint/test/typecheck from package.json.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "workspace_dir": {
+        "type": "string"
+      },
+      "workdir": {
+        "type": "string"
+      },
+      "stages": {
+        "type": "string"
+      },
+      "timeout": {
+        "type": "number"
+      }
+    },
+    "required": [
+      "workspace_dir"
+    ]
+  },
+  "handler": "./handler.js",
+  "protocol_version": "1.0",
+  "tags": [
+    "verify",
+    "run"
+  ],
+  "dependencies": []
+}

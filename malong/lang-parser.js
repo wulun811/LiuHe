@@ -24,36 +24,36 @@ export async function init(core) {
     isRustService() { return true },
     getConfigMode() { return parseClient.describeConfig?.() || 'uds' },
 
-    async extractAllAsync(source, ext, filePath) {
-      return await parseClient.extractAll(source, ext, filePath)
+    async extractAllAsync(source, ext, filePath, workspaceRoot) {
+      return await parseClient.extractAll(source, ext, filePath, workspaceRoot)
     },
 
-    async extractSymbolsAsync(source, ext, filePath) {
-      return await parseClient.extractSymbols(source, ext, filePath)
+    async extractSymbolsAsync(source, ext, filePath, workspaceRoot) {
+      return await parseClient.extractSymbols(source, ext, filePath, workspaceRoot)
     },
 
-    async extractTopLevelAsync(source, ext, filePath) {
-      return await parseClient.extractTopLevel(source, ext, filePath)
+    async extractTopLevelAsync(source, ext, filePath, workspaceRoot) {
+      return await parseClient.extractTopLevel(source, ext, filePath, workspaceRoot)
     },
 
-    async extractReferencesAsync(source, ext, filePath) {
-      return await parseClient.extractReferences(source, ext, filePath)
+    async extractReferencesAsync(source, ext, filePath, workspaceRoot) {
+      return await parseClient.extractReferences(source, ext, filePath, workspaceRoot)
     },
 
-    async hasErrorsAsync(source, ext, filePath) {
-      return await parseClient.hasErrors(source, ext, filePath)
+    async hasErrorsAsync(source, ext, filePath, workspaceRoot) {
+      return await parseClient.hasErrors(source, ext, filePath, workspaceRoot)
     },
 
     async classifyMessageAsync(content) {
       return await parseClient.classifyMessage(content)
     },
 
-    async computeMetricsAsync(source, ext, filePath) {
-      return await parseClient.computeMetrics(source, ext, filePath)
+    async computeMetricsAsync(source, ext, filePath, workspaceRoot) {
+      return await parseClient.computeMetrics(source, ext, filePath, workspaceRoot)
     },
 
-    async batchExtractAsync(files) {
-      return await parseClient.batchExtract(files)
+    async batchExtractAsync(files, workspaceRoot) {
+      return await parseClient.batchExtract(files, workspaceRoot)
     },
   })
 

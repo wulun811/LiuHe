@@ -7,7 +7,7 @@ export async function handle(args, context) {
   const { codeIndexService, getWorkspaceDir } = context
   const workspaceDir = args?.workspace_dir
 
-  if (!workspaceDir) {
+  if (typeof workspaceDir !== 'string' || !workspaceDir) {
     return { error: 'missing_parameter', message: 'workspace_dir is required', suggestion: 'Provide the absolute path to the project root directory. Call reindex first if this is a new workspace.' }
   }
 
@@ -37,7 +37,15 @@ export async function handle(args, context) {
     return { error: 'missing_parameter', message: 'query is required', suggestion: 'Provide a symbol name substring to search (case-sensitive)' }
   }
 
-  const results = await codeIndexService.searchSymbols(query, { limit })
+  // R22-⑪：staleness 前置——搜索前先保鲜结果文件（与 references ensureFreshFile 同模式；mtime 未变时廉价）
+  // 保鲜可能重索引符号，之后重查一次确保结果反映最新磁盘
+  let results = await codeIndexService.searchSymbols(query, { limit })
+  if (codeIndexService?.ensureFreshFile && results.length > 0) {
+    // R22-⑰（第四轮审核 P1）：去重后再保鲜——同文件多结果（如类方法群）时避免 N 次冗余 statSync/realpath
+    const uniqueFiles = [...new Set(results.map(r => r.file))]
+    await Promise.allSettled(uniqueFiles.map(f => codeIndexService.ensureFreshFile(f)))
+    results = await codeIndexService.searchSymbols(query, { limit })
+  }
   const res = { results, count: results.length, query, workspace_dir: workspaceDir }
   if (query.length === 1) {
     res.warning = 'single_char_query'

@@ -37,9 +37,12 @@ function extractVerb(name) {
 }
 
 function detectStyle(db, ext) {
+  // R22-⑪：风格统计排除 test/vendor/fixture 文件——测试代码风格（test_Foo 等）此前混入项目主导风格
   const rows = db.prepare(`
     SELECT s.name FROM symbols s JOIN files f ON s.file_id = f.id
     WHERE f.path LIKE ? AND s.type IN ('function', 'method', 'variable')
+      AND f.path NOT LIKE '%/test/%' AND f.path NOT LIKE '%/tests/%' AND f.path NOT LIKE '%__tests__/%'
+      AND f.path NOT LIKE '%/vendor/%' AND f.path NOT LIKE '%/fixtures/%'
   `).all(`%${ext}`)
   const counts = { snake_case: 0, camelCase: 0, PascalCase: 0 }
   for (const r of rows) {
@@ -61,6 +64,8 @@ function learnVerbs(db, ext) {
   const rows = db.prepare(`
     SELECT s.name FROM symbols s JOIN files f ON s.file_id = f.id
     WHERE f.path LIKE ? AND s.type IN ('function', 'method')
+      AND f.path NOT LIKE '%/test/%' AND f.path NOT LIKE '%/tests/%' AND f.path NOT LIKE '%__tests__/%'
+      AND f.path NOT LIKE '%/vendor/%' AND f.path NOT LIKE '%/fixtures/%'
   `).all(`%${ext}`)
   const verbs = Object.create(null)
   for (const r of rows) {

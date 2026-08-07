@@ -80,7 +80,7 @@ assert(!r5.ok && r5.error.code === 'DIR_AS_FILE', `守卫⑤ 尾斜杠目录 →
 
 // ── 事故回归：file=workspace 根目录 → 结构化错误，绝不 text_fallback ──
 const refDir = await refs.handle({ workspace_dir: WS, symbol: 'process', file: WS }, ctx)
-assert(refDir.error === 'DIR_AS_FILE' && refDir.search_method !== 'text_fallback', `references 事故回归：目录 → DIR_AS_FILE 错误（得 ${refDir.error || '无错误'}）`)
+assert(refDir.error === 'DIR_AS_FILE', `references 事故回归：目录 → DIR_AS_FILE 错误（得 ${refDir.error || '无错误'}）`)
 
 // ── references 绝对路径 file → 归一化后走 DB ──
 const refAbs = await refs.handle({ workspace_dir: WS, symbol: 'process', file: appJs }, ctx)
@@ -113,11 +113,67 @@ assert(rnNf.error === 'FILE_NOT_FOUND', `rename 不存在定义文件 → FILE_N
 
 // ── 已有守卫不回归 ──
 const outlineNf = await outline.handle({ workspace_dir: WS, file: 'nope.js' }, ctx)
-assert(outlineNf.error === 'file_not_found', `outline 保持原守卫错误（得 ${outlineNf.error}）`)
+// r11：outline 接入 resolveFileArg 共享守卫后与 impact/find_tests 统一——不存在文件 → FILE_NOT_FOUND（大写）
+assert(outlineNf.error === 'FILE_NOT_FOUND', `outline 保持原守卫错误（得 ${outlineNf.error}）`)
 const outlineAbs = await outline.handle({ workspace_dir: WS, file: appJs }, ctx)
 assert(!outlineAbs.error && outlineAbs.outline?.length > 0, `outline 绝对路径归一化后正常（outline=${outlineAbs.outline && outlineAbs.outline.length}）`)
 const refOk = await refs.handle({ workspace_dir: WS, symbol: 'process' }, ctx)
-assert(refOk.search_method !== 'text_fallback' || refOk.results.length > 0, `references 无 file 全局搜索正常（count=${refOk.count}）`)
+// R22-③：text_fallback 已移除，search_method 永不为 'text_fallback'——原断言恒真失效（什么都不验证）。
+// 改回验证真实意图：无 file 全局搜索必须返回索引命中（fixture：lib.js 定义 process + app.js import 调用）
+assert(refOk.results.length > 0 && !refOk.error, `references 无 file 全局搜索正常（count=${refOk.count}）`)
+
+// ── R22-⑯：find-tests JS/TS test_symbols 正向（旧 P2-B6 剥离字符串把引号一起剥掉 → 恒空谎报） ──
+{
+  mkdirSync(join(WS, 'tests'), { recursive: true })
+  writeFileSync(join(WS, 'tests', 'app.test.js'), [
+    'import { handle } from "../app.js"',
+    'it("works fine", () => { expect(handle(1)).toBe(true) })',
+    'test("also works", () => {})',
+  ].join('\n'))
+  const ftJs = await findTests.handle({ workspace_dir: WS, file: 'app.js', symbol: 'works' }, ctx)
+  const names = (ftJs.test_symbols || []).map(t => t.name)
+  assert(names.includes('works fine') && names.includes('also works'), `R22-⑯ JS test_symbols 正向（得 ${JSON.stringify(names)}）`)
+  rmSync(join(WS, 'tests'), { recursive: true, force: true })
+}
+
+// ── R22-⑰：rename_symbol 模板字面量插值内符号引用（第四轮审核 P1——旧实现整行模板连锅剥掉） ──
+// R22-⑱：转义 `\${` 是字面量不插值——不得改名（否则字符串运行时输出被改）
+{
+  writeFileSync(join(WS, 'tpl.js'), [
+    'const tpl_name = 1',
+    'const s = `hello ${tpl_name} world`',
+    'const s2 = `plain tpl_name text`',
+    'const s3 = `escaped \\${tpl_name} literal`',
+  ].join('\n'))
+  await svc.indexFile(join(WS, 'tpl.js'), WS)
+  const rnTpl = await rename.handle({ workspace_dir: WS, file: 'tpl.js', symbol: 'tpl_name', new_name: 'new_tpl', dry_run: true }, ctx)
+  const tplEdits = (rnTpl.edits_per_file || []).find(e => e.file === 'tpl.js')
+  const tplLines = tplEdits ? tplEdits.edits.map(e => e.line) : []
+  assert(tplLines.includes(1) && tplLines.includes(2) && !tplLines.includes(3) && !tplLines.includes(4),
+    `R22-⑰ 插值内引用改名、纯字符串文本与转义插值不改（行 ${JSON.stringify(tplLines)}）`)
+  const tplNew2 = tplEdits?.edits.find(e => e.line === 2)?.new || ''
+  assert(tplNew2.includes('${new_tpl}'), `R22-⑰ 插值替换生效（得 ${JSON.stringify(tplNew2)}）`)
+  rmSync(join(WS, 'tpl.js'), { recursive: true, force: true })
+  try { svc.removeFile(join(WS, 'tpl.js'), WS) } catch {}
+}
+
+// ── R22-⑰：7 读路径工具 workspace_dir 非字符串 → 结构化错误不崩进程（第四轮审核 P0） ──
+{
+  const readTools = {
+    'tool-impact-analysis': 'impact-analysis',
+    'tool-call-chain': 'call-chain',
+    'tool-references': 'references',
+    'tool-dep-graph': 'dep-graph',
+    'tool-symbol-search': 'symbol-search',
+    'tool-trace-symbol': 'trace-symbol',
+    'tool-read-symbol': 'read-symbol',
+  }
+  for (const [dir, name] of Object.entries(readTools)) {
+    const mod = await imp(join(MALONG_DIR, 'tools', dir, 'handler.js'))
+    const r = await mod.handle({ workspace_dir: 123, symbol: 'x', file: 'a.js', locator: { file_path: 'a.js' } }, ctx)
+    assert(r.error === 'missing_parameter', `R22-⑰ ${name} ws=123 结构化错误（得 ${r.error || '无错误'}）`)
+  }
+}
 
 console.log(`\n== test-dogfood-r16: ${pass} passed, ${fail} failed ==`)
 process.exit(fail > 0 ? 1 : 0)

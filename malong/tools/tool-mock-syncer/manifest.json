@@ -1,7 +1,7 @@
 {
   "name": "mock_sync",
   "version": "1.0.0",
-  "description": "Detect mock/patch mismatches after signature changes. Pairs rename_symbol. Fix → test_bridge.",
+  "description": "Detect mock/patch mismatches after signature changes. Pairs rename_symbol.",
   "inputSchema": {
     "type": "object",
     "properties": {

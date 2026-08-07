@@ -1,6 +1,7 @@
-import { readFileSync, readdirSync, writeFileSync, existsSync, mkdirSync } from 'node:fs'
-import { join, extname, resolve } from 'node:path'
+import { readFileSync, readdirSync, writeFileSync, existsSync, mkdirSync, realpathSync } from 'node:fs'
+import { join, extname, resolve, sep } from 'node:path'
 import { createHash } from 'node:crypto'
+import { collectStringRanges } from '../../string-utils.js'
 
 function guardPath(root, userPath) {
   // r23-fix3: LLM 可能传非字符串路径（数字/对象）→ resolve() 会抛 TypeError 崩溃
@@ -18,28 +19,32 @@ const MIN_SCAN_FILES = 3
 
 // r23-fix2: 确定性抽样——按文件路径 sha256 排序取前 N，替代原版 Math.random()（见性成佛校验：无非确定性）
 // r23-fix3: walk 上限 5000——几万文件的超大项目全量读盘会卡住 LLM 调用
+// R22-⑪：只读排序后前 N 个文件内容——旧实现 walk 时读全部候选（≤5000 文件整读盘一次调用巨慢）
 const MAX_WALK_FILES = 5000
 function collectCodeFiles(dir) {
-  const files = []
+  const paths = []
   function walk(d) {
-    if (files.length >= MAX_WALK_FILES) return
+    if (paths.length >= MAX_WALK_FILES) return
     let entries
     try { entries = readdirSync(d, { withFileTypes: true }) } catch { return }
     for (const e of entries) {
-      if (files.length >= MAX_WALK_FILES) break
+      if (paths.length >= MAX_WALK_FILES) break
       if (IGNORE_DIRS.has(e.name) || e.name.startsWith('.')) continue
       const full = join(d, e.name)
       if (e.isDirectory()) walk(full)
-      else if (e.isFile() && CACHED_EXT.has(extname(e.name))) {
-        let source
-        try { source = readFileSync(full, 'utf-8') } catch { continue }
-        if (source.length < 20000 && source.length > 10) files.push({ path: full, source })
-      }
+      else if (e.isFile() && CACHED_EXT.has(extname(e.name))) paths.push(full)
     }
   }
   walk(dir)
-  files.sort((a, b) => createHash('sha256').update(a.path).digest('hex').localeCompare(createHash('sha256').update(b.path).digest('hex')))
-  return files.slice(0, MAX_SCAN_FILES)
+  paths.sort((a, b) => createHash('sha256').update(a).digest('hex').localeCompare(createHash('sha256').update(b).digest('hex')))
+  const files = []
+  for (const p of paths.slice(0, MAX_SCAN_FILES)) {
+    try {
+      const source = readFileSync(p, 'utf-8')
+      if (source.length < 20000 && source.length > 10) files.push({ path: p, source })
+    } catch { continue }
+  }
+  return { files, walk_truncated: paths.length > MAX_WALK_FILES }
 }
 
 function sniffIndent(source) {
@@ -61,14 +66,18 @@ function sniffIndent(source) {
 }
 
 function sniffQuotes(source) {
-  const single = (source.match(/'/g) || []).length
-  const double = (source.match(/"/g) || []).length
-  const backtick = (source.match(/`/g) || []).length
-  const max = Math.max(single, double, backtick)
-  if (max === 0) return null
-  if (max === single) return 'single'
-  if (max === double) return 'double'
-  return 'backtick'
+  // R22-⑪：撇号污染——旧实现 `(source.match(/'/g))` 把 don't/it's 等英文撇号计为单引号
+  // 改：collectStringRanges 只统计成对字符串的开引号（未闭合撇号不产区间）；返回计数供全文件聚合
+  let single = 0, double = 0, backtick = 0
+  for (const line of source.split('\n')) {
+    for (const [s] of collectStringRanges(line)) {
+      const ch = line[s]
+      if (ch === "'") single++
+      else if (ch === '"') double++
+      else backtick++
+    }
+  }
+  return { single, double, backtick }
 }
 
 function sniffSemicolons(source) {
@@ -84,14 +93,16 @@ function sniffSemicolons(source) {
 
 function sniffNaming(source) {
   const result = { camelCase: 0, PascalCase: 0, snake_case: 0, UPPER_CASE: 0, kebabCase: 0 }
-  for (const match of source.matchAll(/(?:function|const|let|var)\s+(\w+)/g)) {
+  // R22-⑱（第五轮核实）：旧只匹配 JS 关键词（function/const/let/var + class）——Python def/Go func/Rust fn
+  // 全部不命中 → Python 纯项目 snake_case 恒 0 且 kebabCase 死累加器。补多语言关键词。
+  for (const match of source.matchAll(/(?:function|const|let|var|def|func|fn)\s+(\w+)/g)) {
     const name = match[1]
     if (/^[a-z][a-zA-Z0-9]*$/.test(name)) result.camelCase++
     else if (/^[A-Z][a-zA-Z0-9]*$/.test(name)) result.PascalCase++
     else if (/^[a-z][a-z0-9_]*$/.test(name)) result.snake_case++
     else if (/^[A-Z][A-Z0-9_]*$/.test(name)) result.UPPER_CASE++
   }
-  for (const match of source.matchAll(/class\s+(\w+)/g)) {
+  for (const match of source.matchAll(/(?:class|struct)\s+(\w+)/g)) {
     if (/^[A-Z][a-zA-Z0-9]*$/.test(match[1])) result.PascalCase++
   }
   return result
@@ -170,8 +181,18 @@ export async function handle(args, context) {
   if (!existsSync(scanDir)) {
     return { error: 'dir_not_found', message: `Directory not found: ${scope}` }
   }
+  // R22-⑯：symlink 目录逃逸守卫——guardPath 用 resolve 只归一化不去引用，scope 指向外部 symlink 目录时 collectCodeFiles 跟随遍历外部
+  try {
+    const realWs = realpathSync(workspaceDir)
+    const realScan = realpathSync(scanDir)
+    if (realScan !== realWs && !realScan.startsWith(realWs + sep)) {
+      return { error: 'path_escape', message: `Scope resolves outside workspace_dir: ${scope}` }
+    }
+  } catch {
+    return { error: 'path_escape', message: `Cannot resolve scope path: ${scope}` }
+  }
 
-  const files = collectCodeFiles(scanDir)
+  const { files, walk_truncated } = collectCodeFiles(scanDir)
   if (files.length < MIN_SCAN_FILES) {
     return { status: 'insufficient_files', files: files.length, min_required: MIN_SCAN_FILES, message: `Only ${files.length} code files found (need ≥${MIN_SCAN_FILES})` }
   }
@@ -182,11 +203,13 @@ export async function handle(args, context) {
   }
 
   let trailingTotal = 0, nonTrailingTotal = 0
+  // R22-⑪：quotes 改全文件聚合——旧 `styles.quotes || quotes` 首文件胜出（首个含引号文件说了算，样本失真）
+  let quoteStats = { single: 0, double: 0, backtick: 0 }
   for (const file of files) {
     const indent = sniffIndent(file.source)
     if (indent) styles.indent = styles.indent || indent
-    const quotes = sniffQuotes(file.source)
-    if (quotes) styles.quotes = styles.quotes || quotes
+    const q = sniffQuotes(file.source)
+    quoteStats.single += q.single; quoteStats.double += q.double; quoteStats.backtick += q.backtick
     const semicolons = sniffSemicolons(file.source)
     if (semicolons) styles.semicolons = styles.semicolons || semicolons
     // r23-fix: 尾逗号是占比语义，取首个文件会失真 → 全文件聚合
@@ -195,6 +218,10 @@ export async function handle(args, context) {
     const naming = sniffNaming(file.source)
     for (const [k, v] of Object.entries(naming)) styles.naming[k] += v
   }
+  const maxQ = Math.max(quoteStats.single, quoteStats.double, quoteStats.backtick)
+  styles.quotes = maxQ === 0 ? null
+    : maxQ === quoteStats.single ? 'single'
+    : maxQ === quoteStats.double ? 'double' : 'backtick'
   styles.trailingCommas = trailingTotal + nonTrailingTotal === 0 ? null : (trailingTotal >= nonTrailingTotal ? 'yes' : 'no')
 
   const projectRules = buildProjectRules(styles)
@@ -216,15 +243,23 @@ export async function handle(args, context) {
         next_step: 'Review the generated content above; pass force=true to overwrite, or merge manually.',
       }
     }
-    if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true })
-    rulesPath = target
-    writeFileSync(rulesPath, projectRules, 'utf-8')
+    // r54(P2): mkdir/write 无 try/catch——output 已存在但是文件(ENOTDIR)/权限不足时裸异常违反错误对象契约
+    try {
+      if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true })
+      rulesPath = target
+      writeFileSync(rulesPath, projectRules, 'utf-8')
+    } catch (e) {
+      return { error: 'write_failed', message: `Failed to write PROJECT_RULES.md: ${e.code || e.message}`, project_rules: projectRules, suggestion: 'Check the output directory is writable and not an existing file.' }
+    }
   }
 
   return {
     status: 'done',
     files: files.length,
     sampled: files.map(f => f.path.startsWith(workspaceDir + '/') ? f.path.slice(workspaceDir.length + 1) : f.path),
+    // R22-⑪：低置信度声明——5 文件样本不足以代表全项目风格，防 LLM 当权威规则盲信
+    sample_note: `style detected from ${files.length} sampled files (deterministic sha256 pick); small sample may not represent whole project`,
+    walk_truncated,
     styles,
     project_rules: projectRules,
     rules_path: rulesPath,

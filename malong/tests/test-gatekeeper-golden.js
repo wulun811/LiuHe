@@ -4,6 +4,7 @@
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
+import os from 'node:os'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const imp = (p) => import(pathToFileURL(p).href)
@@ -16,6 +17,7 @@ function assert(cond, msg) {
   if (cond) { pass++ } else { fail++; console.error('  FAIL:', msg) }
 }
 
+const { tmpdir } = os
 const WS = join(tmpdir(), 'opencode', 'gatekeeper-ws')
 const DATA = join(tmpdir(), 'opencode', 'gatekeeper-data')
 rmSync(WS, { recursive: true, force: true })
@@ -237,7 +239,9 @@ assert(tb.sanitizeScope('tests/foo.py') === 'tests/foo.py', `合法 scope 通过
 assert(tb.sanitizeScope('tests/\nrm -rf /') === null, `换行注入拒绝（旧 \\s+ 吞换行 → 白名单绕过）`)
 assert(tb.sanitizeScope('..') === null, `.. 越界拒绝`)
 assert(tb.sanitizeScope('../x') === null, `相对穿越拒绝`)
-// 3. patch-parser fuzzy 错位不硬切（旧：混用坐标静默篡改文件）
+// 3. patch-parser fuzzy 是 Level 2 有意回退（exact→fuzzy 纯文本空白对齐，无坐标混用）——
+//    Y001 校准（2026-08-03）：旧断言期望 applied=0 固化的是坐标混用旧 bug；现行为可预期：
+//    只替换匹配块、不篡改其他内容（旧 bug 特征 = 篡改别处/损坏原文）
 const ppMod = await imp(join(MALONG_DIR, 'patch-parser.js'))
 const ppServices = {}
 const ppCore = { get: () => null, log: () => {}, registerService: (n, s) => { ppServices[n] = s } }
@@ -245,7 +249,8 @@ await ppMod.init(ppCore)
 const pp = ppServices.patchParser
 const fuzzySrc = 'x = 1\n' + ' '.repeat(30) + 'return 42\n\ndef bar():\n    return 1\n'
 const fuzzyR = pp.apply(fuzzySrc, [{ search: 'return 42\n\n\ndef bar()', replace: 'return 43\n\ndef bar()' }])
-assert(fuzzyR.applied.length === 0 && fuzzyR.result === fuzzySrc, `fuzzy 错位不硬切（旧：静默篡改；得 ${JSON.stringify(fuzzyR.applied)}）`)
+assert(fuzzyR.applied.length === 1 && fuzzyR.applied[0].method === 'fuzzy', `fuzzy 空白对齐应用（有意特性；得 ${JSON.stringify(fuzzyR.applied)}）`)
+assert(fuzzyR.result.includes('x = 1'), `fuzzy 不篡改匹配块外内容（得 ${JSON.stringify(fuzzyR.result)}）`)
 // 4. guard-patterns except_bare 三场景（docstring 行内收尾 / 赋值三引号 / 单行 docstring）
 const { handle: guardP } = await imp(join(MALONG_DIR, 'tools/tool-guard-patterns/handler.js'))
 // except_bare 分支需要 refs 非空才能到达（checkRules 空 refs 提前返回）——mock langParser 提供假 refs
@@ -381,6 +386,8 @@ assert(!(gpR.violations ?? []).some(v => ['no-bare-except', 'no-debugger', 'no-e
 // ═══════════ golden 23：第 10 轮 JS parser 路径 fix_imports（生产路径——补局部作用域前的重灾区） ═══════════
 // 旧实现 analyzeFileAST（parser 路径）只有顶层符号+导入，无局部作用域 → resolve/reject 等参数、
 // net.createConnection 的成员用法全误报；建议恒 Python 语法、transaction_ready 会腐蚀 JS 文件
+// Y001 校准（2026-08-03）：fixture 补用 tmpdir（原 fixture 未用 → 报 unused 是正确 recall 行为，
+// 非误报；断言期望 0 unused 固化的是漏检。用上后 0 误报断言保真）
 console.log('── golden 23: JS parser 路径 fix_imports（生产路径 0 误报） ──')
 const jsParserCtx = { codeIndexService, getWorkspaceDir: () => DATA, langParserService: rustLangParser }
 writeFileSync(`${WS}/src/js_scope.js`, `import net from 'node:net'
@@ -395,7 +402,7 @@ export function connect(sockPath) {
     if (existsSync(sockPath)) resolve(sock)
   })
 }
-export function read(p) { return readFileSync(p, 'utf-8') + helper() }
+export function read(p) { return readFileSync(tmpdir() + '/' + p, 'utf-8') + helper() }
 `)
 r = await fixImports({ workspace_dir: WS, file: 'src/js_scope.js' }, jsParserCtx)
 assert(r.issues.filter(i => i.type === 'undefined_symbol').length === 0, `JS parser 路径无 undefined 误报（resolve/reject 是参数、sock 是局部量）（得 ${JSON.stringify(r.issues.filter(i => i.type === 'undefined_symbol').map(i => i.symbol))}）`)

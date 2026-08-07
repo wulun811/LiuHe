@@ -28,6 +28,7 @@ const DENY_PATTERNS = [
   { pattern: /(^|[\/\\])(\.?venv)([\/\\]|$)/i, name: 'venv' },
   { pattern: /(^|[\/\\])__pycache__([\/\\]|$)/i, name: '__pycache__' },
   { pattern: /(^|[\/\\])\.ai-transactions([\/\\]|$)/, name: '.ai-transactions' },
+  { pattern: /(^|[\/\\])\.malong([\/\\]|$)/, name: '.malong' }, // R17-5：与 .ai-transactions 对称
 ]
 
 export function validateFilePath(filePath, workspaceDir) {
@@ -51,7 +52,9 @@ export function validateFilePath(filePath, workspaceDir) {
     return { blocked: true, reason: 'absolute_path', detail: `absolute path is not allowed (must be workspace-relative): ${filePath}` }
   }
 
-  if (filePath.includes('..')) {
+  // r9(P8)：段级匹配——旧实现 `includes('..')` 误杀 foo..bar.txt / v1.0..1.js 等合法文件名；
+  // 只有独立的 `..` 路径段才构成穿越
+  if (/(^|[\/\\])\.\.([\/\\]|$)/.test(filePath)) {
     return { blocked: true, reason: 'path_traversal', detail: `file path contains "..": ${filePath}` }
   }
 

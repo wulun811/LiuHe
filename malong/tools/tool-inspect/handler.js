@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
+import { attachStalenessWarning } from '../../staleness.js'
 
 export async function handle(args, context) {
   const { codeIndexService, getWorkspaceDir } = context
@@ -7,6 +8,10 @@ export async function handle(args, context) {
 
   if (!workspaceDir) {
     return { error: 'missing_parameter', message: 'workspace_dir is required' }
+  }
+  // R22-⑯：非字符串 workspace_dir 让 getWorkspaceDir→resolve 裸抛 TypeError
+  if (typeof workspaceDir !== 'string') {
+    return { error: 'invalid_input', message: `workspace_dir must be a string (got ${typeof workspaceDir})` }
   }
 
   const dbPath = join(getWorkspaceDir(workspaceDir), 'code-index.db')
@@ -39,11 +44,12 @@ export async function handle(args, context) {
     return { error: 'invalid_input', message: 'at least one section required (include_outline, include_refs, or include_chain)' }
   }
 
-  try { await codeIndexService.initWorkspace(workspaceDir) } catch {}
+  // R22-⑪：initWorkspace 异常不再静默吞——透出 init_warning（报告 INFO：旧 catch{} 无日志无提示）
+  let initWarn = null
+  try { await codeIndexService.initWorkspace(workspaceDir) } catch (e) { initWarn = `initWorkspace failed: ${e.message}` }
   const t0 = Date.now()
 
-  // P2-C11：allSettled——任一子查询失败（并发 reindex 的 DROP/CREATE INDEX 窗口等）
-  // 不再丢弃已完成的 outline/refs
+  // Y002-S2：inspect 保鲜——getSymbols 内部 ensureFreshFile 统一承担（R19-②）
   const settle = (p) => (p ?? Promise.resolve(null)).then(v => ({ ok: true, v })).catch(e => ({ ok: false, v: null, reason: e.message }))
   const [outlineR, refsR, chainR] = await Promise.all([
     settle(includeOutline ? codeIndexService.getSymbols(file) : null),
@@ -56,7 +62,12 @@ export async function handle(args, context) {
   const outline = outlineR?.ok ? outlineR.v : null
   const refs = refsR?.ok ? refsR.v : null
   const chain = chainR?.ok ? chainR.v : null
-  const partialFailures = [outlineR, refsR, chainR].filter(r => r && !r.ok && r.reason)
+  // R22-⑰（第四轮审核 P1）：partial_failures 带 section 归属——agent 才能针对性重试对应 section
+  const partialFailures = [
+    { section: 'outline', r: outlineR },
+    { section: 'references', r: refsR },
+    { section: 'call_chain', r: chainR },
+  ].filter(x => x.r && !x.r.ok && x.r.reason)
 
   const result = { symbol, file }
   const sections = []
@@ -98,9 +109,10 @@ export async function handle(args, context) {
   }
 
   result.metadata = { sections_included: sections, parse_time_ms: Date.now() - t0 }
+  if (initWarn) result.init_warning = initWarn
   if (partialFailures.length > 0) {
-    result.partial_failures = partialFailures.map(f => f.reason)
+    result.partial_failures = partialFailures.map(f => ({ section: f.section, reason: f.r.reason }))
   }
   result.next_step = `Before modifying: impact_analysis(symbol="${symbol}", file="${file}"). After modifying: test_bridge(action="run")`
-  return result
+  return attachStalenessWarning(result, outlineR?.ok ? outlineR.v?.freshness : null)
 }

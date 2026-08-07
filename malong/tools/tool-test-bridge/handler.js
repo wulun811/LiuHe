@@ -1,11 +1,40 @@
 import { join, extname, basename, resolve, sep } from 'node:path'
 import { existsSync, readFileSync, statSync } from 'node:fs'
-import { execSync } from 'node:child_process'
+import { spawnWithGroup } from '../../spawn-guard.js'
 import { parseOutput } from './parsers.js'
+// r10d：discover 三层覆盖（约定 + 索引反查 + 文本兜底）——复用 find_tests 的 import 反查/文本扫描，
+// 命名约定不符的测试文件（如 tests/test-dogfood-r12.js import health-check.js）不再漏找
+import { handle as findTestsHandle } from '../tool-find-tests/handler.js'
+
+// 测试文件形态判定（与 find_tests 的 TEST_PATH_RE 同口径）
+function isTestFileLike(path) {
+  return /(?:^|\/)(?:tests?|__tests__)\/|\.test\.|\.spec\.|_test\./.test(path)
+}
+
+// r42：execSync → execFile 异步化（D 组唯一阻塞债）——MCP 单进程 stdio 下跑测试不能卡事件循环
+// command 为白名单模板拼装（buildCommand），含 shell 语法 `2>&1` 需剥离，参数用引号感知拆分
+function splitCommand(cmd) {
+  const parts = []
+  let current = '', inQuote = false, quoteChar = ''
+  for (let i = 0; i < cmd.length; i++) {
+    const ch = cmd[i]
+    if (inQuote) {
+      if (ch === quoteChar) { inQuote = false; continue }
+      current += ch
+    } else if (ch === '"' || ch === "'") {
+      inQuote = true; quoteChar = ch
+    } else if (ch === ' ') {
+      if (current) { parts.push(current); current = '' }
+    } else current += ch
+  }
+  if (current) parts.push(current)
+  return parts
+}
 
 const SKIP_DIRS = new Set(['node_modules', '.git', '__pycache__', '.venv', 'venv', 'dist', 'build', '.next'])
 // 仅允许安全字符与空白分隔（[ \t] 不吞换行——换行可注入多行 shell 命令）
-const SAFE_SCOPE_RE = /^[\w\/\.\-:\[\]]+(?:[ \t]+[\w\/\.\-:\[\]]+)*$/
+// r10e(F2)：中文路径（docs/六合工具集/...）此前被 \b\w\b 排除——SAFE_SCOPE_RE 拒绝中文目录，MCP 下 test_bridge run 无法跑中文路径测试。中文不是 CLI 注入向量（- 开头已另拒）
+const SAFE_SCOPE_RE = /^[\w\u4e00-\u9fa5\/\\.\-:\[\]]+(?:[ \t]+[\w\u4e00-\u9fa5\/\\.\-:\[\]]+)*$/
 
 function sanitizeScope(scope) {
   if (typeof scope !== 'string') return null
@@ -39,7 +68,7 @@ function detectFramework(workspaceDir, file) {
     if (ext === '.py') return 'pytest'
     if (ext === '.go') return 'go_test'
     if (ext === '.rs') return 'cargo_test'
-    if (['.js', '.jsx', '.mjs', '.cjs', '.ts', '.tsx'].includes(ext)) return detectJsFramework(workspaceDir) || 'jest'
+    if (['.js', '.jsx', '.mjs', '.cjs', '.ts', '.tsx'].includes(ext)) return detectJsFramework(workspaceDir) || 'node'
     if (ext === '.java' || ext === '.kt') return existsSync(join(workspaceDir, 'pom.xml')) ? 'maven' : 'gradle'
   }
   if (existsSync(join(workspaceDir, 'pytest.ini')) ||
@@ -76,6 +105,10 @@ function buildCommand(framework, scope, workspaceDir) {
     case 'cargo_test': return `cargo test ${scope === '.' ? '' : scope} 2>&1`
     case 'maven': return `mvn test ${scope !== '.' ? '-pl ' + scope : ''} -q 2>&1`
     case 'gradle': return `./gradlew test ${scope !== '.' ? '--tests "' + scope + '"' : ''} -q 2>&1`
+    // r48: 纯 node 脚本项目（无 jest/vitest/mocha，如 malong 自身）可显式 framework="node" 跑测试
+    // r51/r54(P2): node 只能跑文件——'.' 或目录 scope（无 .js/.mjs/.cjs 扩展名）返回 null 触发 unsupported+hint
+    // （此前目录 scope 生成 `node tests` 报误导性 MODULE_NOT_FOUND）
+    case 'node': return /\.(mjs|cjs|js)$/.test(scope) ? `node ${scope} 2>&1` : null
     default: return null
   }
 }
@@ -152,9 +185,15 @@ function extractTestNames(filePath, workspaceDir) {
     for (let i = 0; i < lines.length; i++) {
       let m
       if (ext === '.py') m = /^\s*(?:async\s+)?def\s+(test_\w+)/.exec(lines[i])
-      else if (['.js', '.mjs', '.ts', '.tsx'].includes(ext)) m = /(?:it|test)\s*\(\s*['"`](.+?)['"`]/.exec(lines[i])
+      // r54(P2): 行首锚定——旧 /(?:it|test)\s*\(/ 无锚定，commit('x')/submit('o') 含 it( 子串被提取为虚构测试（同步 find-tests P2-B6 锚定版）
+      else if (['.js', '.mjs', '.ts', '.tsx'].includes(ext)) m = /^\s*(?:it|test)\s*\(\s*['"`](.+?)['"`]/.exec(lines[i])
       else if (ext === '.go') m = /^func\s+(Test\w+)/.exec(lines[i])
       if (m) tests.push({ name: m[1], line: i + 1 })
+    }
+    // r10e(F2)：裸 assert/expect 风格兜底（malong 全量测试都是裸 assert 无 test() 包裹）——
+    // 无 it/test 提取时，若文件含断言调用则给文件级条目，discover 不再报 no tests found
+    if (tests.length === 0 && /^\s*(?:assert|expect)\(/m.test(content)) {
+      tests.push({ name: basename(filePath, extname(filePath)), line: 1 })
     }
     return tests
   } catch { return [] }
@@ -165,7 +204,9 @@ async function handleRun(args, context) {
   if (!existsSync(workspaceDir)) {
     return { error: 'workspace_not_found', message: `Workspace directory does not exist: ${workspaceDir}` }
   }
-  const scope = args.scope || '.'
+  const scope = args.scope || args.file || '.'
+  // R22-⑦（拷打发现）：run 模式旧实现只读 args.scope、静默忽略 args.file——用户传 file 期望限定测试文件却跑默认 scope，无任何提示；
+  // file 接入 scope 后同时获得 sanitizeScope 的 `..` 穿越与 `-` 注入拦截（../ 恶意 file → invalid_input）
   const safeScope = sanitizeScope(scope)
   if (!safeScope) {
     return { error: 'invalid_input', message: `Unsafe scope: "${scope}". Only alphanumeric, /, ., -, :, spaces allowed.` }
@@ -175,6 +216,8 @@ async function handleRun(args, context) {
   if (args.timeout !== undefined && (typeof args.timeout !== 'number' || !Number.isFinite(timeout) || timeout <= 0)) {
     return { error: 'invalid_input', message: 'timeout must be a positive number (seconds)' }
   }
+  // r11(H4)：上钳 110s（MCP 120s 硬超时）——超大 timeout 时客户端先断、工具僵尸占槽数分钟
+  const effectiveTimeout = Math.min(timeout, 110_000)
   const framework = args.framework || detectFramework(workspaceDir, args.scope)
 
   if (framework === 'unknown') {
@@ -188,25 +231,35 @@ async function handleRun(args, context) {
 
   const command = buildCommand(framework, safeScope, workspaceDir)
   if (!command) {
-    return { error: 'unsupported_framework', message: `Framework "${framework}" is not supported for running` }
+    // r48/r54(P2): node 分支只接受文件 scope（node 无法直接跑目录/'.'）——给出明确指引，避免误导性 unsupported
+    const hint = framework === 'node'
+      ? ' For framework=node provide a test file scope (e.g. scope="tests/app.test.js"), or use verify_pipeline() to run the project test script.'
+      : ''
+    return { error: 'unsupported_framework', message: `Framework "${framework}" is not supported for running${hint}` }
   }
 
   let rawOutput = ''
   let exitCode = 0
   let timedOut = false
 
+  // r42：execFile 异步执行（无 shell，剥离 2>&1 后合并 stdout+stderr 保持原语义）
+  const [cmdBin, ...cmdArgs] = splitCommand(command)
+  const childArgs = cmdArgs.filter(a => a !== '2>&1' && a !== '2>1')
   try {
-    rawOutput = execSync(command, {
+    // R14：spawnWithGroup 进程组杀——npx/go test 的孙进程超时一并清
+    const res = await spawnWithGroup(cmdBin, childArgs, {
       cwd: workspaceDir,
-      encoding: 'utf-8',
-      timeout,
+      timeout: effectiveTimeout,
       maxBuffer: 10 * 1024 * 1024,
-      env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1', TERM: 'dumb' },
+      env: { FORCE_COLOR: '0', NO_COLOR: '1', TERM: 'dumb' },
     })
+    rawOutput = res.stdout + (res.stderr ? '\n' + res.stderr : '')
+    exitCode = typeof res.code === 'number' ? res.code : (res.killed ? 1 : 0)
+    if (res.killed) timedOut = true
   } catch (e) {
-    exitCode = e.status ?? e.code ?? 1
-    rawOutput = (e.stdout || '') + '\n' + (e.stderr || '')
-    if (e.killed || e.code === 'ETIMEDOUT') timedOut = true
+    exitCode = e.code ?? 1
+    rawOutput = ''
+    if (e.code === 'ETIMEDOUT') timedOut = true
   }
 
   const parsed = parseOutput(rawOutput, framework)
@@ -225,8 +278,11 @@ async function handleRun(args, context) {
   }
 
   let nextStep = null
-  if (exitCode !== 0) {
-    nextStep = 'Fix failures above, then re-run. Use inspect() to understand failing code.'
+  // R22-⑰（第四轮审核 P1）：超时 ≠ 失败——next_step 误导 agent 去修代码，实际应加大 timeout/优化测试
+  if (timedOut) {
+    nextStep = 'Test timed out. Increase timeout or optimize the test (slow I/O / infinite loop). Use inspect() to review the test logic.'
+  } else if (exitCode !== 0) {
+    nextStep = 'Fix failures above, then re-run: test_bridge(action="run"). To diagnose: debug_runner(workspace_dir=..., test=...) or verify_pipeline for the full chain.'
   } else {
     nextStep = 'All tests pass. Use edit_transaction to commit changes.'
   }
@@ -383,6 +439,32 @@ async function handleDiscover(args, context) {
     }
   }
 
+  // r10d：import 层（索引反查 + 文本兜底）——find_tests 内部对 by_import 为空时做有界文本扫描
+  try {
+    const ft = await findTestsHandle({ workspace_dir: workspaceDir, file }, context)
+    // r10e(F2)：find_tests 内部守卫错误（FILE_NOT_FOUND / FILE_NOT_INDEXED / DIR_AS_FILE）要透传，
+    // 否则 discover 对不存在文件静默返回 no tests found
+    if (ft?.error) return ft
+    for (const hit of ft?.by_import || []) {
+      if (isTestFileLike(hit.path)) {
+        const testNames = extractTestNames(hit.path, workspaceDir)
+        for (const t of testNames) {
+          const key = `${hit.path}:${t.name}`
+          if (!seen.has(key)) {
+            seen.add(key)
+            tests.push({ file: hit.path, name: t.name, line: t.line })
+          }
+        }
+      }
+    }
+  } catch (e) {
+    // r11(M1)：find_tests 抛异常时不能静默——否则 discover 假阴性 "no tests found"（r10e 只透了 ft?.error，抛异常路径漏了）
+    return { error: 'find_tests_failed', message: `find_tests raised: ${e.message}`, warning: 'discover degraded to convention-only scan' }
+  }
+
+  const searchMethods = ['convention']
+  if (tests.some(t => !candidates.includes(t.file))) searchMethods.push('import_graph/text_fallback')
+
   const testFiles = [...new Set(tests.map(t => t.file))]
   let coverageHint
   if (testFiles.length === 0) coverageHint = 'no tests found — consider creating tests'
@@ -399,6 +481,7 @@ async function handleDiscover(args, context) {
     framework,
     tests: tests.slice(0, 50),
     total: tests.length,
+    search_methods: searchMethods,
     coverage_hint: coverageHint,
     next_step: nextStep,
   }

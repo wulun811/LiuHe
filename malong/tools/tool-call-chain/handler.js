@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 import { existsSync, statSync } from 'node:fs'
-import { checkFileStaleness, attachStalenessWarning } from '../../staleness.js'
+import { attachStalenessWarning } from '../../staleness.js'
 
 function detectMisuse(args) {
   const line = parseInt(args?.line) || 0
@@ -19,7 +19,7 @@ export async function handle(args, context) {
   const { codeIndexService, getWorkspaceDir } = context
   const workspaceDir = args?.workspace_dir
 
-  if (!workspaceDir) {
+  if (typeof workspaceDir !== 'string' || !workspaceDir) {
     return { error: 'missing_parameter', message: 'workspace_dir is required', suggestion: 'Provide the absolute path to the project root directory. Call reindex first if this is a new workspace.' }
   }
 
@@ -57,8 +57,9 @@ export async function handle(args, context) {
   let symbol = args?.symbol
   let symbolSignature = null
 
+  // R19-②：保鲜由服务层查询出口（getSymbolsAtLine/getImpactAnalysis 内部 ensureFreshFile）统一承担
   if (!symbol && line > 0) {
-    const symbols = codeIndexService.getSymbolsAtLine(file, line)
+    const symbols = await codeIndexService.getSymbolsAtLine(file, line)
     if (symbols && symbols.length > 0) {
       const top = symbols.find(s => s.type === 'function' || s.type === 'method' || s.type === 'class')
         || symbols[symbols.length - 1]
@@ -71,7 +72,6 @@ export async function handle(args, context) {
     return { error: 'missing_parameter', message: 'Could not determine symbol from file+line. Provide symbol explicitly.', suggestion: 'Provide a symbol name, or ensure the file is indexed and line falls within a function/class definition.' }
   }
 
-  const staleness = await checkFileStaleness(codeIndexService, workspaceDir, file)
   const impact = await codeIndexService.getImpactAnalysis(file, {
     symbol,
     depth,
@@ -88,8 +88,9 @@ export async function handle(args, context) {
     },
     // 16：file 参数共用守卫归因透传（无效文件时不静默成空调用链）
     ...(impact.file_error ? { file_error: impact.file_error } : {}),
-    callers: formatCallers(impact, 'callers'),
-    truncated_callers: impact.truncated_callers || false,
+    // r54(P2): formatCallers 按 maxCallers 切片——服务按 Math.max(callers,callees) 取数，max_callees>max_callers 时 callers 超预算
+    callers: formatCallers(impact, 'callers', maxCallers),
+    truncated_callers: impact.truncated_callers || (impact.callers || []).length > maxCallers,
     callees: formatCallees(impact, maxCallees),
     truncated_callees: impact.truncated_callees || (impact.callees || []).length > maxCallees,
     test_references: formatTestRefs(impact),
@@ -104,7 +105,7 @@ export async function handle(args, context) {
     }
   }
 
-  attachStalenessWarning(result, staleness)
+  attachStalenessWarning(result, impact?.freshness || null)
 
   if (misuseWarning) {
     result.misuse_warning = misuseWarning
@@ -113,9 +114,9 @@ export async function handle(args, context) {
   return result
 }
 
-function formatCallers(impact, key) {
+function formatCallers(impact, key, limit = Infinity) {
   const callers = impact[key] || []
-  return callers.map(c => ({
+  return callers.slice(0, limit).map(c => ({
     file: c.file,
     line: c.line,
     function: c.function || c.caller_function || 'unknown',
@@ -156,8 +157,11 @@ function formatTestRefs(impact) {
   }))
 }
 
-function checkRecentModifications(workspaceDir, impact, thresholdMinutes = 5) {
-  const now = Date.now()
+// Y001-S3: now 可注入（测试固定 clock 去非确定性；生产默认 Date.now()）
+// Y001 债务4 收口（2026-08-03）：生产路径保留 Date.now() 是有意语义——"几分钟前修改"本就需要
+// 当前时间，非确定性的全部影响仅在此展示层字段；测试确定性已由 now 参数注入保证（test-call-chain ⑥）。
+// 不做 mtime 相对化：会让"多久前"变成"相对启动时间"，对用户无意义。
+function checkRecentModifications(workspaceDir, impact, thresholdMinutes = 5, now = Date.now()) {
   const files = new Set()
   const collect = (items) => {
     if (!items) return
@@ -184,3 +188,5 @@ function checkRecentModifications(workspaceDir, impact, thresholdMinutes = 5) {
 
   return modified
 }
+
+export { checkRecentModifications }

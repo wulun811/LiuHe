@@ -5,13 +5,15 @@
 
 import { createDb } from './db-adapter.js'
 import { join, relative, resolve, sep, basename, isAbsolute } from 'node:path'
-import { existsSync } from 'node:fs'
+import { existsSync, readdirSync, statSync } from 'node:fs'
 
 export const name = 'malong-repo-map'
 export const version = '0.2.1'
 
 const MAX_CACHE_AGE = 5 * 60 * 1000
 const MAX_FOCUSED_TOKENS = 2000
+// r54(P1): 非 focused（默认）也需预算——大仓库全量 map 一次调用数十万 token
+const MAX_FULL_TOKENS = 30000
 const CHARS_PER_TOKEN = 4
 
 // DB type → 展示缩写（对齐 parse-client 的 kind 输出：fn/cls/var/...）
@@ -30,6 +32,35 @@ async function openDb(workspaceDir) {
   const dbPath = join(_core.getWorkspaceDir(workspaceDir), 'code-index.db')
   if (!existsSync(dbPath)) return null
   return await createDb(dbPath, { readonly: true })
+}
+
+// R19：repo_map 走独立只读 DB 连接不经服务层——对根目录树做有界 mtime 粗检（深度 ≤8、≤5000 文件），
+// 与库内 max(mtime) 比对，不一致 → 结果附 index_stale 警告（避免陈旧索引生成误导性地图）
+function checkRepoMapStaleness(db, rootDir) {
+  let diskNewest = 0
+  let diskFiles = 0
+  const walk = (d, depth) => {
+    if (depth > 8 || diskFiles > 5000) return
+    let entries
+    try { entries = readdirSync(d, { withFileTypes: true }) } catch { return }
+    for (const e of entries) {
+      if (e.name.startsWith('.') || e.name === 'node_modules') continue
+      const full = join(d, e.name)
+      if (e.isDirectory()) walk(full, depth + 1)
+      else if (e.isFile()) {
+        diskFiles++
+        try { const st = statSync(full); if (st.mtimeMs > diskNewest) diskNewest = st.mtimeMs } catch {}
+      }
+    }
+  }
+  walk(rootDir, 0)
+  if (diskNewest === 0) return null
+  let indexedNewest = 0
+  try { indexedNewest = db.prepare('SELECT MAX(mtime) AS m FROM files').get().m || 0 } catch { return null }
+  if (diskNewest > indexedNewest) {
+    return { index_stale: true, note: 'Index is older than some source files — results may be stale. Run reindex(workspace_dir=...) for an up-to-date map.', disk_newest: Math.round(diskNewest), indexed_newest: Math.round(indexedNewest) }
+  }
+  return null
 }
 
 // 归一化 DB path：历史库基座可能是 workspace 根，也可能是 workspace 的父目录（path 带 basename 前缀）
@@ -60,6 +91,7 @@ function queryFilesWithSymbols(db, rootDir, workspaceDir, relevantFiles, relevan
     : null
 
   const byFile = new Map()
+  let skippedOutside = 0
   for (const r of rows) {
     const normPath = normalizeDbPath(r.path, workspaceDir)
     if (filterSet && !filterSet.has(normPath)) continue
@@ -68,13 +100,14 @@ function queryFilesWithSymbols(db, rootDir, workspaceDir, relevantFiles, relevan
     if (rootDir !== workspaceDir) {
       const full = join(workspaceDir, normPath)
       const rp = relative(rootDir, full)
-      if (rp.startsWith('..' + sep) || rp === '..') continue // 目录外文件跳过
+      // R17-4：目录外文件跳过计数——否则 LLM 以为 scanDir 内只有这些符号
+      if (rp.startsWith('..' + sep) || rp === '..') { skippedOutside++; continue }
       rel = rp
     }
     if (!byFile.has(rel)) byFile.set(rel, [])
     byFile.get(rel).push({ name: r.name, type: TYPE_SHORT[r.type] || r.type, line: r.line })
   }
-  return { files: [...byFile.entries()].map(([path, symbols]) => ({ path, symbols })), rows: rows.length }
+  return { files: [...byFile.entries()].map(([path, symbols]) => ({ path, symbols })), rows: rows.length, ...(skippedOutside > 0 ? { skipped_outside: skippedOutside } : {}) }
 }
 
 function buildTree(entries, rootName) {
@@ -143,11 +176,22 @@ export async function init(core) {
       try {
         const { files, rows } = queryFilesWithSymbols(db, rootDir, workspaceDir, null, null)
         const tree = buildTree(files, basename(resolve(rootDir)))
-        const map = renderTree(tree)
+        let map = renderTree(tree)
+        // r54(P1): 非 focused 也加硬上限 + truncated 标记（旧实现默认模式无任何预算）
+        let truncated = false
+        if (estimateTokens(map) > MAX_FULL_TOKENS) {
+          const budget = MAX_FULL_TOKENS * CHARS_PER_TOKEN
+          const lines = map.split('\n')
+          let keep = 0, used = 0
+          while (keep < lines.length && used + lines[keep].length + 1 <= budget) { used += lines[keep].length + 1; keep++ }
+          map = lines.slice(0, keep).join('\n') + '\n... (truncated; use focused=true + relevantFiles/relevantEntities to narrow)'
+          truncated = true
+        }
         _cache = { map, files: files.length, timestamp: Date.now() }
         _cacheTime = Date.now()
         _injectToYingMini(map)
-        return { map, files: files.length, tokens: estimateTokens(map) }
+        const stale = checkRepoMapStaleness(db, rootDir)
+        return { map, files: files.length, tokens: estimateTokens(map), truncated, ...(stale ? { index_stale_note: stale.note } : {}) }
       } finally {
         db.close()
       }
@@ -194,7 +238,8 @@ export async function init(core) {
         }
 
         _injectToYingMini(map)
-        return { map, files: files.length, tokens: truncated }
+        const stale = checkRepoMapStaleness(db, rootDir)
+        return { map, files: files.length, tokens: truncated, ...(stale ? { index_stale_note: stale.note } : {}) }
       } finally {
         db.close()
       }

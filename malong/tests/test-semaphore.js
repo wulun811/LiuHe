@@ -1,5 +1,5 @@
 // test-semaphore.js — Semaphore 排队信号量单测（超时兜底 + weight + 防泄漏）
-import { Semaphore } from '../semaphore.js'
+import { Semaphore, heavyToolWeight } from '../semaphore.js'
 
 let pass = 0, fail = 0
 function assert(cond, msg) {
@@ -69,10 +69,15 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 }
 
 // ── 5. release 空队列不炸（幂等） ──
+// R22-⑰：下界保护——超发 release 钳制在 0（负计数会让 acquire 永不排队 → 并发超限静默）
 {
   const s = new Semaphore(1)
   s.release()
-  assert(s.getStatus().current === -1, '空 release 允许（current=-1，调用方保证配对）')
+  assert(s.getStatus().current === 0, '空 release 钳制在 0（不得下溢为负）')
+  s.release(3)
+  assert(s.getStatus().current === 0, '超发 release 仍钳制在 0')
+  const r = await s.acquire(1, 50)
+  assert(!(r && r.timedOut), '钳制后 acquire 正常授予（不排队挂死）')
 }
 
 // ── 6. 无超时路径保持旧行为（timeoutMs=0） ──
@@ -86,6 +91,31 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms))
   s.release()
   await p
   assert(second === true, '无超时 acquire 最终放行')
+}
+
+// ── 7. r11(H1): 重工具权重恒小于并发槽数（reindex 与普通工具永可并行） ──
+{
+  assert(heavyToolWeight(5) === 3, `并发 5 → 权重 3（得 ${heavyToolWeight(5)}）`)
+  assert(heavyToolWeight(3) === 3, `并发 3 → 权重 3（得 ${heavyToolWeight(3)}）`)
+  assert(heavyToolWeight(8) === 4, `并发 8 → 权重 4（得 ${heavyToolWeight(8)}）`)
+  assert(heavyToolWeight(10) === 5, `并发 10 → 权重 5（得 ${heavyToolWeight(10)}）`)
+  for (const n of [2, 3, 4, 5, 6, 8, 10, 16]) {
+    const w = heavyToolWeight(n)
+    assert(w <= n, `并发 ${n} 时权重 ${w} ≤ ${n}（可 acquire）`)
+    if (n >= 5) assert(w < n, `并发 ${n} 时权重 ${w} < ${n}（普通工具总能并行）`)
+  }
+  assert(heavyToolWeight(2) === 2, `并发 2 → 权重 2（cap，得 ${heavyToolWeight(2)}）`)
+  // 行为验证：5 槽下重工具占 3 后，普通 weight=1 仍能进入
+  {
+    const s = new Semaphore(5)
+    await s.acquire(3)
+    let light = false
+    const p = (async () => { await s.acquire(1); light = true })()
+    await sleep(30)
+    assert(light === true, '重工具占 3 槽时普通工具仍可进入')
+    s.release(3)
+    s.release(1)
+  }
 }
 
 console.log(`\n=== test-semaphore: ${pass} passed, ${fail} failed ===`)

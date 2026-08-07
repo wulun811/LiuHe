@@ -16,6 +16,8 @@ function assert(cond, msg) {
   if (cond) { pass++ } else { fail++; console.error('  FAIL:', msg) }
 }
 
+// r37-fix2：状态目录定向（getStatsFile 动态求值，调用前设置即生效）——防止成功编辑写真实 ~/.config/malong/
+process.env.MALONG_STATE_DIR = join(tmpdir(), 'opencode', 'mvp-batch-state')
 const WS = join(tmpdir(), 'opencode', 'mvp-batch-ws')
 const DATA = join(tmpdir(), 'opencode', 'mvp-batch-data')
 const SOCK = join(tmpdir(), 'opencode', 'mvp-batch.sock')

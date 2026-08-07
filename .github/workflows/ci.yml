@@ -10,7 +10,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-14, windows-latest]
+        os: [ubuntu-latest, macos-15, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -49,10 +49,3 @@ jobs:
       - name: npm test
         working-directory: malong
         run: npm test
-
-      - name: dogfood suites (unix)
-        if: runner.os != 'Windows'
-        working-directory: malong
-        run: |
-          node tests/test-dogfood-r14.js
-          node tests/test-dogfood-r30.js

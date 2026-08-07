@@ -1,7 +1,7 @@
 {
   "name": "inspect",
   "version": "1.0.0",
-  "description": "Outline + references + call chain in one call (replaces 3). Then impact_analysis before edit, test_bridge after.",
+  "description": "Outline + references + call chain in one call (replaces read_outline/references/call_chain).",
   "inputSchema": {
     "type": "object",
     "properties": {

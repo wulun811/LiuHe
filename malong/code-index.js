@@ -3,13 +3,14 @@
 // 详见：通天计划 §六 码龙
 
 import { createDb } from './db-adapter.js'
-import { join, relative, extname, resolve, dirname } from 'node:path'
-import { readFileSync, writeFileSync, existsSync, unlinkSync, watch, chmodSync, statSync } from 'node:fs'
+import { join, relative, extname, resolve, dirname, sep } from 'node:path'
+import { readFileSync, writeFileSync, existsSync, unlinkSync, renameSync, watch, chmodSync, statSync, mkdirSync, realpathSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import os from 'node:os'
 import { createServer } from 'node:http'
 import { DEFAULT_IGNORE_DIRS } from './file-collector.js'
 import { scanCjsRequires } from './cjs-imports.js'
+import { validateFilePath } from './error-codes.js'
 import { resolveFileArg, normalizeFilePath } from './file-arg.js'
 import { sha256 } from './hash-utils.js'
 import { computeFileAnchors } from './symbol-anchors.js'
@@ -18,6 +19,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 
 // r31-fix: Windows 下 relative() 返回反斜杠路径，DB 统一正斜杠（查询侧用 src/auth.py）
 const toDbRel = (p) => p.replace(/\\/g, '/')
+
+// r54(P0-6): LIKE 通配符注入——symbol 含 %/_ 时 `LIKE '%sym%'` 会整表匹配。转义特殊字符 + ESCAPE 子句。
+const escapeLike = (s) => String(s).replace(/[\\%_]/g, (c) => '\\' + c)
 
 // 13#1：提取器版本戳 = 二进制文件 sha256。二进制内容变（重新部署）→ 版本变 → 触发索引自愈。
 // 路径解析与 mcp-server.js 的 PARSE_SERVICE_BIN / _ALT 对齐（primary 优先，dev 回退 target/release）。
@@ -157,6 +161,14 @@ function pickCandidate(candidates, callExpr, filePathMap) {
 }
 
 const _exportRefCache = new Map()
+
+// R19-②：查询出口附加 freshness——handler 层 attachStalenessWarning 输入源统一到服务层（删旧 checkFileStaleness 后提示不丢）。
+// 只挂 auto_indexed 状态（方案：freshness: { auto_indexed: true } | null）；数组挂属性由 handler 透出（同 truncated 模式）。
+function _attachFreshness(target, freshness) {
+  if (!target || !freshness?.auto_indexed) return target
+  target.freshness = { auto_indexed: true }
+  return target
+}
 // r29：判定函数是否被「注册/导出形态」引用（对象字面量属性值、exports.name、export 列表）——
 // refs 只记调用与 import，这些形态零 ref，detectDeadCode 需显式豁免以免误报死代码。
 // 保守方向：宁可漏报（不报死代码）不可杀错（真删）。同文件缓存避免重复读盘。
@@ -180,6 +192,24 @@ function isExportReferenced(name, file) {
   return new RegExp(`:\\s*${esc}\\b`).test(source)
 }
 
+// r10d：getter/属性访问形态豁免——`foo.name` 属性读取（无括号）refs 不记录，但语义上是活使用。
+// 与 isExportReferenced 共享 _exportRefCache（同文件内容）。保守方向：宁漏报不杀错。
+function isPropertyAccessed(name, file) {
+  if (!file || !name) return false
+  let source = _exportRefCache.get(file)
+  if (source === undefined) {
+    // r29：file 已是调用方拼好的绝对路径，此处直接读（见 isExportReferenced 同注释）
+    try { source = readFileSync(file, 'utf-8') } catch { source = null }
+    if (source !== null) {
+      if (_exportRefCache.size > 200) _exportRefCache.clear()
+      _exportRefCache.set(file, source)
+    }
+  }
+  if (source === null) return false
+  const esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return new RegExp(`\\.\\s*${esc}\\b`).test(source)
+}
+
 function _calcComplexity(sym) {
   const loc = Math.max(1, (sym.end_line || sym.start_line) - sym.start_line + 1)
   const cyclomatic = Math.min(10, Math.ceil(loc / 10))
@@ -198,12 +228,22 @@ function _calcComplexity(sym) {
 async function initDb(dir) {
   const dbPath = join(dir, 'code-index.db')
   const db = await openHealthy(dbPath)
+  if (!db || db.error) {
+    // R10：openHealthy 失败（BUSY/损坏重建失败）→ 显式抛错，上层报错而非静默继续
+    // 审核补：带 code——mcp-server 透出 service_unavailable（-32001）而非笼统 -32603
+    const err = new Error(`DB unavailable (${db?.error || 'unknown'}): ${db?.message || 'open failed'}`)
+    err.code = 'service_unavailable'
+    throw err
+  }
   db.pragma('journal_mode=WAL')
   db.pragma('synchronous=NORMAL')
   db.pragma('busy_timeout=5000')
   db.pragma('cache_size=-16384')
   db.pragma('mmap_size=67108864')
   db.pragma('temp_store=FILE')
+  // r54(P0-5): 外键默认每连接 OFF——SCHEMA 声明的 ON DELETE CASCADE/SET NULL 从未生效，
+  // 单文件重抽 DELETE symbols 后跨文件 refs.target_symbol_id 永久悬空 → impact 静默漏报。
+  db.pragma('foreign_keys=ON')
   db.exec(SCHEMA)
   try { db.exec('ALTER TABLE refs ADD COLUMN line INTEGER DEFAULT 0') } catch (e) { if (!e.message?.includes('duplicate column')) console.error('[code-index] migration error:', e.message) }
   try { db.exec("ALTER TABLE refs ADD COLUMN call_expr TEXT DEFAULT ''") } catch (e) { if (!e.message?.includes('duplicate column')) console.error('[code-index] migration error:', e.message) }
@@ -221,6 +261,11 @@ async function initDb(dir) {
   return db
 }
 
+// R10：busy 错误判定——SQLITE_BUSY 或消息含 locked/busy（better-sqlite3 integrity_check 在并发写时抛）
+function isBusyError(e) {
+  return e?.code === 'SQLITE_BUSY' || /busy|database is locked/i.test(String(e?.message || ''))
+}
+
 // r35：openHealthy 走 db-adapter（better-sqlite3 完整版 / sql.js 沙盒版）
 async function openHealthy(dbPath) {
   const attempt = async () => {
@@ -231,14 +276,37 @@ async function openHealthy(dbPath) {
     if (!ok) { db.close(); throw new Error('integrity_check failed') }
     return db
   }
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
   try {
     return await attempt()
   } catch (e) {
-    console.error(`[code-index] DB corrupt (${e.message}) — rebuilding: ${dbPath}`)
-    for (const suffix of ['', '-wal', '-shm']) {
-      try { unlinkSync(dbPath + suffix) } catch {}
+    // R10：busy ≠ 损坏——SQLITE_BUSY 重试 2 次（间隔 500ms），仍失败显式报错，绝不删库
+    if (isBusyError(e)) {
+      let last = e
+      for (let i = 0; i < 2; i++) {
+        await sleep(500)
+        try { return await attempt() } catch (e2) { last = e2 }
+      }
+      if (isBusyError(last)) {
+        return { db: null, error: 'BUSY', message: `DB busy after retries: ${last.message}` }
+      }
+      e = last
     }
-    return await createDb(dbPath)
+    // 真损坏：rename 到 .corrupt-<ts> 留取证，再重建（旧实现直接 unlink，无取证）
+    console.error(`[code-index] DB corrupt (${e.message}) — rebuilding: ${dbPath}`)
+    const corruptPath = `${dbPath}.corrupt-${Date.now()}`
+    for (const suffix of ['', '-wal', '-shm']) {
+      try { renameSync(dbPath + suffix, corruptPath + suffix) } catch {}
+    }
+    const rebuilt = await createDb(dbPath)
+    // R10：重建后必须验证——旧实现重建后不跑 integrity_check
+    const r = rebuilt.pragma('integrity_check')
+    const ok = Array.isArray(r) && r.length === 1 && r[0]?.integrity_check === 'ok'
+    if (!ok) {
+      rebuilt.close()
+      return { db: null, error: 'CORRUPT', message: 'integrity_check failed after rebuild' }
+    }
+    return rebuilt
   }
 }
 
@@ -252,12 +320,14 @@ class CodeIndex {
     this._watcher = null
     this._watchedDir = null
     this._watcherTimer = null
+    this._wsLock = Promise.resolve() // r54(P1): 串行化 workspace 初始化/切换，防并发交错 close 彼此的 db
     this._impactCache = new Map()
     this._contextCache = new Map()
     this._outlineCache = new Map()
     this._impactCacheMax = 200
     this._outlineCacheMax = 100
     this._contextCacheMax = 50
+    this._touchedWorkspaces = new Set() // r9(F10/H12)：本进程初始化过的 workspace hash 集合（GC protect）
   }
 
   _resolveRepoDir(filePath) {
@@ -275,6 +345,19 @@ class CodeIndex {
   }
 
   async _initWorkspaceDb(workspaceDir) {
+    // r54(P1): 串行化——并发多 workspace 首调/切换交错会 close 彼此的 db、查错库、泄漏连接
+    const prev = this._wsLock
+    let release
+    this._wsLock = new Promise((r) => { release = r })
+    await prev
+    try {
+      return await this._initWorkspaceDbLocked(workspaceDir)
+    } finally {
+      release()
+    }
+  }
+
+  async _initWorkspaceDbLocked(workspaceDir) {
     const wsDir = this._core.getWorkspaceDir(workspaceDir)
     if (this._db && this._currentWorkspace === workspaceDir) {
       return // 已经初始化过
@@ -285,10 +368,18 @@ class CodeIndex {
       throw new Error(`workspace switch to "${workspaceDir}" during background indexing of "${this._currentWorkspace}"; wait for indexing to finish or reindex with blocking=true`)
     }
     if (this._db) {
-      this._db.close()
+      // r52: close 后立即置 null——否则 await initDb 窗口内 watcher 触发的 indexFile 打到已关闭连接（'database is not open'），且 initDb 失败后 _db 残留已关闭对象 + _currentWorkspace 残留旧值 → 下次 initWorkspace(旧ws) 提前返回，永久损坏直到重启
+      const oldDb = this._db
+      this._db = null
+      this._currentWorkspace = null
+      oldDb.close()
     }
     this._db = await initDb(wsDir)
     this._currentWorkspace = workspaceDir
+    // r9(F10/H12)：记录本进程初始化过的全部 workspace hash——启动 GC 只保护当前 ws 时，
+    // 多会话共享 stateDir 的部署里 B 进程会把 A 进程刚打开（但 14 天无写入）的库删掉
+    const wsHash = wsDir.split('/').pop() || null
+    if (wsHash) this._touchedWorkspaces?.add(wsHash)
     // 13#4：开库自检提取器版本戳，陈旧（含首次无戳的既有库）→ 全量标 dirty，下次 reindex 自动重抽
     this._reconcileExtractorVersion()
     // 写入 metadata
@@ -301,19 +392,74 @@ class CodeIndex {
     writeFileSync(metadataPath, JSON.stringify(metadata, null, 2))
   }
 
+  // R19：新鲜度统一入口——查询出口接线，替代各 handler 各自调 checkFileStaleness。
+  // 内置路径守卫（关键）：服务层方法不只有 handler 调用——code_search _executeIntent、
+  // call_chain/inspect 内部直取 services 调 getCallers/getSymbols，这些内部链路不经 handler 的
+  // validateFilePath；若不守卫，../ 经内部调用链触发自动索引写盘 → r54 P0-1 堵的逃逸面重新打开。
+  // 守卫失败 → 不索引、返回 guarded（查询照走，安全——查询无写面）。
+  async ensureFreshFile(filePath) {
+    const wsDir = this._currentWorkspace
+    if (!wsDir || !filePath) return { auto_indexed: false }
+    const pathCheck = validateFilePath(filePath, wsDir)
+    if (pathCheck.blocked) return { fresh: true, guarded: true }
+    const absPath = join(wsDir, filePath)
+    try {
+      const realRoot = realpathSync(wsDir)
+      const real = realpathSync(absPath)
+      if (real !== realRoot && !real.startsWith(realRoot + sep)) {
+        return { fresh: true, guarded: true }
+      }
+    } catch { /* 文件不存在/symlink 断裂 → 放行，mtime stat 会失败降级 */ }
+    try {
+      const diskMtime = statSync(absPath).mtimeMs
+      const f = this._db.prepare('SELECT mtime FROM files WHERE path = ?').get(filePath)
+      const indexedMtime = f ? f.mtime : 0
+      // R11：两边取整比较（files.mtime 实际存 REAL 浮点 vs statSync 浮点）
+      if (Math.round(diskMtime) !== Math.round(indexedMtime)) {
+        try { this._contextCache.delete(absPath) } catch {}
+        try {
+          for (const key of this._outlineCache.keys()) {
+            if (key.includes(`\0${filePath}\0`)) this._outlineCache.delete(key)
+          }
+          for (const key of this._impactCache.keys()) {
+            if (key.includes(`\0${filePath}\0`)) this._impactCache.delete(key)
+          }
+        } catch {}
+        try { _exportRefCache.delete(absPath) } catch {}
+        try {
+          const r = await this.indexFile(absPath, wsDir)
+          // 审核修复：indexFile 对非代码文件返回 null——null 时不算 auto_indexed（避免误导标记）
+          return { auto_indexed: r !== null }
+        } catch {
+          return { auto_indexed: false }
+        }
+      }
+    } catch {}
+    return { auto_indexed: false }
+  }
+
   async indexFile(filePath, repo) {
     if (!CACHED_EXT.has(extname(filePath))) return null
     if (!this._db) {
       if (!repo) return null
       await this._initWorkspaceDb(repo)
     }
+    // r54(P0-1): 沙箱逃逸兜底——relative() 产出 `..`/绝对路径说明 filePath 在 repo 外，
+    // 拒绝索引（防 checkFileStaleness/ensureIndexed 自动索引读入并回显 workspace 外文件）
+    if (repo) {
+      const rp = toDbRel(relative(repo, filePath))
+      if (rp.startsWith('..') || rp.startsWith('/')) return null
+    }
     let size = 0
     try { size = statSync(filePath).size } catch { return null }
     if (size > 1024 * 1024) return null
     const ext = extname(filePath)
     const source = readFileSync(filePath, 'utf-8')
-    const result = await this._langParser.extractAllAsync(source, ext, filePath)
+    const result = await this._langParser.extractAllAsync(source, ext, filePath, repo || undefined)
     if (!result) return null
+    // r54(P1): extractAllAsync 可达数十秒——期间另一 workspace 的调用可能已切换 this._db。
+    // 写入前校验库归属，不一致则放弃（防把 A 工作区文件写进 B 工作区的库）。
+    if (repo && this._currentWorkspace !== repo) return null
     const { symbols = [], refs = [] } = result
     const relPath = repo ? toDbRel(relative(repo, filePath)) : filePath
     let mtime = Date.now()
@@ -397,6 +543,10 @@ class CodeIndex {
             refRows.push([fileId, null, symName, 'import', r.line, ''])
           }
         }
+      } else if (r.type === 'use' || r.type === 'assign') {
+        // Y002-S3：变量引用追踪（JS/TS spike）——模块级变量读写入 refs 表（schema 早支持，
+        // 此前只填 call/import）；use/assign 不参与 unbound 误报流（L444 查询不含这两类）
+        refRows.push([fileId, null, r.name, r.type, r.line, ''])
       }
     }
     // 14：CJS require() 补 import refs（Rust 解析器只认 ESM import）。
@@ -408,9 +558,8 @@ class CodeIndex {
         const aliasJson = ci.aliasMap && Object.keys(ci.aliasMap).length ? JSON.stringify(ci.aliasMap) : ''
         refRows.push([fileId, null, ci.module, 'import', ci.line, aliasJson])
         // 15（P3）：CJS 解构别名补 per-local import refs（对齐 ESM r.symbols 行为）。
-        // references(symbol=本地名) 走 DB 命中 kind='import'，不再掉 text_fallback
-        // 把绑定行标成 "reference"；_resolveCrossFileRefs 对同名本地变量会被
-        // file_id 过滤跳过，不影响解析。
+        // references(symbol=本地名) 走 DB 命中 kind='import' 并绑定行标；
+        // 同名字段下 _resolveCrossFileRefs 对同名本地变量会被 file_id 过滤跳过，不影响解析。
         if (ci.aliasMap) {
           for (const local of Object.keys(ci.aliasMap)) {
             if (!local) continue
@@ -429,7 +578,8 @@ class CodeIndex {
     }
 
     const updateRef = this._db.prepare('UPDATE refs SET target_symbol_id = ? WHERE id = ?')
-    const namedRefs = this._db.prepare("SELECT id, target_name FROM refs WHERE source_file_id = ? AND target_symbol_id IS NULL AND target_name != '' AND kind = 'call'").all(fileId)
+    // Y002-S3：use/assign 也参与同文件绑定（变量读写 → target_symbol_id，references 可查）
+    const namedRefs = this._db.prepare("SELECT id, target_name FROM refs WHERE source_file_id = ? AND target_symbol_id IS NULL AND target_name != '' AND kind IN ('call','use','assign')").all(fileId)
     for (const nr of namedRefs) {
       const symId = symIdMap.get(nr.target_name)
       if (symId) updateRef.run(symId, nr.id)
@@ -441,7 +591,7 @@ class CodeIndex {
   _resolveCrossFileRefs() {
     // 21：只绑裸调用——成员调用（obj.slice()/byFile.get()）绝大多数是原生/库方法，
     // 跨文件绑同名符号只会制造噪声（slice→format.rs、get→test_impact.js 等误绑）。
-    const unbound = this._db.prepare("SELECT r.id, r.source_file_id, r.target_name, r.call_expr FROM refs r WHERE r.target_symbol_id IS NULL AND r.kind IN ('call','import','extends','implements') AND r.target_name != '' AND (r.call_expr IS NULL OR r.call_expr = '' OR r.call_expr NOT LIKE '%.%') AND (r.call_expr IS NULL OR r.call_expr != ?)").all(ALIAS_LOCAL_MARKER)
+    const unbound = this._db.prepare("SELECT r.id, r.source_file_id, r.target_name, r.call_expr FROM refs r WHERE r.target_symbol_id IS NULL AND r.kind IN ('call','import','extends','implements','use','assign') AND r.target_name != '' AND (r.call_expr IS NULL OR r.call_expr = '' OR r.call_expr NOT LIKE '%.%') AND (r.call_expr IS NULL OR r.call_expr != ?)").all(ALIAS_LOCAL_MARKER)
     if (!unbound.length) return 0
     const allSyms = this._db.prepare('SELECT s.id, s.name, s.file_id FROM symbols s').all()
     const symMap = new Map()
@@ -630,7 +780,7 @@ class CodeIndex {
     return results
   }
 
-  _findCallees(symId, sourceFilePath) {
+  _findCallees(symId, sourceFilePath, contextMode = 'snippet') {
     if (!symId) return []
     const rows = this._db.prepare(
       "SELECT r.target_name, r.target_symbol_id, r.target_file_id, r.line, r.call_expr, " +
@@ -693,7 +843,8 @@ class CodeIndex {
         file: sourceFilePath,
         line: r.line || 0,
         call_expr: r.call_expr || '',
-        context: this._extractContext(sourceFilePath, r.line || 0),
+        // Y002-S4：callees context 同样受 contextMode 约束（none → null，不读文件省 token）
+        context: contextMode === 'none' ? null : this._extractContext(sourceFilePath, r.line || 0),
         callee_file: calleeFile,
         callee_line: calleeLine,
         resolved: !!r.target_symbol_id,
@@ -733,7 +884,11 @@ class CodeIndex {
       try { st = statSync(fp) } catch { continue }
       const old = existingFiles.get(relPath)
       // 13#3：dirty 文件（提取器升级自检标记 / force 重抽）无视 mtime 必重抽；否则按 mtime 增量
-      if (old && old.state !== 'dirty' && old.mtime >= st.mtimeMs) continue
+      // R11：`!==` 而非 `>=`——与读侧 staleness 判定一致，mtime 回退（checkout/rsync）同样触发重抽。
+      // 注意：files.mtime 实际存 REAL（SQLite 浮点亲和），statSync.mtimeMs 也是浮点——两边取整比较，否则永不相等恒重抽
+      if (old && old.state !== 'dirty' && Math.round(old.mtime) === Math.round(st.mtimeMs)) continue
+      // R22-⑯：与 indexFile:455 上限对齐——>1MB 不索引（旧 indexBatch 无门，>1MB 文件 reindex 后可入索引但单文件重抽永不刷新，两套判定分裂）
+      if (st.size > 1024 * 1024) continue
       changedFiles.push(fp)
       mtimeMap.set(relPath, st.mtimeMs)
     }
@@ -765,44 +920,26 @@ class CodeIndex {
         })()
       }
 
-      // 18：重抽前批量清理 changed 文件的旧 symbols/refs。两个坑（均实测）：
-      // ① DROP 索引后逐文件 DELETE WHERE file_id=? 是 N×全表扫描（318 文件 × 26084 refs = 52s）
-      // ② 批量 DELETE symbols 触发外键 ON DELETE SET NULL 逐符号级联全扫（10768 syms × 全扫 = 6s）
-      // 正解：关外键 → IN 批量一次删光（单次全扫）→ UPDATE 清悬空引用（单次全扫，_resolveCrossFileRefs 幂等重绑）
-      if (changedFiles.length) {
-        const CLEAN_BATCH = 400
-        const relPaths = changedFiles.map(fp => toDbRel(relative(repo, fp)))
-        for (let i = 0; i < relPaths.length; i += CLEAN_BATCH) {
-          const rels = relPaths.slice(i, i + CLEAN_BATCH)
-          const ph = rels.map(() => '?').join(',')
-          const ids = this._db.prepare(`SELECT id FROM files WHERE path IN (${ph})`).all(...rels).map(f => f.id)
-          if (!ids.length) continue
-          const ph2 = ids.map(() => '?').join(',')
-          const fkOn = this._db.pragma('foreign_keys', { simple: true })
-          this._db.pragma('foreign_keys = OFF')
-          this._db.transaction(() => {
-            this._db.prepare(`DELETE FROM refs WHERE source_file_id IN (${ph2})`).run(...ids)
-            this._db.prepare(`DELETE FROM symbols WHERE file_id IN (${ph2})`).run(...ids)
-          })()
-          this._db.prepare('UPDATE refs SET target_symbol_id = NULL, target_file_id = NULL WHERE target_symbol_id NOT IN (SELECT id FROM symbols) AND target_symbol_id IS NOT NULL').run()
-          this._db.pragma(`foreign_keys = ${fkOn ? 'ON' : 'OFF'}`)
-        }
-      }
+      // 18（r8 重排）：清理逻辑已移到 parse 之后、insert 之前（见 insert 段）——
+      // 旧实现「先删后插」：parse 窗口（可达数十秒）内读工具拿到被清空的索引（E3 竞态）。
 
       let parsed = []
+      let parseErrorCount = 0
       if (changedFiles.length) {
         const BATCH_SIZE = 50
         parsed = []
         for (let i = 0; i < changedFiles.length; i += BATCH_SIZE) {
           const chunk = changedFiles.slice(i, i + BATCH_SIZE)
           const files = chunk.map(fp => ({ path: toDbRel(relative(repo, fp)), file_path: fp }))
-          const results = await this._langParser.batchExtractAsync(files)
+          const results = await this._langParser.batchExtractAsync(files, repo)
           const statMap = new Map()
           for (const fp of chunk) {
             try { statMap.set(fp, statSync(fp)) } catch {}
           }
           for (const r of results) {
             if (r.error) {
+              // r11(M4)：parse 错误计数——旧实现只打 stderr（MCP 场景不可见），reindex 结果聚合透出
+              parseErrorCount++
               console.error(`[code-index] batch parse error for ${r.path}: ${r.error}`)
               continue
             }
@@ -817,19 +954,62 @@ class CodeIndex {
               cjsImports: src ? scanCjsRequires(src.toString()) : [],
               contentHash: src ? sha256(src) : null,
             })
+            this._lastParseErrors = parseErrorCount
           }
           if (i + BATCH_SIZE < changedFiles.length) await new Promise(r => setImmediate(r))
         }
         console.error(`[code-index] parse: ${parsed.length}/${changedFiles.length} files in ${((Date.now() - t0) / 1000).toFixed(1)}s`)
       }
 
+      // 18（r8 重排）：parse 完成后才清理 changed 文件的旧 symbols/refs——两个坑（均实测）：
+      // ① DROP 索引后逐文件 DELETE WHERE file_id=? 是 N×全表扫描（318 文件 × 26084 refs = 52s）
+      // ② 批量 DELETE symbols 触发外键 ON DELETE SET NULL 逐符号级联全扫（10768 syms × 全扫 = 6s）
+      // 正解：关外键 → IN 批量一次删光（单次全扫）→ UPDATE 清悬空引用（单次全扫，_resolveCrossFileRefs 幂等重绑）
+      // r8(F7)：清理事务内同标 dirty——崩溃在删后插前 → 残留 dirty 下次增量必重抽（不再永久索引空洞）
+      if (changedFiles.length) {
+        const CLEAN_BATCH = 400
+        const relPaths = changedFiles.map(fp => toDbRel(relative(repo, fp)))
+        for (let i = 0; i < relPaths.length; i += CLEAN_BATCH) {
+          const rels = relPaths.slice(i, i + CLEAN_BATCH)
+          const ph = rels.map(() => '?').join(',')
+          const ids = this._db.prepare(`SELECT id FROM files WHERE path IN (${ph})`).all(...rels).map(f => f.id)
+          if (!ids.length) continue
+          const ph2 = ids.map(() => '?').join(',')
+          const fkOn = this._db.pragma('foreign_keys', { simple: true })
+          this._db.pragma('foreign_keys = OFF')
+          this._db.transaction(() => {
+            this._db.prepare(`DELETE FROM refs WHERE source_file_id IN (${ph2})`).run(...ids)
+            this._db.prepare(`DELETE FROM symbols WHERE file_id IN (${ph2})`).run(...ids)
+            this._db.prepare(`UPDATE files SET index_state = 'dirty', content_hash = '' WHERE id IN (${ph2})`).run(...ids)
+          })()
+          this._db.prepare('UPDATE refs SET target_symbol_id = NULL, target_file_id = NULL WHERE target_symbol_id NOT IN (SELECT id FROM symbols) AND target_symbol_id IS NOT NULL').run()
+          this._db.pragma(`foreign_keys = ${fkOn ? 'ON' : 'OFF'}`)
+        }
+      }
+
       const CHUNK = 200
       const results = []
       for (let i = 0; i < parsed.length; i += CHUNK) {
         const chunk = parsed.slice(i, i + CHUNK)
+        // r8(F6/F12)：parse 期间文件被改 → 丢弃陈旧解析结果并标 dirty——
+        // 防止旧符号插入（与写后同步 indexFile 的新行形成同 stable_id 重复行），且下次增量必重抽
+        const freshChunk = []
+        for (const p of chunk) {
+          let changed = false
+          try {
+            const st = statSync(join(repo, p.relPath))
+            if (st.mtimeMs !== mtimeMap.get(p.relPath)) changed = true
+          } catch { changed = true }
+          if (changed) {
+            try { this._db.prepare("UPDATE files SET index_state = 'dirty', content_hash = '' WHERE path = ?").run(p.relPath) } catch {}
+            continue
+          }
+          freshChunk.push(p)
+        }
+        if (freshChunk.length === 0) continue
         const txResults = this._db.transaction(() => {
           const r = []
-          for (const p of chunk) r.push(this._indexFileDb(p.relPath, p.sourceLength, p.symbols, p.refs, mtimeMap.get(p.relPath) || Date.now(), p.contentHash, p.cjsImports, true))
+          for (const p of freshChunk) r.push(this._indexFileDb(p.relPath, p.sourceLength, p.symbols, p.refs, mtimeMap.get(p.relPath) || Date.now(), p.contentHash, p.cjsImports, true))
           return r
         })()
         results.push(...txResults)
@@ -932,9 +1112,22 @@ class CodeIndex {
         await initWorkspaceDb(workspaceDir)
         if (!self._watcher || self._watchedDir !== resolve(workspaceDir)) {
           if (self._watcher) { self._watcher.close(); self._watcher = null }
+          // r52: 切换时清防抖 timer——旧 timer 触发时 _watchedDir 已指向新 workspace，会把旧 workspace 文件以 ../../ 相对路径写进新库（跨库污染，P0#8 同根因漏网）
+          if (self._watcherTimer) { clearTimeout(self._watcherTimer); self._watcherTimer = null }
           startWatcher(resolve(workspaceDir))
         }
         return { workspace_dir: workspaceDir, db_path: join(core.getWorkspaceDir(workspaceDir), 'code-index.db') }
+      },
+
+      // r8(F11)：当前在用工作区的缓存 hash——health(cleanup) 用它保护不被 GC 误删
+      getCurrentWorkspaceHash() {
+        if (!self._currentWorkspace) return null
+        return core.getWorkspaceDir(self._currentWorkspace).split('/').pop() || null
+      },
+
+      // r9(F10/H12)：本进程初始化过的全部 workspace hash（GC protect 列表）
+      getTouchedWorkspaceHashes() {
+        return [...(self._touchedWorkspaces || [])]
       },
 
       // 索引单个文件（供 reindex handler 调用）
@@ -983,6 +1176,8 @@ class CodeIndex {
               files: self._db.prepare('SELECT COUNT(*) as cnt FROM files').get().cnt,
               symbols: self._db.prepare('SELECT COUNT(*) as cnt FROM symbols').get().cnt,
               refs: self._db.prepare('SELECT COUNT(*) as cnt FROM refs').get().cnt,
+              // r11(M4)：本次索引 parse 失败文件数（超时/病态语法）——reindex 结果聚合透出
+              parse_errors: self._lastParseErrors || 0,
               completed_at: new Date().toISOString(),
             }
             self._lastIndexed = stats
@@ -1006,43 +1201,35 @@ class CodeIndex {
       },
 
       async getSymbols(filePath, { timeout = 5000 } = {}) {
+        const freshness = await self.ensureFreshFile(filePath)
         const f = self._db.prepare('SELECT id FROM files WHERE path = ?').get(filePath)
         if (!f) return []
-        return self._db.prepare('SELECT name, type, start_line, end_line FROM symbols WHERE file_id = ? ORDER BY start_line').all(f.id)
+        return _attachFreshness(self._db.prepare('SELECT name, type, start_line, end_line FROM symbols WHERE file_id = ? ORDER BY start_line').all(f.id), freshness)
       },
 
-      async getReferences(symbol, filePath, { timeout = 5000 } = {}) {
+      // r10e：按符号名查全仓顶层定义（parent_id IS NULL）——fix_imports findCandidates 用它区分
+      // 「真·可导入模块符号」与「别文件里的局部变量巧合同名」（旧 getReferences 使用点当候选 → from x import v 荒谬建议）
+      async findDefinitions(symbol, { limit = 20 } = {}) {
+        return self._db.prepare('SELECT s.name, s.type, s.start_line, f.path FROM symbols s JOIN files f ON s.file_id = f.id WHERE s.name = ? AND s.parent_id IS NULL AND s.type IN (\'function\',\'class\',\'variable\') ORDER BY s.start_line LIMIT ?').all(symbol, limit)
+      },
+
+      async getReferences(symbol, filePath, { timeout = 5000, limit = 500 } = {}) {
+        let freshness = null
+        if (filePath) freshness = await self.ensureFreshFile(filePath)
+        const pat = `%${escapeLike(symbol)}%`
+        // R17-1：多取 1 条检测截断——LIMIT 静默截断会让 LLM 误以为就这么点引用
+        let rows
         if (filePath) {
           const f = self._db.prepare('SELECT id FROM files WHERE path = ?').get(filePath)
           if (!f) return []
-          return self._db.prepare("SELECT f.path, r.kind, r.target_name, r.line FROM refs r JOIN files f ON r.source_file_id = f.id WHERE r.source_file_id = ? AND (r.target_name = ? OR r.target_name LIKE ?)").all(f.id, symbol, `%${symbol}%`)
+          rows = self._db.prepare("SELECT f.path, r.kind, r.target_name, r.line FROM refs r JOIN files f ON r.source_file_id = f.id WHERE r.source_file_id = ? AND (r.target_name = ? OR r.target_name LIKE ? ESCAPE '\\') LIMIT ?").all(f.id, symbol, pat, limit + 1)
+        } else {
+          rows = self._db.prepare("SELECT f.path, r.kind, r.target_name, r.line FROM refs r JOIN files f ON r.source_file_id = f.id WHERE (r.target_name = ? OR r.target_name LIKE ? ESCAPE '\\') LIMIT ?").all(symbol, pat, limit + 1)
         }
-        return self._db.prepare("SELECT f.path, r.kind, r.target_name, r.line FROM refs r JOIN files f ON r.source_file_id = f.id WHERE (r.target_name = ? OR r.target_name LIKE ?)").all(symbol, `%${symbol}%`)
-      },
-
-      async getCallGraph(filePath, { timeout = 10000 } = {}) {
-        const f = self._db.prepare('SELECT id FROM files WHERE path = ?').get(filePath)
-        if (!f) return { calls: [], calledBy: [] }
-        const syms = self._db.prepare("SELECT id, name, type, start_line FROM symbols WHERE file_id = ? AND type IN ('function','method')").all(f.id)
-        const calls = self._db.prepare("SELECT r.target_name, r.kind FROM refs r WHERE r.source_file_id = ? AND r.kind IN ('call','import') AND (r.call_expr IS NULL OR r.call_expr != ?)").all(f.id, ALIAS_LOCAL_MARKER)
-        const calledBy = self._db.prepare("SELECT f.path, r.kind FROM refs r JOIN files f ON r.source_file_id = f.id WHERE r.target_name IN (SELECT name FROM symbols WHERE file_id = ? AND type IN ('function','method'))").all(f.id)
-        return { functions: syms, calls, calledBy }
-      },
-
-      async getModuleGraph(entryFiles, { timeout = 15000 } = {}) {
-        const entries = Array.isArray(entryFiles) ? entryFiles : [entryFiles]
-        const nodes = new Set(entries)
-        const edges = []
-        for (const e of entries) {
-          const f = self._db.prepare('SELECT id FROM files WHERE path = ?').get(e)
-          if (!f) continue
-          const refs = self._db.prepare("SELECT r.target_name, f.path AS source FROM refs r JOIN files f ON r.source_file_id = f.id WHERE r.source_file_id = ? AND r.kind = 'import' AND (r.call_expr IS NULL OR r.call_expr != ?)").all(f.id, ALIAS_LOCAL_MARKER)
-          for (const r of refs) {
-            edges.push({ from: r.source, to: r.target_name, kind: 'import' })
-            nodes.add(r.target_name)
-          }
-        }
-        return { nodes: [...nodes], edges }
+        const truncated = rows.length > limit
+        const out = truncated ? rows.slice(0, limit) : rows
+        if (truncated) out.truncated = true
+        return _attachFreshness(out, freshness)
       },
 
       async classifyMessage(content, { timeout = 3000 } = {}) {
@@ -1069,39 +1256,52 @@ class CodeIndex {
 
       async searchSymbols(query, { limit = 30 } = {}) {
         if (!query || query.length < 1) return []
-        return self._db.prepare("SELECT s.name, s.type, s.start_line, s.end_line, f.path AS file FROM symbols s JOIN files f ON s.file_id = f.id WHERE s.name LIKE ? ORDER BY s.name LIMIT ?").all(`%${query}%`, limit)
+        // R7：LIKE 通配符转义——`_`/`%` 变字面量（对齐 getReferences），防全表命中
+        const pat = `%${escapeLike(query)}%`
+        return self._db.prepare("SELECT s.name, s.type, s.start_line, s.end_line, f.path AS file FROM symbols s JOIN files f ON s.file_id = f.id WHERE s.name LIKE ? ESCAPE '\\' ORDER BY s.name LIMIT ?").all(pat, limit)
       },
 
       async getCallers(symbolName, { filePath } = {}) {
+        let freshness = null
+        if (filePath) freshness = await self.ensureFreshFile(filePath)
         if (filePath) {
           const f = self._db.prepare('SELECT id FROM files WHERE path = ?').get(filePath)
           if (!f) return []
-          return self._db.prepare("SELECT r.target_name AS callee, r.target_symbol_id, f2.path AS target_file, r.line FROM refs r JOIN files f ON r.source_file_id = f.id LEFT JOIN files f2 ON r.target_file_id = f2.id WHERE r.source_file_id = ? AND r.kind = 'call' AND r.target_name = ?").all(f.id, symbolName)
+          return _attachFreshness(self._db.prepare("SELECT r.target_name AS callee, r.target_symbol_id, f2.path AS target_file, r.line FROM refs r JOIN files f ON r.source_file_id = f.id LEFT JOIN files f2 ON r.target_file_id = f2.id WHERE r.source_file_id = ? AND r.kind = 'call' AND r.target_name = ?").all(f.id, symbolName), freshness)
         }
         return self._db.prepare("SELECT f.path AS caller_file, r.target_name AS callee, r.line FROM refs r JOIN files f ON r.source_file_id = f.id WHERE r.kind = 'call' AND r.target_name = ?").all(symbolName)
       },
 
       async getCallees(symbolName, { filePath } = {}) {
         if (!symbolName) return []
+        let freshness = null
+        if (filePath) freshness = await self.ensureFreshFile(filePath)
         if (filePath) {
-          return self._db.prepare("SELECT r.target_name, r.kind, f2.path AS target_file FROM symbols s JOIN refs r ON r.source_file_id = s.file_id LEFT JOIN files f2 ON r.target_file_id = f2.id WHERE s.name = ? AND s.file_id = (SELECT id FROM files WHERE path = ?) AND r.kind IN ('call','import')").all(symbolName, filePath)
+          return _attachFreshness(self._db.prepare("SELECT r.target_name, r.kind, f2.path AS target_file FROM symbols s JOIN refs r ON r.source_file_id = s.file_id LEFT JOIN files f2 ON r.target_file_id = f2.id WHERE s.name = ? AND s.file_id = (SELECT id FROM files WHERE path = ?) AND r.kind IN ('call','import')").all(symbolName, filePath), freshness)
         }
         return self._db.prepare("SELECT r.target_name, r.kind, f.path AS source_file, f2.path AS target_file FROM symbols s JOIN refs r ON r.source_file_id = s.file_id JOIN files f ON s.file_id = f.id LEFT JOIN files f2 ON r.target_file_id = f2.id WHERE s.name = ? AND r.kind IN ('call','import')").all(symbolName)
       },
 
-      getSymbolsAtLine(filePath, line) {
+      async getSymbolsAtLine(filePath, line) {
+        const freshness = await self.ensureFreshFile(filePath)
         const f = self._db.prepare('SELECT id FROM files WHERE path = ?').get(filePath)
         if (!f) return []
-        return self._db.prepare("SELECT id, name, type, start_line, end_line FROM symbols WHERE file_id = ? AND ? BETWEEN start_line AND end_line ORDER BY end_line - start_line ASC").all(f.id, line)
+        return _attachFreshness(self._db.prepare("SELECT id, name, type, start_line, end_line FROM symbols WHERE file_id = ? AND ? BETWEEN start_line AND end_line ORDER BY end_line - start_line ASC").all(f.id, line), freshness)
       },
 
-      async getImpactAnalysis(filePath, { symbol, changeType = 'modify', maxCallers = 20, depth = 2 } = {}) {
-        const cacheKey = `${self._currentWorkspace || ''}\0${filePath}\0${symbol || ''}\0${changeType}\0${maxCallers}\0${depth}`
+      async getImpactAnalysis(filePath, { symbol, changeType = 'modify', maxCallers = 20, depth = 2, contextMode = 'snippet' } = {}) {
+        const freshness = await self.ensureFreshFile(filePath)
+        // r54(P0-7): 文档契约 "0=unlimited"——maxCallers<=0 时 slice(0,0) 返回空数组，与承诺相反。归一为 Infinity。
+        if (!(maxCallers > 0)) maxCallers = Infinity
+        const cacheKey = `${self._currentWorkspace || ''}\0${filePath}\0${symbol || ''}\0${changeType}\0${maxCallers}\0${depth}\0${contextMode}`
         if (self._impactCache.has(cacheKey)) {
           const cached = self._impactCache.get(cacheKey)
-          cached._fromCache = true
-          return cached
+          return { ...cached, _fromCache: true }
         }
+        // Y002-S4：输出预算控制——context_mode: none（不读文件）/ snippet（默认 ±1 行）/
+        // full（±5 行）；none 模式跳过 _extractContext，token 预算最低
+        const contextWindow = contextMode === 'full' ? 5 : 1
+        const withContext = (info) => contextMode === 'none' ? { ...info, context: null } : info
 
         // 16：file 参数共用守卫——无效（目录/绝对路径/不存在）时返回 file_error 归因，
         // 不再静默返回空对象让 LLM 误以为「没有调用者」
@@ -1109,15 +1309,21 @@ class CodeIndex {
         if (!fileArg.ok) {
           const errRes = { file: filePath, symbol: symbol || null, callers: [], importers: [], callees: [], truncated: false, caller_count: { direct: 0, indirect: 0, test: 0, import: 0 }, risk_level: 'low', limitations: [], file_error: fileArg.error }
           self._impactCache.set(cacheKey, errRes)
-          return errRes
+          return { ...errRes }
         }
         const f = { id: fileArg.fileId }
 
         let symLine = 0
         let symId = 0
+        let symbolNotInFile = false
         if (symbol) {
-          const sym = self._db.prepare('SELECT id, start_line FROM symbols WHERE name = ? AND file_id = ?').get(symbol, f.id)
-                     || self._db.prepare('SELECT id, start_line FROM symbols WHERE name = ?').get(symbol)
+          let sym = self._db.prepare('SELECT id, start_line FROM symbols WHERE name = ? AND file_id = ?').get(symbol, f.id)
+          if (!sym) {
+            // r54(P1): 文件内查不到——跨文件兜底必须显式标注，不能静默抓任意同名符号
+            // （a.js 无 beta 却返回 b.js beta 的调用者、risk 照算、零提示，误导重构决策）
+            sym = self._db.prepare('SELECT id, start_line FROM symbols WHERE name = ?').get(symbol)
+            if (sym) symbolNotInFile = true
+          }
           if (sym) { symLine = sym.start_line; symId = sym.id }
         }
 
@@ -1174,7 +1380,7 @@ class CodeIndex {
           const key = `${r.source_file_path}\0${callerFunc || ''}`
           seenKeys.add(key)
           const sameLang = sameLangAs(r.source_file_path)
-          const info = {
+          const info = withContext({
             type: isTest ? 'test' : 'direct',
             ref_type: r.kind,
             file: r.source_file_path,
@@ -1182,8 +1388,8 @@ class CodeIndex {
             function: callerFunc,
             call_expr: r.call_expr || '',
             confidence: sameLang ? 'high' : 'low',
-            context: self._extractContext(r.source_file_path, refLine),
-          }
+            context: self._extractContext(r.source_file_path, refLine, contextWindow),
+          })
           bucketCaller(info, sameLang, isTest, directCallers)
         }
 
@@ -1196,7 +1402,7 @@ class CodeIndex {
             seenKeys.add(key)
             const isTest = self._isTestFile(entry.file)
             const sameLang = sameLangAs(entry.file)
-            const info = {
+            const info = withContext({
               type: isTest ? 'test' : 'indirect',
               ref_type: 'indirect',
               file: entry.file,
@@ -1204,10 +1410,10 @@ class CodeIndex {
               function: entry.function,
               call_expr: '',
               confidence: sameLang ? 'high' : 'low',
-              context: self._extractContext(entry.file, entry.line || 0),
+              context: self._extractContext(entry.file, entry.line || 0, contextWindow),
               depth: entry.depth,
               via: entry.via,
-            }
+            })
             bucketCaller(info, sameLang, isTest, indirectCallers)
           }
         }
@@ -1215,7 +1421,7 @@ class CodeIndex {
         const allCallers = [...directCallers, ...indirectCallers, ...testCallers]
         const truncated = allCallers.length > maxCallers
 
-        const callees = symbol && symId ? self._findCallees(symId, filePath) : []
+        const callees = symbol && symId ? self._findCallees(symId, filePath, contextMode) : []
 
         const result = {
           symbol: symbol || null,
@@ -1236,6 +1442,8 @@ class CodeIndex {
           },
           risk_level: self._calculateRisk(directCallers.length, testCallers.length, changeType),
           limitations: ['dynamic_calls_invisible', 'method_dispatch_by_name', 'cross_language_segregated'],
+          // r54(P1): symbol 不在给定文件、用了跨文件同名兜底——显式标注，防 LLM 误以为是本文件符号的影响面
+          ...(symbolNotInFile ? { symbol_not_in_file: true, note: `symbol "${symbol}" not found in ${filePath}; results are for a same-named symbol in another file` } : {}),
         }
 
         self._impactCache.set(cacheKey, result)
@@ -1243,7 +1451,32 @@ class CodeIndex {
           const oldest = self._impactCache.keys().next().value
           self._impactCache.delete(oldest)
         }
-        return result
+        return _attachFreshness({ ...result }, freshness)
+      },
+
+      // r12.5：注释行 import ref 防御——refs 表可能含陈旧/误提取行（旧解析器或增量索引残留曾把
+      // 注释里的 import('./x.js') 当真依赖）；读取源文件对应行，行首是 // /* * 的过滤掉。
+      // 每文件行缓存，避免重复读；读失败/文件已删时放行（保守，宁可多报不可漏报）。
+      _filterCommentImports(rows) {
+        if (!rows || !rows.length || !self._currentWorkspace) return rows || []
+        const lineCache = new Map()
+        const out = []
+        for (const r of rows) {
+          let lines = lineCache.get(r.source_file_id)
+          if (lines === undefined) {
+            const f = self._db.prepare('SELECT path FROM files WHERE id = ?').get(r.source_file_id)
+            try {
+              lines = f ? readFileSync(join(self._currentWorkspace, f.path), 'utf-8').split('\n') : null
+            } catch { lines = null }
+            lineCache.set(r.source_file_id, lines)
+          }
+          if (!lines) { out.push(r); continue }
+          const raw = lines[(r.line || 1) - 1] || ''
+          const s = raw.trimStart()
+          if (s.startsWith('//') || s.startsWith('/*') || s.startsWith('*')) continue
+          out.push(r)
+        }
+        return out
       },
 
       async getModuleDependencies(filePath, { depth = 3 } = {}) {
@@ -1251,7 +1484,7 @@ class CodeIndex {
         const fileArg = resolveFileArg({ db: self._db, workspaceDir: self._currentWorkspace, file: filePath })
         if (!fileArg.ok) return { file: filePath, imports: [], transitive: [], file_error: fileArg.error }
         const f = { id: fileArg.fileId }
-        const imports = self._db.prepare("SELECT r.target_name AS module FROM refs r WHERE r.source_file_id = ? AND r.kind = 'import' AND (r.call_expr IS NULL OR r.call_expr != ?)").all(f.id, ALIAS_LOCAL_MARKER)
+        const imports = this._filterCommentImports(self._db.prepare("SELECT r.target_name AS module, r.source_file_id, r.line FROM refs r WHERE r.source_file_id = ? AND r.kind = 'import' AND (r.call_expr IS NULL OR r.call_expr != ?)").all(f.id, ALIAS_LOCAL_MARKER))
         const transitive = []
         if (depth > 1) {
           const visited = new Set([filePath])
@@ -1262,13 +1495,16 @@ class CodeIndex {
               if (visited.has(mod)) continue
               visited.add(mod)
               const cleanMod = mod.replace(/^\.\.?\//, '')
-              let mf = self._db.prepare("SELECT id, path FROM files WHERE path LIKE ?").get(`%${cleanMod}%`)
+              // R22-⑯：LIKE 通配符转义——模块名含 _/% 时全表匹配（R7 修了 searchSymbols，此处漏）
+              const pat = `%${escapeLike(cleanMod)}%`
+              let mf = self._db.prepare("SELECT id, path FROM files WHERE path LIKE ? ESCAPE '\\'").get(pat)
               if (!mf && cleanMod.includes('.')) {
                 const slashed = cleanMod.replace(/\./g, '/')
-                mf = self._db.prepare("SELECT id, path FROM files WHERE path LIKE ?").get(`%${slashed}%`)
+                const pat2 = `%${escapeLike(slashed)}%`
+                mf = self._db.prepare("SELECT id, path FROM files WHERE path LIKE ? ESCAPE '\\'").get(pat2)
               }
               if (!mf) continue
-              const sub = self._db.prepare("SELECT r.target_name AS module FROM refs r WHERE r.source_file_id = ? AND r.kind = 'import' AND (r.call_expr IS NULL OR r.call_expr != ?)").all(mf.id, ALIAS_LOCAL_MARKER)
+              const sub = this._filterCommentImports(self._db.prepare("SELECT r.target_name AS module, r.source_file_id, r.line FROM refs r WHERE r.source_file_id = ? AND r.kind = 'import' AND (r.call_expr IS NULL OR r.call_expr != ?)").all(mf.id, ALIAS_LOCAL_MARKER))
               for (const s of sub) {
                 if (!visited.has(s.module) && !s.module.startsWith('node:')) {
                   transitive.push({ depth: d, from: mf.path, module: s.module })
@@ -1282,6 +1518,71 @@ class CodeIndex {
         return { file: filePath, directImports: imports, transitiveDeps: transitive }
       },
 
+      // B13 缺口四：全项目模块图 + 环检测（基于 refs 表 import 边，不重新扫描磁盘）
+      // 节点 = 已索引文件；边 = import 引用（target 按基名/相对路径 LIKE 解析到文件）
+      buildModuleGraph() {
+        const files = self._db.prepare('SELECT id, path FROM files').all()
+        const nodes = files.map(f => ({ path: f.path }))
+        const fileById = new Map(files.map(f => [f.id, f.path]))
+        // R22-⑮：basename→路径 索引替代逐边 files.find（O(E×V) 线性查找——大仓边数×文件数可达百万级比较，最慢路径）
+        const byBase = new Map()
+        for (const f of files) {
+          const base = f.path.split('/').pop().replace(/\.[^.]+$/, '')
+          if (!byBase.has(base)) byBase.set(base, [])
+          byBase.get(base).push(f.path)
+        }
+        const edges = []
+        const rows = this._filterCommentImports(self._db.prepare("SELECT r.source_file_id, r.target_name, r.line FROM refs r WHERE r.kind = 'import' AND (r.call_expr IS NULL OR r.call_expr != ?)").all(ALIAS_LOCAL_MARKER))
+        for (const r of rows) {
+          const from = fileById.get(r.source_file_id)
+          if (!from || !r.target_name) continue
+          if (r.target_name.startsWith('node:') || r.target_name.startsWith('@types/')) continue
+          const base = r.target_name.replace(/^\.\.?\//, '').split('/').pop().replace(/\.[^.]+$/, '')
+          const targetFile = (byBase.get(base) || []).find(p => p !== from)
+          if (targetFile) {
+            edges.push({ from, to: targetFile })
+          }
+        }
+        return { nodes, edges }
+      },
+
+      // 全项目环检测：DFS 栈环查找，返回去重后的环列表
+      findModuleCycles(nodes, edges) {
+        const adj = new Map()
+        for (const n of nodes) adj.set(n.path, [])
+        for (const e of edges) {
+          if (adj.has(e.from) && adj.has(e.to)) adj.get(e.from).push(e.to)
+        }
+        const visited = new Set()
+        const stack = new Set()
+        const cycles = []
+        const seenCycles = new Set()
+        const dfs = (path, trail) => {
+          visited.add(path)
+          stack.add(path)
+          trail.push(path)
+          for (const next of adj.get(path) || []) {
+            if (stack.has(next)) {
+              const idx = trail.indexOf(next)
+              const cycle = trail.slice(idx).concat(next)
+              const key = [...cycle].sort().join('\0')
+              if (!seenCycles.has(key)) {
+                seenCycles.add(key)
+                cycles.push({ cycle, length: cycle.length - 1 })
+              }
+            } else if (!visited.has(next)) {
+              dfs(next, trail)
+            }
+          }
+          stack.delete(path)
+          trail.pop()
+        }
+        for (const n of nodes) {
+          if (!visited.has(n.path)) dfs(n.path, [])
+        }
+        return cycles
+      },
+
       async detectDeadCode({ minUseCount = 1 } = {}) {
         // 14：usage 计数同时认 target_name 和 target_symbol_id——CJS 别名重绑定后
         // 调用点 ref 的 target_name 是本地别名（libProcess≠process），只按名计数会把
@@ -1289,7 +1590,9 @@ class CodeIndex {
         const dead = self._db.prepare("SELECT s.name, s.type, f.path AS file, s.start_line, (SELECT COUNT(*) FROM refs WHERE (target_name = s.name OR target_symbol_id = s.id)) AS ref_count FROM symbols s JOIN files f ON s.file_id = f.id WHERE s.type IN ('function','method') AND (SELECT COUNT(*) FROM refs WHERE (target_name = s.name OR target_symbol_id = s.id) AND (source_file_id != s.file_id OR kind != 'import')) < ? ORDER BY ref_count ASC LIMIT 50").all(minUseCount)
         // r29：注册/导出形态引用过滤——refs 只记调用与 import，`extract: extractBlocksFromLLM`
         // 这类「对象字面量属性值引用」（registerService/registerTool 回调挂载）零 ref → 被误报死代码
-        return dead.filter(s => !isExportReferenced(s.name, join(self._currentWorkspace || process.cwd(), s.file)))
+        // r10d：再加属性访问（getter）形态豁免——`svc.indexProgress` 属性读取同样零 ref
+        return dead.filter(s => !isExportReferenced(s.name, join(self._currentWorkspace || process.cwd(), s.file))
+          && !isPropertyAccessed(s.name, join(self._currentWorkspace || process.cwd(), s.file)))
       },
 
       async getComplexity(symbolName, { filePath } = {}) {
@@ -1301,14 +1604,6 @@ class CodeIndex {
         }
         const sym = self._db.prepare("SELECT s.id, s.start_line, s.end_line, s.type, f.path AS file FROM symbols s JOIN files f ON s.file_id = f.id WHERE s.name = ? LIMIT 1").get(symbolName)
         return sym ? _calcComplexity(sym) : null
-      },
-
-      async detectChangeType(oldHash, newHash, { timeout = 3000 } = {}) {
-        return { changeType: 'unknown' }
-      },
-
-      async syncFileChange(filePath) {
-        return doSyncFileChange(filePath)
       },
 
       async indexProject(rootDir, { timeout = 60000 } = {}) {
@@ -1344,6 +1639,11 @@ class CodeIndex {
         return f ? f.mtime : 0
       },
 
+      // R19：service 层薄包装——class 方法（self.ensureFreshFile）供查询出口接线
+      ensureFreshFile(filePath) {
+        return self.ensureFreshFile(filePath)
+      },
+
       clearCachesForFile(filePath) {
         const absPath = self._currentWorkspace ? join(self._currentWorkspace, filePath) : filePath
         self._contextCache.delete(absPath)
@@ -1353,6 +1653,8 @@ class CodeIndex {
         for (const key of self._impactCache.keys()) {
           if (key.includes(`\0${filePath}\0`)) self._impactCache.delete(key)
         }
+        // r8(D2)：export 引用缓存同步失效——否则 sweep_dead_code 用旧内容把活函数报成死代码
+        _exportRefCache.delete(absPath)
       },
 
       // 原语化 P1：版本锚点查询（附录 A/C/E）
@@ -1368,11 +1670,18 @@ class CodeIndex {
         return self.getFileByPath(filePath)
       },
 
+      // r11(L6)：非代码文件 content_hash 更新公共方法——write-runtime 旧实现直取 _db 私有字段（service stop 后 TypeError）
+      updateContentHash(filePath, hash) {
+        const r = self._db.prepare("UPDATE files SET content_hash = ?, index_state = 'fresh' WHERE path = ?").run(hash, filePath)
+        return r.changes > 0
+      },
+
       markIndexDirty(filePath, reason) {
         return self.markIndexDirty(filePath, reason)
       },
 
       async getFileOutline(filePath, { depth = 1, includeRefs = false, includeTestRefs = false, maxItems = 50 } = {}) {
+        const freshness = await self.ensureFreshFile(filePath)
         // 16：复用守卫的路径归一化（绝对路径/./前缀/尾斜杠 → 相对），保留原有更丰富的错误语义
         const normPath = normalizeFilePath(filePath, self._currentWorkspace)
         const cacheKey = `${self._currentWorkspace || ''}\0${normPath}\0${depth}\0${includeRefs}\0${includeTestRefs}\0${maxItems}`
@@ -1420,7 +1729,7 @@ class CodeIndex {
           self._outlineCache.delete(oldest)
         }
 
-        return result
+        return _attachFreshness(result, freshness)
 
         async function buildOutlineNode(sym, allSyms, remainingDepth, countRefs, countTestRefs) {
           const children = allSyms.filter(c => c.id !== sym.id && c.start_line >= sym.start_line && c.end_line <= sym.end_line && !allSyms.some(g => g.id !== sym.id && g.id !== c.id && g.start_line <= c.start_line && g.end_line >= c.end_line))
@@ -1442,26 +1751,6 @@ class CodeIndex {
           return node
         }
       },
-
-      watchDirectory(dir) {
-        if (self._watcher) { self._watcher.close(); self._watcher = null }
-        const resolvedDir = resolve(dir)
-        if (!existsSync(resolvedDir)) return { status: 'not_found', dir }
-        startWatcher(resolvedDir)
-        if (self._watcher) {
-          return { status: 'watching', dir: resolvedDir }
-        } else {
-          return { status: 'error', message: 'Failed to start watcher' }
-        }
-      },
-
-      unwatch() {
-        if (self._watcher) { self._watcher.close(); self._watcher = null }
-        self._watchedDir = null
-        if (self._watcherTimer) { clearTimeout(self._watcherTimer); self._watcherTimer = null }
-        self._core.log('info', `[code-index] watcher stopped`)
-        return { status: 'stopped' }
-      },
     })
     core.log('info', `[code-index] service registered`)
 
@@ -1475,6 +1764,9 @@ class CodeIndex {
       listenPath = `\\\\.\\pipe\\malong-code-index-${h.toString(16)}`
     }
     if (!isWin) { try { unlinkSync(udsPath) } catch {} }
+    // r37-fix3: 宿主（codex/claude/opencode 等）以任意 cwd 启动时 data/ 可能不存在——
+    // UDS listen 到不存在父目录会抛 EACCES → uncaughtException 进程崩溃。确保目录存在。
+    if (!isWin) { try { mkdirSync(dirname(listenPath), { recursive: true }) } catch {} }
     this._udsServer = createServer((req, res) => {
       if (udsToken) {
         const token = new URL(req.url, 'http://localhost').searchParams.get('token') || req.headers['x-auth-token'] || ''
@@ -1531,6 +1823,10 @@ class CodeIndex {
         }
       })
     })
+    // r54(P2): listen 失败（如 Windows 管道名冲突 EADDRINUSE）无 error handler 会 uncaughtException 崩进程
+    this._udsServer.on('error', (e) => {
+      core.log('error', `[code-index] UDS server error: ${e.message}`)
+    })
     this._udsServer.listen(listenPath, () => {
       if (!isWin) { try { chmodSync(udsPath, 0o600) } catch {} }
       core.log('info', `[code-index] UDS server on ${listenPath}`)
@@ -1582,6 +1878,8 @@ class CodeIndex {
 
   // 13#5：force 重抽入口——全量标 dirty，下次 indexBatch 无视 mtime 重抽所有文件（清陈旧/可疑数据）
   markAllDirty() {
+    // r8(D2)：全量失效时 export 引用缓存一并清空（sweep_dead_code 依赖它判断活引用）
+    _exportRefCache.clear()
     if (!this._db) return 0
     const r = this._db.prepare("UPDATE files SET index_state = 'dirty', content_hash = ''").run()
     this._core?.log?.('info', `[code-index] marked ${r.changes} files dirty (force re-extract on next reindex)`)
@@ -1612,6 +1910,10 @@ class CodeIndex {
   async stop() {
     if (this._watcher) { this._watcher.close(); this._watcher = null }
     if (this._watcherTimer) { clearTimeout(this._watcherTimer); this._watcherTimer = null }
+    // r54(P2): 清 _watchedDir/_currentWorkspace——在途 watcher 回调（await 解析中）见 _db=null 但
+    // _watchedDir 非空会重新 _initWorkspaceDb → 停止后僵尸开库
+    this._watchedDir = null
+    this._currentWorkspace = null
     if (this._udsServer) { this._udsServer.close(); this._udsServer = null }
     if (this._db) { this._db.close(); this._db = null }
     this._langParser = null
@@ -1625,5 +1927,5 @@ const version = '0.3.0'
 const init = (core) => instance.init(core)
 const start = () => instance.start()
 const stop = () => instance.stop()
-export { name, version, init, start, stop }
+export { isPropertyAccessed, name, version, init, start, stop }
 export default instance

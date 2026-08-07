@@ -1,0 +1,45 @@
+{
+  "generated_at": "2026-08-05T07:12:33.414Z",
+  "n_files": 20000,
+  "gen_ms": 545,
+  "collect_ms": 95,
+  "files_found": 20000,
+  "truncated": false,
+  "rss_mb": 80,
+  "note": "reindex = collect (this) + extract (bench-extract.js) + DB writes; walker budget line is the JS-side gate",
+  "full_index": {
+    "generated_at": "2026-08-05T12:24:24.312Z",
+    "workspace": "/home/chen/1q/1FTY-llm/0FTYcloud",
+    "files": 737,
+    "collect_ms": 28,
+    "parse_ms_runs": [
+      2200,
+      700,
+      1500
+    ],
+    "parse_p50_ms": 1500,
+    "db_write_ms_runs": [
+      6200,
+      4100,
+      5400
+    ],
+    "db_write_p50_ms": 5400,
+    "full_run_ms": [
+      {
+        "run": 1,
+        "total_ms": 6511
+      },
+      {
+        "run": 2,
+        "total_ms": 4383
+      },
+      {
+        "run": 3,
+        "total_ms": 5634
+      }
+    ],
+    "full_p50_ms": 5634,
+    "throughput_files_per_s": 131,
+    "note": "r10e(F1) 全流程实测：collect + parse(daemon) + DB 写(indexBatch 真实路径, 临时库)。DB 写占 ~95%，旧基准未测该段导致高估 4.5x。"
+  }
+}

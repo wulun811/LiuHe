@@ -1,5 +1,6 @@
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { mkdirSync, writeFileSync, symlinkSync, rmSync } from 'node:fs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const FIXTURES = join(__dirname, 'fixtures')
@@ -432,9 +433,47 @@ async function testA20() {
   assert(!hashlibInMultiLine, `A20: hashlib 在 multi_line.py 中不被误报`)
 }
 
+// ═══ A21: find_tests 读侧路径穿越（R6）═══
+// FILE_NOT_INDEXED 分支旧实现直接赋值 file，后续 join(workspaceDir, file) 可经 ../ 越界读
+async function testA21() {
+  console.log('\n═══ A21: find_tests ../ 穿越═══')
+  const handle = await loadTool('tool-find-tests')
+  const ctx = {
+    codeIndexService: {
+      resolveFileArg: (f) => ({ ok: false, error: { code: 'FILE_NOT_INDEXED', message: 'not indexed' }, path: f }),
+      initWorkspace: async () => {},
+      getReferences: async () => [],
+    },
+    getWorkspaceDir: (ws) => join(ws, '.malong'),
+  }
+  const res = await handle({ workspace_dir: FIXTURES, file: '../secret.js' }, ctx)
+  assert(res.error === 'PATH_BLOCKED', `A21: ../ 穿越被 PATH_BLOCKED（实际 ${res.error}）`)
+  const res2 = await handle({ workspace_dir: FIXTURES, file: 'src/sql_queries.py' }, ctx)
+  assert(res2.error !== 'PATH_BLOCKED', `A21: 正常相对路径不受影响`)
+}
+
+async function testA25() {
+  console.log('\n═══ A25: R22-⑮ active-todos symlink 逃逸守卫 ═══')
+  const at = await loadTool('tool-active-todos')
+  const ws = join(FIXTURES, 'symlink-ws')
+  mkdirSync(ws, { recursive: true })
+  const outside = join(FIXTURES, 'outside-todo')
+  mkdirSync(outside, { recursive: true })
+  writeFileSync(join(outside, 'secret.js'), '// TODO: 外部文件不该被扫到\n')
+  try { symlinkSync(join(outside, 'secret.js'), join(ws, 'link.js')) } catch { assert(false, 'symlink 创建'); return }
+  const r = await at({ workspace_dir: ws, scope: 'link.js' }, { ...mockContext, codeIndexService: null })
+  assert(r.error === 'path_blocked', `scope 指向外部 symlink → path_blocked（得 ${r.error}）`)
+  // R22-⑯：目录 symlink 同样拦截（旧守卫只在 isFile 分支，目录绕行）
+  try { symlinkSync(outside, join(ws, 'extdir'), 'dir') } catch { assert(false, 'dir symlink 创建'); return }
+  const rDir = await at({ workspace_dir: ws, scope: 'extdir' }, { ...mockContext, codeIndexService: null })
+  assert(rDir.error === 'path_blocked', `scope 指向外部目录 symlink → path_blocked（得 ${rDir.error}）`)
+  rmSync(ws, { recursive: true, force: true })
+  rmSync(outside, { recursive: true, force: true })
+}
+
 // Run all
 const tests = [testA1, testA2, testA3, testA4, testA5, testA6, testA7, testA8, testA9, testA10,
-               testA11, testA12, testA13, testA14, testA15, testA16, testA17, testA18, testA19, testA20]
+               testA11, testA12, testA13, testA14, testA15, testA16, testA17, testA18, testA19, testA20, testA21, testA22, testA23, testA24, testA25]
 
 for (const t of tests) {
   try { await t() } catch (e) {
@@ -443,6 +482,54 @@ for (const t of tests) {
     console.log(`  ✗ ${t.name}: EXCEPTION ${e.message}`)
   }
 }
+// ═══ A22: edit_sandbox 小写标识符 undefined（R22-⑪：旧只查大写开头） ═══
+async function testA22() {
+  console.log('\n═══ A22: edit_sandbox 小写 undefined 检测 ═══')
+  const handle = await loadTool('tool-edit-sandbox')
+  const src = 'function main() {\n  validateUser()\n  console.log("hi")\n  if (x > 0) {}\n  obj.method()\n  return 1\n}\n'
+  const result = await handle({ workspace_dir: FIXTURES, file: 'src/a22.js', new_content: src }, { ...mockContext, codeIndexService: {} })
+  const symErrs = (result.checks?.symbol_references?.errors || []).map(e => e.symbol)
+  assert(symErrs.includes('validateUser') && !symErrs.includes('console') && !symErrs.includes('method') && !symErrs.includes('if'), `A22: 只报真小写未定义（得 ${JSON.stringify(symErrs)}）`)
+}
+
+// ═══ A23: diff_facts manifest ../ 越界守卫（R22-⑪） ═══
+async function testA23() {
+  console.log('\n═══ A23: diff_facts 越界守卫 ═══')
+  const { writeFileSync, mkdirSync, rmSync } = await import('node:fs')
+  const { handle } = await import('../tools/tool-diff-facts/handler.js')
+  const ws = join(FIXTURES, '..', '.a23-txn-ws')
+  rmSync(ws, { recursive: true, force: true })
+  mkdirSync(join(ws, '.ai-transactions', 'txn1', 'backup'), { recursive: true })
+  writeFileSync(join(ws, '.ai-transactions', 'txn1', 'manifest.json'), JSON.stringify({ txnId: 'a23t1', created: Date.now(), files: { '../../etc/passwd': { backupName: 'p' } } }))
+  const r = await handle({ workspace_dir: ws, since: 'a23t1' }, {})
+  assert(JSON.stringify(r.warnings || []).includes('path_blocked'), `A23: ../ fileRel 报 path_blocked（得 ${JSON.stringify(r.warnings)}）`)
+  rmSync(ws, { recursive: true, force: true })
+}
+
+// ═══ A24: R22-⑪ 拷打发现——4 工具非字符串参数裸抛 + find-tests 无服务守卫绕过 ═══
+async function testA24() {
+  console.log('\n═══ A24: 非字符串参数结构化错误 ═══')
+  const cases = [
+    ['tool-active-todos', { workspace_dir: FIXTURES, scope: 123 }],
+    ['tool-dead-code-sweeper', { workspace_dir: FIXTURES, scope: 123 }],
+    ['tool-find-tests', { workspace_dir: FIXTURES, file: 123 }],
+    ['tool-exception-guard', { workspace_dir: FIXTURES, file: 123 }],
+  ]
+  for (const [tool, args] of cases) {
+    let threw = false
+    let r = null
+    try {
+      const handle = await loadTool(tool)
+      r = await handle(args, { ...mockContext, codeIndexService: null, langParserService: null })
+    } catch (e) { threw = true; r = e }
+    assert(!threw && r?.error, `${tool} 非字符串参数→结构化错误不裸抛（得 ${threw ? 'THROW ' + r.message?.slice(0, 40) : JSON.stringify(r?.error)}）`)
+  }
+  // find-tests 无 codeIndexService 时 ../ 仍被拦
+  const ft = await loadTool('tool-find-tests')
+  const rFt = await ft({ workspace_dir: FIXTURES, file: '../../etc/passwd' }, { ...mockContext, codeIndexService: null })
+  assert(rFt.error === 'PATH_BLOCKED', `find-tests 无服务时 ../ 仍拦（得 ${rFt.error}）`)
+}
+
 
 console.log('\n══════════════════════════════════════════════════')
 console.log(`总计: ${passed} passed, ${failed} failed`)

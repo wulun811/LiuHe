@@ -1,0 +1,39 @@
+{
+  "name": "r8-refs-depth",
+  "txnId": "r8-refs-depth-9f545d1d",
+  "created": 1785895528955,
+  "files": {
+    "src/extract/javascript.rs": {
+      "backupName": "src__extract__javascript.rs",
+      "size": 32238
+    },
+    "src/extract/python.rs": {
+      "backupName": "src__extract__python.rs",
+      "size": 15040
+    },
+    "src/extract/go.rs": {
+      "backupName": "src__extract__go.rs",
+      "size": 17444
+    },
+    "src/extract/rust_lang.rs": {
+      "backupName": "src__extract__rust_lang.rs",
+      "size": 30608
+    },
+    "src/extract/c_lang.rs": {
+      "backupName": "src__extract__c_lang.rs",
+      "size": 18715
+    },
+    "src/extract/cpp.rs": {
+      "backupName": "src__extract__cpp.rs",
+      "size": 21912
+    },
+    "src/extract/java.rs": {
+      "backupName": "src__extract__java.rs",
+      "size": 18886
+    },
+    "src/extract/bash.rs": {
+      "backupName": "src__extract__bash.rs",
+      "size": 11810
+    }
+  }
+}

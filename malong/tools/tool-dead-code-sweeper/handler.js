@@ -5,7 +5,55 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 const SOURCE_EXTS = new Set(['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.mts', '.cts', '.py', '.go', '.rs', '.java', '.c', '.cpp', '.cc', '.cxx', '.hpp', '.hh', '.hxx', '.sh', '.bash', '.rb'])
 const SKIP_DIRS = new Set(['node_modules', '.git', '__pycache__', '.venv', 'venv', 'dist', 'build'])
 const ENTRY_NAMES = new Set(['main', 'index', 'app', 'server', 'cli', '__main__', 'manage'])
-const MAGIC_METHODS = new Set(['__init__', '__str__', '__repr__', '__eq__', '__hash__', '__len__', '__call__', '__enter__', '__exit__', '__new__', '__del__'])
+const MAGIC_METHODS = new Set(['__init__', '__str__', '__repr__', '__eq__', '__hash__', '__len__', '__call__', '__enter__', '__exit__', '__new__', '__del__', 'constructor'])
+// r12（隔壁实战教训）：seedTasks 被 tongtian-cli 字符串引用却报死——unused_function 只看 import 图，
+// CLI 命令字符串 / scripts/*.sh / package.json scripts / 文档里的文本引用不在图内。
+// 文本兜底：这些非源码文件里 grep 符号名，命中即视为活（宁可漏报不可误删——死代码删除代价不可逆）
+const TEXT_REF_EXTS = new Set(['.sh', '.bash', '.json', '.md', '.txt', '.html', '.yml', '.yaml', '.toml', '.ini', '.rst', '.csv'])
+// r12（隔壁第 5 条建议）：守卫类函数生产零调用 = 架构级未接线信号（比普通死代码危险得多）
+const GUARD_NAME_RE = /^(?:assert|validate|verify|check|sanitize|guard|authorize|permit|ensure|isValid|isAuthorized|hasPermission|requirePermission)/i
+
+// r12：收集全项目非源码文本（scripts/CLI/文档/配置文件），供死代码候选做文本级引用兑底
+function collectTextReferences(workspaceDir, maxFiles = 500) {
+  const texts = []
+  let count = 0
+  const walk = (dir, depth) => {
+    if (count >= maxFiles) return
+    let entries
+    try { entries = readdirSync(dir, { withFileTypes: true }) } catch { return }
+    for (const entry of entries) {
+      if (count >= maxFiles) return
+      if (entry.name.startsWith('.') || entry.name === '.index-cache' || SKIP_DIRS.has(entry.name) || entry.name === 'tests' || entry.name === 'test' || entry.name === '__tests__') continue
+      const full = join(dir, entry.name)
+      if (entry.isDirectory()) {
+        if (depth < 6) walk(full, depth + 1)
+      } else {
+        const ext = extname(entry.name)
+        if (!TEXT_REF_EXTS.has(ext) && ext) continue
+        let content
+        try {
+          if (statSync(full).size > 1024 * 1024) continue
+          content = readFileSync(full, 'utf-8')
+        } catch { continue }
+        texts.push(content)
+        count++
+      }
+    }
+  }
+  walk(workspaceDir, 0)
+  return texts
+}
+
+function hasTextReference(texts, symbolName) {
+  if (!texts || !texts.length) return false
+  const esc = String(symbolName).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  // R22-⑪：短名（<4）裸词匹配太宽——`run`/`foo` 命中任意文本（"run the script"）永不报死（报告 P2）
+  // 短名要求引号/空白包裹（CLI 命令字符串/JSON key 形态），长名仍用单词边界
+  const re = String(symbolName).length < 4
+    ? new RegExp(`["'\[\{,\s]${esc}["'\]\},;\s]`)
+    : new RegExp(`\\b${esc}\\b`)
+  return texts.some(t => re.test(t))
+}
 
 function walkSourceFiles(baseDir, dir, files, maxFiles) {
   if (files.length >= maxFiles) return
@@ -222,6 +270,14 @@ export async function handle(args, context) {
   }
 
   const scope = args?.scope || '.'
+  // R22-⑪（拷打发现）：非字符串 scope 让 split 裸抛——前置类型校验
+  if (typeof scope !== 'string') {
+    return { error: 'invalid_input', message: `scope must be a string (got ${typeof scope})` }
+  }
+  // r54(P2): scope 含 .. 会越权遍历 workspace 外目录
+  if (scope.split(/[\\/]/).includes('..')) {
+    return { error: 'invalid_input', message: `scope contains "..": ${scope}` }
+  }
   const includeFiles = args?.include_files === true
   let scanDir = scope === '.' ? workspaceDir : join(workspaceDir, scope)
   let scanFile = null
@@ -268,6 +324,8 @@ export async function handle(args, context) {
         await codeIndexService.initWorkspace(workspaceDir)
         const dead = await codeIndexService.detectDeadCode?.()
         if (dead && Array.isArray(dead)) {
+          // r12：文本引用兜底懒加载——只在存在死代码候选时扫描（候选少则省一次全仓文件遍历）
+          let textRefs = null
           for (const s of dead) {
             if (!['function', 'method'].includes(s.type)) continue
             if (MAGIC_METHODS.has(s.name)) continue
@@ -281,6 +339,10 @@ export async function handle(args, context) {
             // 不走符号引用 → 全被误报 unused_function
             const sPath = s.file || s.path || ''
             if (extname(sPath) === '.rs' && (s.name.startsWith('test_') || s.name.endsWith('_test'))) continue
+            // r12（seedTasks 教训）：import 图外的文本引用（CLI 命令字符串/scripts/*.sh/package.json scripts/文档）
+            // 命中即视为活——宁可漏报不可误删
+            if (textRefs === null) textRefs = collectTextReferences(workspaceDir)
+            if (hasTextReference(textRefs, s.name)) continue
 
             let mtime = null, daysUnused = null
             try {
@@ -289,15 +351,26 @@ export async function handle(args, context) {
               daysUnused = Math.floor((Date.now() - st.mtimeMs) / 86400000)
             } catch {}
 
-            deadCode.push({
-              type: 'unused_function',
-              file: s.file || s.path,
-              line: s.start_line,
-              name: s.name,
-              last_modified: mtime,
-              days_unused: daysUnused,
-              suggestion: `remove or archive ${s.name}()`,
-            })
+            const isGuard = GUARD_NAME_RE.test(s.name)
+            deadCode.push(isGuard
+              ? {
+                type: 'unused_guard',
+                file: s.file || s.path,
+                line: s.start_line,
+                name: s.name,
+                confidence: 'architecture_signal',
+                message: '守卫类函数（assert/validate/verify 命名）生产零调用——可能是架构级未接线（守卫未接入调用链），比普通死代码危险，先人工确认调用路径再处理',
+                suggestion: `trace call sites of ${s.name} — if truly unwired, wire it into the flow or delete deliberately`,
+              }
+              : {
+                type: 'unused_function',
+                file: s.file || s.path,
+                line: s.start_line,
+                name: s.name,
+                last_modified: mtime,
+                days_unused: daysUnused,
+                suggestion: `remove or archive ${s.name}()`,
+              })
           }
         }
       } catch {}
@@ -336,19 +409,24 @@ export async function handle(args, context) {
   const summary = {
     unused_imports: deadCode.filter(d => d.type === 'unused_import').length,
     unused_functions: deadCode.filter(d => d.type === 'unused_function').length,
+    // r12：架构级未接线信号独立计数——与普通死代码区分（勿直接删）
+    unused_guards: deadCode.filter(d => d.type === 'unused_guard').length,
     orphan_files: deadCode.filter(d => d.type === 'orphan_file').length,
   }
-  summary.estimated_tokens_saved = summary.unused_imports * 50 + summary.unused_functions * 200 + summary.orphan_files * 500
+  summary.estimated_tokens_saved = summary.unused_imports * 50 + summary.unused_functions * 200 + summary.unused_guards * 200 + summary.orphan_files * 500
 
   let nextStep = null
-  if (deadCode.length > 0) {
+  if (deadCode.some(d => d.type === 'unused_guard')) {
+    nextStep = 'unused_guard 是架构级未接线信号（守卫未接入调用链）——先人工 trace 调用路径，确认未接线后再处理；普通 unused imports/functions 可安全删除。'
+  } else if (deadCode.length > 0) {
     nextStep = `Remove dead code via edit_transaction. Unused imports are safe to remove immediately.`
   } else {
-    nextStep = `No dead code found.`
+    nextStep = `No dead code found (import graph + text reference fallback scanned).`
   }
 
   return {
     scope,
+    coverage: 'graph-scan (import refs) + text-ref fallback (scripts/docs/config); dynamic/reflection wiring NOT covered',
     dead_code: deadCode.slice(0, 100),
     truncated: deadCode.length > 100,
     summary,

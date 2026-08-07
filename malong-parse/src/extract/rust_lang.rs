@@ -234,11 +234,13 @@ pub fn extract_all(tree: &Tree, source: &str) -> super::ExtractResult {
 
     walk(tree.root_node(), source, 0, None, &mut symbols, &mut refs);
 
+    let (has_errors, truncated) = has_error_node(tree.root_node());
     super::ExtractResult {
         symbols,
         imports: vec![],
         refs,
-        has_errors: has_error_node(tree.root_node()),
+        has_errors,
+        truncated,
     }
 }
 
@@ -460,7 +462,8 @@ pub fn extract_top_level(tree: &Tree, source: &str) -> Vec<Symbol> {
 pub fn extract_references(tree: &Tree, source: &str) -> Vec<Reference> {
     let mut refs = Vec::new();
 
-    fn walk(node: Node, source: &str, refs: &mut Vec<Reference>) {
+    fn walk(node: Node, source: &str, depth: u32, refs: &mut Vec<Reference>) {
+        if depth > super::MAX_WALK_DEPTH { return; }
         if node.kind() == "call_expression" {
             if let Some(fn_node) = node.child_by_field_name("function") {
                 let full = &source[fn_node.byte_range()];
@@ -523,12 +526,12 @@ pub fn extract_references(tree: &Tree, source: &str) -> Vec<Reference> {
 
         for i in 0..node.child_count() {
             if let Some(child) = node.child(i) {
-                walk(child, source, refs);
+                walk(child, source, depth + 1, refs);
             }
         }
     }
 
-    walk(tree.root_node(), source, &mut refs);
+    walk(tree.root_node(), source, 0, &mut refs);
     refs
 }
 

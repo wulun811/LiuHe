@@ -1,7 +1,7 @@
 {
   "name": "edit_transaction",
   "version": "1.3.0",
-  "description": "DEFAULT multi-file edit path with rollback/preview/undo (begin→edit→commit). Use when unsure about changes. Single-file? edit_batch.",
+  "description": "DEFAULT multi-file edit path with rollback/preview/undo (begin→edit→commit). Use when unsure about changes. Single-file? edit_batch. 含双引号/反斜杠的字符串参数注意 JSON 转义一致性（全串统一转义或改用中文引号），否则客户端参数解析失败。",
   "inputSchema": {
     "type": "object",
     "properties": {

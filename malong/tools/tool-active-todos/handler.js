@@ -1,11 +1,13 @@
-import { join, extname } from 'node:path'
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { join, extname, sep } from 'node:path'
+import { existsSync, readFileSync, readdirSync, statSync, realpathSync } from 'node:fs'
 import { stripStrings } from '../../string-utils.js'
+import { DEFAULT_IGNORE_DIRS } from '../../file-collector.js'
 
 const TODO_RE = /(?:#|\/\/|\/\*|\*|--)\s*(TODO|FIXME|XXX|HACK)\s*(?:\((\w+)\))?\s*[:\-]?\s*(.*)/i
 // r28-fix：补 .java/.sh/.bash（TODO 纯文本扫描，rb/php 保留无碍）
 const SOURCE_EXTS = new Set(['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.py', '.go', '.rs', '.java', '.rb', '.c', '.cpp', '.h', '.php', '.sh', '.bash'])
-const SKIP_DIRS = new Set(['node_modules', '.git', '__pycache__', '.venv', 'venv', 'dist', 'build', '.next', 'fixtures', 'test-fixtures', 'mock_data'])
+// R22-⑪：SKIP_DIRS 与 file-collector 权威忽略集统一（此前是子集且口径不一致——collector 有的 .hg/.svn/out/target 这里漏扫）；fixtures 类为 TODO 扫描主动选择保留
+const SKIP_DIRS = new Set([...DEFAULT_IGNORE_DIRS, 'fixtures', 'test-fixtures', 'mock_data'])
 const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000
 
 function walkFiles(baseDir, dir, files, maxFiles) {
@@ -29,21 +31,46 @@ export async function handle(args, context) {
   if (!workspaceDir) {
     return { error: 'missing_parameter', message: 'workspace_dir is required' }
   }
+  // R22-⑯：非字符串 workspace_dir 让 .endsWith 裸抛 TypeError
+  if (typeof workspaceDir !== 'string') {
+    return { error: 'invalid_input', message: `workspace_dir must be a string (got ${typeof workspaceDir})` }
+  }
 
   const scope = args?.scope || '.'
+  // R22-⑪（拷打发现）：非字符串 scope 让 split 裸抛——前置类型校验
+  if (typeof scope !== 'string') {
+    return { error: 'invalid_input', message: `scope must be a string (got ${typeof scope})` }
+  }
+  // r54(P2): scope 含 .. 会越权遍历 workspace 外目录
+  if (scope.split(/[\\/]/).includes('..')) {
+    return { error: 'invalid_input', message: `scope contains "..": ${scope}` }
+  }
+  // r11(L11)：workspaceDir 尾斜杠归一化——旧实现 `workspaceDir + '/'` 在用户传尾斜杠路径时拼成 `//` 恒不匹配（r54 修过 edit-sandbox 同款，此处漏网）
+  const wsPrefix = workspaceDir.endsWith('/') ? workspaceDir : workspaceDir + '/'
+  const toRel = (abs) => abs.startsWith(wsPrefix) ? abs.slice(wsPrefix.length) : abs
   const currentFiles = new Set((args?.current_files || []).map(f => {
-    if (f.startsWith(workspaceDir + '/')) return f.slice(workspaceDir.length + 1)
+    if (f.startsWith(wsPrefix)) return f.slice(wsPrefix.length)
     if (f.startsWith('./')) return f.slice(2)
     return f
   }))
   let scanDir = scope === '.' ? workspaceDir : join(workspaceDir, scope)
 
   // 检测 scope 是否为文件路径（而非目录）
+  // R22-⑯：symlink 逃逸守卫上移——目录/文件 scope 统一 realpath 检测（R22-⑮ 只堵了文件分支，目录 symlink 绕行）
   if (scope !== '.' && existsSync(scanDir)) {
+    try {
+      const realWs = realpathSync(workspaceDir)
+      const realScan = realpathSync(scanDir)
+      if (realScan !== realWs && !realScan.startsWith(realWs + sep)) {
+        return { error: 'path_blocked', message: `scope resolves outside workspace: ${scope}` }
+      }
+    } catch {
+      return { error: 'path_blocked', message: `cannot resolve scope path: ${scope}` }
+    }
     const stat = statSync(scanDir)
     if (stat.isFile()) {
       // 直接扫描该文件
-      const relPath = scanDir.startsWith(workspaceDir + '/') ? scanDir.slice(workspaceDir.length + 1) : scanDir
+      const relPath = toRel(scanDir)
       const absPath = scanDir
       let lines
       try { lines = readFileSync(absPath, 'utf-8').split('\n') } catch { return { scope, total_todos: 0, todos: [], truncated: false, summary: { high: 0, medium: 0, low: 0 }, scanned_files: 0 } }
@@ -103,10 +130,12 @@ export async function handle(args, context) {
   walkFiles(workspaceDir, scanDir, files, 500)
 
   const todos = []
+  // R22-⑪：读失败不再静默——计数透出（此前 catch{continue} 丢文件无提示）
+  let readErrors = 0
   for (const relPath of files) {
     const absPath = join(workspaceDir, relPath)
     let lines
-    try { lines = readFileSync(absPath, 'utf-8').split('\n') } catch { continue }
+    try { lines = readFileSync(absPath, 'utf-8').split('\n') } catch { readErrors++; continue }
 
     for (let i = 0; i < lines.length; i++) {
       const m = TODO_RE.exec(stripStrings(lines[i]))
@@ -154,7 +183,7 @@ export async function handle(args, context) {
   } else if (todos.length > 0) {
     nextStep = `Review TODOs above. Prioritize by file modification recency.`
   } else {
-    nextStep = 'No TODOs found. Code is clean.'
+    nextStep = 'No TODO/FIXME markers found (regex scan of markers only).'
   }
 
   return {
@@ -162,6 +191,9 @@ export async function handle(args, context) {
     total_todos: todos.length,
     todos: todos.slice(0, 50),
     truncated: todos.length > 50,
+    // R17-3：文件扫描到 500 上限截断——否则 LLM 误以为全仓已扫
+    files_truncated: files.length >= 500,
+    read_errors: readErrors,
     summary,
     scanned_files: files.length,
     next_step: nextStep,

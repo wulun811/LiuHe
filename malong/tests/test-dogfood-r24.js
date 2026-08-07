@@ -5,7 +5,7 @@
 import { writeFileSync, mkdirSync, rmSync, mkdtempSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { pathToFileURL } from 'node:url'
+import { pathToFileURL, fileURLToPath } from 'node:url'
 
 let passed = 0, failed = 0
 function assert(cond, msg) {
@@ -29,7 +29,9 @@ export function other5() { hot() }
 export function other6() { hot() }
 `.trim() + '\n')
 
-const MALONG = new URL('..', import.meta.url).pathname
+// r11：MALONG 必须用 fileURLToPath 解码——旧 `new URL('..', import.meta.url).pathname` 返回 URL 编码
+// 路径（中文目录 %E5%85%AD...），imp() 里 pathToFileURL 再编码一次 → ERR_MODULE_NOT_FOUND（双重编码）
+const MALONG = fileURLToPath(new URL('..', import.meta.url))
 const imp = (p) => import(pathToFileURL(p).href)
 const impactHandler = (await imp(join(MALONG, 'tools/tool-impact-analysis/handler.js'))).handle
 const outlineHandler = (await imp(join(MALONG, 'tools/tool-outline-reader/handler.js'))).handle

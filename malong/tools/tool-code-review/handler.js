@@ -1,5 +1,7 @@
 import { basename, extname, resolve } from 'node:path'
 import { readFileSync, existsSync } from 'node:fs'
+import { detectPromptInjection, buildInjectionWarning } from '../../injection-guard.js'
+import { stripStrings } from '../../string-utils.js'
 
 function guardPath(root, userPath) {
   // r23-fix3: LLM 可能传非字符串路径（数字/对象）→ resolve() 会抛 TypeError 崩溃
@@ -24,15 +26,33 @@ function getNameConvention(fileName) {
   return 'unknown'
 }
 
+// r10e：语言惯例感知——Python/Shell/Rust 用 snake_case、Go 用 Pascal/camel、Java 用 Pascal，
+// 只有 JS/TS 系才要求 kebab/camel。旧规则对所有语言报「不是 kebab-case」→ 对 Python 脚本纯噪声
+const LEGAL_NAME_STYLES = {
+  '.py': ['snake_case'],
+  '.sh': ['snake_case', 'kebab-case'],
+  '.rs': ['snake_case'],
+  '.go': ['PascalCase', 'camelCase'],
+  '.java': ['PascalCase'],
+  '.js': ['kebab-case', 'camelCase'],
+  '.mjs': ['kebab-case', 'camelCase'],
+  '.cjs': ['kebab-case', 'camelCase'],
+  '.jsx': ['kebab-case', 'camelCase', 'PascalCase'],
+  '.ts': ['kebab-case', 'camelCase', 'PascalCase'],
+  '.tsx': ['kebab-case', 'camelCase', 'PascalCase'],
+}
+
 function checkNaming(source, fileName) {
   const issues = []
   const ext = extname(fileName)
   const convention = getNameConvention(fileName)
-  if (convention !== 'kebab-case' && convention !== 'camelCase') {
-    issues.push({ severity: 'info', category: 'naming', message: `文件名 "${basename(fileName)}" 不是标准命名风格 (kebab/camelCase)`, line: 1 })
+  const legal = LEGAL_NAME_STYLES[ext]
+  if (legal && !legal.includes(convention)) {
+    issues.push({ severity: 'info', category: 'naming', message: `文件名 "${basename(fileName)}" 不是 ${ext} 惯例命名风格 (${legal.join('/')})`, line: 1 })
   }
 
-  const srcStr = String(source)
+  // R22-⑪：命名统计剥字符串——字符串/注释里的标识符文本此前污染风格统计（如文案里的 "maxRetries" 计入 camel）
+  const srcStr = String(source).split('\n').map(l => stripStrings(l)).join('\n')
   const names = { camel: new Set(), pascal: new Set(), snake: new Set(), upperSnake: new Set() }
   let m
 
@@ -78,22 +98,14 @@ function checkNaming(source, fileName) {
 function checkComments(source, fileName) {
   const issues = []
   const lines = String(source).split('\n')
-  const isJsLike = /\.(js|mjs|cjs|jsx|ts|tsx)$/i.test(fileName || '')
-  const commentLines = lines.filter(l => {
-    const t = l.trim()
-    // '#' 只在非 JS 语言算注释（JS 私有字段 #foo 不算）
-    return t.startsWith('//') || t.startsWith('*') || t.startsWith('/*') || (t.startsWith('#') && !isJsLike)
-  })
-  const ratio = commentLines.length / Math.max(1, lines.length)
   const funcCount = (String(source).match(/function\s+\w+\(/g) || []).length
   const docCommentCount = (String(source).match(/\/\*\*[\s\S]*?\*\//g) || []).length
 
   if (funcCount > 0 && docCommentCount < funcCount * 0.5) {
     issues.push({ severity: 'info', category: 'documentation', message: `${funcCount} 个函数，仅 ${docCommentCount} 个有 JSDoc 注释`, line: 1 })
   }
-  if (ratio < 0.03 && lines.length > 100) {
-    issues.push({ severity: 'info', category: 'documentation', message: `注释比 ${(ratio * 100).toFixed(1)}%，建议增加注释（>100 行文件）`, line: 1 })
-  }
+  // r10e：删除注释率阈值规则（ratio<0.03）——对训练脚本/一次性脚本等注释少是常态，
+  // 报 info 纯噪声稀释有效信号（用户反馈：18 个 issue 几乎全是误报）
   const todoLines = lines.map((l, i) => /\b(TODO|FIXME|HACK|XXX)\b/.test(l) ? i + 1 : null).filter(Boolean)
   if (todoLines.length > 0) {
     issues.push({ severity: 'info', category: 'maintainability', message: `存在 ${todoLines.length} 处 TODO/FIXME/HACK 标记（行 ${todoLines.slice(0, 5).join(', ')}${todoLines.length > 5 ? '…' : ''}）`, line: todoLines[0] })
@@ -107,17 +119,27 @@ function checkLongFunctions(source) {
   // 控制语句会匹配 methodMatch（if/for/while/catch/switch/with），必须排除
   const CONTROL_STATEMENTS = new Set(['if', 'for', 'while', 'catch', 'switch', 'with'])
   let inFunc = false, funcLine = 0, funcName = '', braceCount = 0, funcLines = 0
+  // r54(P1): 声明行也要计花括号——旧实现恒置 braceCount=1，单行函数 `function f(){ return 1 }` 的 `}` 不计
+  // → 永不闭合，其后顶层平衡代码全计入该函数 → 误报「函数有 N 行」
+  const beginFunc = (line, i, name) => {
+    inFunc = true; funcLine = i + 1; funcName = name; funcLines = 1
+    braceCount = 0
+    let sawOpen = false
+    // R22-⑪：花括号计数剥字符串——字符串/模板里的 `{`/`}` 此前导致括号失衡（长函数误报/漏报）
+    for (const ch of stripStrings(line)) { if (ch === '{') { braceCount++; sawOpen = true } else if (ch === '}') braceCount-- }
+    if (sawOpen && braceCount <= 0) { inFunc = false; funcLines = 0 } // 单行函数，本行即闭合
+  }
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
     const funcMatch = line.match(/(?:async\s+)?function\s+(\w+)\s*\(/)
     const arrowMatch = line.match(/(\w+)\s*=\s*(?:async\s*)?\([^)]*\)\s*=>\s*{/)
     const methodMatch = line.match(/(\w+)\s*\([^)]*\)\s*{/)
 
-    if (funcMatch) { inFunc = true; funcLine = i + 1; funcName = funcMatch[1]; braceCount = 1; funcLines = 1 }
-    else if (arrowMatch) { inFunc = true; funcLine = i + 1; funcName = arrowMatch[1]; braceCount = 1; funcLines = 1 }
-    else if (methodMatch && !inFunc && !CONTROL_STATEMENTS.has(methodMatch[1])) { inFunc = true; funcLine = i + 1; funcName = methodMatch[1]; braceCount = 1; funcLines = 1 }
+    if (funcMatch) { beginFunc(line, i, funcMatch[1]) }
+    else if (arrowMatch) { beginFunc(line, i, arrowMatch[1]) }
+    else if (methodMatch && !inFunc && !CONTROL_STATEMENTS.has(methodMatch[1])) { beginFunc(line, i, methodMatch[1]) }
     else if (inFunc) {
-      for (const ch of line) { if (ch === '{') braceCount++; if (ch === '}') braceCount-- }
+      for (const ch of stripStrings(line)) { if (ch === '{') braceCount++; if (ch === '}') braceCount-- }
       funcLines++
       if (braceCount <= 0) {
         if (funcLines > 50) {
@@ -132,13 +154,16 @@ function checkLongFunctions(source) {
 
 function checkDuplication(source) {
   const issues = []
-  const lines = String(source).split('\n').map(l => l.trim()).filter(l => l.length > 20)
+  // r54(P1): 先保留原始行号再 filter——旧实现 filter 后用过滤数组下标当行号，短行越多偏移越大
+  const lines = String(source).split('\n')
+    .map((l, idx) => ({ text: l.trim(), line: idx + 1 }))
+    .filter(x => x.text.length > 20)
   const seen = new Map()
   for (let i = 0; i < lines.length; i++) {
-    const key = lines[i].slice(0, 60)
+    const key = lines[i].text.slice(0, 60)
     if (key.length >= 30) {
-      if (seen.has(key)) seen.get(key).push(i + 1)
-      else seen.set(key, [i + 1])
+      if (seen.has(key)) seen.get(key).push(lines[i].line)
+      else seen.set(key, [lines[i].line])
     }
   }
   for (const [, locations] of seen) {
@@ -163,7 +188,8 @@ function reviewOne(source, filePath) {
       total_issues: issues.length,
       warnings: warnCount,
       infos: infoCount,
-      score: Math.max(0, 100 - warnCount * 15 - infoCount * 3),
+      // r12：打分误导（隔壁反馈 82 分但 C1 攻击链在文件里）——分数只度量形状（规则命中数），不含逻辑正确性/安全性；改名 shape_score 消语义歧义
+      shape_score: Math.max(0, 100 - warnCount * 15 - infoCount * 3),
     },
     issues,
   }
@@ -233,7 +259,8 @@ export async function handle(args, context) {
       format: srBlocks.length > 0 ? 'search_replace' : 'unified',
       blocks_reviewed: blocks.length,
       files: [...new Set(blocks.map(b => b.file))],
-      summary: { total_issues: allIssues.length, warnings: w, infos: info, score: Math.max(0, 100 - w * 15 - info * 3) },
+      coverage: 'shape-check (naming/length/dup); logic, semantics, security NOT covered',
+      summary: { total_issues: allIssues.length, warnings: w, infos: info, shape_score: Math.max(0, 100 - w * 15 - info * 3) },
       issues: allIssues.slice(0, maxIssues),
       truncated: allIssues.length > maxIssues,
     }
@@ -251,7 +278,12 @@ export async function handle(args, context) {
     if (!existsSync(absPath)) {
       return { error: 'file_not_found', message: `File not found: ${file}`, suggestion: 'Check the path is relative to workspace_dir and the file exists on disk' }
     }
-    source = readFileSync(absPath, 'utf-8')
+    // R22-⑦（3 分档抽样）：目录当 file 时 readFileSync 裸抛 EISDIR 穿透到 MCP（报告 P2 复现）——结构化错误
+    try {
+      source = readFileSync(absPath, 'utf-8')
+    } catch (e) {
+      return { error: 'invalid_input', message: `Cannot read file: ${file} (${e.code === 'EISDIR' ? 'is a directory' : e.message})`, suggestion: 'Provide a file path (not a directory) relative to workspace_dir' }
+    }
     readFromFile = true
   }
   if (source === undefined) {
@@ -259,17 +291,21 @@ export async function handle(args, context) {
   }
 
   const result = reviewOne(source, file)
+  // r10(G)：prompt injection 最小设防——受检源码含注入短语时打 warning（不改变正常输出格式）
+  const promptInjection = buildInjectionWarning(detectPromptInjection(source), readFromFile ? file : 'inline')
   // r23-fix5: 与 diff 模式统一——issues 带 file 字段（source 传参时标记 'inline'，JSON 不会丢字段）
   const issues = result.issues.map(i => ({ ...i, file: readFromFile ? file : 'inline' }))
   return {
     mode: 'source',
     file: readFromFile ? file : undefined,
+    coverage: 'shape-check (naming/length/dup); logic, semantics, security NOT covered',
     source_provided: !readFromFile,
     summary: result.summary,
     issues: issues.slice(0, maxIssues),
     truncated: issues.length > maxIssues,
+    ...(promptInjection ? { prompt_injection: promptInjection } : {}),
     next_step: result.summary.warnings > 0
-      ? 'Fix warnings above (long functions, duplication, naming).'
-      : 'Code review passed with no warnings.',
+      ? 'Fix warnings above (long functions, duplication, naming). Deep probe: code_quality(file=...). After: test_bridge(action="run")'
+      : 'No shape-level issues found. Shape check only — logic/semantic correctness and security require deeper review. Deep probe: code_quality(file=...)',
   }
 }

@@ -1,4 +1,4 @@
-import { join, extname } from 'node:path'
+import { join, extname, sep, resolve } from 'node:path'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 
 const BUILTIN_EXCEPTIONS = new Set([
@@ -49,15 +49,23 @@ function checkRaises(content, ext) {
       // P2-B3：三引号字符串里的 raise 示例文本不误报（状态机同 guard-patterns）
       const trimmed = line.trim()
       if (trimmed.startsWith('#')) continue
+      // r54(P2): 行尾注释内的三引号会误触发状态机（lazy 前缀可从注释内重新锚定）→ 其后 raise 全漏检。
+      // 仅当 # 之前无三引号时才认定其后是注释并剥除（# 在三引号内则保留整行，防 `"""a#b"""` 回归）
+      let codePart = trimmed
+      const hashIdx = trimmed.indexOf('#')
+      if (hashIdx >= 0) {
+        const beforeHash = trimmed.slice(0, hashIdx)
+        if (!beforeHash.includes('"""') && !beforeHash.includes("'''")) codePart = beforeHash
+      }
       if (!inString) {
-        const open = trimmed.match(/(?:[frbu]{0,2})?[^"'#]*?("""|''')/)?.[1]
+        const open = codePart.match(/(?:[frbu]{0,2})?[^"']*?("""|''')/)?.[1]
         if (open) {
-          const rest = trimmed.slice(trimmed.indexOf(open) + open.length)
+          const rest = codePart.slice(codePart.indexOf(open) + open.length)
           if (!rest.includes(open)) { inString = true; openDelim = open }
           continue
         }
       } else {
-        if (trimmed.includes(openDelim)) inString = false
+        if (codePart.includes(openDelim)) inString = false
         continue
       }
       m = /^\s*raise\s+(\w+)/.exec(line)
@@ -175,16 +183,29 @@ export async function handle(args, context) {
   }
 
   const file = args?.file
+  // R22-⑪（拷打发现）：非字符串 file 让 resolve/join 裸抛——前置类型校验
+  if (typeof file !== 'string') {
+    return { error: 'invalid_input', message: `file must be a string (got ${typeof file})` }
+  }
   if (!file) {
     return { error: 'missing_parameter', message: 'file is required' }
   }
 
-  const absPath = join(workspaceDir, file)
+  // r54(P0-4): resolve 归一化——workspaceDir 带尾斜杠时 `ws + sep` = `/ws//` 恒不匹配，合法文件被误判逃逸
+  const wsNorm = resolve(workspaceDir)
+  const absPath = resolve(wsNorm, file)
+  if (!absPath.startsWith(wsNorm + sep)) {
+    return { error: 'invalid_input', message: `File escapes workspace: ${file}` }
+  }
   if (!existsSync(absPath)) {
     return { error: 'file_not_found', message: `File not found: ${file}` }
   }
 
-  const content = readFileSync(absPath, 'utf-8')
+  // r54(P1): readFileSync 无 try/catch——目录(EISDIR)/不可读文件裸异常违反错误对象契约
+  let content
+  try { content = readFileSync(absPath, 'utf-8') } catch (e) {
+    return { error: 'file_not_found', message: `Cannot read file: ${file} (${e.code || e.message})` }
+  }
   const ext = extname(file)
   const SUPPORTED_EXTS = new Set(['.py', '.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.rs'])
   const languageSupported = SUPPORTED_EXTS.has(ext)
@@ -217,9 +238,44 @@ export async function handle(args, context) {
   // 改用 Python 的 ValidationError）= 跨语言误报。现：只收同语言族（sameLang）。
   // 注：不按 fixtures/OLD 路径排除——测试常以 fixtures 为工作区根，路径排除会误伤（p2 A8/T2）；
   // 跨语言误报由 sameLang 完整解决即可。
+  // r12（隔壁实战教训）：sancai 的 YamlError 被建议给 tongtian——跨语言已修，跨模块没修。
+  // 模块边界（inModuleBoundary）：异常类须与目标文件共享目录树（file 目录子树 + 祖先链直接子文件），
+  // 同工作区不同子系统的异常不再互相污染。边界内无异常类时回退全库 + hierarchy_scope 标注。
   const JS_EXTS = ['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx']
   const isPy = ext === '.py'
   const sameLang = (f) => isPy ? f.endsWith('.py') : JS_EXTS.some(e => f.endsWith(e))
+  const normRel = (p) => String(p || '').replace(/\\/g, '/')
+  // r12：模块边界——target 的 dirname ∈ {file 的 dirname 子树, 祖先链任意层}
+  const inModuleBoundary = (targetRel, fileRel) => {
+    const t = normRel(targetRel)
+    const f = normRel(fileRel)
+    if (!t || !f) return true
+    const td = t.slice(0, t.lastIndexOf('/'))
+    const fd = f.slice(0, f.lastIndexOf('/'))
+    if (!td || !fd) return true
+    if (td === fd || td.startsWith(fd + '/')) return true
+    let d = fd
+    while (d) {
+      if (d === td) return true
+      d = d.slice(0, d.lastIndexOf('/'))
+    }
+    return false
+  }
+  let hierarchyScope = null
+  const hierarchyOrigins = []
+  const collectHierarchy = (list) => {
+    let added = 0
+    for (const s of list) {
+      // R22-⑪：名字形态过滤——searchSymbols 子串匹配会把 ErrorHandler/errorFactory 等非异常类混入层级（报告 P2）
+      if (s.type === 'class' && sameLang(s.file) && /(?:Error|Exception)$/.test(s.name)) {
+        if (!inModuleBoundary(s.file, file)) continue
+        hierarchy[s.name] = { base: isPy ? 'Exception' : 'Error', module: s.file, file: s.file, line: s.start_line }
+        hierarchyOrigins.push(s.file)
+        added++
+      }
+    }
+    return added
+  }
   if (codeIndexService) {
     const dbPath = join(getWorkspaceDir(workspaceDir), 'code-index.db')
     if (existsSync(dbPath)) {
@@ -227,17 +283,16 @@ export async function handle(args, context) {
         await codeIndexService.initWorkspace(workspaceDir)
         const results = await codeIndexService.searchSymbols('Error')
         const results2 = await codeIndexService.searchSymbols('Exception')
-        for (const s of [...(results || []), ...(results2 || [])]) {
-          if (s.type === 'class' && sameLang(s.file)) {
-            hierarchy[s.name] = { base: isPy ? 'Exception' : 'Error', module: s.file, file: s.file, line: s.start_line }
-          }
-        }
+        collectHierarchy([...(results || []), ...(results2 || [])])
+        if (Object.keys(hierarchy).length > 0) hierarchyScope = 'module'
       } catch {}
     }
   }
 
+  // r12：walk 收集单次遍历——先按模块边界过滤；边界内无异常类再回退全库（一次遍历两次过滤，避免重复读盘）
   if (Object.keys(hierarchy).length === 0) {
-    try {
+    const walkCollect = () => {
+      const found = []
       const dirs = []
       const walkDir = (dir, depth) => {
         if (depth > 3) return
@@ -259,19 +314,32 @@ export async function handle(args, context) {
       for (const filePath of dirs) {
         try {
           const c = readFileSync(filePath, 'utf-8')
-          // 11#5：Python `class X(Base)` vs JS `class X extends Base`
-          const classRe = isPy ? /^class\s+(\w+)\s*\((\w+)\)/gm : /^class\s+(\w+)\s+extends\s+(\w+)/gm
+          // 11#5：Python `class X(Base)` vs JS `class X extends Base`；r12: export class 形态（原 ^class 锚定行首永远匹配不到 export class）
+          const classRe = isPy ? /^(?:export\s+)?class\s+(\w+)\s*\((\w+)\)/gm : /^(?:export\s+)?class\s+(\w+)\s+extends\s+(\w+)/gm
           let cm
           while ((cm = classRe.exec(c)) !== null) {
             if (/Error|Exception/.test(cm[2])) {
               const relPath = filePath.startsWith(workspaceDir + '/') ? filePath.slice(workspaceDir.length + 1) : filePath
-              hierarchy[cm[1]] = { base: cm[2], module: relPath, file: relPath, line: c.slice(0, cm.index).split('\n').length }
+              found.push({ name: cm[1], base: cm[2], relPath, line: c.slice(0, cm.index).split('\n').length })
             }
           }
         } catch {}
       }
-    } catch {}
+      return found
+    }
+    const applyHierarchy = (found, filter) => {
+      for (const f of found) {
+        if (filter && !filter(f.relPath)) continue
+        hierarchy[f.name] = { base: f.base, module: f.relPath, file: f.relPath, line: f.line }
+        hierarchyOrigins.push(f.relPath)
+      }
+    }
+    const found = walkCollect()
+    applyHierarchy(found, (rel) => inModuleBoundary(rel, file))
+    // r12：边界内无异常类 → 回退全库（行为退化到旧状，但 hierarchy_scope 标注 + 跨模块提示）
+    if (Object.keys(hierarchy).length === 0) applyHierarchy(found)
   }
+  hierarchyScope = hierarchyScope || (hierarchyOrigins.some(o => inModuleBoundary(o, file)) ? 'module' : 'project')
 
   const raises = checkRaises(content, ext)
   const issues = []
@@ -321,12 +389,15 @@ export async function handle(args, context) {
   } else if (projectExcNames.length === 0 && raises.some(r => BUILTIN_EXCEPTIONS.has(r.exception))) {
     nextStep = `Project has no custom exceptions — builtin-usage check skipped (raise statements found: ${raises.length}).`
   } else {
-    nextStep = `Exception usage is clean.`
+    nextStep = `No raise/throw issues found by pattern check — not a full exception-design review.`
   }
 
   return {
     file,
+    coverage: 'pattern-scan (raise/throw shape + module-scoped hierarchy); exception design/flow NOT covered',
     project_exceptions: hierarchy,
+    // r12：hierarchy 收集范围——module=仅目标文件所在模块（同语言同模块）；project=模块内无异常类回退全库（跨模块异常可能混入，需人工甄别）
+    hierarchy_scope: hierarchyScope,
     issues,
     summary: {
       raises_checked: raises.length,

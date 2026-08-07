@@ -1,8 +1,11 @@
 import { execFile } from 'node:child_process'
-import { mkdtempSync, writeFileSync, existsSync, rmSync, mkdirSync } from 'node:fs'
-import { join, resolve, sep } from 'node:path'
+import { mkdtempSync, writeFileSync, existsSync, rmSync, mkdirSync, realpathSync } from 'node:fs'
+import { join, dirname, resolve, sep } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
+
+// r8(F8)：同仓库 git 事务串行化门闩（每 repo 一条 promise 链）
+const _repoLocks = new Map()
 
 function guardPath(root, userPath) {
   // r23-fix3: LLM 可能传非字符串路径（数字/对象）→ resolve() 会抛 TypeError 崩溃
@@ -55,6 +58,28 @@ export async function handle(args, context) {
       return { error: 'invalid_parameter', message: `new_content and delete are mutually exclusive: ${c.path}` }
     }
   }
+  // r8(F8)：同仓库 git 操作串行化——并行调用 checkout/commit/merge 交错会毁分支状态
+  // r9(P11)：锁 key 用 realpath——`/repo`、`/repo/`、`/repo/.`、symlink 别名指向同一仓库时
+  // 旧实现各建一条链，r8 想防的 checkout/merge 交错仍在不同拼写间存在
+  let lockKey = repoDir
+  try { lockKey = realpathSync(repoDir) } catch {}
+  const prev = _repoLocks.get(lockKey) || Promise.resolve()
+  let release
+  const myLock = new Promise(r => { release = r })
+  const myLink = prev.catch(() => {}).then(() => myLock)
+  _repoLocks.set(lockKey, myLink)
+  await prev.catch(() => {})
+  try {
+    return await _runTransaction(repoDir, changes, args)
+  } finally {
+    release()
+    // r9(P11)：链尾时清理 Map 条目（防跨大量 workspace 的微内存泄漏）——
+    // 存的是 myLink（包装链）而非 myLock，身份比较要用 myLink
+    if (_repoLocks.get(lockKey) === myLink) _repoLocks.delete(lockKey)
+  }
+}
+
+async function _runTransaction(repoDir, changes, args) {
   const timeout = Math.min(Math.max(parseInt(args?.timeout) || 30000, 1000), 120000)
 
   if (!existsSync(join(repoDir, '.git'))) {
@@ -87,6 +112,7 @@ export async function handle(args, context) {
     return { error: 'detached_head', message: 'Workspace is in detached HEAD state', suggestion: 'git checkout -b <branch> first, then retry' }
   }
 
+  let commit = null // r54(P0-10): 提升到 try 外——catch 需知道提交是否已创建，决定是否保留分支
   try {
     await git(['checkout', '-b', branchName], repoDir, timeout)
     await git(['checkout', originalBranch], repoDir, timeout)
@@ -95,11 +121,39 @@ export async function handle(args, context) {
     for (const change of changes) {
       const fullPath = join(worktreePath, change.path)
       if (change.new_content !== undefined) {
+        // r8(B4)：symlink 守卫——仓库提交的 symlink 会被 worktree checkout 重现，裸 writeFileSync 会写穿到外部
+        const realWorktree = realpathSync(worktreePath)
+        let targetReal = null
+        try { targetReal = realpathSync(fullPath) } catch {}
+        if (targetReal) {
+          if (targetReal !== realWorktree && !targetReal.startsWith(realWorktree + sep)) {
+            throw new Error(`refusing to write through symlink: ${change.path} resolves outside worktree (${targetReal})`)
+          }
+        } else {
+          let parentReal = null
+          try { parentReal = realpathSync(dirname(fullPath)) } catch {}
+          if (parentReal && parentReal !== realWorktree && !parentReal.startsWith(realWorktree + sep)) {
+            throw new Error(`refusing to write through symlinked dir: ${change.path} resolves outside worktree (${parentReal})`)
+          }
+        }
         const dir = join(fullPath, '..')
         if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
         writeFileSync(fullPath, change.new_content, 'utf-8')
       } else if (change.delete) {
-        if (existsSync(fullPath)) rmSync(fullPath)
+        // r9(P4)：delete 分支同样过 realpath 守卫——仓库提交的 symlink（指向 ~/.ssh 等）会被
+        // worktree checkout 重现，裸 rmSync 跟随 symlink 删外部文件；write 分支有守卫而 delete 没有
+        const realWorktree = realpathSync(worktreePath)
+        const parentReal = realpathSync(dirname(fullPath))
+        if (parentReal !== realWorktree && !parentReal.startsWith(realWorktree + sep)) {
+          throw new Error(`refusing to delete through symlinked dir: ${change.path} resolves outside worktree (${parentReal})`)
+        }
+        if (existsSync(fullPath)) {
+          const targetReal = realpathSync(fullPath)
+          if (targetReal !== realWorktree && !targetReal.startsWith(realWorktree + sep)) {
+            throw new Error(`refusing to delete through symlink: ${change.path} resolves outside worktree (${targetReal})`)
+          }
+          rmSync(fullPath)
+        }
       } else {
         throw new Error(`change for ${change.path} needs new_content or delete`)
       }
@@ -112,14 +166,17 @@ export async function handle(args, context) {
       }
     }
 
-    await git(['add', '-A'], worktreePath, timeout)
+    // r54(P1): 只 add 声明的 change 路径——git add -A 会把 verify_cmd 产物(node_modules/build/coverage)一并提交
+    await git(['add', '--', ...changes.map(c => c.path)], worktreePath, timeout)
     await git(['commit', '-m', args?.message || `tongtian: multi-file change (${changes.length} files)`], worktreePath, timeout)
-    const commit = await git(['rev-parse', 'HEAD'], worktreePath, timeout)
+    commit = await git(['rev-parse', 'HEAD'], worktreePath, timeout)
     await git(['worktree', 'remove', '--force', worktreePath], repoDir, timeout)
     rmSync(worktreePath, { recursive: true, force: true })
     await git(['checkout', originalBranch], repoDir, timeout)
     await git(['merge', '--ff-only', branchName], repoDir, timeout)
     await git(['branch', '-D', branchName], repoDir, timeout)
+    // R18：merge 后工作区文件全变——索引整体失效，标 dirty 让后续读取/增量重抽自动刷新
+    try { context?.codeIndexService?.markAllDirty() } catch {}
 
     return {
       success: true,
@@ -132,6 +189,18 @@ export async function handle(args, context) {
   } catch (e) {
     try { await git(['worktree', 'remove', '--force', worktreePath], repoDir, timeout) } catch {}
     try { rmSync(worktreePath, { recursive: true, force: true }) } catch {}
+    // r54(P0-10): 提交已创建但 merge/后续失败——branchName 是该提交唯一 ref，删掉即悬挂丢失。保留分支供人工合并。
+    if (commit) {
+      try { await git(['checkout', originalBranch], repoDir, timeout) } catch {}
+      return {
+        success: false,
+        error: 'merge_failed_commit_preserved',
+        message: e.message,
+        branch: branchName,
+        commit,
+        detail: `Commit ${commit.slice(0, 12)} was created but a later step failed. Branch "${branchName}" preserved (do NOT delete it). Recover with: git merge ${branchName}  (or git cherry-pick ${commit.slice(0, 12)}).`,
+      }
+    }
     try { await git(['branch', '-D', branchName], repoDir, timeout) } catch {}
     try { await git(['checkout', originalBranch], repoDir, timeout) } catch {}
     return {

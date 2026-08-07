@@ -3,7 +3,8 @@
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import { isConstantName } from '../misuse-helpers.js'
-import { checkFileStaleness, attachStalenessWarning } from '../../staleness.js'
+import { attachStalenessWarning } from '../../staleness.js'
+import { validateFilePath } from '../../error-codes.js'
 
 function detectMisuse(symbol) {
   if (!symbol) return null
@@ -20,7 +21,7 @@ export async function handle(args, context) {
   const { codeIndexService, getWorkspaceDir } = context
   const workspaceDir = args?.workspace_dir
 
-  if (!workspaceDir) {
+  if (typeof workspaceDir !== 'string' || !workspaceDir) {
     return { error: 'missing_parameter', message: 'workspace_dir is required', suggestion: 'Provide the absolute path to the project root directory. Call reindex first if this is a new workspace.' }
   }
 
@@ -43,26 +44,39 @@ export async function handle(args, context) {
   if (!file) {
     return { error: 'missing_parameter', message: 'file is required', suggestion: 'Provide a file path relative to workspace_dir (e.g. "scripts/lib/tools/spawn.mjs")' }
   }
+  // r54(P0-1): staleness/indexFile 前必须先校验——否则 `../` 经 checkFileStaleness 自动索引逃逸 workspace
+  const v = validateFilePath(file, workspaceDir)
+  if (v.blocked) {
+    return { error: 'PATH_BLOCKED', message: `file blocked: ${v.detail}`, suggestion: 'Provide a file path inside workspace_dir (no "..", no absolute paths outside workspace)' }
+  }
 
   const opts = {}
-  const staleness = await checkFileStaleness(codeIndexService, workspaceDir, file)
+  // R19-②：保鲜由服务层 getImpactAnalysis 内部 ensureFreshFile 统一承担
+  // Y002-S4：输出预算控制——max_results（默认 20，0=不限；max_callers 为向后兼容别名）
+  opts.maxCallers = 20
+  if (args?.max_results !== undefined || args?.max_callers !== undefined) {
+    const raw = args?.max_results !== undefined ? args.max_results : args.max_callers
+    const m = parseInt(raw)
+    opts.maxCallers = Number.isFinite(m) && m >= 0 ? m : 20
+  }
+  const ctxMode = args?.context_mode
+  opts.contextMode = ['none', 'snippet', 'full'].includes(ctxMode) ? ctxMode : 'snippet'
   const symbols = args?.symbols
   if (Array.isArray(symbols) && symbols.length > 0 && !args?.symbol) {
     const results = []
     for (const sym of symbols) {
-      const symOpts = { symbol: sym, changeType: opts.changeType || 'modify', maxCallers: opts.maxCallers || 20, depth: opts.depth || 2 }
+      const symOpts = { symbol: sym, changeType: opts.changeType || 'modify', maxCallers: opts.maxCallers, depth: opts.depth || 2, contextMode: opts.contextMode }
       if (args?.change_type) {
         const VALID_CHANGE_TYPES = ['modify', 'delete', 'rename']
         symOpts.changeType = VALID_CHANGE_TYPES.includes(args.change_type) ? args.change_type : 'modify'
       }
-      if (args?.max_callers) symOpts.maxCallers = args.max_callers
       if (args?.depth) {
         const d = parseInt(args.depth)
         symOpts.depth = (d > 0 && d <= 10) ? d : 2
       }
       const misuseWarning = detectMisuse(sym)
       const result = await codeIndexService.getImpactAnalysis(file, symOpts)
-      attachStalenessWarning(result, staleness)
+      attachStalenessWarning(result, result.freshness)
       if (misuseWarning) result.misuse_warning = misuseWarning
       results.push(result)
     }
@@ -74,7 +88,6 @@ export async function handle(args, context) {
     const VALID_CHANGE_TYPES = ['modify', 'delete', 'rename']
     opts.changeType = VALID_CHANGE_TYPES.includes(args.change_type) ? args.change_type : 'modify'
   }
-  if (args?.max_callers) opts.maxCallers = args.max_callers
   if (args?.depth) {
     const d = parseInt(args.depth)
     opts.depth = (d > 0 && d <= 10) ? d : 2
@@ -83,7 +96,7 @@ export async function handle(args, context) {
   const misuseWarning = detectMisuse(args?.symbol)
   const result = await codeIndexService.getImpactAnalysis(file, opts)
 
-  attachStalenessWarning(result, staleness)
+  attachStalenessWarning(result, result.freshness)
 
   if (misuseWarning) {
     result.misuse_warning = misuseWarning

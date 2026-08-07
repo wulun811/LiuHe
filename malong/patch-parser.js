@@ -59,7 +59,7 @@ export function parseBlocks(text) {
         searchLines.push(lines[i])
         i++
       }
-      if (i >= lines.length) break
+      if (i >= lines.length) { blocks.unclosed = true; break }
       i++ // skip =======
 
       const replaceLines = []
@@ -67,7 +67,7 @@ export function parseBlocks(text) {
         replaceLines.push(lines[i])
         i++
       }
-      if (i >= lines.length) break
+      if (i >= lines.length) { blocks.unclosed = true; break }
       i++ // skip >>>>>>> REPLACE
 
       blocks.push({

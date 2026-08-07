@@ -1,7 +1,7 @@
 {
   "name": "security_review",
   "version": "1.0.0",
-  "description": "Scan code for 19 security patterns: injection (eval/exec/SQL), XSS, hardcoded secrets (JWT/password/API key), CORS *, timing attacks, insecure compare. Severity-graded + score. Deterministic regex, zero LLM.",
+  "description": "Scan for security patterns: injection (eval/exec/spawn/SQL/template), XSS, secrets, CORS*, insecure compare. Severity-graded, zero LLM. Suppress via malong-ignore or .ai-patterns.json. Out of scope: SSRF/XXE/deserialization/auth.",
   "inputSchema": {
     "type": "object",
     "properties": {

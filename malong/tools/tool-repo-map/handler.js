@@ -27,8 +27,9 @@ export async function handle(args, context) {
   }
 
   // P2-C12：args.dir 必须落在 workspace 内（旧：可映射任意目录 /etc）
-  let scanDir = args.dir || workspaceDir
+  // r54(P1): 相对 dir 按 workspace_dir 解析——旧实现 resolve(scanDir) 用进程 cwd，workspace≠cwd 时合法子目录被误判 PATH_BLOCKED
   const { resolve, sep } = await import('node:path')
+  let scanDir = args.dir ? resolve(workspaceDir, args.dir) : resolve(workspaceDir)
   const resolvedDir = resolve(scanDir)
   const resolvedWs = resolve(workspaceDir)
   if (resolvedDir !== resolvedWs && !resolvedDir.startsWith(resolvedWs + sep)) {

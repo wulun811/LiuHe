@@ -138,6 +138,11 @@ assert(r1.index_status?.state === 'fresh' || r1.index_status?.state === 'dirty' 
 assert(Array.isArray(r1.pipeline) && r1.pipeline.length >= 2, 'P2 pipeline 返回')
 assert(!!r1.trace_id, 'P2 trace_id 返回')
 assert(r1.budget?.truncated === true || r1.symbol?.text.length <= 400 + 20, 'P2 budget 截断生效（400 字符内）')
+// R22-⑨：budget_hint=0 曾被 `|| 1200` 吞为默认——0 = 不截断（全文预算 100000）
+const r0 = await readHandler({ workspace_dir: WS, locator: { file_path: 'src/auth.py', symbol_id: loginSyms[0].stable_id }, budget_hint: 0 }, ctx)
+assert(r0.budget?.requested === 100000 && r0.budget?.truncated === false, `P2 budget_hint=0 → 全文预算 100000 不截断（得 requested=${r0.budget?.requested} truncated=${r0.budget?.truncated}）`)
+const r1200 = await readHandler({ workspace_dir: WS, locator: { file_path: 'src/auth.py', symbol_id: loginSyms[0].stable_id } }, ctx)
+assert(r1200.budget?.requested === 1200, `P2 不传 budget_hint → 默认 1200（得 ${r1200.budget?.requested}）`)
 assert(r1.outline === null, 'P2 core 模式默认不带 outline（省 token）')
 const r1Rich = await readHandler({ workspace_dir: WS, locator: { file_path: 'src/auth.py', symbol_id: loginSyms[0].stable_id }, mode: 'rich', budget_hint: 400 }, ctx)
 assert(r1Rich.outline?.items?.length > 0, 'P2 rich 模式带 outline 摘要')
@@ -146,11 +151,12 @@ const r1Force = await readHandler({ workspace_dir: WS, locator: { file_path: 'sr
 assert(r1Force.outline?.items?.length > 0, 'P2 include_outline=true 显式强制带 outline')
 
 const rAmb = await readHandler({ workspace_dir: WS, locator: { file_path: 'src/auth.py', name: 'login' } }, ctx)
-assert(rAmb.success === false && rAmb.error?.code === 'AMBIGUOUS_SYMBOL', 'P2 同名 login → AMBIGUOUS_SYMBOL 不自动选')
-assert(Array.isArray(rAmb.error?.candidates) && rAmb.error.candidates.length === 2, 'P2 歧义返回 2 个候选（含 symbol_id）')
+// R22-⑯：错误 shape 扁平化——error/code 顶层字段
+assert(rAmb.success === false && (rAmb.code === 'AMBIGUOUS_SYMBOL' || rAmb.error?.code === 'AMBIGUOUS_SYMBOL'), 'P2 同名 login → AMBIGUOUS_SYMBOL 不自动选')
+assert(Array.isArray(rAmb.candidates || rAmb.error?.candidates) && (rAmb.candidates || rAmb.error?.candidates).length === 2, 'P2 歧义返回 2 个候选（含 symbol_id）')
 
 const rMiss = await readHandler({ workspace_dir: WS, locator: { file_path: 'src/auth.py', name: 'no_such_fn' } }, ctx)
-assert(rMiss.success === false && rMiss.error?.code === 'SYMBOL_NOT_FOUND', 'P2 不存在 → SYMBOL_NOT_FOUND')
+assert(rMiss.success === false && (rMiss.code === 'SYMBOL_NOT_FOUND' || rMiss.error?.code === 'SYMBOL_NOT_FOUND'), 'P2 不存在 → SYMBOL_NOT_FOUND')
 
 const rDeg = await readHandler({ workspace_dir: WS, locator: { file_path: 'README.md', line_range: [3, 5] } }, ctx)
 assert(rDeg.symbol?.symbol_id === null && rDeg.symbol?.text.includes('Some doc line'), 'P2 非代码 line_range 降级读')
@@ -400,25 +406,25 @@ mkdirSync(join(recWS, '.malong', 'journal'), { recursive: true })
 writeFileSync(`${recWS}/a.txt`, 'v1')
 const ja = createJournal(recWS, 'a.txt', `${recWS}/a.txt`, 'v1', { editMode: 'patch', state: 'staged' })
 updateJournalState(ja.dir, { state: 'staged', new_hash: sha256('v2') })
-let rec = recoverJournals(recWS)
+let rec = await recoverJournals(recWS)
 assert(rec.some(r => r.txn_id === ja.txnId && r.action === 'abandoned'), `P3 recovery: staged+当前==写前 → abandoned（得 ${JSON.stringify(rec)}）`)
 assert(readFileSync(`${recWS}/a.txt`, 'utf-8') === 'v1', 'P3 recovery: abandoned 不覆盖文件')
 // 场景 B：当前 == new_hash（rename 成功、崩溃在 committed 前）→ 补标 committed，文件不动
 writeFileSync(`${recWS}/b.txt`, 'v2')
 const jb = createJournal(recWS, 'b.txt', `${recWS}/b.txt`, 'v1', { editMode: 'patch', state: 'staged' })
 updateJournalState(jb.dir, { state: 'staged', new_hash: sha256('v2') })
-rec = recoverJournals(recWS)
+rec = await recoverJournals(recWS)
 assert(rec.some(r => r.txn_id === jb.txnId && r.action === 'committed'), `P3 recovery: staged+当前==写后 → committed（得 ${JSON.stringify(rec)}）`)
 assert(readFileSync(`${recWS}/b.txt`, 'utf-8') === 'v2', 'P3 recovery: committed 不覆盖新内容')
 // 场景 C：当前既非写前也非写后（外部修改过）→ needs_review，绝不覆盖
 writeFileSync(`${recWS}/c.txt`, 'EXTERNAL')
 const jc = createJournal(recWS, 'c.txt', `${recWS}/c.txt`, 'v1', { editMode: 'patch', state: 'staged' })
 updateJournalState(jc.dir, { state: 'staged', new_hash: sha256('v2') })
-rec = recoverJournals(recWS)
+rec = await recoverJournals(recWS)
 assert(rec.some(r => r.txn_id === jc.txnId && r.action === 'kept_external_change'), `P3 recovery: staged+外部修改 → kept_external_change（得 ${JSON.stringify(rec)}）`)
 assert(readFileSync(`${recWS}/c.txt`, 'utf-8') === 'EXTERNAL', 'P3 recovery: 外部修改不被回滚覆盖')
 // 场景 D：旧语义回归（真实崩溃在 rename 前 → staged + 当前==写前，旧代码会 rename 覆盖；新代码标 abandoned 同样安全）
-assert(recoverJournals(recWS).length === 0, 'P3 recovery: 二次运行无重复处理')
+assert((await recoverJournals(recWS)).length === 0, 'P3 recovery: 二次运行无重复处理')
 
 // 3.17 括号平衡校验字符串感知（字符串/注释里的括号不是代码结构 —— 递归进化第 4 轮修复）
 const { checkBracketBalance } = await imp(join(MALONG_DIR, 'write-edit.js'))
@@ -429,6 +435,19 @@ assert(checkBracketBalance('// comment with )').ok === true, 'P3 行注释含 ) 
 assert(checkBracketBalance('/* block ) */ x = 1').ok === true, 'P3 块注释含 ) 不误报')
 assert(checkBracketBalance('function f() { return 1 }').ok === true, 'P3 正常代码仍 pass')
 assert(checkBracketBalance('function f( { return 1 }').ok === false, 'P3 真不平衡仍报')
+
+// 3.18 bracket 误报降级（全工具冒烟 r12.5 发现）：stripper 不识别正则字面量——含引号字符类如 ['"`]
+// 连带破坏字符串剥离，合法文件（node --check 过）也报 unbalanced。syntax pass 是权威 ⇒ 降级防 strict 阻断/误导。
+const { reconcileBracketWithSyntax } = await imp(join(MALONG_DIR, 'write-runtime.js'))
+assert(checkBracketBalance("function f(x) { return /['\"]/ }\nconst b = /['\"]/").ok === false, 'P3 已知局限：含引号字符类的正则使 raw bracket 误报（锁定现状，靠 reconcile 兜底）')
+const v1 = reconcileBracketWithSyntax({ syntax: { status: 'pass' }, bracket: { status: 'fail', errors: ['unbalanced: expected ) but got }'] } })
+assert(v1.bracket.status === 'pass' && v1.bracket.false_positive_downgraded, 'P3 syntax pass + bracket fail → 降级为 pass（syntax 是权威）')
+const v2 = reconcileBracketWithSyntax({ syntax: { status: 'skip', reason: 'non-code file' }, bracket: { status: 'fail', errors: ['x'] } })
+assert(v2.bracket.status === 'fail', 'P3 syntax skip（非代码）→ bracket 是唯一信号，保留 fail')
+const v3 = reconcileBracketWithSyntax({ syntax: { status: 'fail' }, bracket: { status: 'fail', errors: ['x'] } })
+assert(v3.bracket.status === 'fail', 'P3 syntax fail → bracket 保留 fail（佐证）')
+const v4 = reconcileBracketWithSyntax({ syntax: { status: 'pass' }, bracket: { status: 'pass' } })
+assert(v4.bracket.status === 'pass' && !v4.bracket.false_positive_downgraded, 'P3 双 pass 不动')
 
 // ══════════════ 汇总 ══════════════
 console.log(`\n${pass} passed, ${fail} failed`)

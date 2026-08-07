@@ -1,7 +1,7 @@
 {
   "name": "write_symbols",
   "version": "1.0.0",
-  "description": "SAFE WRITE PATH (batch). All-or-nothing across files, deadlock-safe. Multi-file refactor? Use instead of N×write_symbol. New symbols: reindex first.",
+  "description": "Guarded write path (batch). All-or-nothing across files, deadlock-safe. Multi-file refactor? Use instead of N×write_symbol. New symbols: reindex first. 含双引号/反斜杠的字符串参数注意 JSON 转义一致性（全串统一转义或改用中文引号），否则客户端参数解析失败。",
   "inputSchema": {
     "type": "object",
     "properties": {

@@ -12,7 +12,8 @@ export async function handle(args, context) {
 
   if (action === 'restart') {
     // 软重启：重置服务状态，不杀进程
-    const restartLog = join(stateDir || '/tmp', 'restart.log')
+    // r54(P2): 无 stateDir 时不回退共享 /tmp/restart.log——可被预植符号链接，append 跟随写任意文件。无 stateDir 则跳过日志
+    const restartLog = stateDir ? join(stateDir, 'restart.log') : null
     const ts = new Date().toISOString()
 
     try {
@@ -49,25 +50,39 @@ export async function handle(args, context) {
           fail_checks: afterHealth.checks.filter(c => c.status === 'FAIL').map(c => c.name),
         },
         message: 'Soft restart completed. Services reinitialized.',
-        next_step: 'If issues persist, consider restarting opencode.',
+        next_step: 'If issues persist, consider restarting the MCP host.',
       }
 
-      appendFileSync(restartLog, `[${ts}] restart completed, RSS: ${result.before.memory.rss_mb}MB -> ${result.after.memory.rss_mb}MB\n`)
+      if (restartLog) {
+        try { appendFileSync(restartLog, `[${ts}] restart completed, RSS: ${result.before.memory.rss_mb}MB -> ${result.after.memory.rss_mb}MB\n`) } catch {}
+      }
 
       return result
     } catch (e) {
       return {
         status: 'restart_failed',
         error: e.message,
-        message: 'Soft restart failed. Consider restarting opencode.',
+        message: 'Soft restart failed. Consider restarting the MCP host.',
       }
     }
   }
 
   if (action === 'cleanup') {
-    const maxAgeDays = Number(args?.max_age_days) > 0 ? Number(args.max_age_days) : 14
+    const maxAgeDays = Number(args?.max_age_days) > 0 ? Number(args.max_age_days) : 3
     const dryRun = args?.dry_run === true
-    const result = cleanupStaleWorkspaces(context.workspacesDir, { maxAgeDays, dryRun })
+    // r8(F11)：保护在用工作区——只读负载不刷新 lastActivity，GC 会误删仍被打开的索引库
+    // R16：保护列表与启动 GC 同源（getTouchedWorkspaceHashes）——长驻进程打开的库不删；
+    // 旧实现只保护当前 ws hash，切过 workspace 的长驻进程会删掉仍打开的库 → 写入落 unlinked inode
+    const protect = []
+    if (context?.codeIndexService?.getTouchedWorkspaceHashes) {
+      const touched = context.codeIndexService.getTouchedWorkspaceHashes()
+      if (Array.isArray(touched)) protect.push(...touched)
+    }
+    if (context?.codeIndexService?.getCurrentWorkspaceHash) {
+      const h = context.codeIndexService.getCurrentWorkspaceHash()
+      if (h && !protect.includes(h)) protect.push(h)
+    }
+    const result = cleanupStaleWorkspaces(context.workspacesDir, { maxAgeDays, dryRun, protect })
     result.next_step = dryRun
       ? 'Dry run only — re-run with dry_run=false to actually prune stale workspace caches.'
       : 'Deleted caches are rebuildable: next access to a pruned workspace reindexes automatically.'

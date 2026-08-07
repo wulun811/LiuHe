@@ -1,7 +1,7 @@
 {
   "name": "impact_analysis",
   "version": "2.1.0",
-  "description": "BEFORE modifying/renaming: callers (blast radius), callees, risk. Line-level? call_chain. Simple edit? read_symbol+write_symbol.",
+  "description": "BEFORE modifying/renaming: callers (blast radius), callees, risk (caller-count blast). Line-level? call_chain. Simple edit? read_symbol+write_symbol.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -35,7 +35,20 @@
       },
       "max_callers": {
         "type": "number",
-        "description": "Max callers to return (default: 20). caller_count always includes full counts."
+        "description": "Max callers to return (default: 20). caller_count always includes full counts. Backward-compat alias for max_results."
+      },
+      "max_results": {
+        "type": "number",
+        "description": "Y002-S4 output budget: max results to return (default 20, 0=unlimited). max_callers is a backward-compat alias."
+      },
+      "context_mode": {
+        "type": "string",
+        "enum": [
+          "none",
+          "snippet",
+          "full"
+        ],
+        "description": "Y002-S4 output budget: caller context granularity. none=no context (cheapest), snippet, full (default)."
       },
       "depth": {
         "type": "number",

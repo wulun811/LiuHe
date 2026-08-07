@@ -21,6 +21,10 @@
         "type": "string",
         "description": "Test command to run in workspace_dir (e.g. \"npm test\", \"pytest\")"
       },
+      "cwd": {
+        "type": "string",
+        "description": "Optional working directory relative to workspace_dir (e.g. \"0FTYcloud\"). Scripts that must run in a subdirectory no longer need cd workarounds."
+      },
       "timeout": {
         "type": "number",
         "description": "Timeout in ms (default: 30000, min 1000)"

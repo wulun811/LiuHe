@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process'
+import { spawnWithGroup } from '../../spawn-guard.js'
 import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { join, extname, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -13,23 +13,23 @@ function guardPath(root, userPath) {
 }
 
 function runCmd(cmd, args, opts = {}) {
-  return new Promise((resolve) => {
-    const timeout = opts.timeout || 30000
-    const child = execFile(cmd, args || [], {
-      cwd: opts.cwd || process.cwd(),
-      env: { ...process.env, ...(opts.env || {}) },
-      timeout,
-      maxBuffer: 4 * 1024 * 1024,
-    }, (err, stdout, stderr) => {
-      resolve({
-        stdout: (stdout || '').toString(),
-        stderr: (stderr || '').toString(),
-        exitCode: err ? (typeof err.code === 'number' ? err.code : -1) : 0,
-        timeout: err?.killed === true,
-        error: err && typeof err.code !== 'number' ? err.message : undefined,
-      })
-    })
-  })
+  const timeout = opts.timeout || 30000
+  // R14：spawnWithGroup 进程组杀——超时杀孙进程，防孤儿
+  return spawnWithGroup(cmd, args, {
+    cwd: opts.cwd || process.cwd(),
+    env: opts.env,
+    timeout,
+    maxBuffer: 4 * 1024 * 1024,
+  }).then(({ code, stdout, stderr, killed }) => ({
+    stdout,
+    stderr,
+    exitCode: typeof code === 'number' ? code : -1,
+    timeout: killed,
+    error: killed ? `Command timed out after ${timeout}ms` : undefined,
+  })).catch((e) => ({
+    stdout: '', stderr: '', exitCode: -1, timeout: false,
+    error: e?.code === 'ENOENT' ? `Command not found: ${cmd}` : (e.message || String(e)),
+  }))
 }
 
 function parseStackTraces(output) {
@@ -56,6 +56,9 @@ function parseStackTraces(output) {
 }
 
 function extractErrorType(stderr, stdout, exitCode) {
+  // r41-fix: 干净退出（exit 0）= 成功，输出文本再像失败也不分类——/FAILED/i 无词边界会命中
+  // "0 failed" 总结行，全绿测试因此被误判 TestFailure（exitCode 检查原只在 RuntimeError 分支）
+  if (exitCode === 0) return null
   const combined = stderr + '\n' + stdout
   if (/SyntaxError/i.test(combined)) return 'SyntaxError'
   if (/TypeError/i.test(combined)) return 'TypeError'
@@ -91,7 +94,7 @@ const SUGGESTIONS = {
   SegFault: '检查内存越界访问或大型递归调用',
 }
 
-function analyzeError(output) {
+export function analyzeError(output) {
   const stderr = output?.stderr || ''
   const stdout = output?.stdout || ''
   const exitCode = output?.exitCode ?? -1
@@ -132,6 +135,18 @@ export async function handle(args, context) {
   if (!workspaceDir) {
     return { error: 'missing_parameter', message: 'workspace_dir is required' }
   }
+  // r10e：cwd 可选参数（相对 workspace_dir）——脚本必须在子目录（如 0FTYcloud/）跑时不再绕路径
+  let runCwd = workspaceDir
+  if (args?.cwd != null) {
+    if (typeof args.cwd !== 'string') {
+      return { error: 'invalid_input', message: 'cwd must be a string', suggestion: 'Provide a subdirectory path relative to workspace_dir.' }
+    }
+    const resolvedCwd = guardPath(workspaceDir, args.cwd)
+    if (!resolvedCwd || !existsSync(resolvedCwd)) {
+      return { error: 'cwd_not_found', message: `cwd not found inside workspace_dir: ${args.cwd}` }
+    }
+    runCwd = resolvedCwd
+  }
   // r23-fix2: 下限 1000ms——LLM 常把秒当参数传，timeout=1 会 1ms 秒超时
   const timeout = Math.min(Math.max(parseInt(args?.timeout) || 30000, 1000), 120000)
 
@@ -147,39 +162,39 @@ export async function handle(args, context) {
     const ext = extname(args.script)
     let run
     // r23-fix: 全部补 cwd=workspace_dir（原版只对 command/test 传了 cwd，脚本内相对路径读不到）
-    if (['.js', '.mjs', '.cjs'].includes(ext)) run = runCmd(process.execPath, [filePath], { cwd: workspaceDir, timeout })
-    else if (ext === '.py') run = runCmd('python3', [filePath], { cwd: workspaceDir, timeout })
-    else if (ext === '.go') run = runCmd('go', ['run', filePath], { cwd: workspaceDir, timeout })
+    if (['.js', '.mjs', '.cjs'].includes(ext)) run = runCmd(process.execPath, [filePath], { cwd: runCwd, timeout })
+    else if (ext === '.py') run = runCmd('python3', [filePath], { cwd: runCwd, timeout })
+    else if (ext === '.go') run = runCmd('go', ['run', filePath], { cwd: runCwd, timeout })
     else if (ext === '.rs') {
       // r23-fix: 原固定 /tmp/debug_runner_${pid} 并发互相覆盖 → 唯一临时目录，运行后清理
       const binDir = mkdtempSync(join(tmpdir(), 'dr-rust-'))
       const bin = join(binDir, `run-${process.pid}-${randomUUID().slice(0, 8)}`)
-      const compiled = await runCmd('rustc', ['--edition', '2021', '-o', bin, filePath], { cwd: workspaceDir, timeout })
+      const compiled = await runCmd('rustc', ['--edition', '2021', '-o', bin, filePath], { cwd: runCwd, timeout })
       if (compiled.exitCode !== 0) {
         rmSync(binDir, { recursive: true, force: true })
         return { mode: 'script', script: args.script, ...compiled, ...analyzeError(compiled) }
       }
-      const execResult = await runCmd(bin, [], { cwd: workspaceDir, timeout })
+      const execResult = await runCmd(bin, [], { cwd: runCwd, timeout })
       rmSync(binDir, { recursive: true, force: true })
       run = Promise.resolve(execResult)
-    } else if (ext === '.sh') run = runCmd('bash', [filePath], { cwd: workspaceDir, timeout })
+    } else if (ext === '.sh') run = runCmd('bash', [filePath], { cwd: runCwd, timeout })
     else {
       return { error: 'unsupported_extension', message: `Unsupported extension: ${ext} (support js/mjs/cjs/py/go/rs/sh)` }
     }
     const result = await run
-    return buildResponse(result, { mode: 'script', script: args.script, cwd: workspaceDir, next_step: analyzeError(result).error_type ? analyzeError(result).suggested_action : 'Script ran successfully.' })
+    return buildResponse(result, { mode: 'script', script: args.script, cwd: runCwd, next_step: analyzeError(result).error_type ? analyzeError(result).suggested_action : 'Script ran successfully.' })
   }
 
   // command 模式：bash -c 执行，保留引号语义（split 会拆碎引号导致 SyntaxError）
   if (args?.command) {
-    const result = await runCmd('bash', ['-c', args.command], { cwd: workspaceDir, timeout })
-    return buildResponse(result, { mode: 'command', command: args.command, cwd: workspaceDir, next_step: analyzeError(result).error_type ? analyzeError(result).suggested_action : 'Command ran successfully.' })
+    const result = await runCmd('bash', ['-c', args.command], { cwd: runCwd, timeout })
+    return buildResponse(result, { mode: 'command', command: args.command, cwd: runCwd, next_step: analyzeError(result).error_type ? analyzeError(result).suggested_action : 'Command ran successfully.' })
   }
 
   // test 模式
   if (args?.test) {
-    const result = await runCmd('bash', ['-c', args.test], { cwd: workspaceDir, timeout })
-    return buildResponse(result, { mode: 'test', command: args.test, cwd: workspaceDir, next_step: analyzeError(result).error_type ? analyzeError(result).suggested_action : 'Tests passed.' })
+    const result = await runCmd('bash', ['-c', args.test], { cwd: runCwd, timeout })
+    return buildResponse(result, { mode: 'test', command: args.test, cwd: runCwd, next_step: analyzeError(result).error_type ? analyzeError(result).suggested_action : 'Tests passed.' })
   }
 
   return { error: 'missing_parameter', message: 'Provide command, script, or test to run' }

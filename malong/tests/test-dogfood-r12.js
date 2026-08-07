@@ -4,6 +4,7 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
+import { tmpdir } from 'node:os'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const imp = (p) => import(pathToFileURL(p).href)
@@ -48,7 +49,6 @@ function assert(c, m) { if (c) { pass++ } else { fail++; console.error('  FAIL:'
   const out = execFileSync('python3', ['-c', `
 import sys; sys.path.insert(0, ${JSON.stringify(dirname(py))})
 import batch_edit_mvp as m
-import { tmpdir } from 'node:os'
 d = m.generate_diff('a\\nb\\n', 'a\\nc\\n', 'f.txt')
 print(d.startswith('--- a/f.txt\\n+++ b/f.txt\\n@@'))
 `], { encoding: 'utf-8' }).trim()

@@ -16,6 +16,10 @@
       "file": {
         "type": "string",
         "description": "Restrict to file rel to root; not a dir; omit = project-wide"
+      },
+      "kind": {
+        "type": "string",
+        "description": "Y002-S4 kind filter: comma-separated call/import/use/assign/extends/implements. Invalid kinds ignored with kind_filter_note."
       }
     },
     "required": [

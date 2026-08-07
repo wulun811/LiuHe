@@ -101,6 +101,11 @@ pub fn decode_frame(buf: &[u8]) -> DecodeResult {
     let payload = &buf[4..4 + total_len];
     let consumed = 4 + total_len;
 
+    // r9(B3)：零长度帧——payload 为空时直接 Skip，旧实现落到 from_slice(空) → Skip(0) → 服务端 drain(..0) 无限自旋
+    if payload.is_empty() {
+        return DecodeResult::Skip(4);
+    }
+
     if payload.len() >= 4 {
         let header_len = u32::from_be_bytes([payload[0], payload[1], payload[2], payload[3]]) as usize;
         if header_len > 0 && header_len <= payload.len() - 4 && header_len < total_len {

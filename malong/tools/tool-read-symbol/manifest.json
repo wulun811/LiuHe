@@ -35,10 +35,42 @@
             },
             "description": "Degraded line_range read for non-code files: [start, end] 1-based inclusive"
           }
+        }
+      },
+      "locators": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "symbol_id": {
+              "type": "string",
+              "description": "Stable symbol id (lang:path::qualified_name#kind). Preferred anchor."
+            },
+            "file_path": {
+              "type": "string",
+              "description": "Workspace-relative file path (e.g. src/auth.py)"
+            },
+            "name": {
+              "type": "string",
+              "description": "Symbol name (used with file_path when symbol_id unknown)"
+            },
+            "kind": {
+              "type": "string",
+              "description": "Optional: function/method/class/variable to disambiguate"
+            },
+            "line_range": {
+              "type": "array",
+              "items": {
+                "type": "integer"
+              },
+              "description": "Degraded line_range read for non-code files: [start, end] 1-based inclusive"
+            }
+          },
+          "required": [
+            "file_path"
+          ]
         },
-        "required": [
-          "file_path"
-        ]
+        "description": "Y002-S5 batch entry: array of locators, parallel read-only, per-entry failure non-blocking. Use instead of locator for multi-symbol reads."
       },
       "mode": {
         "type": "string",
@@ -50,7 +82,7 @@
       },
       "context_lines": {
         "type": "integer",
-        "description": "Context lines around symbol (default 3)"
+        "description": "Context lines around symbol (default 0 — context_lines does not affect slicing; symbol body is returned as indexed)"
       },
       "include_outline": {
         "type": "boolean",
@@ -81,8 +113,19 @@
       }
     },
     "required": [
-      "workspace_dir",
-      "locator"
+      "workspace_dir"
+    ],
+    "anyOf": [
+      {
+        "required": [
+          "locator"
+        ]
+      },
+      {
+        "required": [
+          "locators"
+        ]
+      }
     ]
   },
   "handler": "./handler.js",
