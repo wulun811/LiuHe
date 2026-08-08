@@ -1,6 +1,9 @@
 import { readUsageStats, cleanupStaleWorkspaces } from '../../health-check.js'
-import { appendFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { appendFileSync, readFileSync } from 'node:fs'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const MATRIX_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'docs', 'Y004-工具排查矩阵.md')
 
 export async function handle(args, context) {
   const { runHealthCheck, stateDir } = context
@@ -9,6 +12,39 @@ export async function handle(args, context) {
   }
 
   const action = args?.action || 'check'
+
+  if (action === 'matrix') {
+    const tool = args?.tool
+    if (!tool) {
+      return { error: 'missing_parameter', message: 'tool is required for action=matrix', suggestion: 'Pass tool=<name> e.g. health(action="matrix", tool="read_symbol")' }
+    }
+    try {
+      const text = readFileSync(MATRIX_PATH, 'utf8')
+      const lines = text.split('\n')
+      const row = lines.find(l => l.trim().startsWith(`| **${tool}** |`) || l.trim().startsWith(`| **${tool} `))
+      if (!row) {
+        return {
+          action: 'matrix',
+          tool,
+          registered: false,
+          next_step: 'Tool not in Y004 matrix — if it is new/changed, register it (update the matrix + add failure-path test).',
+        }
+      }
+      // 列: | 工具 | 设想的边界情况 | 覆盖状态 | 残留风险 |
+      const cells = row.split('|').map(c => c.trim()).filter((_, i, a) => i > 0 && i < a.length - 1)
+      return {
+        action: 'matrix',
+        tool,
+        registered: true,
+        boundary: cells[1] || '',
+        coverage: cells[2] || '',
+        residual_risk: cells[3] || '',
+        next_step: '改前查此判据（该停就停）；改后补失败路径测试 + 更新本行。回归跑 coverage 列里的 test-xxx.js。',
+      }
+    } catch (e) {
+      return { error: 'matrix_unavailable', message: `Cannot read Y004 matrix: ${e.message}`, suggestion: 'Ensure malong/docs/Y004-工具排查矩阵.md exists' }
+    }
+  }
 
   if (action === 'restart') {
     // 软重启：重置服务状态，不杀进程

@@ -191,6 +191,9 @@ function findUnusedImports(content, ext) {
 
     if (importOk) {
       if (ext === '.py') {
+        // R22-㉒（ansible 真实项目实测）：from __future__ import X 是编译指令不是名字绑定，
+        // 语义上永不"未使用"——旧实现把它当普通 import 登记，全仓误报（ansible modules 71 文件报 97 个）
+        if (/^from\s+__future__\s+import\b/.test(line)) continue
         m = /^(?:from\s+\S+\s+)?import\s+(.+)/.exec(line)
         if (m) {
           const raw = m[1].replace(/[()]/g, '')
@@ -322,7 +325,7 @@ export async function handle(args, context) {
     if (existsSync(dbPath)) {
       try {
         await codeIndexService.initWorkspace(workspaceDir)
-        const dead = await codeIndexService.detectDeadCode?.()
+        const dead = await codeIndexService.detectDeadCode?.({ scopePrefix })
         if (dead && Array.isArray(dead)) {
           // r12：文本引用兜底懒加载——只在存在死代码候选时扫描（候选少则省一次全仓文件遍历）
           let textRefs = null

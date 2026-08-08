@@ -28,12 +28,20 @@ const MEMORY_DANGER_MB = 480
 // r35-fix: Windows 无 getuid → UID 兜底 0（与 parse-client.js 同款守卫）
 
 const UID = typeof process.getuid === 'function' ? process.getuid() : 0
+// r55: Windows 无 Unix socket——daemon 走 TCP 127.0.0.1:MALONG_PORT（parse-client.js 已有 IS_WIN 分支，此处补齐）
+const IS_WIN = process.platform === 'win32'
 // r9(H14)：parse-client 的 socket 路径已跟随 env（r8 F4 pid 同步）——mcp-server 的检查/spawn 探测
 // 还硬编码默认路径 → 设了 MALONG_SOCKET 的会话双 spawn / 孤儿 daemon
 const PARSE_SERVICE_SOCKET = process.env.MALONG_SOCKET || `/tmp/malong-parse-${UID}.sock`
+const PARSE_SERVICE_TCP_PORT = parseInt(process.env.MALONG_PORT || '31001', 10)
 // r53: MALONG_PARSE_BIN env 覆盖（与 parse-client 对齐——此前启动 daemon 用硬编码路径，运行期重启用 env 路径，用户设 env 后两个路径 daemon 可能并存）
 const PARSE_SERVICE_BIN = process.env.MALONG_PARSE_BIN || process.env.MALONG_PARSE_BIN_ALT || join(os.homedir(), '.local', 'bin', 'malong-parse')
 const PARSE_SERVICE_BIN_ALT = join(__dirname, '..', 'malong-parse', 'target', 'release', 'malong-parse')
+
+// r55: Windows 无 /tmp 语义——spawn 锁放用户数据目录，与 parse-stderr.log 同址
+const PARSE_SPAWN_LOCK = IS_WIN
+  ? join(os.homedir(), '.local', 'share', 'malong', '.parse-spawn.lock')
+  : join(dirname(PARSE_SERVICE_SOCKET), '.parse-spawn.lock')
 
 // r11(M3)：daemon stderr 落盘——旧实现 stdio ignore 把 tracing 日志（SLOW/PANIC/TIMEOUT 等排障关键）全丢 /dev/null，
 // r10-B 的 rotate_stdout_log_if_needed 只对 shell 重定向生效，程序化 spawn 是 no-op；
@@ -51,10 +59,10 @@ function openParseStderrFd() {
 
 // R22-⑱（第五轮核实）：daemon spawn 无原子锁——两个 MCP 进程同时探测失败 → 双 spawn → 一个 EADDRINUSE 变孤儿。
 // O_EXCL 锁 + mtime stale（>10s 无 socket 视为崩溃残留）：获取失败 = 另一进程正在启动 → 等 socket 出现。
-const PARSE_SPAWN_LOCK = join(dirname(PARSE_SERVICE_SOCKET), '.parse-spawn.lock')
 
 function acquireSpawnLock() {
   try {
+    mkdirSync(dirname(PARSE_SPAWN_LOCK), { recursive: true })
     writeFileSync(PARSE_SPAWN_LOCK, `${process.pid} ${Date.now()}`, { flag: 'wx' })
     return true
   } catch {
@@ -73,23 +81,26 @@ function releaseSpawnLock() {
   try { unlinkSync(PARSE_SPAWN_LOCK) } catch {}
 }
 
+// r55: 探测 daemon 是否可连——Windows 用 TCP 127.0.0.1:port，Unix 用 socket 文件连接测试
+function probeParseService(timeoutMs = 1000) {
+  return new Promise((resolve) => {
+    const test = IS_WIN
+      ? net.createConnection({ host: '127.0.0.1', port: PARSE_SERVICE_TCP_PORT })
+      : net.createConnection(PARSE_SERVICE_SOCKET)
+    const done = (ok) => { test.destroy(); resolve(ok) }
+    test.on('connect', () => done(true))
+    test.on('error', () => done(false))
+    setTimeout(() => done(false), timeoutMs)
+  })
+}
+
 async function ensureParseService() {
-  // 检查是否已运行
-  if (existsSync(PARSE_SERVICE_SOCKET)) {
-    try {
-      const test = net.createConnection(PARSE_SERVICE_SOCKET)
-      await new Promise((resolve, reject) => {
-        test.on('connect', () => { test.destroy(); resolve(true) })
-        test.on('error', reject)
-        setTimeout(() => { test.destroy(); reject(new Error('timeout')) }, 1000)
-      })
-      crashLog('malong-parse already running')
-      return
-    } catch (e) {
-      // r11(L4)：probe 失败记录——旧实现静默落入 spawn 分支，慢 daemon（>1s 未 accept）被误判死亡 → 二次 spawn 竞态
-      crashLog(`malong-parse probe failed (${e.message}); will spawn new daemon`)
-    }
+  // 检查是否已运行（Windows 无 socket 文件——probe 直接试 TCP 连接）
+  if (await probeParseService(1000)) {
+    crashLog('malong-parse already running')
+    return
   }
+  crashLog('malong-parse probe failed; will spawn new daemon')
 
   // 查找二进制
   let binPath = PARSE_SERVICE_BIN
@@ -110,15 +121,15 @@ async function ensureParseService() {
   // 启动服务
   try {
     if (!acquireSpawnLock()) {
-      // 另一进程正在启动 daemon——等 socket 出现（最多 2s），不重复 spawn
+      // 另一进程正在启动 daemon——等服务可连（最多 2s），不重复 spawn
       for (let i = 0; i < 20; i++) {
         await new Promise(r => setTimeout(r, 100))
-        if (existsSync(PARSE_SERVICE_SOCKET)) {
-          crashLog('malong-parse socket ready (other process)')
+        if (await probeParseService(200)) {
+          crashLog('malong-parse ready (other process)')
           return
         }
       }
-      crashLog('malong-parse spawn lock held but socket never appeared; giving up')
+      crashLog('malong-parse spawn lock held but service never appeared; giving up')
       return
     }
     const child = spawn(binPath, [], {
@@ -132,11 +143,11 @@ async function ensureParseService() {
     child.unref()
     crashLog(`malong-parse started (pid=${child.pid})`)
 
-    // 等待 socket 就绪
+    // 等待服务就绪（Windows 等 TCP 端口，Unix 等 socket）
     for (let i = 0; i < 20; i++) {
       await new Promise(r => setTimeout(r, 100))
-      if (existsSync(PARSE_SERVICE_SOCKET)) {
-        crashLog('malong-parse socket ready')
+      if (await probeParseService(200)) {
+        crashLog('malong-parse ready')
         releaseSpawnLock()
         return
       }
@@ -320,6 +331,22 @@ function safeRespondError(id, code, message) {
   }
 }
 
+// r55: 客户端（opencode）收到 tools/list 的 -32000 会立即关闭 stdin kill 进程——初始化（含 Windows daemon TCP 等待）
+// 超过客户端重试窗口时永远连不上。未就绪改为轮询等待 _ready 后再响应（上限 15s，超过仍报错兜底）。
+function waitForReady(id) {
+  let waited = 0
+  const timer = setInterval(() => {
+    waited += 250
+    if (_ready && registry) {
+      clearInterval(timer)
+      safeRespond(id, { tools: registry.listTools() })
+    } else if (waited >= 15_000) {
+      clearInterval(timer)
+      safeRespondError(id, -32000, 'Server still loading modules, please retry in a few seconds')
+    }
+  }, 250)
+}
+
 function handleRequest(req) {
   const { id, method, params } = req
   if (id == null) return
@@ -341,7 +368,7 @@ function handleRequest(req) {
 
     case 'tools/list':
       if (!_ready || !registry) {
-        safeRespondError(id, -32000, 'Server still loading modules, please retry in a few seconds')
+        waitForReady(id)
         break
       }
       safeRespond(id, { tools: registry.listTools() })

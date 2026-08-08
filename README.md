@@ -127,6 +127,8 @@ node tests/test-db-adapter.js   # 22 assertions: sql.js backend + persistence
 node tests/test-mcp-server.js   # 25 assertions: MCP stdio + daemon round-trip
 ```
 
+> **Windows users:** use `releases/malong-liuhe-0.4.2-windows-x86_64.tar.gz` (contains `malong-parse.exe`), extract and put it on PATH; the MCP server auto-starts the daemon, so step 1's `malong-parse &` is not required. The `mkdir -p`/`tar -xzf` above are Unix syntax — on Windows use any extractor (`tar -xzf` works on Win10+).
+
 > Note: if the daemon is not running, parse-dependent tools (symbol extraction
 > etc.) degrade; the SQLite-backed tools (repo-map / code-index / health-check)
 > still work.
@@ -148,7 +150,17 @@ malong-parse &                                   # start the daemon (Unix socket
 cd ../malong && npm ci
 
 # 3) Register the MCP server (works with any MCP client, e.g. opencode / Claude Desktop)
-#    config:
+#    opencode (project-root opencode.json; Windows paths use double backslashes, Linux/macOS forward slashes):
+#    {
+#      "mcp": {
+#        "malong": {
+#          "type": "local",
+#          "command": ["node", "--max-old-space-size=512", "N:\\repo\\liuhe\\malong\\mcp-server.js", "--workspace", "N:\\repo\\liuhe"],
+#          "enabled": true
+#        }
+#      }
+#    }
+#    Claude Desktop (verified on Windows: %APPDATA%\Claude\claude_desktop_config.json):
 #    {
 #      "mcpServers": {
 #        "malong": { "command": "node", "args": ["/path/to/malong/mcp-server.js"] }
@@ -183,7 +195,7 @@ malong-parse &                                   # daemon (Unix socket: /tmp/mal
 Prebuilt binaries for Linux x86_64 are committed under
 [`releases/`](releases/) (with `.sha256` checksums) — pick one up instead of building if you prefer.
 
-**Platforms:** Linux and macOS use the Unix socket; on **Windows** the daemon listens on TCP `127.0.0.1:31001` (set `MALONG_PORT` to override) — start it manually (`malong-parse.exe`), the client will not auto-restart it. Set `MALONG_SOCKET` to override the Unix socket path.
+**Platforms:** Linux and macOS use the Unix socket; on **Windows** the daemon listens on TCP `127.0.0.1:31001` (set `MALONG_PORT` to override) — the MCP server probes and auto-starts `malong-parse.exe` on startup, so no manual launch is needed (if you use the parse-client API directly outside MCP, start it manually). Set `MALONG_SOCKET` to override the Unix socket path.
 
 ### Install the toolset
 
@@ -197,10 +209,25 @@ npm test          # 1874 assertions (daemon must be running)
 
 ```bash
 cd malong
-node --max-old-space-size=512 mcp-server.js
+node --max-old-space-size=512 mcp-server.js --workspace /path/to/project
 ```
 
-Register the MCP server with any MCP-capable LLM client (e.g. opencode, Claude Desktop) and the tools become available.
+Register the MCP server with any MCP-capable LLM client and the tools become available. For **opencode**, register in the project root `opencode.json`:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "malong": {
+      "type": "local",
+      "command": ["node", "--max-old-space-size=512", "malong/mcp-server.js", "--workspace", "."],
+      "enabled": true
+    }
+  }
+}
+```
+
+> Windows note: relative paths in `--workspace` and `malong/mcp-server.js` resolve against the directory where opencode is launched; pass absolute paths (escape backslashes as `\\` in JSON) if you start it elsewhere. The daemon is auto-started by the MCP server — no need to launch `malong-parse.exe` manually.
 
 ### Configuration (environment variables)
 

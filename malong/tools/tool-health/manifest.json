@@ -7,11 +7,6 @@
     "properties": {
       "action": {
         "type": "string",
-        "enum": [
-          "check",
-          "restart",
-          "cleanup"
-        ],
         "description": "check (default) / restart (soft-recover) / cleanup (prune stale caches)"
       },
       "stats": {

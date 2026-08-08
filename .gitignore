@@ -22,3 +22,6 @@ __pycache__/
 # 运行时产物
 .malong/
 data/
+
+# 本地 LLM 客户端配置（含本机绝对路径，不入库；示例见 README）
+opencode.json

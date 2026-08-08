@@ -126,6 +126,8 @@ node tests/test-db-adapter.js   # 22 断言：sql.js 后端 + 持久化
 node tests/test-mcp-server.js   # 25 断言：MCP stdio + daemon 往返
 ```
 
+> **Windows 用户：** 用 `releases/malong-liuhe-0.4.2-windows-x86_64.tar.gz`（内附 `malong-parse.exe`），解压后放到 PATH 即可；MCP 服务启动时会自动拉起 daemon，无需手动执行 `malong-parse &` 这一步。上面的 `mkdir -p`/`tar -xzf` 为 Unix 语法，Windows 用解压工具或 `tar -xzf`（Win10+ 自带）均可。
+
 > 注意：daemon 未启动时，依赖解析的工具（符号提取等）会降级；SQLite 系工具（repo-map / code-index / health-check）不受影响。
 
 - SQLite 后端自动探测：有 `better-sqlite3` 时用完整版（行为完全不变）；否则回退**仓库内置 sql.js WASM**（`malong/vendor/`，零依赖）——无需安装、无需编译、无需网络。
@@ -142,8 +144,18 @@ malong-parse &                                   # 启动 daemon（Unix socket�
 # 2) 安装工具集
 cd ../malong && npm ci
 
-# 3) 注册 MCP 服务（任何 MCP 客户端通用，如 opencode / Claude Desktop）
-#    配置：
+# 3) 注册 MCP 服务（opencode / Claude Desktop 等任何 MCP 客户端通用）
+#    opencode（项目根 opencode.json；Windows 路径用双反斜杠，Linux/macOS 用正斜杠）：
+#    {
+#      "mcp": {
+#        "malong": {
+#          "type": "local",
+#          "command": ["node", "--max-old-space-size=512", "N:\\repo\\liuhe\\malong\\mcp-server.js", "--workspace", "N:\\repo\\liuhe"],
+#          "enabled": true
+#        }
+#      }
+#    }
+#    Claude Desktop（Windows 实测：%APPDATA%\Claude\claude_desktop_config.json）：
 #    {
 #      "mcpServers": {
 #        "malong": { "command": "node", "args": ["/path/to/malong/mcp-server.js"] }
@@ -178,7 +190,7 @@ malong-parse &                                   # 启动 daemon（Unix socket: 
 Linux x86_64 预编译二进制已随仓库提交在
 [`releases/`](releases/)（附 `.sha256` 校验）——不想编译可以直接下载。
 
-**平台说明：** Linux/macOS 走 Unix socket；**Windows** 上 daemon 监听 TCP `127.0.0.1:31001`（可用 `MALONG_PORT` 覆盖）——需手动启动 `malong-parse.exe`，客户端不自动重启。Unix socket 路径可用 `MALONG_SOCKET` 覆盖。
+**平台说明：** Linux/macOS 走 Unix socket；**Windows** 上 daemon 监听 TCP `127.0.0.1:31001`（可用 `MALONG_PORT` 覆盖）——MCP 服务启动时会自动探测并拉起 `malong-parse.exe`，无需手动启动；单独使用 parse-client API（非 MCP 场景）时仍需手动启动。Unix socket 路径可用 `MALONG_SOCKET` 覆盖。
 
 ### 安装工具集
 
@@ -192,10 +204,25 @@ npm test          # 1874 断言全绿（需要 daemon 在跑）
 
 ```bash
 cd malong
-node --max-old-space-size=512 mcp-server.js
+node --max-old-space-size=512 mcp-server.js --workspace /path/to/project
 ```
 
-将 MCP 服务注册到支持 MCP 的 LLM 客户端（如 opencode / Claude Desktop），工具自动可用。
+将 MCP 服务注册到支持 MCP 的 LLM 客户端，工具自动可用。**opencode** 在项目根 `opencode.json` 里注册：
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "malong": {
+      "type": "local",
+      "command": ["node", "--max-old-space-size=512", "malong/mcp-server.js", "--workspace", "."],
+      "enabled": true
+    }
+  }
+}
+```
+
+> Windows 提示：命令里 `--workspace` 和 `malong/mcp-server.js` 的相对路径以 opencode 启动目录为基准；如需从其他目录启动，改传绝对路径（`N:\\repo\\liuhe\\malong\\mcp-server.js`，JSON 里反斜杠要双写）。daemon 由 MCP 服务自动拉起，无需手动启动 `malong-parse.exe`。
 
 ### 配置（环境变量）
 

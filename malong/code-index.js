@@ -214,6 +214,26 @@ function isPropertyAccessed(name, file) {
   return new RegExp(`\\.\\s*${esc}\\b`).test(source)
 }
 
+// R22-㉒（ansible 真实项目实测）：函数作为值传递的形态 refs 不记录——
+// `sys.excepthook = _ansible_excepthook`（赋值 RHS）与 `os.walk(..., onerror=handle_walk_errors)`（kwarg 值）
+// 被误报死代码。与 isExportReferenced/isPropertyAccessed 同类豁免：源文件内形态检测，宁漏报不杀错。
+// 排除形态：==/!=/<=/>= 比较（负向后瞻）；def 行（def name 前无 =）；注释/字符串内的偶然命中属漏报方向安全。
+function isValueReferenced(name, file) {
+  if (!file || !name) return false
+  let source = _exportRefCache.get(file)
+  if (source === undefined) {
+    try { source = readFileSync(file, 'utf-8') } catch { source = null }
+    if (source !== null) {
+      if (_exportRefCache.size > 200) _exportRefCache.clear()
+      _exportRefCache.set(file, source)
+    }
+  }
+  if (source === null) return false
+  const esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  // 赋值 RHS / kwarg 值：前字符不是比较符的 `= name`（kw=name 同样命中本模式）
+  return new RegExp(`(?<![=!<>])\\s*=\\s*${esc}\\b`).test(source)
+}
+
 function _calcComplexity(sym) {
   const loc = Math.max(1, (sym.end_line || sym.start_line) - sym.start_line + 1)
   const cyclomatic = Math.min(10, Math.ceil(loc / 10))
@@ -1594,16 +1614,26 @@ class CodeIndex {
         return cycles
       },
 
-      async detectDeadCode({ minUseCount = 1 } = {}) {
+      async detectDeadCode({ minUseCount = 1, scopePrefix = null } = {}) {
         // 14：usage 计数同时认 target_name 和 target_symbol_id——CJS 别名重绑定后
         // 调用点 ref 的 target_name 是本地别名（libProcess≠process），只按名计数会把
         // 被别名调用的函数误报为死代码
-        const dead = self._db.prepare("SELECT s.name, s.type, f.path AS file, s.start_line, (SELECT COUNT(*) FROM refs WHERE (target_name = s.name OR target_symbol_id = s.id)) AS ref_count FROM symbols s JOIN files f ON s.file_id = f.id WHERE s.type IN ('function','method') AND (SELECT COUNT(*) FROM refs WHERE (target_name = s.name OR target_symbol_id = s.id) AND (source_file_id != s.file_id OR kind != 'import')) < ? ORDER BY ref_count ASC LIMIT 50").all(minUseCount)
+        // R22-㉒：scopePrefix 时先按目录过滤再 LIMIT——旧实现 LIMIT 50 在 scope 过滤前执行，
+        // 大仓库子目录扫描时死函数候选被全仓 top50 截断（ansible 实测：modules 内 17 个死函数只命中 1 个）
+        let sql = "SELECT s.name, s.type, f.path AS file, s.start_line, (SELECT COUNT(*) FROM refs WHERE (target_name = s.name OR target_symbol_id = s.id)) AS ref_count FROM symbols s JOIN files f ON s.file_id = f.id WHERE s.type IN ('function','method') AND (SELECT COUNT(*) FROM refs WHERE (target_name = s.name OR target_symbol_id = s.id) AND (source_file_id != s.file_id OR kind != 'import')) < ?"
+        const params = [minUseCount]
+        if (scopePrefix) {
+          sql += " AND f.path LIKE ? ESCAPE '\\'"
+          params.push(scopePrefix.replace(/[%_\\]/g, m => '\\' + m) + '%')
+        }
+        sql += " ORDER BY ref_count ASC LIMIT 50"
+        const dead = self._db.prepare(sql).all(...params)
         // r29：注册/导出形态引用过滤——refs 只记调用与 import，`extract: extractBlocksFromLLM`
         // 这类「对象字面量属性值引用」（registerService/registerTool 回调挂载）零 ref → 被误报死代码
         // r10d：再加属性访问（getter）形态豁免——`svc.indexProgress` 属性读取同样零 ref
         return dead.filter(s => !isExportReferenced(s.name, join(self._currentWorkspace || process.cwd(), s.file))
-          && !isPropertyAccessed(s.name, join(self._currentWorkspace || process.cwd(), s.file)))
+          && !isPropertyAccessed(s.name, join(self._currentWorkspace || process.cwd(), s.file))
+          && !isValueReferenced(s.name, join(self._currentWorkspace || process.cwd(), s.file)))
       },
 
       async getComplexity(symbolName, { filePath } = {}) {
@@ -1938,5 +1968,5 @@ const version = '0.3.0'
 const init = (core) => instance.init(core)
 const start = () => instance.start()
 const stop = () => instance.stop()
-export { isPropertyAccessed, name, version, init, start, stop }
+export { isPropertyAccessed, isValueReferenced, name, version, init, start, stop }
 export default instance
