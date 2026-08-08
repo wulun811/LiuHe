@@ -1,12 +1,30 @@
 // 重连期间请求排队测试
 import { execSync } from 'node:child_process'
 import { readFileSync, existsSync } from 'node:fs'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import os from 'node:os'
 
+const __dirname = dirname(fileURLToPath(import.meta.url))
 const IS_WIN = process.platform === 'win32'
 const UID = IS_WIN ? 0 : (process.getuid?.() ?? 0)
 const SOCKET = `/tmp/malong-parse-${UID}.sock`
 const PID_FILE = `/tmp/malong-parse-${UID}.pid`
-const BIN = process.env.MALONG_PARSE_BIN || 'malong-parse'
+
+// R22-㉓：候选链绝对路径（同 test-kill-recover/test-variable-refs 模式）——裸 malong-parse 依赖 PATH，
+// CI 只构建 target/debug 未装 PATH → setsid 重启起不来。
+const BIN_CANDIDATES = [
+  process.env.MALONG_PARSE_BIN,
+  join(__dirname, '..', '..', 'malong-parse', 'target', 'debug', 'malong-parse'),
+  join(__dirname, '..', '..', 'malong-parse', 'target', 'release', 'malong-parse'),
+  join(os.homedir(), '.local', 'bin', 'malong-parse'),
+  '/tmp/opencode/s3-bin/malong-parse',
+].filter(Boolean)
+const BIN = BIN_CANDIDATES.find(p => existsSync(p))
+if (!BIN) {
+  console.error(`  FAIL: malong-parse binary not found (tried: ${BIN_CANDIDATES.join(' | ')})`)
+  process.exit(1)
+}
 
 let passed = 0, failed = 0
 function assert(label, ok, detail) {
