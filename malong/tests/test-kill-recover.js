@@ -1,7 +1,7 @@
 // kill -9 恢复测试（简化版）
 import { createConnection } from 'node:net'
 import { existsSync, readFileSync } from 'node:fs'
-import { execSync } from 'node:child_process'
+import { execSync, spawn } from 'node:child_process'
 import { join } from 'node:path'
 import os from 'node:os'
 import { fileURLToPath } from 'node:url'
@@ -15,15 +15,17 @@ const PID_FILE = `/tmp/malong-parse-${UID}.pid`
 
 // R22-㉓（ubuntu/mac CI 实测）：setsid malong-parse 依赖 PATH——CI 只构建 target/debug 未装 PATH → 新进程没起来。
 // 候选链：env 覆盖 → 仓库 debug（CI 构建）→ release → ~/.local/bin → 本地 tmp 习惯路径（同 test-variable-refs 模式）。
+const BIN_NAME = IS_WIN ? 'malong-parse.exe' : 'malong-parse'
 const BIN_CANDIDATES = [
   process.env.MALONG_PARSE_BIN,
-  join(__dirname, '..', '..', 'malong-parse', 'target', 'debug', 'malong-parse'),
-  join(__dirname, '..', '..', 'malong-parse', 'target', 'release', 'malong-parse'),
-  join(os.homedir(), '.local', 'bin', 'malong-parse'),
-  '/tmp/opencode/s3-bin/malong-parse',
+  join(__dirname, '..', '..', 'malong-parse', 'target', 'debug', BIN_NAME),
+  join(__dirname, '..', '..', 'malong-parse', 'target', 'release', BIN_NAME),
+  join(os.homedir(), '.local', 'bin', BIN_NAME),
+  join(os.tmpdir(), 'opencode', 's3-bin', BIN_NAME),
 ].filter(Boolean)
 const BIN = BIN_CANDIDATES.find(p => existsSync(p))
-if (!BIN) {
+// Windows 整测试跳过（main 内 exit 0），顶层不因缺二进制报错
+if (!BIN && !IS_WIN) {
   console.error(`  FAIL: malong-parse binary not found (tried: ${BIN_CANDIDATES.join(' | ')})`)
   process.exit(1)
 }
@@ -67,10 +69,11 @@ async function main() {
     assert('进程已终止', true)
   }
 
-  // 手动重启进程——用候选链绝对路径，不依赖 PATH
+  // 手动重启进程——用候选链绝对路径，不依赖 PATH（setsid 仅 Linux 有，macOS 无 → 用 spawn detached 跨平台）
   console.log(`  重启进程 (${BIN}) ...`)
   const t0 = performance.now()
-  execSync(`setsid ${BIN} &`, { stdio: 'ignore' })
+  const child = spawn(BIN, [], { stdio: 'ignore', detached: true })
+  child.unref()
   
   // 等待 socket 出现且真连接成功（stale socket 文件残留不算——R22-㉓ CI 实测假绿）
   for (let i = 0; i < 30; i++) {

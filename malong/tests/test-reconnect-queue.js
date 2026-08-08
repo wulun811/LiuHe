@@ -1,5 +1,5 @@
 // 重连期间请求排队测试
-import { execSync } from 'node:child_process'
+import { execSync, spawn } from 'node:child_process'
 import { readFileSync, existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -12,18 +12,25 @@ const SOCKET = `/tmp/malong-parse-${UID}.sock`
 const PID_FILE = `/tmp/malong-parse-${UID}.pid`
 
 // R22-㉓：候选链绝对路径（同 test-kill-recover/test-variable-refs 模式）——裸 malong-parse 依赖 PATH，
-// CI 只构建 target/debug 未装 PATH → setsid 重启起不来。
+// CI 只构建 target/debug 未装 PATH → setsid 重启起不来。macOS 无 setsid → 用 spawn detached 跨平台。
+const BIN_NAME = IS_WIN ? 'malong-parse.exe' : 'malong-parse'
 const BIN_CANDIDATES = [
   process.env.MALONG_PARSE_BIN,
-  join(__dirname, '..', '..', 'malong-parse', 'target', 'debug', 'malong-parse'),
-  join(__dirname, '..', '..', 'malong-parse', 'target', 'release', 'malong-parse'),
-  join(os.homedir(), '.local', 'bin', 'malong-parse'),
-  '/tmp/opencode/s3-bin/malong-parse',
+  join(__dirname, '..', '..', 'malong-parse', 'target', 'debug', BIN_NAME),
+  join(__dirname, '..', '..', 'malong-parse', 'target', 'release', BIN_NAME),
+  join(os.homedir(), '.local', 'bin', BIN_NAME),
+  join(os.tmpdir(), 'opencode', 's3-bin', BIN_NAME),
 ].filter(Boolean)
 const BIN = BIN_CANDIDATES.find(p => existsSync(p))
-if (!BIN) {
+// Windows 整测试跳过（main 内 exit 0），顶层不因缺二进制报错
+if (!BIN && !IS_WIN) {
   console.error(`  FAIL: malong-parse binary not found (tried: ${BIN_CANDIDATES.join(' | ')})`)
   process.exit(1)
+}
+
+function startDaemon() {
+  const child = spawn(BIN, [], { stdio: 'ignore', detached: true })
+  child.unref()
 }
 
 let passed = 0, failed = 0
@@ -41,7 +48,7 @@ function ensureService() {
   } catch {
     // 进程不存在，启动
     try { execSync(`rm -f ${SOCKET} ${PID_FILE}`) } catch {}
-    execSync(`setsid ${BIN} &`, { stdio: 'ignore' })
+    startDaemon()
     // 等待 socket
     for (let i = 0; i < 20; i++) {
       if (existsSync(SOCKET)) break
@@ -95,7 +102,7 @@ async function main() {
   // 立即重启进程（让请求进入等待状态）
   console.log('  重启进程 ...')
   try { execSync(`rm -f ${SOCKET}`) } catch {}
-  execSync(`setsid ${BIN} &`, { stdio: 'ignore' })
+  startDaemon()
 
   // 等待所有请求完成
   const results = await Promise.all(requests)
