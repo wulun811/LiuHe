@@ -16,12 +16,20 @@ jobs:
         include:
           - os: ubuntu-latest
             artifact: malong-parse-linux-x86_64
+            osname: linux
+            arch: x86_64
           - os: macos-15-intel
             artifact: malong-parse-darwin-x86_64
+            osname: darwin
+            arch: x86_64
           - os: macos-15
             artifact: malong-parse-darwin-aarch64
+            osname: darwin
+            arch: aarch64
           - os: windows-latest
             artifact: malong-parse-windows-x86_64
+            osname: windows
+            arch: x86_64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -61,10 +69,20 @@ jobs:
           $hash = (Get-FileHash "${{ matrix.artifact }}.zip" -Algorithm SHA256).Hash.ToLower()
           "$hash  ${{ matrix.artifact }}.zip" | Out-File -Encoding ascii "${{ matrix.artifact }}.zip.sha256"
 
+      - name: Package full tarball (整套包: JS 源码 + parse 二进制)
+        shell: bash
+        run: |
+          bash scripts/package-full.sh ${{ matrix.osname }} ${{ matrix.arch }}
+
       - uses: actions/upload-artifact@v5
         with:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.artifact }}.*
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: ${{ matrix.artifact }}-full
+          path: releases/malong-liuhe-*
 
   release:
     needs: build
