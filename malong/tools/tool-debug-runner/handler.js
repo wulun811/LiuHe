@@ -174,11 +174,18 @@ export async function handle(args, context) {
       const bin = join(binDir, `run-${process.pid}-${randomUUID().slice(0, 8)}`) + (process.platform === 'win32' ? '.exe' : '')
       const compiled = await runCmd('rustc', ['--edition', '2021', '-o', bin, filePath], { cwd: runCwd, timeout })
       if (compiled.exitCode !== 0) {
-        rmSync(binDir, { recursive: true, force: true })
+        try { rmSync(binDir, { recursive: true, force: true }) } catch {}
         return { mode: 'script', script: args.script, ...compiled, ...analyzeError(compiled) }
       }
       const execResult = await runCmd(bin, [], { cwd: runCwd, timeout })
-      rmSync(binDir, { recursive: true, force: true })
+      // r56: Windows 子进程退出后 .exe 文件句柄可能未完全释放 → rmSync EBUSY 崩测试/崩 MCP
+      // （与 dogfood-r12 的 EBUSY 修复同款：包 try/catch + 短重试，最终仍失败则留给下次运行清理）
+      try {
+        rmSync(binDir, { recursive: true, force: true })
+      } catch {
+        await new Promise(r => setTimeout(r, 300))
+        try { rmSync(binDir, { recursive: true, force: true }) } catch {}
+      }
       run = Promise.resolve(execResult)
     } else if (ext === '.sh') run = runCmd('bash', [filePath], { cwd: runCwd, timeout })
     else {

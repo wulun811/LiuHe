@@ -9,7 +9,9 @@ function escapeRegex(s) {
 }
 
 function isTestFile(path) {
-  return /(?:^|\/)(?:tests?|__tests__)\/|\.test\.|\.spec\.|_test\./.test(path)
+  // r56: Windows 分隔符——walk 递归时 fullPath 是反斜杠（join 生成），`/tests/` 匹配不上 → 测试文件全跳过 → 0 mocks
+  const norm = path.replace(/\\/g, '/')
+  return /(?:^|\/)(?:tests?|__tests__)\/|\.test\.|\.spec\.|_test\./.test(norm)
 }
 
 function walkTestFiles(baseDir, dir, files, limit) {

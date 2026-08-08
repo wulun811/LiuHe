@@ -46,12 +46,20 @@ export async function handle(args, context) {
     return { error: 'invalid_input', message: `scope contains "..": ${scope}` }
   }
   // r11(L11)：workspaceDir 尾斜杠归一化——旧实现 `workspaceDir + '/'` 在用户传尾斜杠路径时拼成 `//` 恒不匹配（r54 修过 edit-sandbox 同款，此处漏网）
-  const wsPrefix = workspaceDir.endsWith('/') ? workspaceDir : workspaceDir + '/'
-  const toRel = (abs) => abs.startsWith(wsPrefix) ? abs.slice(wsPrefix.length) : abs
+  // r56: Windows 分隔符归一化——旧 wsPrefix 拼出反斜杠路径+正斜杠结尾（`N:\ws\fixtures/`），
+  //      current_files 绝对路径（全反斜杠）startsWith 恒 false → 绝对路径永不 boost（对抗性 A4 实测）
+  const wsNorm = workspaceDir.replace(/\\/g, '/')
+  const wsPrefix = wsNorm.endsWith('/') ? wsNorm : wsNorm + '/'
+  const toRel = (abs) => {
+    const norm = abs.replace(/\\/g, '/')
+    return norm.startsWith(wsPrefix) ? norm.slice(wsPrefix.length) : norm
+  }
   const currentFiles = new Set((args?.current_files || []).map(f => {
-    if (f.startsWith(wsPrefix)) return f.slice(wsPrefix.length)
-    if (f.startsWith('./')) return f.slice(2)
-    return f
+    if (typeof f !== 'string') return ''
+    const norm = f.replace(/\\/g, '/')
+    if (norm.startsWith(wsPrefix)) return norm.slice(wsPrefix.length)
+    if (norm.startsWith('./')) return norm.slice(2)
+    return norm
   }))
   let scanDir = scope === '.' ? workspaceDir : join(workspaceDir, scope)
 
