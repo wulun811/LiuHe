@@ -29,6 +29,7 @@ export function resolveExtractorBin() {
   const candidates = [
     join(os.homedir(), '.local', 'bin', 'malong-parse'),
     join(__dirname, '..', 'malong-parse', 'target', 'release', 'malong-parse'),
+    join(__dirname, '..', 'malong-parse', 'target', 'debug', 'malong-parse'),
   ]
   for (const c of candidates) {
     if (existsSync(c)) return c

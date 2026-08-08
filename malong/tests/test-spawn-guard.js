@@ -4,7 +4,7 @@
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { execFileSync, spawnSync } from 'node:child_process'
-import { readFileSync, rmSync } from 'node:fs'
+import { readFileSync, rmSync, mkdirSync } from 'node:fs'
 import os from 'node:os'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -21,17 +21,21 @@ const isWin = process.platform === 'win32'
 
 // ① 超时杀全组：bash -c 起孙进程 sleep 100，超时后孙进程不得存活
 //    Windows 等价：node -e 挂起 60s，超时后该进程不得存活（taskkill /T 杀树）
+// R22-㉓（mac/linux CI 实测）：/tmp/opencode 在 CI 干净环境不存在 → marker 写入失败。
+// 统一用 os.tmpdir()/opencode 并先 mkdirSync 建目录（与 Windows 分支同构）。
 {
+  const markerDir = join(os.tmpdir(), 'opencode')
+  try { mkdirSync(markerDir, { recursive: true }) } catch {}
   let marker, childPid
   let res
   const t0 = Date.now()
   if (isWin) {
-    marker = join(os.tmpdir(), 'opencode', `sp-guard-${Date.now()}.pid`)
+    marker = join(markerDir, `sp-guard-${Date.now()}.pid`)
     const childScript = `const{writeFileSync}=require('fs');writeFileSync(${JSON.stringify(marker)},String(process.pid));setTimeout(()=>{},60000)`
     res = await spawnWithGroup(process.execPath, ['-e', childScript, 'x'], { timeout: 800 })
     childPid = readFileSync(marker, 'utf-8').trim()
   } else {
-    marker = `/tmp/opencode/sp-guard-${Date.now()}.pid`
+    marker = join(markerDir, `sp-guard-${Date.now()}.pid`)
     res = await spawnWithGroup('bash', ['-c', `sleep 100 & echo $! > ${marker}; wait`], { timeout: 800 })
     childPid = execFileSync('cat', [marker]).toString().trim()
   }
@@ -42,8 +46,15 @@ const isWin = process.platform === 'win32'
   const alive = isWin
     ? spawnSync('tasklist', ['/fi', `PID eq ${childPid}`])
     : spawnSync('kill', ['-0', childPid])
+  // R22-㉓（Windows CI 实测）：断言逻辑反了——进程被杀后 tasklist /fi 输出 "INFO: No tasks are running..."（exit 0），
+  // 旧代码 !includes(...) 正好要求进程还活着 → 被杀成功反而 FAIL。修正：应断言包含 No tasks。
   if (isWin) {
-    assert(alive.status === 0 && alive.stdout && !alive.stdout.includes('INFO: No tasks'), `挂起进程（pid=${childPid}）已被杀（tasklist 残留 ${alive.status}）`)
+    // R22-㉓（Windows CI 实测）：进程被杀后 tasklist /fi 输出 "INFO: No tasks are running..."（exit 0），
+    // 旧代码 !includes(...) 正好要求进程还活着 → 被杀成功反而 FAIL。修正：应断言进程已无残留。
+    // 中英文 tasklist 都含该 PID 行（若进程还在）；无匹配时只有一句提示语，不含 PID → 用 PID 出现与否判据（语言无关）
+    const out = alive.stdout ? alive.stdout.toString() : ''
+    const noTasks = !out.includes(String(childPid))
+    assert(alive.status === 0 && noTasks, `挂起进程（pid=${childPid}）已被杀（tasklist 无残留，exit ${alive.status}）`)
   } else {
     assert(alive.status === 1, `孙进程（bash 后台 sleep 100, pid=${childPid}）已被杀（kill -0 返回 ${alive.status}）`)
   }
