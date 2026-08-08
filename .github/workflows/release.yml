@@ -69,7 +69,7 @@ jobs:
           $hash = (Get-FileHash "${{ matrix.artifact }}.zip" -Algorithm SHA256).Hash.ToLower()
           "$hash  ${{ matrix.artifact }}.zip" | Out-File -Encoding ascii "${{ matrix.artifact }}.zip.sha256"
 
-      - name: Package full tarball (整套包: JS 源码 + parse 二进制)
+      - name: Package full tarball (full tarball JS source plus parse binary)
         shell: bash
         run: |
           bash scripts/package-full.sh ${{ matrix.osname }} ${{ matrix.arch }}
