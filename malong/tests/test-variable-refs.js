@@ -21,10 +21,19 @@ function assert(cond, msg) {
 import { spawn } from 'node:child_process'
 import net from 'node:net'
 const IS_WIN = process.platform === 'win32'
-const TEST_BIN = join(os.tmpdir(), 'opencode', 's3-bin', IS_WIN ? 'malong-parse.exe' : 'malong-parse')
-if (!existsSync(TEST_BIN)) {
+// R22-㉓（GitHub CI 实测）：候选链——env 覆盖 → 仓库 debug 产物（CI 构建）→ release → ~/.local/bin → 本地 tmp 习惯路径。
+// 旧实现硬编码 os.tmpdir()/opencode/s3-bin（本地手动放置），CI 干净环境没有 → 全链硬失败。
+const TEST_BIN_CANDIDATES = [
+  process.env.MALONG_PARSE_BIN,
+  join(__dirname, '..', '..', 'malong-parse', 'target', 'debug', IS_WIN ? 'malong-parse.exe' : 'malong-parse'),
+  join(__dirname, '..', '..', 'malong-parse', 'target', 'release', IS_WIN ? 'malong-parse.exe' : 'malong-parse'),
+  join(os.homedir(), '.local', 'bin', IS_WIN ? 'malong-parse.exe' : 'malong-parse'),
+  join(os.tmpdir(), 'opencode', 's3-bin', IS_WIN ? 'malong-parse.exe' : 'malong-parse'),
+].filter(Boolean)
+const TEST_BIN = TEST_BIN_CANDIDATES.find(p => existsSync(p))
+if (!TEST_BIN) {
   // R22-④：链内静默跳过 = 绿灯假象（exit 0 零断言执行）。环境缺 daemon 必须显式失败
-  console.error('  FAIL: test daemon binary not found at', TEST_BIN, '— install malong-parse (SKIP was silent-green)')
+  console.error('  FAIL: test daemon binary not found (tried:', TEST_BIN_CANDIDATES.join(' | '), ') — install malong-parse (SKIP was silent-green)')
   process.exit(1)
 }
 const TEST_PORT = 31000 + (process.pid % 20000)

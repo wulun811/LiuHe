@@ -3,7 +3,7 @@
 //       timeout 优先 / handle 端到端（全绿命令不再被标 TestFailure）
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, rmSync, writeFileSync, realpathSync } from 'node:fs'
 import os from 'node:os'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -71,10 +71,13 @@ const { analyzeError, handle } = await import(pathToFileURL(join(__dirname, '..'
   const ws = join(os.tmpdir(), 'opencode', 'dr-cwd-ws')
   mkdirSync(join(ws, '0FTYcloud'), { recursive: true })
   const pwdCmd = process.platform === 'win32' ? 'echo %cd%' : 'pwd'
+  // R22-㉓（mac CI 实测）：mac 上 /var → /private/var 符号链接——os.tmpdir() 返回逻辑路径，
+  // 子进程 pwd 输出物理路径 → 直接比较恒不等。realpathSync 归一后再比（linux 上 /tmp 无链接，行为不变）
+  const realWs = realpathSync(ws)
   const root = await handle({ command: pwdCmd, workspace_dir: ws }, {})
-  assert(root.stdout.trim() === ws, `⑤ 默认 cwd=workspace_dir（得 ${root.stdout.trim()}）`)
+  assert(root.stdout.trim() === realWs, `⑤ 默认 cwd=workspace_dir（得 ${root.stdout.trim()}）`)
   const sub = await handle({ command: pwdCmd, workspace_dir: ws, cwd: '0FTYcloud' }, {})
-  assert(sub.stdout.trim() === join(ws, '0FTYcloud'), `⑤ cwd=0FTYcloud 生效（得 ${sub.stdout.trim()}）`)
+  assert(sub.stdout.trim() === join(realWs, '0FTYcloud'), `⑤ cwd=0FTYcloud 生效（得 ${sub.stdout.trim()}）`)
   const esc = await handle({ command: 'pwd', workspace_dir: ws, cwd: '../outside' }, {})
   assert(esc.error === 'cwd_not_found', `⑤ 越界 cwd 拒绝（得 ${esc.error}）`)
   const notStr = await handle({ command: 'pwd', workspace_dir: ws, cwd: 42 }, {})
