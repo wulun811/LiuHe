@@ -1,4 +1,4 @@
-# 码龙·六合工具（Malong LiuHe）
+﻿# 码龙·六合工具（Malong LiuHe）
 
 **LLM-Native 代码操作工具链** — 为无手、无眼、无记忆的 LLM 重新发明代码操作。
 
@@ -14,7 +14,7 @@
 ![throughput](https://img.shields.io/badge/throughput-588%20calls%2Fs-blue)
 ![token](https://img.shields.io/badge/token%20savings-65%25-brightgreen)
 ![license](https://img.shields.io/badge/license-MIT-blue)
-![version](https://img.shields.io/badge/version-0.4.2-blue)
+![version](https://img.shields.io/badge/version-0.4.5-blue)
 ![commits](https://img.shields.io/badge/commits-264-blue)
 
 **码龙·六合工具** 是一套**为 LLM 而非人类设计**的代码操作工具链，包含两个组件：
@@ -113,7 +113,7 @@ git clone <repo-url> liuhe && cd liuhe/malong
 
 # 1) 解析 daemon——用 releases/ 里的预编译二进制（无需 cargo）：
 mkdir -p ~/.local/bin
-tar -xzf ../releases/malong-liuhe-0.4.2-linux-x86_64.tar.gz
+tar -xzf ../releases/malong-liuhe-0.4.5-linux-x86_64.tar.gz
 cp malong-parse/target/release/malong-parse ~/.local/bin
 malong-parse &                                   # 启动 daemon（socket: /tmp/malong-parse-$UID.sock）
 
@@ -126,7 +126,7 @@ node tests/test-db-adapter.js   # 22 断言：sql.js 后端 + 持久化
 node tests/test-mcp-server.js   # 25 断言：MCP stdio + daemon 往返
 ```
 
-> **Windows 用户：** 用 `releases/malong-liuhe-0.4.2-windows-x86_64.tar.gz`（内附 `malong-parse.exe`），解压后放到 PATH 即可；MCP 服务启动时会自动拉起 daemon，无需手动执行 `malong-parse &` 这一步。上面的 `mkdir -p`/`tar -xzf` 为 Unix 语法，Windows 用解压工具或 `tar -xzf`（Win10+ 自带）均可。
+> **Windows 用户：** 用 `releases/malong-liuhe-0.4.5-windows-x86_64.tar.gz`（内附 `malong-parse.exe`），解压后放到 PATH 即可；MCP 服务启动时会自动拉起 daemon，无需手动执行 `malong-parse &` 这一步。上面的 `mkdir -p`/`tar -xzf` 为 Unix 语法，Windows 用解压工具或 `tar -xzf`（Win10+ 自带）均可。
 
 > 注意：daemon 未启动时，依赖解析的工具（符号提取等）会降级；SQLite 系工具（repo-map / code-index / health-check）不受影响。
 

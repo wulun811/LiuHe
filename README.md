@@ -1,4 +1,4 @@
-# Malong LiuHe（码龙·六合工具）
+﻿# Malong LiuHe（码龙·六合工具）
 
 **LLM-Native Code Operations Toolkit** — Code tooling reinvented for the LLM that has no hands, no eyes, and no memory.
 
@@ -14,7 +14,7 @@
 ![throughput](https://img.shields.io/badge/throughput-588%20calls%2Fs-blue)
 ![token](https://img.shields.io/badge/token%20savings-65%25-brightgreen)
 ![license](https://img.shields.io/badge/license-MIT-blue)
-![version](https://img.shields.io/badge/version-0.4.2-blue)
+![version](https://img.shields.io/badge/version-0.4.5-blue)
 ![commits](https://img.shields.io/badge/commits-264-blue)
 
 **Malong LiuHe** is a toolkit built for LLMs rather than humans. It ships two components:
@@ -114,7 +114,7 @@ git clone <repo-url> liuhe && cd liuhe/malong
 
 # 1) Parse daemon — prebuilt binary from releases/ (no cargo needed):
 mkdir -p ~/.local/bin
-tar -xzf ../releases/malong-liuhe-0.4.2-linux-x86_64.tar.gz
+tar -xzf ../releases/malong-liuhe-0.4.5-linux-x86_64.tar.gz
 cp malong-parse/target/release/malong-parse ~/.local/bin
 malong-parse &                                   # start the daemon (socket: /tmp/malong-parse-$UID.sock)
 
@@ -127,7 +127,7 @@ node tests/test-db-adapter.js   # 22 assertions: sql.js backend + persistence
 node tests/test-mcp-server.js   # 25 assertions: MCP stdio + daemon round-trip
 ```
 
-> **Windows users:** use `releases/malong-liuhe-0.4.2-windows-x86_64.tar.gz` (contains `malong-parse.exe`), extract and put it on PATH; the MCP server auto-starts the daemon, so step 1's `malong-parse &` is not required. The `mkdir -p`/`tar -xzf` above are Unix syntax — on Windows use any extractor (`tar -xzf` works on Win10+).
+> **Windows users:** use `releases/malong-liuhe-0.4.5-windows-x86_64.tar.gz` (contains `malong-parse.exe`), extract and put it on PATH; the MCP server auto-starts the daemon, so step 1's `malong-parse &` is not required. The `mkdir -p`/`tar -xzf` above are Unix syntax — on Windows use any extractor (`tar -xzf` works on Win10+).
 
 > Note: if the daemon is not running, parse-dependent tools (symbol extraction
 > etc.) degrade; the SQLite-backed tools (repo-map / code-index / health-check)
