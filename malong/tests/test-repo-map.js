@@ -116,6 +116,59 @@ assert(g1.files === 1, `带前缀历史库归一化后 1 个文件（实际 ${g1
 assert(g1.map.includes('mainFn'), '带前缀历史库符号可见')
 assert(!g1.map.includes('subproj/subproj'), '前缀未重复')
 
+// ── r23 骨架化分页 ──
+// 构造 6 个顶层条目的库：page_size=2 → 3 页
+const WS3 = join(WS, 'paged-ws')
+mkdirSync(WS3, { recursive: true })
+const db3 = await createDb(join(WS3, 'code-index.db'))
+db3.exec(`CREATE TABLE files (id INTEGER PRIMARY KEY AUTOINCREMENT, path TEXT UNIQUE NOT NULL, repo TEXT NOT NULL DEFAULT '');
+CREATE TABLE symbols (id INTEGER PRIMARY KEY AUTOINCREMENT, file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE, name TEXT NOT NULL, type TEXT NOT NULL CHECK(type IN ('function','class','variable','method','export','import','interface','type')), signature TEXT DEFAULT '', start_line INTEGER NOT NULL, end_line INTEGER NOT NULL DEFAULT 0, parent_id INTEGER REFERENCES symbols(id) ON DELETE SET NULL);`)
+const insF3 = db3.prepare('INSERT INTO files (path) VALUES (?)')
+const insS3 = db3.prepare('INSERT INTO symbols (file_id, name, type, start_line) VALUES (?, ?, ?, ?)')
+for (const name of ['alpha.js', 'beta.js', 'gamma.js', 'delta.js', 'echo.js', 'zulu.js']) {
+  const fid = insF3.run(name).lastInsertRowid
+  insS3.run(fid, name.replace('.js', 'Fn'), 'function', 1)
+}
+db3.close()
+
+const p1 = await svc.generate(WS3, { pageSize: 2 })
+assert(!p1.error, '分页 generate 成功')
+assert(p1.total_entries === 6, `total_entries=6（实际 ${p1.total_entries}）`)
+assert(p1.total_pages === 3, `total_pages=3（实际 ${p1.total_pages}）`)
+assert(p1.page === 1 && p1.next_page === 2, 'page=1 且 next_page=2')
+assert(p1.truncated === true, 'truncated=true（还有后续页）')
+assert(Array.isArray(p1.skeleton) && p1.skeleton.length === 6, 'skeleton 含全部 6 个顶层条目')
+assert(JSON.stringify(p1.skeleton.map((s) => s.page)) === '[1,1,2,2,3,3]', '骨架页号分配正确 [1,1,2,2,3,3]')
+assert(p1.skeleton.filter((s) => s.detail).length === 2, '仅当前页条目 detail=true')
+assert(p1.map.includes('(p2)') && p1.map.includes('(p3)'), 'map 文本带其他页页号标注')
+assert(p1.map.includes('alphaFn') && !p1.map.includes('gammaFn'), '第 1 页详情含前 2 条，不含第 3 条')
+
+// 核心需求：翻页后骨架不断——第 2 页仍能看到全部 6 个条目 + 页号
+const p2 = await svc.generate(WS3, { pageSize: 2, page: 2 })
+assert(p2.page === 2, 'page=2 生效')
+assert(Array.isArray(p2.skeleton) && p2.skeleton.length === 6, '第 2 页骨架仍完整（翻页不断导航）')
+assert(p2.map.includes('alpha.js') && p2.map.includes('(p1)') && p2.map.includes('(p3)'), '第 2 页 map 仍含第 1/3 页条目与页号')
+assert(p2.map.includes('gammaFn') && !p2.map.includes('alphaFn'), '第 2 页详情只含第 3/4 条')
+assert(p2.skeleton.find((s) => s.name === 'alpha.js').detail === false, '非当前页条目 detail=false')
+
+// prefix 过滤
+const pf1 = await svc.generate(WS3, { prefix: 'e' })
+assert(pf1.total_entries === 1 && pf1.map.includes('echoFn'), 'prefix=e 只留 echo.js')
+const pf2 = await svc.generate(WS3, { prefix: 'a-b' })
+assert(pf2.total_entries === 2, 'prefix=a-b 留 alpha+beta（首字母区间）')
+const pf3 = await svc.generate(WS3, { prefix: '#' })
+assert(pf3.total_entries === 0, 'prefix=# 无数字/符号条目时为空')
+
+// 越界 page：失败路径断言（合观：越界也给恢复指引）
+const po = await svc.generate(WS3, { pageSize: 2, page: 99 })
+assert(po.page_out_of_range === true, '越界 page 返回 page_out_of_range')
+assert(po.page === 3, '越界时夹回最后一页')
+assert(String(po.suggestion).includes('total_pages=3'), '越界提示含 total_pages')
+
+// focused 分页同样生效
+const fp = await svc.generateFocused(WS3, { pageSize: 2, page: 2 })
+assert(fp.page === 2 && fp.total_pages === 3 && fp.skeleton.length === 6, 'focused 分页 + 骨架同样生效')
+
 // ── 未索引 workspace ──
 const EMPTY = join(WS, 'empty-dir')
 mkdirSync(EMPTY, { recursive: true })

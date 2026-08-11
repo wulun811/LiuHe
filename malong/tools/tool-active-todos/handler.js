@@ -105,15 +105,15 @@ export async function handle(args, context) {
 
         if (currentFiles.has(t.file)) {
           t.priority = 'high'
-          t.reason = '文件正在被编辑'
+          t.reason = 'file being edited'
         } else if (now - mtime < SEVEN_DAYS) {
           const days = Math.floor((now - mtime) / 86400000)
           t.priority = 'medium'
-          t.reason = `文件 ${days} 天前修改过`
+          t.reason = `modified ${days} days ago`
         } else {
           const days = mtime > 0 ? Math.floor((now - mtime) / 86400000) : null
           t.priority = 'low'
-          t.reason = days !== null ? `${days} 天前修改，文件未动` : '无法获取修改时间'
+          t.reason = days !== null ? `modified ${days} days ago, unchanged` : 'mtime unavailable'
         }
       }
 

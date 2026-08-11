@@ -116,14 +116,14 @@ function buildCommand(framework, scope, workspaceDir) {
 
 function suggestRootCause(failure) {
   const msg = failure.error || ''
-  if (/AssertionError|assert/.test(msg)) return '断言失败：预期值与实际值不匹配，检查函数返回值是否变更'
-  if (/ImportError|ModuleNotFoundError|Cannot find module/.test(msg)) return '导入失败：检查是否新增了依赖或重命名了模块'
-  if (/TypeError|AttributeError|is not a function|has no attribute/.test(msg)) return '类型/属性错误：检查函数签名是否变更'
-  if (/NameError|is not defined/.test(msg)) return '名称错误：检查是否重命名了变量或函数'
-  if (/ConnectionError|timeout|ECONNREFUSED/.test(msg)) return '连接失败：检查外部服务是否可用（非代码问题）'
-  if (/FileNotFoundError|ENOENT/.test(msg)) return '文件未找到：检查路径或 fixture 配置'
-  if (/KeyError|IndexError|undefined is not/.test(msg)) return '键/索引错误：检查数据结构是否变更'
-  return '请检查代码变更与测试预期的差异'
+  if (/AssertionError|assert/.test(msg)) return 'Assertion failed: actual value does not match expected — check if the function return value changed'
+  if (/ImportError|ModuleNotFoundError|Cannot find module/.test(msg)) return 'Import failed: check if a dependency was added or a module renamed'
+  if (/TypeError|AttributeError|is not a function|has no attribute/.test(msg)) return 'Type/attribute error: check if the function signature changed'
+  if (/NameError|is not defined/.test(msg)) return 'Name error: check if a variable or function was renamed'
+  if (/ConnectionError|timeout|ECONNREFUSED/.test(msg)) return 'Connection failed: check if the external service is reachable (not a code issue)'
+  if (/FileNotFoundError|ENOENT/.test(msg)) return 'File not found: check the path or fixture config'
+  if (/KeyError|IndexError|undefined is not/.test(msg)) return 'Key/index error: check if the data structure changed'
+  return 'Review the diff between the code change and the test expectation'
 }
 
 function enrichFailures(failures, workspaceDir) {

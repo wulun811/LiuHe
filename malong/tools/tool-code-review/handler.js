@@ -49,7 +49,7 @@ function checkNaming(source, fileName) {
   const convention = getNameConvention(fileName)
   const legal = LEGAL_NAME_STYLES[ext]
   if (legal && !legal.includes(convention)) {
-    issues.push({ severity: 'info', category: 'naming', message: `文件名 "${basename(fileName)}" 不是 ${ext} 惯例命名风格 (${legal.join('/')})`, line: 1 })
+    issues.push({ severity: 'info', category: 'naming', message: `File "${basename(fileName)}" does not follow ${ext} naming convention (${legal.join('/')})`, line: 1 })
   }
 
   // R22-⑪：命名统计剥字符串——字符串/注释里的标识符文本此前污染风格统计（如文案里的 "maxRetries" 计入 camel）
@@ -89,7 +89,7 @@ function checkNaming(source, fileName) {
           if (!sm[1].startsWith('process.env')) badLines.add(srcStr.slice(0, sm.index).split('\n').length)
         }
         const first = [...badLines][0] || 1
-        issues.push({ severity: 'warn', category: 'naming', message: `JS 文件主要使用 snake_case (${names.snake.size} 处，如行 ${[...badLines].slice(0, 3).join(', ')}${badLines.size > 3 ? '…' : ''})，建议使用 camelCase`, line: first })
+        issues.push({ severity: 'warn', category: 'naming', message: `JS file predominantly uses snake_case (${names.snake.size} occurrences, e.g. line ${[...badLines].slice(0, 3).join(', ')}${badLines.size > 3 ? '…' : ''}) — consider camelCase`, line: first })
       }
     }
   }
@@ -103,13 +103,13 @@ function checkComments(source, fileName) {
   const docCommentCount = (String(source).match(/\/\*\*[\s\S]*?\*\//g) || []).length
 
   if (funcCount > 0 && docCommentCount < funcCount * 0.5) {
-    issues.push({ severity: 'info', category: 'documentation', message: `${funcCount} 个函数，仅 ${docCommentCount} 个有 JSDoc 注释`, line: 1 })
+    issues.push({ severity: 'info', category: 'documentation', message: `${funcCount} functions, only ${docCommentCount} have JSDoc comments`, line: 1 })
   }
   // r10e：删除注释率阈值规则（ratio<0.03）——对训练脚本/一次性脚本等注释少是常态，
   // 报 info 纯噪声稀释有效信号（用户反馈：18 个 issue 几乎全是误报）
   const todoLines = lines.map((l, i) => /\b(TODO|FIXME|HACK|XXX)\b/.test(l) ? i + 1 : null).filter(Boolean)
   if (todoLines.length > 0) {
-    issues.push({ severity: 'info', category: 'maintainability', message: `存在 ${todoLines.length} 处 TODO/FIXME/HACK 标记（行 ${todoLines.slice(0, 5).join(', ')}${todoLines.length > 5 ? '…' : ''}）`, line: todoLines[0] })
+    issues.push({ severity: 'info', category: 'maintainability', message: `${todoLines.length} TODO/FIXME/HACK marker(s) found (lines ${todoLines.slice(0, 5).join(', ')}${todoLines.length > 5 ? '…' : ''})`, line: todoLines[0] })
   }
   return issues
 }

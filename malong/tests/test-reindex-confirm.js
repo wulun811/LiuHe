@@ -23,11 +23,14 @@ function mockService() {
     indexProgress: null,
     lastIndexed: null,
     lastBatch: null,
+    // 测试可配：null=旧行为（undefined，handler 回退全量）/ [] = 增量 0 变化 / 数组 = 实际重抽结果
+    indexBatchReturn: null,
     async initWorkspace(ws) { svc._currentWorkspace = ws },
     async indexBatch(files, ws, cb) {
       svc.lastBatch = files.slice()
       svc.lastIndexed = { workspace_dir: ws, files: files.length, symbols: files.length, refs: 0 }
       if (cb) cb(files.length, files.length)
+      return svc.indexBatchReturn
     },
     markAllDirty() { return 0 },
   }
@@ -96,6 +99,38 @@ console.log('── ⑤ maxFiles 截断（索引上限语义）──')
   const r = await handle({ workspace_dir: ws, threshold: 3, maxFiles: 4, confirm: first.confirm_token, blocking: true }, { codeIndexService: svc, log: () => {} })
   assert(r.status === 'completed' && r.files_indexed === 4, `仅索引前 maxFiles 个（得 ${r.files_indexed}）`)
   assert(r.warning && r.warning.includes('truncated'), `截断警告明确（得 ${(r.warning || '').slice(0, 40)}...）`)
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
+}
+
+console.log('── ⑦ 二次 reindex：无变化 → already_fresh 提醒（防 LLM 反复建索引）──')
+{
+  const ws = mkws(3)
+  const svc = mockService()
+  svc.indexBatchReturn = []
+  const r = await handle({ workspace_dir: ws, threshold: 3, blocking: true }, { codeIndexService: svc, log: () => {} })
+  assert(r.status === 'completed' && r.already_fresh === true, `无变化时 already_fresh 明确（得 ${r.status}/${r.already_fresh}）`)
+  assert(r.files_indexed === 0 && r.unchanged_skipped === 3, `files_indexed 是真实重抽数 0，unchanged_skipped=3（得 ${r.files_indexed}/${r.unchanged_skipped}）`)
+  assert(typeof r.note === 'string' && r.note.includes('already up to date'), `note 提醒无需再建索引（得 ${(r.note || '').slice(0, 40)}...）`)
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
+}
+
+console.log('── ⑧ 修改 1 个文件后 → 增量只重抽变化文件，不误报 fresh ──')
+{
+  const ws = mkws(3)
+  const svc = mockService()
+  svc.indexBatchReturn = [{ path: 'a0.js' }]
+  const r = await handle({ workspace_dir: ws, threshold: 3, blocking: true }, { codeIndexService: svc, log: () => {} })
+  assert(r.status === 'completed' && r.already_fresh === false, `有变化时不误报 already_fresh（得 ${r.already_fresh}）`)
+  assert(r.files_indexed === 1 && r.unchanged_skipped === 2, `增量只重抽变化文件（得 ${r.files_indexed}/${r.unchanged_skipped}）`)
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
+}
+
+console.log('── ⑨ 非 blocking：note 明确增量语义 ──')
+{
+  const ws = mkws(3)
+  const svc = mockService()
+  const r = await handle({ workspace_dir: ws, threshold: 3 }, { codeIndexService: svc, log: () => {} })
+  assert(r.status === 'started' && typeof r.note === 'string' && r.note.includes('Incremental'), `非 blocking note 明确增量（得 ${(r.note || '').slice(0, 40)}...）`)
   try { rmSync(ws, { recursive: true, force: true }) } catch {}
 }
 

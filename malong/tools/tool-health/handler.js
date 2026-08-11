@@ -39,7 +39,7 @@ export async function handle(args, context) {
         boundary: cells[1] || '',
         coverage: cells[2] || '',
         residual_risk: cells[3] || '',
-        next_step: '改前查此判据（该停就停）；改后补失败路径测试 + 更新本行。回归跑 coverage 列里的 test-xxx.js。',
+        next_step: 'Check this row before changing the tool (stop if listed); after changing, add failure-path tests + update this row. Regression: run the test-xxx.js files listed in the coverage column.',
       }
     } catch (e) {
       return { error: 'matrix_unavailable', message: `Cannot read Y004 matrix: ${e.message}`, suggestion: 'Ensure malong/docs/Y004-工具排查矩阵.md exists' }

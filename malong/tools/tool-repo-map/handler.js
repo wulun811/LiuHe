@@ -44,6 +44,10 @@ export async function handle(args, context) {
     workspaceDir,
     relevantFiles: args?.relevantFiles,
     relevantEntities: args?.relevantEntities,
+    // r23：骨架化分页参数（全部可选，缺省=第 1 页 + 40 条 + 全量）
+    page: args?.page,
+    pageSize: args?.page_size,
+    prefix: args?.prefix,
   }
 
   if (args?.focused) {

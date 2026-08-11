@@ -81,20 +81,20 @@ function extractErrorType(stderr, stdout, exitCode) {
 }
 
 const SUGGESTIONS = {
-  SyntaxError: '检查代码中的语法错误，确保括号/引号匹配、关键字正确',
-  TypeError: '检查变量类型，确认函数调用参数和返回值类型匹配',
-  ReferenceError: '检查变量是否在作用域内声明，拼写是否正确',
-  AssertionError: '检查测试断言逻辑，确认实际值是否符合预期',
-  TimeoutError: '检查是否有死循环或异步操作未完成，增加超时或优化性能',
-  PermissionError: '检查文件/网络权限，确保有足够访问权限',
-  NotFoundError: '检查文件路径、模块名、API端点是否正确',
-  PortInUseError: '检查端口是否被占用，更换端口或终止占用进程',
-  ConnectionRefused: '检查服务是否已启动，地址和端口配置是否正确',
-  LintError: '运行 linter 修复格式和代码规范问题',
-  TestFailure: '检查测试输出，确认失败断言的详细信息',
-  NpmError: '检查 package.json 和 node_modules，尝试 npm ci 重装依赖',
-  Panic: '检查可能导致 panic 的 nil 指针、越界访问、类型断言',
-  SegFault: '检查内存越界访问或大型递归调用',
+  SyntaxError: 'Check syntax: ensure brackets/quotes match and keywords are correct',
+  TypeError: 'Check types: confirm function call arguments and return values match signatures',
+  ReferenceError: 'Check scope: verify the variable is declared and spelled correctly',
+  AssertionError: 'Check assertion logic: confirm actual value matches expected',
+  TimeoutError: 'Check for infinite loops or unfinished async work; raise the timeout or optimize',
+  PermissionError: 'Check file/network permissions',
+  NotFoundError: 'Check file path, module name, and API endpoint',
+  PortInUseError: 'Check if the port is occupied; use another port or stop the process',
+  ConnectionRefused: 'Check if the service is running and host/port config is correct',
+  LintError: 'Run the linter to fix formatting and style issues',
+  TestFailure: 'Inspect test output for failing assertion details',
+  NpmError: 'Check package.json and node_modules; try npm ci to reinstall',
+  Panic: 'Check for nil pointers, out-of-bounds access, or bad type assertions',
+  SegFault: 'Check for memory out-of-bounds access or deep recursion',
 }
 
 export function analyzeError(output) {
@@ -112,7 +112,9 @@ export function analyzeError(output) {
     first_error: firstErrorLine.slice(0, 200),
     stack_traces: traces.slice(0, 15),
     error_lines: errorLines.length,
-    suggested_action: SUGGESTIONS[errorType] || `检查错误输出，定位问题根因（退出码: ${exitCode}）`,
+    suggested_action: errorType === null && exitCode === 0
+      ? 'Command ran successfully. Nothing to do.'
+      : SUGGESTIONS[errorType] || `Inspect error output to find the root cause (exit code: ${exitCode})`,
   }
 }
 

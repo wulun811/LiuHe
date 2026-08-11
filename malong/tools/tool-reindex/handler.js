@@ -23,7 +23,7 @@ function estimateIndexSeconds(totalFiles) {
 function formatDuration(seconds) {
   if (seconds < 60) return `~${Math.max(1, seconds)}s`
   const m = Math.ceil(seconds / 60)
-  if (m < 60) return `~${m} 分钟`
+  if (m < 60) return `~${m} min`
   return `~${Math.floor(m / 60)}h${m % 60 ? ` ${m % 60}m` : ''}`
 }
 
@@ -36,17 +36,23 @@ async function runIndexing(codeIndexService, filePaths, workspaceDir, totalFiles
 
   if (blocking) {
     try {
-      await codeIndexService.indexBatch(filePaths, workspaceDir, progress)
+      const result = await codeIndexService.indexBatch(filePaths, workspaceDir, progress)
       codeIndexService.indexing = false
       const durationMs = Date.now() - startTime
       log('info', `[reindex] blocking done: ${totalFiles} files, ${durationMs}ms`)
       const last = codeIndexService.lastIndexed || {}
+      // 真实重抽数（indexBatch 按 mtime 增量，0 变化时返回空数组）——
+      // files_indexed 不再是全量文件数，避免 LLM 误以为每次都在全量建索引
+      const indexedCount = Array.isArray(result) ? result.length : filePaths.length
+      const alreadyFresh = indexedCount === 0
       return {
         status: 'completed',
         done: true,
         workspace_dir: workspaceDir,
         total_files: totalFiles,
-        files_indexed: filePaths.length,
+        files_indexed: indexedCount,
+        unchanged_skipped: Math.max(totalFiles - indexedCount, 0),
+        already_fresh: alreadyFresh,
         symbols: last.symbols,
         refs: last.refs,
         // r11(M4)：parse 失败文件数（>0 说明有病态/超大文件未入索引，仍是 dirty 下次增量重试）
@@ -54,6 +60,9 @@ async function runIndexing(codeIndexService, filePaths, workspaceDir, totalFiles
         duration_seconds: Math.round(durationMs / 1000),
         force_marked_dirty: forceMarked,
         ...(note ? { warning: note } : {}),
+        ...(alreadyFresh ? {
+          note: 'Index is already up to date — no files changed since last index. No need to reindex; read tools are served from fresh index.',
+        } : {}),
       }
     } catch (e) {
       codeIndexService.indexing = false
@@ -83,7 +92,7 @@ async function runIndexing(codeIndexService, filePaths, workspaceDir, totalFiles
     estimated_time_human: formatDuration(estimateIndexSeconds(filePaths.length)),
     force_marked_dirty: forceMarked,
     next_action: 'Call reindex() to check progress, or pass blocking=true to wait for completion',
-    note: note || `Indexing ${filePaths.length} files in background. You can continue with other tasks.`,
+    note: note || `Incremental indexing started: only files changed since last index are re-extracted (${filePaths.length} files scanned). If already indexed, this finishes in seconds. You can continue with other tasks.`,
   }
 }
 
@@ -187,7 +196,7 @@ export async function handle(args, context) {
         threshold,
         maxFiles: userMaxFiles,
         confirm_error: 'invalid_or_expired_confirm_token',
-        message: `确认 token 无效或已过期（TTL ${CONFIRM_TTL_MS / 60000} 分钟）。请重新调用 reindex(workspace_dir="${workspaceDir}") 获取新的确认信息后再提交确认。`,
+        message: `Confirm token invalid or expired (TTL ${CONFIRM_TTL_MS / 60000} min). Call reindex(workspace_dir="${workspaceDir}") again to get a fresh token before confirming.`,
       }
     }
     _confirmTokens.delete(workspaceDir)
@@ -199,7 +208,7 @@ export async function handle(args, context) {
     if (forceMarked > 0) log('info', `[reindex] force=true: marked ${forceMarked} files dirty for full re-extract`)
 
     const note = truncated
-      ? `文件总数 ${totalFiles} 超出 maxFiles=${userMaxFiles}，仅索引前 ${filePaths.length} 个文件（truncated）。其余文件未入索引；如需全部索引请提高 maxFiles 或用 ignoreDirs 排除目录。`
+      ? `File count ${totalFiles} exceeds maxFiles=${userMaxFiles}: only the first ${filePaths.length} files will be indexed (truncated). The rest are skipped; raise maxFiles or exclude dirs with ignoreDirs to index everything.`
       : null
     return runIndexing(codeIndexService, filePaths, workspaceDir, totalFiles, {
       forceMarked,
@@ -237,11 +246,11 @@ export async function handle(args, context) {
       confirm_ttl_seconds: CONFIRM_TTL_MS / 1000,
       estimated_time_seconds: estimateSec,
       estimated_time_human: formatDuration(estimateSec),
-      estimation_note: '估算基准（benchmarks/results/r10-reindex-baseline.json）：collect 20000 文件 ~95ms；extract p50 3000 文件 ~11.6s；全流程按 30 files/s 保守估算。',
+      estimation_note: 'Estimation baseline (benchmarks/results/r10-reindex-baseline.json): collect 20000 files ~95ms; extract p50 3000 files ~11.6s; conservative full-flow estimate at 30 files/s.',
       indexing_plan: (pre.truncated || totalFiles > userMaxFiles)
-        ? `文件总数 ${displayTotal} 可能超出 maxFiles=${userMaxFiles}：确认后将先收集（最多前 ${userMaxFiles} 个文件），超出即截断；要全部索引请提高 maxFiles 或用 ignoreDirs 排除非必要目录`
-        : `将索引全部 ${displayTotal} 个文件（含前 15 大目录明细，可用 skipDirs/ignoreDirs 剔除后再确认）`,
-      next_action: `二次确认：再次调用 reindex(workspace_dir="${workspaceDir}", confirm="${token}") 开始索引；或调整 maxFiles/ignoreDirs/skipDirs 后重新调用`,
+        ? `File count ${displayTotal} may exceed maxFiles=${userMaxFiles}: on confirm, at most the first ${userMaxFiles} files are collected, the rest truncated; raise maxFiles or use ignoreDirs to index everything`
+        : `Will index all ${displayTotal} files (top-15 dir breakdown included; exclude with skipDirs/ignoreDirs before confirming)`,
+      next_action: `Second confirmation: call reindex(workspace_dir="${workspaceDir}", confirm="${token}") to start indexing; or adjust maxFiles/ignoreDirs/skipDirs and call again`,
     }
   }
 

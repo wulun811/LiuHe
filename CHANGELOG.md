@@ -4,6 +4,12 @@
 
 ## 变更速览
 
+- **[0.4.5]** (2026-08-11): reindex 二次调用提醒——无变化时返回 already_fresh=true + 「索引已是最新无需再建」提示，LLM 不再反复建索引；新增 dev→liuhe 同步脚本（--check/--commit）
+
+- **[0.4.4]** (2026-08-10): i18n 英文化——9 handler + 3 manifest 的 47 处 LLM 可见中文文案统一英文（中英夹杂消除）；debug-runner 成功路径 suggested_action 不再误导；全链断言实测 2015（81 文件 0 失败）+ Rust 92；Y004 矩阵形状债务登记（核心 lib 长函数/重复块列为已知项维持）
+
+- **[0.4.3]** (2026-08-09): repo_map 骨架化分页（r23）——截断不再盲：`page`/`page_size`/`prefix` 三参数（token 预算自适应 + 40 条/页双保险）；返回全局骨架 `skeleton[{name,page,detail}]`，一次调用看到全部顶层条目与页号，翻页后骨架始终保留（导航不断）；越界 page 夹回末页 + `page_out_of_range` + suggestion；focused/全量统一管线；测试 +22 断言（54/54）
+
 - **[0.4.2]** (2026-08-08): Windows 发布支持——Rust 测试跨平台化（UnixStream→tokio duplex、check_existing_instance 补 Windows 空实现）、92 Rust 断言 + 全链 81 测试文件 1874 断言 Windows 实测 0 失败；零依赖容器包 malong-liuhe-0.4.2（linux-x86_64 + windows-x86_64）发布
 
 - **[0.4.1]** (2026-08-07): R22 深度审查 + 冻结期——五轮审核 30 项修复、三条真实工作流 58 断言（多语言/崩溃恢复/双进程并发）暴露 2 项 P1 即修即锁；全链 81 测试文件 1874 断言 0 失败；零依赖容器包 malong-liuhe-0.4.1 发布

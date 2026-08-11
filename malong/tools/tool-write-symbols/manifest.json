@@ -1,7 +1,7 @@
 {
   "name": "write_symbols",
   "version": "1.0.0",
-  "description": "Guarded write path (batch). All-or-nothing across files, deadlock-safe. Multi-file refactor? Use instead of N×write_symbol. New symbols: reindex first. 含双引号/反斜杠的字符串参数注意 JSON 转义一致性（全串统一转义或改用中文引号），否则客户端参数解析失败。",
+  "description": "Guarded write path (batch). All-or-nothing across files, deadlock-safe. Multi-file refactor? Use instead of N×write_symbol. New symbols: reindex first. For string params containing double quotes/backslashes, keep JSON escaping consistent across the whole string (escape uniformly or prefer full-width quotes), otherwise client-side parameter parsing fails.",
   "inputSchema": {
     "type": "object",
     "properties": {

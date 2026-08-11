@@ -16,7 +16,8 @@ scripts/         ci.sh / release.sh / sync-from-dev.sh
 
 1. **The parsing engine is Rust.** All symbol/reference extraction goes through the `malong-parse` daemon. Node.js side holds zero tree-sitter bindings. If you change extraction, you change Rust — and you must run `cargo test` and re-deploy the binary.
 2. **Tools are Node.** Each tool lives in `malong/tools/tool-<name>/` with a `handler.js` and a `manifest.json`. Follow existing conventions: structured errors with `suggestion`/`next_action`, self-contained calls taking `workspace_dir`.
-3. **Determinism is a hard gate.** No non-deterministic external calls (network, clock, random) in tool logic — or inject a controllable seed/mock at the upstream of the call chain.
+3. **LLM-visible text is English.** All messages returned to the LLM (`message` / `suggestion` / `next_step` / `suggested_action` / manifest `description`) must be English. Chinese is allowed only in: exception-guard keyword arrays (functionally matching Chinese error text), developer-facing comments, and test assertion messages.
+4. **Determinism is a hard gate.** No non-deterministic external calls (network, clock, random) in tool logic — or inject a controllable seed/mock at the upstream of the call chain.
 
 ## Testing requirements
 

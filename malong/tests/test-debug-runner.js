@@ -22,6 +22,10 @@ const { analyzeError, handle } = await import(pathToFileURL(join(__dirname, '..'
   assert(r2.error_type === null, '① exit 0 + FAILED 字样仍不判失败（exit 优先）')
   const r3 = analyzeError({ stdout: 'SyntaxError: whatever', stderr: '', exitCode: 0 })
   assert(r3.error_type === null, '① exit 0 + SyntaxError 文本也不分类（干净退出=成功）')
+  // R22-fix: 成功时 suggested_action 不得再误导“Inspect error output”（冒烟实锤：exit 0 仍给失败引导）
+  assert(r.suggested_action === 'Command ran successfully. Nothing to do.', `① exit 0 suggested_action 为成功文案（得 ${r.suggested_action}）`)
+  const r4 = analyzeError({ stdout: 'ok', stderr: '', exitCode: 0 })
+  assert(r4.suggested_action === 'Command ran successfully. Nothing to do.', '① 空输出 exit 0 同样成功文案')
 }
 
 // ── ② 非零退出按文本分类 ──
@@ -34,6 +38,9 @@ const { analyzeError, handle } = await import(pathToFileURL(join(__dirname, '..'
   assert(r3.error_type === 'AssertionError', `② AssertionError 分类（得 ${r3.error_type}）`)
   const r4 = analyzeError({ stdout: 'clean', stderr: '', exitCode: 3 })
   assert(r4.error_type === 'RuntimeError', `② 非零退出无匹配文本 → RuntimeError（得 ${r4.error_type}）`)
+  assert(r4.suggested_action.includes('Inspect error output'), `② 失败路径 suggested_action 仍是错误引导（得 ${r4.suggested_action}）`)
+  const r5 = analyzeError({ stdout: '', stderr: 'TypeError: boom', exitCode: 1 })
+  assert(r5.suggested_action === 'Check types: confirm function call arguments and return values match signatures', '② 分类错误仍给对应 SUGGESTIONS 文案')
 }
 
 // ── ③ timeout 优先于 exit code ──

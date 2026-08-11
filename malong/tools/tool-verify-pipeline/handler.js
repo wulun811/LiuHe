@@ -273,7 +273,7 @@ export async function handle(args, context) {
   // 否则工具超时后服务端仍继续跑、占满 semaphore 槽导致其他工具排队 60s 超时（实测 verify_pipeline 全链 3-4 分钟）
   const totalBudgetMs = wanted.length * timeout
   const mcp_note = totalBudgetMs > 100_000
-    ? `MCP 请求超时 120s 硬限制：本次 ${wanted.length} 阶段 × ${Math.round(timeout / 1000)}s 预算 ${Math.round(totalBudgetMs / 1000)}s 必然超时。建议 stages=lint 单阶段，或用 test_bridge(action="run") 按文件 scope 分批。`
+    ? `MCP request has a 120s hard timeout: ${wanted.length} stages × ${Math.round(timeout / 1000)}s budget = ${Math.round(totalBudgetMs / 1000)}s, will definitely time out. Suggest stages=lint single-stage, or use test_bridge(action="run") to batch by file scope.`
     : null
   return {
     status,

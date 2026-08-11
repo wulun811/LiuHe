@@ -362,7 +362,7 @@ export async function handle(args, context) {
                 line: s.start_line,
                 name: s.name,
                 confidence: 'architecture_signal',
-                message: '守卫类函数（assert/validate/verify 命名）生产零调用——可能是架构级未接线（守卫未接入调用链），比普通死代码危险，先人工确认调用路径再处理',
+                message: 'Guard-typed function (assert/validate/verify naming) with zero production callers — likely architecture-level disconnection (guard never wired into call chain), more dangerous than ordinary dead code. Manually trace the call path before handling.',
                 suggestion: `trace call sites of ${s.name} — if truly unwired, wire it into the flow or delete deliberately`,
               }
               : {
@@ -401,7 +401,7 @@ export async function handle(args, context) {
         deadCode.push({
           type: 'orphan_file',
           file: f,
-          reason: '无任何导入',
+          reason: 'no imports at all',
           last_modified: mtime,
           suggestion: 'archive or delete',
         })
@@ -420,7 +420,7 @@ export async function handle(args, context) {
 
   let nextStep = null
   if (deadCode.some(d => d.type === 'unused_guard')) {
-    nextStep = 'unused_guard 是架构级未接线信号（守卫未接入调用链）——先人工 trace 调用路径，确认未接线后再处理；普通 unused imports/functions 可安全删除。'
+    nextStep = 'unused_guard is an architecture-level un-wired signal (guard not connected to call chain) — manually trace the call path to confirm before handling; plain unused imports/functions can be safely removed.'
   } else if (deadCode.length > 0) {
     nextStep = `Remove dead code via edit_transaction. Unused imports are safe to remove immediately.`
   } else {
