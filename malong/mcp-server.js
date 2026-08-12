@@ -264,6 +264,18 @@ async function initModules() {
   _ready = true
   crashLog(`modules initialized, stateDir=${stateDir}, tools=${registry.getToolCount()}, concurrency=${concurrency}, pid=${process.pid}`)
 
+  // SQL 后端探测：默认应使用 better-sqlite3 完整版；仅当无法安装（离线/无编译环境）才应降级 sql.js
+  try {
+    const { getBackendName } = await import('./db-adapter.js')
+    if (getBackendName() === 'sql.js') {
+      safeLog('SQLITE BACKEND: running on vendored sql.js (sandbox) — better-sqlite3 not installed.')
+      safeLog('SQLITE UPGRADE: run `cd malong && npm ci` (or `npm install better-sqlite3`) to enable the full SQLite backend;')
+      safeLog('SQLITE UPGRADE: if npm install is not possible (offline / no build toolchain), the sandbox backend works as a fallback.')
+    } else {
+      safeLog('SQLITE BACKEND: better-sqlite3 (full backend)')
+    }
+  } catch {}
+
   const health = await runHealthCheck({
     stateDir, toolsDir, workspacesDir, registry, log: core.log, semaphore, activeRequests,
     parseService: core.getService('langParser'),

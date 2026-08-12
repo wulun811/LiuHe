@@ -103,45 +103,16 @@
 
 ## 快速开始
 
-### 零构建部署（沙盒 / 离线环境）
+### 标准安装（默认——推荐）
 
-适用于 **Node ≥ 20 且无法 npm 安装**的环境（不能 `npm ci`、不能原生编译）——全部从仓库文件直接运行（**Linux / Windows**，预编译二进制为 linux-x86_64 / windows-x86_64）：
-
-```bash
-# 0) 克隆后进入工具集目录：
-git clone <repo-url> liuhe && cd liuhe/malong
-
-# 1) 解析 daemon——用 releases/ 里的预编译二进制（无需 cargo）：
-mkdir -p ~/.local/bin
-tar -xzf ../releases/malong-liuhe-0.4.5-linux-x86_64.tar.gz
-cp malong-parse/target/release/malong-parse ~/.local/bin
-malong-parse &                                   # 启动 daemon（socket: /tmp/malong-parse-$UID.sock）
-
-# 2) 直接跑工具集——零 npm 安装：
-node --max-old-space-size=4096 mcp-server.js --workspace /path/to/project
-# better-sqlite3 不可用时自动启用仓库内置 SQLite（sql.js WASM）
-
-# 3) 自检（可选，30 秒）：
-node tests/test-db-adapter.js   # 22 断言：sql.js 后端 + 持久化
-node tests/test-mcp-server.js   # 25 断言：MCP stdio + daemon 往返
-```
-
-> **Windows 用户：** 用 `releases/malong-liuhe-0.4.5-windows-x86_64.tar.gz`（内附 `malong-parse.exe`），解压后放到 PATH 即可；MCP 服务启动时会自动拉起 daemon，无需手动执行 `malong-parse &` 这一步。上面的 `mkdir -p`/`tar -xzf` 为 Unix 语法，Windows 用解压工具或 `tar -xzf`（Win10+ 自带）均可。
-
-> 注意：daemon 未启动时，依赖解析的工具（符号提取等）会降级；SQLite 系工具（repo-map / code-index / health-check）不受影响。
-
-- SQLite 后端自动探测：有 `better-sqlite3` 时用完整版（行为完全不变）；否则回退**仓库内置 sql.js WASM**（`malong/vendor/`，零依赖）——无需安装、无需编译、无需网络。
-- 两后端数据文件完全兼容（都是 SQLite 格式）。
-- 内置组件声明见 `THIRD_PARTY_NOTICES.md`。
-
-### 10 秒体验
+`npm ci` 会安装 `better-sqlite3`（完整版 SQLite 后端），这是默认推荐路径：
 
 ```bash
 # 1) 获取解析服务——从 releases/ 下载预编译二进制，或自己编译：
 cd malong-parse && cargo build --release && cp target/release/malong-parse ~/.local/bin
 malong-parse &                                   # 启动 daemon（Unix socket）
 
-# 2) 安装工具集
+# 2) 安装工具集（npm ci 装 better-sqlite3 完整版）
 cd ../malong && npm ci
 
 # 3) 注册 MCP 服务（opencode / Claude Desktop 等任何 MCP 客户端通用）
@@ -164,6 +135,37 @@ cd ../malong && npm ci
 
 # 4) 让 LLM 问一句："search for the symbol 'handle' in my workspace"
 ```
+
+> **SQL 后端说明**：默认使用 `better-sqlite3` 完整版。若 `npm install` 失败（离线 / 无编译工具链 / Node < 20），服务自动降级为仓库内置的 **sql.js WASM 沙盒后端**（`malong/vendor/`，零依赖、无需网络）——启动日志会提示当前后端与升级命令。两后端数据文件完全兼容（都是 SQLite 格式）。
+
+### 零构建部署（降级路径：沙盒 / 离线环境）
+
+适用于 **Node ≥ 20 且无法 npm 安装**的环境（不能 `npm ci`、不能原生编译）——全部从仓库文件直接运行（**Linux / Windows**，预编译二进制为 linux-x86_64 / windows-x86_64）。此路径下 SQLite 为 sql.js 沙盒后端（降级版）：
+
+```bash
+# 0) 克隆后进入工具集目录：
+git clone <repo-url> liuhe && cd liuhe/malong
+
+# 1) 解析 daemon——用 releases/ 里的预编译二进制（无需 cargo）：
+mkdir -p ~/.local/bin
+tar -xzf ../releases/malong-liuhe-0.4.5-linux-x86_64.tar.gz
+cp malong-parse/target/release/malong-parse ~/.local/bin
+malong-parse &                                   # 启动 daemon（socket: /tmp/malong-parse-$UID.sock）
+
+# 2) 直接跑工具集——零 npm 安装：
+node --max-old-space-size=4096 mcp-server.js --workspace /path/to/project
+# better-sqlite3 不可用时自动降级仓库内置 SQLite（sql.js WASM）
+
+# 3) 自检（可选，30 秒）：
+node tests/test-db-adapter.js   # 22 断言：sql.js 后端 + 持久化
+node tests/test-mcp-server.js   # 25 断言：MCP stdio + daemon 往返
+```
+
+> **Windows 用户：** 用 `releases/malong-liuhe-0.4.5-windows-x86_64.tar.gz`（内附 `malong-parse.exe`），解压后放到 PATH 即可；MCP 服务启动时会自动拉起 daemon，无需手动执行 `malong-parse &` 这一步。上面的 `mkdir -p`/`tar -xzf` 为 Unix 语法，Windows 用解压工具或 `tar -xzf`（Win10+ 自带）均可。
+
+> 注意：daemon 未启动时，依赖解析的工具（符号提取等）会降级；SQLite 系工具（repo-map / code-index / health-check）不受影响。
+
+- 内置组件声明见 `THIRD_PARTY_NOTICES.md`。
 
 LLM 收到的真实输出：
 

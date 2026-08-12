@@ -40,48 +40,15 @@ jobs:
         working-directory: malong-parse
         run: cargo build --release
 
-      - name: Package (ubuntu)
-        if: runner.os == 'Linux'
-        run: |
-          mkdir -p dist
-          cp malong-parse/target/release/malong-parse dist/malong-parse
-          cp LICENSE dist/LICENSE
-          tar -czf "${{ matrix.artifact }}.tar.gz" -C dist malong-parse LICENSE
-          sha256sum "${{ matrix.artifact }}.tar.gz" > "${{ matrix.artifact }}.tar.gz.sha256"
-
-      - name: Package (macos)
-        if: runner.os == 'macOS'
-        run: |
-          mkdir -p dist
-          cp malong-parse/target/release/malong-parse dist/malong-parse
-          cp LICENSE dist/LICENSE
-          tar -czf "${{ matrix.artifact }}.tar.gz" -C dist malong-parse LICENSE
-          shasum -a 256 "${{ matrix.artifact }}.tar.gz" > "${{ matrix.artifact }}.tar.gz.sha256"
-
-      - name: Package (windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Copy-Item malong-parse\target\release\malong-parse.exe dist\malong-parse.exe
-          Copy-Item LICENSE dist\LICENSE
-          Compress-Archive -Path dist\malong-parse.exe, dist\LICENSE -DestinationPath "${{ matrix.artifact }}.zip"
-          $hash = (Get-FileHash "${{ matrix.artifact }}.zip" -Algorithm SHA256).Hash.ToLower()
-          "$hash  ${{ matrix.artifact }}.zip" | Out-File -Encoding ascii "${{ matrix.artifact }}.zip.sha256"
-
       - name: Package full tarball (full tarball JS source plus parse binary)
         shell: bash
         run: |
+          rm -rf releases && mkdir -p releases
           bash scripts/package-full.sh ${{ matrix.osname }} ${{ matrix.arch }}
 
       - uses: actions/upload-artifact@v5
         with:
           name: ${{ matrix.artifact }}
-          path: ${{ matrix.artifact }}.*
-
-      - uses: actions/upload-artifact@v5
-        with:
-          name: ${{ matrix.artifact }}-full
           path: releases/malong-liuhe-*
 
   release:

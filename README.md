@@ -102,11 +102,47 @@ Deterministic scanners only — regex pattern matching and reference graphs. **N
 
 ## Quick Start
 
-### Zero-build deployment (sandbox / offline environments)
+### Standard install (default — recommended)
+
+`npm ci` installs `better-sqlite3` (the full SQLite backend); this is the default recommended path:
+
+```bash
+# 1) Get the parsing daemon — download a prebuilt binary from releases/, or build:
+cd malong-parse && cargo build --release && cp target/release/malong-parse ~/.local/bin
+malong-parse &                                   # start the daemon (Unix socket)
+
+# 2) Install the toolset (npm ci installs the full better-sqlite3 backend)
+cd ../malong && npm ci
+
+# 3) Register the MCP server (works with any MCP client, e.g. opencode / Claude Desktop)
+#    opencode (project-root opencode.json; Windows paths use double backslashes, Linux/macOS forward slashes):
+#    {
+#      "mcp": {
+#        "malong": {
+#          "type": "local",
+#          "command": ["node", "--max-old-space-size=512", "N:\\repo\\liuhe\\malong\\mcp-server.js", "--workspace", "N:\\repo\\liuhe"],
+#          "enabled": true
+#        }
+#      }
+#    }
+#    Claude Desktop (verified on Windows: %APPDATA%\Claude\claude_desktop_config.json):
+#    {
+#      "mcpServers": {
+#        "malong": { "command": "node", "args": ["/path/to/malong/mcp-server.js"] }
+#      }
+#    }
+
+# 4) Ask your LLM: "search for the symbol 'handle' in my workspace"
+```
+
+> **SQL backend note:** the default is the full `better-sqlite3` backend. If `npm install` fails (offline / no build toolchain / Node < 20), the server automatically degrades to the **vendored sql.js WASM sandbox backend** (`malong/vendor/`, zero-dependency, no network) — the startup log shows which backend is active and the upgrade command. Data files are fully compatible between backends (both are SQLite).
+
+### Zero-build deployment (degraded path: sandbox / offline environments)
 
 For environments with **Node >= 20 and no npm access** (no `npm ci`, no native
 compilation), everything runs from the repo files as-is (Linux/Windows — the
-prebuilt binaries are `linux-x86_64` and `windows-x86_64`):
+prebuilt binaries are `linux-x86_64` and `windows-x86_64`). On this path SQLite
+runs on the sql.js sandbox backend (degraded):
 
 ```bash
 # 0) Clone, then enter the toolset directory:
@@ -133,42 +169,7 @@ node tests/test-mcp-server.js   # 25 assertions: MCP stdio + daemon round-trip
 > etc.) degrade; the SQLite-backed tools (repo-map / code-index / health-check)
 > still work.
 
-- SQLite backend auto-detection: `better-sqlite3` when available (full version,
-  unchanged behavior); otherwise the **vendored sql.js WASM** (`malong/vendor/`,
-  zero-dependency) is used — no install, no compilation, no network.
-- Data files are fully compatible between backends (both are SQLite).
 - See `THIRD_PARTY_NOTICES.md` for the vendored component.
-
-### 10-second taste
-
-```bash
-# 1) Get the parsing daemon — download a prebuilt binary from releases/, or build:
-cd malong-parse && cargo build --release && cp target/release/malong-parse ~/.local/bin
-malong-parse &                                   # start the daemon (Unix socket)
-
-# 2) Install the toolset
-cd ../malong && npm ci
-
-# 3) Register the MCP server (works with any MCP client, e.g. opencode / Claude Desktop)
-#    opencode (project-root opencode.json; Windows paths use double backslashes, Linux/macOS forward slashes):
-#    {
-#      "mcp": {
-#        "malong": {
-#          "type": "local",
-#          "command": ["node", "--max-old-space-size=512", "N:\\repo\\liuhe\\malong\\mcp-server.js", "--workspace", "N:\\repo\\liuhe"],
-#          "enabled": true
-#        }
-#      }
-#    }
-#    Claude Desktop (verified on Windows: %APPDATA%\Claude\claude_desktop_config.json):
-#    {
-#      "mcpServers": {
-#        "malong": { "command": "node", "args": ["/path/to/malong/mcp-server.js"] }
-#      }
-#    }
-
-# 4) Ask your LLM: "search for the symbol 'handle' in my workspace"
-```
 
 What the LLM sees back:
 
