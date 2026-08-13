@@ -7,7 +7,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-VER="$(grep -m1 '"version"' malong/package.json | sed 's/.*: "\([0-9.]*\)".*/\1/')"
+VER="$(grep -m1 '"version"' malong/package.json | sed 's/.*: "\([0-9][0-9A-Za-z.-]*\)".*/\1/')"
 OS="${1:-linux}"   # linux | windows | darwin
 ARCH="${2:-x86_64}" # x86_64 | aarch64
 case "$OS" in

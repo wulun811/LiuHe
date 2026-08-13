@@ -4,6 +4,7 @@
 
 ## 变更速览
 
+- **[0.4.5.post1]** (2026-08-14): 新增 DSH 适配包（malong/dsh/：dsh-bridge.mjs 插件 + install-dsh.sh + 接入说明）——自动注入会话工作区、输出结构化、索引规则透明；打包版本主体 0.4.5 不变
 - **[0.4.5]** (2026-08-11): reindex 二次调用提醒——无变化时返回 already_fresh=true + 「索引已是最新无需再建」提示，LLM 不再反复建索引；新增 dev→liuhe 同步脚本（--check/--commit）
 
 - **[0.4.4]** (2026-08-10): i18n 英文化——9 handler + 3 manifest 的 47 处 LLM 可见中文文案统一英文（中英夹杂消除）；debug-runner 成功路径 suggested_action 不再误导；全链断言实测 2015（81 文件 0 失败）+ Rust 92；Y004 矩阵形状债务登记（核心 lib 长函数/重复块列为已知项维持）

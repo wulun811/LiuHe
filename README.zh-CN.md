@@ -134,6 +134,13 @@ cd ../malong && npm ci
 #    }
 
 # 4) 让 LLM 问一句："search for the symbol 'handle' in my workspace"
+
+#    DeepSeek Harness（dsh web）——自动跟随会话工作区（额外便利，可选）：
+#    在 dsh 宿主机上执行一次（Linux/macOS）：
+#      bash malong/dsh/install-dsh.sh         # 幂等；自动备份并修改 ~/.dsh/profiles/web/cordis.patch.yml
+#      pkill -f "dsh web"; dsh web --port 3456 --host 0.0.0.0 --trusted-host <局域网IP>
+#    桥层将 38 个工具注册为 malong__*，并自动用当前对话的工作区填充 workspace_dir
+#    （无需每次指定路径；显式传路径仍优先）。完整指南（含索引规则）：malong/dsh/DSH接入说明.md
 ```
 
 > **SQL 后端说明**：默认使用 `better-sqlite3` 完整版。若 `npm install` 失败（离线 / 无编译工具链 / Node < 20），服务自动降级为仓库内置的 **sql.js WASM 沙盒后端**（`malong/vendor/`，零依赖、无需网络）——启动日志会提示当前后端与升级命令。两后端数据文件完全兼容（都是 SQLite 格式）。
