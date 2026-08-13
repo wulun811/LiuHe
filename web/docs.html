@@ -410,13 +410,13 @@ args = ["/path/to/malong/mcp-server.js", "--workspace", "/path/to/project"]</pre
                 <div class="px-6 py-3 text-xs font-mono" style="background:rgba(255,255,255,0.03);border-bottom:1px solid rgba(255,255,255,0.05);color:#e8b86e">一键全链（需守护进程运行）</div>
                 <div class="p-5">
                     <div class="text-sm font-mono mb-3" style="color:#b0b0b0">./scripts/ci.sh    <span style="color:#6d6d6d"># cargo test + npm test + dogfood</span></div>
-                    <div class="text-sm font-mono" style="color:#b0b0b0">npm test    <span style="color:#6d6d6d"># 2015 断言 / 81 个测试文件</span></div>
+                    <div class="text-sm font-mono" style="color:#b0b0b0">npm test    <span style="color:#6d6d6d"># 2013 断言 / 81 个测试文件</span></div>
                 </div>
             </div>
             <div class="space-y-3 text-sm font-mono" style="color:#b0b0b0">
                 <div>node tests/test-db-adapter.js   <span style="color:#6d6d6d"># 22 断言：sql.js 后端 + 持久化</span></div>
                 <div>node tests/test-mcp-server.js    <span style="color:#6d6d6d"># 25 断言：MCP stdio + 守护进程往返</span></div>
-                <div>cd malong-parse && cargo test    <span style="color:#6d6d6d"># 109 断言：多语言提取 / 协议 / 缓存 / 调度</span></div>
+                <div>cd malong-parse && cargo test    <span style="color:#6d6d6d"># 92 断言：多语言提取 / 协议 / 缓存 / 调度</span></div>
             </div>
         </section>
 

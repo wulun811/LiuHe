@@ -410,13 +410,13 @@ args = ["/path/to/malong/mcp-server.js", "--workspace", "/path/to/project"]</pre
                 <div class="px-6 py-3 text-xs font-mono" style="background:rgba(255,255,255,0.03);border-bottom:1px solid rgba(255,255,255,0.05);color:#e8b86e">One-shot full chain (daemon must be running)</div>
                 <div class="p-5">
                     <div class="text-sm font-mono mb-3" style="color:#b0b0b0">./scripts/ci.sh    <span style="color:#6d6d6d"># cargo test + npm test + dogfood</span></div>
-                    <div class="text-sm font-mono" style="color:#b0b0b0">npm test    <span style="color:#6d6d6d"># 2015 assertions / 81 test files</span></div>
+                    <div class="text-sm font-mono" style="color:#b0b0b0">npm test    <span style="color:#6d6d6d"># 2013 assertions / 81 test files</span></div>
                 </div>
             </div>
             <div class="space-y-3 text-sm font-mono" style="color:#b0b0b0">
                 <div>node tests/test-db-adapter.js   <span style="color:#6d6d6d"># 22 assertions: sql.js backend + persistence</span></div>
                 <div>node tests/test-mcp-server.js    <span style="color:#6d6d6d"># 25 assertions: MCP stdio + daemon round-trip</span></div>
-                <div>cd malong-parse && cargo test    <span style="color:#6d6d6d"># 109 assertions: extraction / protocol / cache / dispatch</span></div>
+                <div>cd malong-parse && cargo test    <span style="color:#6d6d6d"># 92 assertions: extraction / protocol / cache / dispatch</span></div>
             </div>
         </section>
 
