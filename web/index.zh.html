@@ -1,30 +1,46 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Malong·Liuhe Toolkit — Reinventing Code Operations for LLMs</title>
-    <meta name="description" content="Malong Liuhe: a 44-tool MCP server suite designed for LLMs, not humans — symbolic read/write, Rust parsing, transactional safety, deterministic quality gates.">
+    <title>码龙·六合工具 — 为 LLM 重新发明代码操作</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700;900&family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/ScrollTrigger.min.js"></script>
     <script>
-        tailwind.config = window.tailwindConfig || {
-            theme: { extend: {
-                fontFamily: { 'mono': ['"JetBrains Mono"', 'monospace'], 'sans': ['Inter', 'system-ui', 'sans-serif'] },
-                colors: {
-                    dragon: { 50:'#fdf8f0',100:'#f9ecd6',200:'#f2d5a8',300:'#e8b86e',400:'#dc9940',500:'#c97d2a',600:'#b06220',700:'#8f4c1d',800:'#753e1e',900:'#61331b',950:'#37190c' },
-                    ink: { 50:'#f6f6f6',100:'#e7e7e7',200:'#d1d1d1',300:'#b0b0b0',400:'#888888',500:'#6d6d6d',600:'#5d5d5d',700:'#4f4f4f',800:'#454545',900:'#1a1a1a',950:'#0d0d0d' },
-                    verdant: { 50:'#f0fdf4',100:'#dcfce7',200:'#bbf7d0',300:'#86efac',400:'#4ade80',500:'#22c55e',600:'#16a34a',700:'#15803d',800:'#166534',900:'#14532d' },
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        'serif-cn': ['"Noto Serif SC"', 'serif'],
+                        'mono': ['"JetBrains Mono"', 'monospace'],
+                        'sans': ['Inter', 'system-ui', 'sans-serif'],
+                    },
+                    colors: {
+                        'dragon': {
+                            50: '#fdf8f0', 100: '#f9ecd6', 200: '#f2d5a8', 300: '#e8b86e',
+                            400: '#dc9940', 500: '#c97d2a', 600: '#b06220', 700: '#8f4c1d',
+                            800: '#753e1e', 900: '#61331b', 950: '#37190c',
+                        },
+                        'ink': {
+                            50: '#f6f6f6', 100: '#e7e7e7', 200: '#d1d1d1', 300: '#b0b0b0',
+                            400: '#888888', 500: '#6d6d6d', 600: '#5d5d5d', 700: '#4f4f4f',
+                            800: '#454545', 900: '#1a1a1a', 950: '#0d0d0d',
+                        },
+                        'verdant': {
+                            50: '#f0fdf4', 100: '#dcfce7', 200: '#bbf7d0', 300: '#86efac',
+                            400: '#4ade80', 500: '#22c55e', 600: '#16a34a', 700: '#15803d',
+                            800: '#166534', 900: '#14532d',
+                        }
+                    }
                 }
-            } }
-        };
+            }
+        }
     </script>
-    <link rel="stylesheet" href="assets/site.css">
+        <link rel="stylesheet" href="assets/site.css">
 </head>
 <body class="antialiased">
     <div class="hero-glow" id="heroGlow"></div>
@@ -36,21 +52,21 @@
                 <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-dragon-500 to-dragon-700 flex items-center justify-center">
                     <span class="text-white font-bold text-sm font-mono">LH</span>
                 </div>
-                <span class="font-sans font-bold text-lg text-white">Malong·Liuhe</span>
+                <span class="font-serif-cn font-bold text-lg text-white">码龙·六合</span>
             </div>
             <div class="hidden md:flex items-center gap-8 text-sm text-ink-400">
-                <a href="#philosophy" class="nav-link hover:text-white transition-colors">Philosophy</a>
-                <a href="#performance" class="nav-link hover:text-white transition-colors">Performance</a>
-                <a href="#architecture" class="nav-link hover:text-white transition-colors">Architecture</a>
-                <a href="#tools" class="nav-link hover:text-white transition-colors">Tools</a>
-                <a href="#safety" class="nav-link hover:text-white transition-colors">Safety</a>
-                <a href="#evolution" class="nav-link hover:text-white transition-colors">Evolution</a>
-                <a href="download.en.html" class="nav-link hover:text-white transition-colors">Download</a>
-                <a href="docs.en.html" class="nav-link hover:text-white transition-colors">Docs</a>
+                <a href="#philosophy" class="nav-link hover:text-white transition-colors">理念</a>
+                <a href="#performance" class="nav-link hover:text-white transition-colors">性能</a>
+                <a href="#architecture" class="nav-link hover:text-white transition-colors">架构</a>
+                <a href="#tools" class="nav-link hover:text-white transition-colors">工具</a>
+                <a href="#safety" class="nav-link hover:text-white transition-colors">安全</a>
+                <a href="#evolution" class="nav-link hover:text-white transition-colors">进化</a>
+                <a href="download.html" class="nav-link hover:text-white transition-colors">下载</a>
+                <a href="docs.html" class="nav-link hover:text-white transition-colors">文档</a>
             </div>
             <div class="flex items-center gap-3">
                 <span class="tag-pill px-3 py-1 rounded-full text-xs font-mono">v0.4.5</span>
-                <a href="index.html" class="text-ink-400 hover:text-white transition-colors text-sm">中文</a>
+                <a href="index.html" class="text-ink-400 hover:text-white transition-colors text-sm">EN</a>
                 <a href="https://github.com/wulun811/LiuHe" target="_blank" class="text-ink-400 hover:text-white transition-colors">
                     <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
                 </a>
@@ -61,15 +77,15 @@
     <!-- TOC Sidebar -->
     <div class="toc-sidebar" id="tocSidebar">
         <div class="flex flex-col gap-4">
-            <a href="#hero" class="toc-dot" data-section="hero" title="Home"></a>
-            <a href="#philosophy" class="toc-dot" data-section="philosophy" title="Philosophy"></a>
-            <a href="#performance" class="toc-dot" data-section="performance" title="Performance"></a>
-            <a href="#architecture" class="toc-dot" data-section="architecture" title="Architecture"></a>
-            <a href="#tools" class="toc-dot" data-section="tools" title="Tools"></a>
-            <a href="#safety" class="toc-dot" data-section="safety" title="Safety"></a>
-            <a href="#evolution" class="toc-dot" data-section="evolution" title="Evolution"></a>
-            <a href="#languages" class="toc-dot" data-section="languages" title="Languages"></a>
-            <a href="#quickstart" class="toc-dot" data-section="quickstart" title="Quick Start"></a>
+            <a href="#hero" class="toc-dot" data-section="hero" title="首页"></a>
+            <a href="#philosophy" class="toc-dot" data-section="philosophy" title="核心理念"></a>
+            <a href="#performance" class="toc-dot" data-section="performance" title="性能实测"></a>
+            <a href="#architecture" class="toc-dot" data-section="architecture" title="四层架构"></a>
+            <a href="#tools" class="toc-dot" data-section="tools" title="工具矩阵"></a>
+            <a href="#safety" class="toc-dot" data-section="safety" title="安全写入"></a>
+            <a href="#evolution" class="toc-dot" data-section="evolution" title="自我进化"></a>
+            <a href="#languages" class="toc-dot" data-section="languages" title="多语言"></a>
+            <a href="#quickstart" class="toc-dot" data-section="quickstart" title="快速开始"></a>
         </div>
     </div>
 
@@ -91,50 +107,51 @@
         <div class="relative z-10 max-w-5xl mx-auto px-6 text-center">
             <div class="mb-8 inline-flex items-center gap-2 px-4 py-2 rounded-full border border-dragon-500/20 bg-dragon-500/5">
                 <span class="w-2 h-2 rounded-full bg-verdant-400 animate-pulse"></span>
-                <span class="text-dragon-300 text-sm font-mono">1800+ assertions green · 44 MCP tools · 10 languages</span>
+                <span class="text-dragon-300 text-sm font-mono">1800+ 断言全绿 · 44 MCP 工具 · 10 语言支持</span>
             </div>
             
-            <h1 class="font-sans text-5xl md:text-7xl font-black mb-6 leading-tight">
-                <span class="text-white">Reinventing</span>
-                <span class="gradient-text">Code Operations</span>
+            <h1 class="font-serif-cn text-5xl md:text-7xl font-black mb-6 leading-tight">
+                <span class="text-white">为</span>
+                <span class="gradient-text">LLM</span>
+                <span class="text-white">重新发明</span>
                 <br class="hidden md:block">
-                <span class="text-white">for LLMs</span>
+                <span class="text-white">代码操作</span>
             </h1>
             
             <p class="text-xl md:text-2xl text-ink-400 mb-4 font-light max-w-3xl mx-auto leading-relaxed">
-                Malong·Liuhe Toolkit — a code-operation toolchain <strong class="text-white font-medium">designed for LLMs, not humans</strong>
+                码龙·六合工具 —— 一套<strong class="text-white font-medium">为 LLM 而非人类设计</strong>的代码操作工具链
             </p>
             
             <p class="text-ink-500 mb-12 max-w-2xl mx-auto leading-relaxed">
-                Traditional tools assume users with hands, eyes and memory. LLMs have none of the three.<br class="hidden md:block">
-                We rebuilt the entire pipeline — from parsing to writing — around those three missing pieces.
+                传统工具假设使用者有手、有眼、有记忆；LLM 三者皆无。<br class="hidden md:block">
+                我们围绕这三点缺失，重新设计了从解析到写入的完整基础设施。
             </p>
 
             <div class="flex flex-wrap justify-center gap-4 mb-16">
                 <div class="metric-card rounded-xl px-6 py-4 text-center min-w-[140px]">
                     <div class="text-3xl font-bold text-white font-mono">98<span class="text-lg text-dragon-400">ms</span></div>
-                    <div class="text-xs text-ink-500 mt-1">repo_map response</div>
+                    <div class="text-xs text-ink-500 mt-1">repo_map 响应</div>
                 </div>
                 <div class="metric-card rounded-xl px-6 py-4 text-center min-w-[140px]">
                     <div class="text-3xl font-bold text-white font-mono">588<span class="text-lg text-dragon-400">/s</span></div>
-                    <div class="text-xs text-ink-500 mt-1">peak throughput</div>
+                    <div class="text-xs text-ink-500 mt-1">吞吐峰值</div>
                 </div>
                 <div class="metric-card rounded-xl px-6 py-4 text-center min-w-[140px]">
                     <div class="text-3xl font-bold text-white font-mono">65<span class="text-lg text-dragon-400">%</span></div>
-                    <div class="text-xs text-ink-500 mt-1">token savings</div>
+                    <div class="text-xs text-ink-500 mt-1">Token 节省</div>
                 </div>
                 <div class="metric-card rounded-xl px-6 py-4 text-center min-w-[140px]">
-                    <div class="text-3xl font-bold text-white font-mono">128<span class="text-lg text-dragon-400">concurrent</span></div>
-                    <div class="text-xs text-ink-500 mt-1">zero OOM</div>
+                    <div class="text-3xl font-bold text-white font-mono">128<span class="text-lg text-dragon-400">并发</span></div>
+                    <div class="text-xs text-ink-500 mt-1">零 OOM</div>
                 </div>
             </div>
 
             <div class="flex justify-center gap-4">
                 <a href="#quickstart" class="px-8 py-3 bg-gradient-to-r from-dragon-600 to-dragon-500 text-white rounded-lg font-medium hover:from-dragon-500 hover:to-dragon-400 transition-all shadow-lg shadow-dragon-500/20">
-                    Quick Start
+                    快速开始
                 </a>
                 <a href="#philosophy" class="px-8 py-3 border border-white/10 text-white rounded-lg font-medium hover:bg-white/5 transition-all">
-                    Learn More
+                    深入了解
                 </a>
             </div>
 
@@ -154,9 +171,9 @@
                     <div class="w-12 h-px bg-dragon-500"></div>
                     <span class="text-dragon-400 text-sm font-mono uppercase tracking-wider">Philosophy</span>
                 </div>
-                <h2 class="font-sans text-4xl md:text-5xl font-bold text-white mb-6">Core Philosophy</h2>
+                <h2 class="font-serif-cn text-4xl md:text-5xl font-bold text-white mb-6">核心理念</h2>
                 <p class="text-xl text-ink-400 max-w-2xl mb-16">
-                    Not an IDE plugin for human programmers — OS primitives for LLMs.
+                    不是给人类程序员用的 IDE 插件，而是给 LLM 用的操作系统原语。
                 </p>
             </div>
 
@@ -168,13 +185,13 @@
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/>
                             </svg>
                         </div>
-                        <h3 class="text-xl font-bold text-white mb-3">No Hands</h3>
+                        <h3 class="text-xl font-bold text-white mb-3">无手</h3>
                         <p class="text-ink-400 leading-relaxed mb-4">
-                            LLMs cannot click, drag or confirm. Every operation must be <strong class="text-white">atomic, undoable and retryable</strong>.
+                            LLM 无法像人类一样点击、拖拽、确认。每一次操作必须是<strong class="text-white">原子化、可撤销、可重试</strong>的。
                         </p>
                         <div class="code-block rounded-lg p-4 text-xs text-ink-300">
                             <div class="highlight-line px-2 -mx-2 mb-1">edit_transaction</div>
-                            <div class="px-2">  transaction + rollback + undo journal</div>
+                            <div class="px-2">  事务 + rollback + undo journal</div>
                         </div>
                     </div>
                 </div>
@@ -187,12 +204,12 @@
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
                             </svg>
                         </div>
-                        <h3 class="text-xl font-bold text-white mb-3">No Eyes</h3>
+                        <h3 class="text-xl font-bold text-white mb-3">无眼</h3>
                         <p class="text-ink-400 leading-relaxed mb-4">
-                            LLMs cannot "see" code structure. Output must be <strong class="text-white">structured and self-explaining</strong> — JSON for direct consumption, errors with fix suggestions.
+                            LLM 无法"看到"代码结构。输出必须是<strong class="text-white">结构化、自解释</strong>的，JSON 直接消费，错误带修复建议。
                         </p>
                         <div class="code-block rounded-lg p-4 text-xs text-ink-300">
-                            <div class="px-2 text-verdant-400">// errors carry a next_action</div>
+                            <div class="px-2 text-verdant-400">// 错误响应自带 next_action</div>
                             <div class="highlight-line px-2 -mx-2">{ "error": "...", "suggestion": "..." }</div>
                         </div>
                     </div>
@@ -205,13 +222,13 @@
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
                             </svg>
                         </div>
-                        <h3 class="text-xl font-bold text-white mb-3">No Memory</h3>
+                        <h3 class="text-xl font-bold text-white mb-3">无记忆</h3>
                         <p class="text-ink-400 leading-relaxed mb-4">
-                            LLM context is finite and unstable. Every call must be <strong class="text-white">self-contained</strong> — workspace-anchored, with optimistic version concurrency control.
+                            LLM 的上下文有限且不稳定。每次调用必须<strong class="text-white">自包含</strong>，带 workspace 锚定，版本乐观并发控制。
                         </p>
                         <div class="code-block rounded-lg p-4 text-xs text-ink-300">
                             <div class="highlight-line px-2 -mx-2">read_symbol → write_symbol(base_version)</div>
-                            <div class="px-2">  6-state conflict machine</div>
+                            <div class="px-2">  六级冲突状态机</div>
                         </div>
                     </div>
                 </div>
@@ -227,22 +244,23 @@
                     <div class="w-12 h-px bg-dragon-500"></div>
                     <span class="text-dragon-400 text-sm font-mono uppercase tracking-wider">Performance</span>
                 </div>
-                <h2 class="font-sans text-4xl md:text-5xl font-bold text-white mb-6">Measured, Not Claimed</h2>
+                <h2 class="font-serif-cn text-4xl md:text-5xl font-bold text-white mb-6">性能实测</h2>
                 <p class="text-xl text-ink-400 max-w-2xl">
-                    Real numbers under a real 512MB Docker cgroup limit — no paper benchmarks.
+                    不是纸面数字，是 512MB Docker 真 cgroup 限制下的实测数据。
                 </p>
             </div>
 
+            <!-- Key Metrics Grid -->
             <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-6 mb-16">
                 <div class="section-reveal glass-panel rounded-2xl p-6 border border-white/5 relative overflow-hidden">
                     <div class="absolute top-0 right-0 w-24 h-24 bg-dragon-500/5 rounded-full blur-2xl"></div>
                     <div class="relative">
                         <div class="text-4xl font-bold text-white font-mono mb-1">1<span class="text-2xl text-dragon-400">ms</span></div>
-                        <div class="text-sm text-ink-400 mb-3">small-file read P95</div>
+                        <div class="text-sm text-ink-400 mb-3">小文件 read P95</div>
                         <div class="w-full h-1 bg-ink-800 rounded-full overflow-hidden">
                             <div class="performance-bar h-full w-[5%]"></div>
                         </div>
-                        <div class="text-xs text-ink-500 mt-2">50 runs, after warmup</div>
+                        <div class="text-xs text-ink-500 mt-2">50 次实测，预热后</div>
                     </div>
                 </div>
 
@@ -250,11 +268,11 @@
                     <div class="absolute top-0 right-0 w-24 h-24 bg-dragon-500/5 rounded-full blur-2xl"></div>
                     <div class="relative">
                         <div class="text-4xl font-bold text-white font-mono mb-1">7<span class="text-2xl text-dragon-400">ms</span></div>
-                        <div class="text-sm text-ink-400 mb-3">small-file write P95</div>
+                        <div class="text-sm text-ink-400 mb-3">小文件 write P95</div>
                         <div class="w-full h-1 bg-ink-800 rounded-full overflow-hidden">
                             <div class="performance-bar h-full w-[15%]"></div>
                         </div>
-                        <div class="text-xs text-ink-500 mt-2">incl. post-write re-index</div>
+                        <div class="text-xs text-ink-500 mt-2">含写后同步重抽</div>
                     </div>
                 </div>
 
@@ -262,11 +280,11 @@
                     <div class="absolute top-0 right-0 w-24 h-24 bg-dragon-500/5 rounded-full blur-2xl"></div>
                     <div class="relative">
                         <div class="text-4xl font-bold text-white font-mono mb-1">98<span class="text-2xl text-dragon-400">ms</span></div>
-                        <div class="text-sm text-ink-400 mb-3">repo_map full repo</div>
+                        <div class="text-sm text-ink-400 mb-3">repo_map 全库</div>
                         <div class="w-full h-1 bg-ink-800 rounded-full overflow-hidden">
                             <div class="performance-bar h-full w-full"></div>
                         </div>
-                        <div class="text-xs text-ink-500 mt-2">optimized from tens of seconds</div>
+                        <div class="text-xs text-ink-500 mt-2">从几十秒优化而来</div>
                     </div>
                 </div>
 
@@ -274,72 +292,74 @@
                     <div class="absolute top-0 right-0 w-24 h-24 bg-dragon-500/5 rounded-full blur-2xl"></div>
                     <div class="relative">
                         <div class="text-4xl font-bold text-white font-mono mb-1">588<span class="text-2xl text-dragon-400">/s</span></div>
-                        <div class="text-sm text-ink-400 mb-3">peak throughput</div>
+                        <div class="text-sm text-ink-400 mb-3">吞吐峰值</div>
                         <div class="w-full h-1 bg-ink-800 rounded-full overflow-hidden">
                             <div class="performance-bar h-full w-[95%]"></div>
                         </div>
-                        <div class="text-xs text-ink-500 mt-2">60-600x LLM demand</div>
+                        <div class="text-xs text-ink-500 mt-2">LLM 需求的 60-600 倍</div>
                     </div>
                 </div>
             </div>
 
+            <!-- Detailed Comparison -->
             <div class="section-reveal glass-panel rounded-2xl p-8 border border-white/5 mb-12">
                 <h3 class="text-xl font-bold text-white mb-6 flex items-center gap-2">
                     <svg class="w-5 h-5 text-dragon-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
                     </svg>
-                    All metrics
+                    全指标一览
                 </h3>
                 <div class="overflow-x-auto">
                     <table class="w-full text-sm">
                         <thead>
                             <tr class="border-b border-white/10 text-ink-400">
-                                <th class="text-left py-3 px-4 font-medium">Metric</th>
-                                <th class="text-right py-3 px-4 font-medium">Value</th>
-                                <th class="text-left py-3 px-4 font-medium">Note</th>
+                                <th class="text-left py-3 px-4 font-medium">指标</th>
+                                <th class="text-right py-3 px-4 font-medium">数值</th>
+                                <th class="text-left py-3 px-4 font-medium">说明</th>
                             </tr>
                         </thead>
                         <tbody class="text-ink-300">
                             <tr class="comparison-row border-b border-white/5">
-                                <td class="py-4 px-4">Memory footprint</td>
+                                <td class="py-4 px-4">内存占用</td>
                                 <td class="py-4 px-4 text-right font-mono text-dragon-300">RSS 134MB / 26%</td>
-                                <td class="py-4 px-4 text-ink-500">docker --memory=512m real cgroup limit</td>
+                                <td class="py-4 px-4 text-ink-500">docker --memory=512m 真 cgroup 限制</td>
                             </tr>
                             <tr class="comparison-row border-b border-white/5">
-                                <td class="py-4 px-4">Concurrency</td>
-                                <td class="py-4 px-4 text-right font-mono text-dragon-300">128 conc / 256 in-flight</td>
-                                <td class="py-4 px-4 text-ink-500">zero OOM, zero tearing</td>
+                                <td class="py-4 px-4">并发能力</td>
+                                <td class="py-4 px-4 text-right font-mono text-dragon-300">128 并发 / 256 在途</td>
+                                <td class="py-4 px-4 text-ink-500">零 OOM，零撕裂</td>
                             </tr>
                             <tr class="comparison-row border-b border-white/5">
-                                <td class="py-4 px-4">Token savings</td>
+                                <td class="py-4 px-4">Token 节省</td>
                                 <td class="py-4 px-4 text-right font-mono text-verdant-300">↓65.3%</td>
-                                <td class="py-4 px-4 text-ink-500">same task 7673 → 2662 est</td>
+                                <td class="py-4 px-4 text-ink-500">原语化同任务 7673 → 2662 est</td>
                             </tr>
                             <tr class="comparison-row border-b border-white/5">
-                                <td class="py-4 px-4">Call count</td>
+                                <td class="py-4 px-4">调用次数</td>
                                 <td class="py-4 px-4 text-right font-mono text-verdant-300">↓50.0%</td>
-                                <td class="py-4 px-4 text-ink-500">old 6 steps → new 3 primitives</td>
+                                <td class="py-4 px-4 text-ink-500">旧六步 6 次 → 新原语 3 次</td>
                             </tr>
                             <tr class="comparison-row border-b border-white/5">
-                                <td class="py-4 px-4">Index throughput</td>
-                                <td class="py-4 px-4 text-right font-mono text-dragon-300">538 files / 7s</td>
-                                <td class="py-4 px-4 text-ink-500">scoped reindex measured</td>
+                                <td class="py-4 px-4">索引吞吐</td>
+                                <td class="py-4 px-4 text-right font-mono text-dragon-300">538 文件 / 7s</td>
+                                <td class="py-4 px-4 text-ink-500">缩 scope reindex 实测</td>
                             </tr>
                             <tr class="comparison-row border-b border-white/5">
-                                <td class="py-4 px-4">dry_run consistency</td>
+                                <td class="py-4 px-4">dry_run 一致性</td>
                                 <td class="py-4 px-4 text-right font-mono text-verdant-300">47/47 100%</td>
-                                <td class="py-4 px-4 text-ink-500">3-language golden hashes</td>
+                                <td class="py-4 px-4 text-ink-500">三语言 golden hash 对比</td>
                             </tr>
                             <tr class="comparison-row">
-                                <td class="py-4 px-4">Concurrent writes, same symbol</td>
-                                <td class="py-4 px-4 text-right font-mono text-verdant-300">16/16 no silent overwrite</td>
-                                <td class="py-4 px-4 text-ink-500">exactly one win, one conflict</td>
+                                <td class="py-4 px-4">并发写同符号</td>
+                                <td class="py-4 px-4 text-right font-mono text-verdant-300">16/16 无静默覆盖</td>
+                                <td class="py-4 px-4 text-ink-500">恰好一胜一冲突</td>
                             </tr>
                         </tbody>
                     </table>
                 </div>
             </div>
 
+            <!-- Stress Test Badge -->
             <div class="section-reveal flex items-center justify-center">
                 <div class="glass-panel rounded-2xl px-8 py-6 border border-verdant-500/20 flex items-center gap-6">
                     <div class="w-12 h-12 rounded-full bg-verdant-500/10 border border-verdant-500/30 flex items-center justify-center">
@@ -348,8 +368,8 @@
                         </svg>
                     </div>
                     <div>
-                        <div class="text-white font-bold">Storm conflict matrix passed</div>
-                        <div class="text-ink-400 text-sm">32-way read/write mix on hot files → zero tearing, integrity_check PASS, 95/95 controlled conflicts</div>
+                        <div class="text-white font-bold">Storm 冲突矩阵通过</div>
+                        <div class="text-ink-400 text-sm">32 路读写混合打热点文件 → 零撕裂、integrity_check PASS、95/95 受控冲突</div>
                     </div>
                 </div>
             </div>
@@ -364,12 +384,13 @@
                     <div class="w-12 h-px bg-dragon-500"></div>
                     <span class="text-dragon-400 text-sm font-mono uppercase tracking-wider">Architecture</span>
                 </div>
-                <h2 class="font-sans text-4xl md:text-5xl font-bold text-white mb-6">Four-Layer Architecture</h2>
+                <h2 class="font-serif-cn text-4xl md:text-5xl font-bold text-white mb-6">四层架构</h2>
                 <p class="text-xl text-ink-400 max-w-2xl">
-                    Not an MCP shell — a 4-layer parsing/indexing/writing infrastructure.
+                    不是 MCP 壳子，是四层分工的解析/索引/写入基础设施。
                 </p>
             </div>
 
+            <!-- Architecture Diagram -->
             <div class="section-reveal glass-panel rounded-2xl p-8 md:p-12 border border-white/5 mb-12">
                 <div class="grid md:grid-cols-2 gap-12 items-center">
                     <div>
@@ -379,8 +400,8 @@
                                     <span class="text-yellow-400 font-mono text-sm font-bold">JS</span>
                                 </div>
                                 <div>
-                                    <h4 class="text-white font-bold mb-1">Node.js orchestration</h4>
-                                    <p class="text-ink-400 text-sm">MCP protocol, 44-tool orchestration, error recovery, Semaphore scheduling</p>
+                                    <h4 class="text-white font-bold mb-1">Node.js 编排层</h4>
+                                    <p class="text-ink-400 text-sm">MCP 协议、44 工具编排、错误恢复、Semaphore 调度</p>
                                 </div>
                             </div>
 
@@ -389,8 +410,8 @@
                                     <span class="text-orange-400 font-mono text-sm font-bold">RS</span>
                                 </div>
                                 <div>
-                                    <h4 class="text-white font-bold mb-1">Rust parser service</h4>
-                                    <p class="text-ink-400 text-sm">tree-sitter + tokio + rayon, Unix Socket IPC, catch_unwind crash isolation</p>
+                                    <h4 class="text-white font-bold mb-1">Rust 解析服务</h4>
+                                    <p class="text-ink-400 text-sm">tree-sitter + tokio + rayon，Unix Socket IPC，catch_unwind 崩溃隔离</p>
                                 </div>
                             </div>
 
@@ -399,8 +420,8 @@
                                     <span class="text-blue-400 font-mono text-sm font-bold">DB</span>
                                 </div>
                                 <div>
-                                    <h4 class="text-white font-bold mb-1">SQLite index layer</h4>
-                                    <p class="text-ink-400 text-sm">WAL mode, single-file DB, integrity_check self-heal, per-workspace isolation</p>
+                                    <h4 class="text-white font-bold mb-1">SQLite 索引层</h4>
+                                    <p class="text-ink-400 text-sm">WAL 模式、单文件 DB、integrity_check 自愈、按 workspace 隔离</p>
                                 </div>
                             </div>
 
@@ -409,8 +430,8 @@
                                     <span class="text-green-400 font-mono text-sm font-bold">IO</span>
                                 </div>
                                 <div>
-                                    <h4 class="text-white font-bold mb-1">Transactional write layer</h4>
-                                    <p class="text-ink-400 text-sm">temp+rename atomic writes, 6-state conflict machine, undo journal</p>
+                                    <h4 class="text-white font-bold mb-1">事务级写入层</h4>
+                                    <p class="text-ink-400 text-sm">temp+rename 原子写、六级冲突状态机、undo journal</p>
                                 </div>
                             </div>
                         </div>
@@ -421,7 +442,7 @@
                             <circle cx="200" cy="160" r="140" fill="url(#archGlow)" opacity="0.3"/>
                             
                             <rect x="80" y="20" width="240" height="60" rx="8" fill="rgba(234,179,8,0.08)" stroke="rgba(234,179,8,0.3)" stroke-width="1"/>
-                            <text x="200" y="45" text-anchor="middle" fill="#eab308" font-family="JetBrains Mono" font-size="12" font-weight="600">Node.js MCP Orchestration</text>
+                            <text x="200" y="45" text-anchor="middle" fill="#eab308" font-family="JetBrains Mono" font-size="12" font-weight="600">Node.js MCP 编排</text>
                             <text x="200" y="62" text-anchor="middle" fill="#888" font-family="Inter" font-size="10">44 Tools · JSON-RPC · Semaphore</text>
                             
                             <path d="M200 85 L200 105" stroke="#c97d2a" stroke-width="1.5" stroke-dasharray="4 2" class="architecture-line"/>
@@ -435,7 +456,7 @@
                             <polygon points="196,192 200,198 204,192" fill="#c97d2a"/>
                             
                             <rect x="80" y="200" width="240" height="60" rx="8" fill="rgba(59,130,246,0.08)" stroke="rgba(59,130,246,0.3)" stroke-width="1"/>
-                            <text x="200" y="225" text-anchor="middle" fill="#3b82f6" font-family="JetBrains Mono" font-size="12" font-weight="600">SQLite Index</text>
+                            <text x="200" y="225" text-anchor="middle" fill="#3b82f6" font-family="JetBrains Mono" font-size="12" font-weight="600">SQLite 索引</text>
                             <text x="200" y="242" text-anchor="middle" fill="#888" font-family="Inter" font-size="10">WAL · integrity_check · Workspace Isolation</text>
                             
                             <path d="M200 265 L200 285" stroke="#c97d2a" stroke-width="1.5" stroke-dasharray="4 2" class="architecture-line"/>
@@ -458,30 +479,31 @@
                 </div>
             </div>
 
+            <!-- Why Rust -->
             <div class="grid md:grid-cols-2 gap-8">
                 <div class="section-reveal glass-panel rounded-2xl p-8 border border-white/5">
                     <h3 class="text-lg font-bold text-white mb-4 flex items-center gap-2">
                         <svg class="w-5 h-5 text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
                         </svg>
-                        Why Rust for parsing
+                        为什么 Rust 做解析
                     </h3>
                     <ul class="space-y-3 text-ink-400 text-sm">
                         <li class="flex items-start gap-2">
                             <span class="text-orange-400 mt-0.5">▸</span>
-                            <span><strong class="text-white">Zero-copy strings</strong>: &amp;source[byte_range] vs JS slice() allocations</span>
+                            <span><strong class="text-white">零拷贝字符串</strong>：&source[byte_range] vs JS slice() 新分配</span>
                         </li>
                         <li class="flex items-start gap-2">
                             <span class="text-orange-400 mt-0.5">▸</span>
-                            <span><strong class="text-white">No GC pauses</strong>: Node batch indexing stalls 1-5ms every 50ms</span>
+                            <span><strong class="text-white">无 GC 暂停</strong>：Node 批量索引 GC 每 50ms 暂停 1-5ms</span>
                         </li>
                         <li class="flex items-start gap-2">
                             <span class="text-orange-400 mt-0.5">▸</span>
-                            <span><strong class="text-white">No N-API boundary</strong>: node-tree-sitter crosses the boundary per child()</span>
+                            <span><strong class="text-white">无 N-API 边界</strong>：node-tree-sitter 每次 child() 都跨边界</span>
                         </li>
                         <li class="flex items-start gap-2">
                             <span class="text-orange-400 mt-0.5">▸</span>
-                            <span><strong class="text-white">rayon true parallelism</strong>: worker_threads pay startup costs</span>
+                            <span><strong class="text-white">rayon 真并行</strong>：批量解析多核并行，worker_threads 有启动开销</span>
                         </li>
                     </ul>
                 </div>
@@ -491,12 +513,12 @@
                         <svg class="w-5 h-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
                         </svg>
-                        Crash isolation (harder than performance)
+                        崩溃隔离（比性能更硬的卖点）
                     </h3>
                     <div class="space-y-4">
                         <div class="p-4 rounded-lg bg-red-500/5 border border-red-500/10">
-                            <div class="text-red-300 text-sm font-medium mb-1">Old architecture</div>
-                            <div class="text-ink-400 text-sm">A parse crash kills the whole MCP process — once every 2-4h on average</div>
+                            <div class="text-red-300 text-sm font-medium mb-1">旧架构</div>
+                            <div class="text-ink-400 text-sm">解析崩溃 → kill MCP 进程，平均 2-4h 崩一次</div>
                         </div>
                         <div class="flex justify-center">
                             <svg class="w-6 h-6 text-ink-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -504,8 +526,8 @@
                             </svg>
                         </div>
                         <div class="p-4 rounded-lg bg-verdant-500/5 border border-verdant-500/10">
-                            <div class="text-verdant-300 text-sm font-medium mb-1">New architecture</div>
-                            <div class="text-ink-400 text-sm">catch_unwind turns panics into a PARSE_PANIC error code — the MCP server keeps running</div>
+                            <div class="text-verdant-300 text-sm font-medium mb-1">新架构</div>
+                            <div class="text-ink-400 text-sm">catch_unwind 兜住 panic → 返回 PARSE_PANIC 错误码，MCP 继续运行</div>
                         </div>
                     </div>
                 </div>
@@ -521,13 +543,14 @@
                     <div class="w-12 h-px bg-dragon-500"></div>
                     <span class="text-dragon-400 text-sm font-mono uppercase tracking-wider">Toolbox</span>
                 </div>
-                <h2 class="font-sans text-4xl md:text-5xl font-bold text-white mb-6">44 MCP Tools</h2>
+                <h2 class="font-serif-cn text-4xl md:text-5xl font-bold text-white mb-6">44 个 MCP 工具</h2>
                 <p class="text-xl text-ink-400 max-w-2xl">
-                    From symbolic read/write to quality gates — the full code-operation chain. Pure regex/AST, zero LLM calls.
+                    从符号读写到质量门禁，覆盖代码操作全链路。全部纯正则/AST，零 LLM 调用。
                 </p>
             </div>
 
             <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <!-- I/O Primitives -->
                 <div class="section-reveal tool-grid-item glass-panel rounded-xl p-6 border border-white/5">
                     <div class="flex items-center gap-2 mb-4">
                         <div class="w-8 h-8 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-center justify-center">
@@ -535,15 +558,16 @@
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2"/>
                             </svg>
                         </div>
-                        <span class="text-white font-bold text-sm">I/O Primitives</span>
+                        <span class="text-white font-bold text-sm">I/O 原语</span>
                     </div>
                     <div class="space-y-2">
                         <div class="font-mono text-xs text-blue-300">read_symbol</div>
                         <div class="font-mono text-xs text-blue-300">write_symbol / write_symbols</div>
-                        <div class="text-xs text-ink-500">version-anchored writes + conflict machine</div>
+                        <div class="text-xs text-ink-500">符号读写 + 版本锚定 + 冲突状态机</div>
                     </div>
                 </div>
 
+                <!-- Index & Search -->
                 <div class="section-reveal tool-grid-item glass-panel rounded-xl p-6 border border-white/5">
                     <div class="flex items-center gap-2 mb-4">
                         <div class="w-8 h-8 rounded-lg bg-purple-500/10 border border-purple-500/20 flex items-center justify-center">
@@ -551,15 +575,16 @@
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
                             </svg>
                         </div>
-                        <span class="text-white font-bold text-sm">Index &amp; Search</span>
+                        <span class="text-white font-bold text-sm">索引与搜索</span>
                     </div>
                     <div class="space-y-2">
                         <div class="font-mono text-xs text-purple-300">reindex · symbol_search</div>
                         <div class="font-mono text-xs text-purple-300">code_search · repo_map</div>
-                        <div class="text-xs text-ink-500">98ms-class file maps, NL intent search</div>
+                        <div class="text-xs text-ink-500">98ms 级文件地图，自然语言意图搜索</div>
                     </div>
                 </div>
 
+                <!-- Analysis -->
                 <div class="section-reveal tool-grid-item glass-panel rounded-xl p-6 border border-white/5">
                     <div class="flex items-center gap-2 mb-4">
                         <div class="w-8 h-8 rounded-lg bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center">
@@ -567,15 +592,16 @@
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
                             </svg>
                         </div>
-                        <span class="text-white font-bold text-sm">Analysis</span>
+                        <span class="text-white font-bold text-sm">分析</span>
                     </div>
                     <div class="space-y-2">
                         <div class="font-mono text-xs text-cyan-300">impact_analysis · call_chain</div>
                         <div class="font-mono text-xs text-cyan-300">references · dep_graph · inspect</div>
-                        <div class="text-xs text-ink-500">blast radius, call chains, constant tracing</div>
+                        <div class="text-xs text-ink-500">影响面 + 风险、调用链、常量追踪</div>
                     </div>
                 </div>
 
+                <!-- Editing -->
                 <div class="section-reveal tool-grid-item glass-panel rounded-xl p-6 border border-white/5">
                     <div class="flex items-center gap-2 mb-4">
                         <div class="w-8 h-8 rounded-lg bg-dragon-500/10 border border-dragon-500/20 flex items-center justify-center">
@@ -583,15 +609,16 @@
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
                             </svg>
                         </div>
-                        <span class="text-white font-bold text-sm">Editing</span>
+                        <span class="text-white font-bold text-sm">编辑</span>
                     </div>
                     <div class="space-y-2">
                         <div class="font-mono text-xs text-dragon-300">edit_batch · edit_transaction</div>
                         <div class="font-mono text-xs text-dragon-300">edit_sandbox · rename_symbol</div>
-                        <div class="text-xs text-ink-500">atomic transactions + rollback + cross-file rename</div>
+                        <div class="text-xs text-ink-500">原子事务 + rollback + 跨文件重命名</div>
                     </div>
                 </div>
 
+                <!-- Quality Gates -->
                 <div class="section-reveal tool-grid-item glass-panel rounded-xl p-6 border border-white/5">
                     <div class="flex items-center gap-2 mb-4">
                         <div class="w-8 h-8 rounded-lg bg-verdant-500/10 border border-verdant-500/20 flex items-center justify-center">
@@ -599,15 +626,16 @@
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
                             </svg>
                         </div>
-                        <span class="text-white font-bold text-sm">Quality Gates</span>
+                        <span class="text-white font-bold text-sm">质量守门</span>
                     </div>
                     <div class="space-y-2">
                         <div class="font-mono text-xs text-verdant-300">code_review · security_review</div>
                         <div class="font-mono text-xs text-verdant-300">sweep_dead_code · guard_patterns</div>
-                        <div class="text-xs text-ink-500">deterministic, zero LLM, auditable</div>
+                        <div class="text-xs text-ink-500">纯正则/AST、零 LLM、可复现可审计</div>
                     </div>
                 </div>
 
+                <!-- Engineering -->
                 <div class="section-reveal tool-grid-item glass-panel rounded-xl p-6 border border-white/5">
                     <div class="flex items-center gap-2 mb-4">
                         <div class="w-8 h-8 rounded-lg bg-pink-500/10 border border-pink-500/20 flex items-center justify-center">
@@ -615,18 +643,14 @@
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/>
                             </svg>
                         </div>
-                        <span class="text-white font-bold text-sm">Engineering</span>
+                        <span class="text-white font-bold text-sm">工程辅助</span>
                     </div>
                     <div class="space-y-2">
                         <div class="font-mono text-xs text-pink-300">test_bridge · verify_pipeline</div>
                         <div class="font-mono text-xs text-pink-300">debug_runner · patch_parser</div>
-                        <div class="text-xs text-ink-500">test orchestration, pipeline gates, error analysis</div>
+                        <div class="text-xs text-ink-500">测试编排、管线验证、错误分析</div>
                     </div>
                 </div>
-            </div>
-
-            <div class="section-reveal mt-8 text-center">
-                <a href="docs.en.html#tools" class="text-dragon-300 hover:text-dragon-200 text-sm underline underline-offset-4">Full 44-tool matrix in docs →</a>
             </div>
         </div>
     </section>
@@ -639,55 +663,57 @@
                     <div class="w-12 h-px bg-dragon-500"></div>
                     <span class="text-dragon-400 text-sm font-mono uppercase tracking-wider">Safety</span>
                 </div>
-                <h2 class="font-sans text-4xl md:text-5xl font-bold text-white mb-6">Transactional Safe Writes</h2>
+                <h2 class="font-serif-cn text-4xl md:text-5xl font-bold text-white mb-6">事务级安全写入</h2>
                 <p class="text-xl text-ink-400 max-w-2xl">
-                    The threat here is not external attackers — it's the LLM itself, under concurrency, crashes and conflicts.
+                    防的不是外部攻击，防的是"自己"——LLM 在并发、崩溃、冲突场景下的不可预测行为。
                 </p>
             </div>
 
             <div class="grid lg:grid-cols-2 gap-8 mb-12">
+                <!-- Conflict State Machine -->
                 <div class="section-reveal glass-panel rounded-2xl p-8 border border-white/5">
                     <h3 class="text-lg font-bold text-white mb-6 flex items-center gap-2">
                         <svg class="w-5 h-5 text-dragon-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/>
                         </svg>
-                        6-State Conflict Machine
+                        六级冲突状态机
                     </h3>
                     <div class="space-y-3">
                         <div class="flex items-center gap-3 p-3 rounded-lg bg-verdant-500/5 border border-verdant-500/10">
                             <span class="w-2 h-2 rounded-full bg-verdant-400"></span>
                             <span class="font-mono text-sm text-verdant-300">CLEAN</span>
-                            <span class="text-xs text-ink-500 ml-auto">no conflict, write</span>
+                            <span class="text-xs text-ink-500 ml-auto">无冲突，直接写入</span>
                         </div>
                         <div class="flex items-center gap-3 p-3 rounded-lg bg-yellow-500/5 border border-yellow-500/10">
                             <span class="w-2 h-2 rounded-full bg-yellow-400"></span>
                             <span class="font-mono text-sm text-yellow-300">FILE_CHANGED_SYMBOL_STABLE</span>
-                            <span class="text-xs text-ink-500 ml-auto">file changed, symbol stable</span>
+                            <span class="text-xs text-ink-500 ml-auto">文件变，符号未变</span>
                         </div>
                         <div class="flex items-center gap-3 p-3 rounded-lg bg-orange-500/5 border border-orange-500/10">
                             <span class="w-2 h-2 rounded-full bg-orange-400"></span>
                             <span class="font-mono text-sm text-orange-300">SYMBOL_CHANGED</span>
-                            <span class="text-xs text-ink-500 ml-auto">symbol body changed</span>
+                            <span class="text-xs text-ink-500 ml-auto">符号内容变化</span>
                         </div>
                         <div class="flex items-center gap-3 p-3 rounded-lg bg-red-500/5 border border-red-500/10">
                             <span class="w-2 h-2 rounded-full bg-red-400"></span>
                             <span class="font-mono text-sm text-red-300">SYMBOL_SIGNATURE_CHANGED</span>
-                            <span class="text-xs text-ink-500 ml-auto">signature changed, review</span>
+                            <span class="text-xs text-ink-500 ml-auto">签名变化，需审查</span>
                         </div>
                         <div class="flex items-center gap-3 p-3 rounded-lg bg-red-600/5 border border-red-600/10">
                             <span class="w-2 h-2 rounded-full bg-red-500"></span>
                             <span class="font-mono text-sm text-red-400">SYMBOL_DELETED / AMBIGUOUS</span>
-                            <span class="text-xs text-ink-500 ml-auto">deleted / undeterminable</span>
+                            <span class="text-xs text-ink-500 ml-auto">符号已删除 / 无法判定</span>
                         </div>
                     </div>
                 </div>
 
+                <!-- Write Pipeline -->
                 <div class="section-reveal glass-panel rounded-2xl p-8 border border-white/5">
                     <h3 class="text-lg font-bold text-white mb-6 flex items-center gap-2">
                         <svg class="w-5 h-5 text-dragon-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
                         </svg>
-                        Write Defense Pipeline
+                        写入防护管线
                     </h3>
                     <div class="space-y-4">
                         <div class="flex gap-4">
@@ -697,7 +723,7 @@
                             </div>
                             <div>
                                 <div class="text-white text-sm font-medium">guardRealPath</div>
-                                <div class="text-ink-500 text-xs">symlink guard — never write outside workspace</div>
+                                <div class="text-ink-500 text-xs">symlink 守卫，防止写穿 workspace</div>
                             </div>
                         </div>
                         <div class="flex gap-4">
@@ -706,8 +732,8 @@
                                 <div class="w-px h-8 bg-white/10"></div>
                             </div>
                             <div>
-                                <div class="text-white text-sm font-medium">acquireLock + TOCTOU detection</div>
-                                <div class="text-ink-500 text-xs">resolve+read+conflict inside the lock</div>
+                                <div class="text-white text-sm font-medium">acquireLock + TOCTOU 检测</div>
+                                <div class="text-ink-500 text-xs">锁内 resolve+read+conflict 一体，防竞态</div>
                             </div>
                         </div>
                         <div class="flex gap-4">
@@ -716,8 +742,8 @@
                                 <div class="w-px h-8 bg-white/10"></div>
                             </div>
                             <div>
-                                <div class="text-white text-sm font-medium">createJournal + temp write</div>
-                                <div class="text-ink-500 text-xs">unique tmp names — resists symlink planting</div>
+                                <div class="text-white text-sm font-medium">createJournal + temp 写入</div>
+                                <div class="text-ink-500 text-xs">唯一 tmp 文件名，防 symlink 预置攻击</div>
                             </div>
                         </div>
                         <div class="flex gap-4">
@@ -726,8 +752,8 @@
                                 <div class="w-px h-8 bg-white/10"></div>
                             </div>
                             <div>
-                                <div class="text-white text-sm font-medium">renameRetry atomic commit</div>
-                                <div class="text-ink-500 text-xs">Windows EPERM/EBUSY auto-retry</div>
+                                <div class="text-white text-sm font-medium">renameRetry 原子提交</div>
+                                <div class="text-ink-500 text-xs">Windows EPERM/EBUSY 自动重试</div>
                             </div>
                         </div>
                         <div class="flex gap-4">
@@ -735,39 +761,40 @@
                                 <div class="w-8 h-8 rounded-full bg-verdant-500/10 border border-verdant-500/30 flex items-center justify-center text-verdant-400 text-xs font-bold">✓</div>
                             </div>
                             <div>
-                                <div class="text-white text-sm font-medium">Post-write re-index + syntax check</div>
-                                <div class="text-ink-500 text-xs">fresh index, node --check / py_compile</div>
+                                <div class="text-white text-sm font-medium">写后同步重抽 + 语法自检</div>
+                                <div class="text-ink-500 text-xs">索引保鲜，node --check / py_compile 验证</div>
                             </div>
                         </div>
                     </div>
                 </div>
             </div>
 
+            <!-- Crash Recovery Demo -->
             <div class="section-reveal glass-panel rounded-2xl p-8 border border-white/5">
                 <div class="flex items-center justify-between mb-6">
                     <h3 class="text-lg font-bold text-white flex items-center gap-2">
                         <svg class="w-5 h-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
                         </svg>
-                        SIGKILL half-write recovery (tested)
+                        SIGKILL 半写恢复实测
                     </h3>
-                    <span class="tag-pill px-3 py-1 rounded-full text-xs">test passed</span>
+                    <span class="tag-pill px-3 py-1 rounded-full text-xs">已通过测试</span>
                 </div>
                 <div class="grid md:grid-cols-3 gap-6">
                     <div class="text-center p-6 rounded-xl bg-white/[0.02]">
                         <div class="text-3xl font-bold text-white font-mono mb-2">SIGKILL</div>
-                        <div class="text-sm text-ink-400">process force-killed</div>
-                        <div class="text-xs text-ink-500 mt-2">kill -9 child</div>
+                        <div class="text-sm text-ink-400">模拟进程被强制终止</div>
+                        <div class="text-xs text-ink-500 mt-2">kill -9 子进程</div>
                     </div>
                     <div class="text-center p-6 rounded-xl bg-white/[0.02]">
                         <div class="text-3xl font-bold text-dragon-300 font-mono mb-2">Journal</div>
-                        <div class="text-sm text-ink-400">undo journal keeps staged state</div>
-                        <div class="text-xs text-ink-500 mt-2">.malong/journal/ dir</div>
+                        <div class="text-sm text-ink-400">undo journal 保留 staged 状态</div>
+                        <div class="text-xs text-ink-500 mt-2">.malong/journal/ 目录</div>
                     </div>
                     <div class="text-center p-6 rounded-xl bg-verdant-500/5 border border-verdant-500/10">
                         <div class="text-3xl font-bold text-verdant-300 font-mono mb-2">Auto-rollback</div>
-                        <div class="text-sm text-ink-400">half-written transaction auto-rolls back or stays</div>
-                        <div class="text-xs text-ink-500 mt-2">new_hash guards misjudgment</div>
+                        <div class="text-sm text-ink-400">半写事务自动回滚/保留</div>
+                        <div class="text-xs text-ink-500 mt-2">new_hash 防误判</div>
                     </div>
                 </div>
             </div>
@@ -782,73 +809,76 @@
                     <div class="w-12 h-px bg-dragon-500"></div>
                     <span class="text-dragon-400 text-sm font-mono uppercase tracking-wider">Self-Hosting</span>
                 </div>
-                <h2 class="font-sans text-4xl md:text-5xl font-bold text-white mb-6">Self-Evolution</h2>
+                <h2 class="font-serif-cn text-4xl md:text-5xl font-bold text-white mb-6">自我进化</h2>
                 <p class="text-xl text-ink-400 max-w-2xl">
-                    30+ rounds of "Malong reviews Malong" — the suite audits and fixes its own code, each round growing the assertion suite.
+                    30+ 轮「码龙查码龙」——工具集审查并修复自身代码，每一轮都伴随断言增长。
                 </p>
             </div>
 
             <div class="grid md:grid-cols-2 gap-8 mb-12">
+                <!-- Test Stats -->
                 <div class="section-reveal glass-panel rounded-2xl p-8 border border-white/5">
-                    <h3 class="text-lg font-bold text-white mb-6">Test Matrix</h3>
+                    <h3 class="text-lg font-bold text-white mb-6">测试矩阵</h3>
                     <div class="grid grid-cols-2 gap-4 mb-6">
                         <div class="p-4 rounded-xl bg-white/[0.02] text-center">
                             <div class="text-3xl font-bold text-white font-mono test-counter" data-target="1846">0</div>
-                            <div class="text-xs text-ink-500 mt-1">JS assertions</div>
+                            <div class="text-xs text-ink-500 mt-1">JS 断言总数</div>
                         </div>
                         <div class="p-4 rounded-xl bg-white/[0.02] text-center">
                             <div class="text-3xl font-bold text-white font-mono">81</div>
-                            <div class="text-xs text-ink-500 mt-1">test files</div>
+                            <div class="text-xs text-ink-500 mt-1">测试文件</div>
                         </div>
                         <div class="p-4 rounded-xl bg-white/[0.02] text-center">
                             <div class="text-3xl font-bold text-white font-mono">109</div>
-                            <div class="text-xs text-ink-500 mt-1">Rust assertions</div>
+                            <div class="text-xs text-ink-500 mt-1">Rust 断言</div>
                         </div>
                         <div class="p-4 rounded-xl bg-verdant-500/5 border border-verdant-500/10 text-center">
                             <div class="text-3xl font-bold text-verdant-300 font-mono">0</div>
-                            <div class="text-xs text-ink-500 mt-1">failures</div>
+                            <div class="text-xs text-ink-500 mt-1">失败数</div>
                         </div>
                     </div>
                     <div class="flex items-center gap-2 text-xs text-ink-500">
                         <svg class="w-4 h-4 text-verdant-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
                         </svg>
-                        <span>Full-chain tests green · 2026-08-13 (v0.4.5)</span>
+                        <span>2026-08-13 全链实测通过（v0.4.5）</span>
                     </div>
                 </div>
 
+                <!-- Commit History -->
                 <div class="section-reveal glass-panel rounded-2xl p-8 border border-white/5">
-                    <h3 class="text-lg font-bold text-white mb-6">30+ Self-Review Rounds</h3>
+                    <h3 class="text-lg font-bold text-white mb-6">30+ 轮自我审查</h3>
                     <div class="space-y-4">
                         <div class="flex items-center gap-4">
                             <div class="commit-graph h-16" id="commitGraph1"></div>
-                            <div class="text-xs text-ink-500">r12-r30<br>dogfood end-to-end</div>
+                            <div class="text-xs text-ink-500">r12-r30<br>dogfood 端到端</div>
                         </div>
                         <div class="space-y-2 text-sm">
                             <div class="flex items-center gap-2">
                                 <span class="w-1.5 h-1.5 rounded-full bg-dragon-400"></span>
-                                <span class="text-ink-400">directory scope filter bug fixed</span>
+                                <span class="text-ink-400">目录 scope 过滤失效修复</span>
                             </div>
                             <div class="flex items-center gap-2">
                                 <span class="w-1.5 h-1.5 rounded-full bg-dragon-400"></span>
-                                <span class="text-ink-400">registered-form dead-code false positives fixed</span>
+                                <span class="text-ink-400">注册形态死代码误报修复</span>
                             </div>
                             <div class="flex items-center gap-2">
                                 <span class="w-1.5 h-1.5 rounded-full bg-dragon-400"></span>
-                                <span class="text-ink-400">constant-tracing read-point loss fixed</span>
+                                <span class="text-ink-400">常量追踪读取点丢失修复</span>
                             </div>
                             <div class="flex items-center gap-2">
                                 <span class="w-1.5 h-1.5 rounded-full bg-dragon-400"></span>
-                                <span class="text-ink-400">SQL parameterization hardening</span>
+                                <span class="text-ink-400">SQL 参数化治理</span>
                             </div>
                         </div>
                         <div class="pt-4 border-t border-white/5">
-                            <div class="text-xs text-ink-500">Every fix ships with a locking test — test blind spots are where bugs hide.</div>
+                            <div class="text-xs text-ink-500">每一轮修复都带测试锁定，测试盲区即 bug 潜伏区</div>
                         </div>
                     </div>
                 </div>
             </div>
 
+            <!-- Deterministic Guarantee -->
             <div class="section-reveal glass-panel rounded-2xl p-8 border border-verdant-500/10 bg-verdant-500/[0.02]">
                 <div class="flex items-start gap-6">
                     <div class="w-14 h-14 rounded-xl bg-verdant-500/10 border border-verdant-500/20 flex items-center justify-center flex-shrink-0">
@@ -857,14 +887,14 @@
                         </svg>
                     </div>
                     <div>
-                        <h3 class="text-xl font-bold text-white mb-2">Determinism Guarantee</h3>
-                        <p class="text-ink-400 mb-4">Every quality-gate tool makes <strong class="text-white">zero LLM calls</strong> — pure regex/AST, same input always yields the same output. Reproducible, CI-ready, auditable.</p>
+                        <h3 class="text-xl font-bold text-white mb-2">确定性保证</h3>
+                        <p class="text-ink-400 mb-4">全部质量门禁工具 <strong class="text-white">零 LLM 调用</strong>：纯正则/AST，同一输入永远同一输出。可复现、可 CI、可审计。</p>
                         <div class="flex flex-wrap gap-3">
-                            <span class="tag-pill px-3 py-1 rounded-full text-xs">300 protocol fuzz rounds</span>
-                            <span class="tag-pill px-3 py-1 rounded-full text-xs">fixed-seed determinism</span>
-                            <span class="tag-pill px-3 py-1 rounded-full text-xs">crash injection</span>
-                            <span class="tag-pill px-3 py-1 rounded-full text-xs">89 golden assertions</span>
-                            <span class="tag-pill px-3 py-1 rounded-full text-xs">16/16 concurrent, no silent overwrite</span>
+                            <span class="tag-pill px-3 py-1 rounded-full text-xs">协议 fuzz 300 轮</span>
+                            <span class="tag-pill px-3 py-1 rounded-full text-xs">固定 seed 确定性</span>
+                            <span class="tag-pill px-3 py-1 rounded-full text-xs">crash 注入</span>
+                            <span class="tag-pill px-3 py-1 rounded-full text-xs">golden 89 断言</span>
+                            <span class="tag-pill px-3 py-1 rounded-full text-xs">并发 16/16 无静默覆盖</span>
                         </div>
                     </div>
                 </div>
@@ -881,9 +911,9 @@
                     <span class="text-dragon-400 text-sm font-mono uppercase tracking-wider">Multi-Language</span>
                     <div class="w-12 h-px bg-dragon-500"></div>
                 </div>
-                <h2 class="font-sans text-4xl md:text-5xl font-bold text-white mb-6">10 Languages</h2>
+                <h2 class="font-serif-cn text-4xl md:text-5xl font-bold text-white mb-6">10 语言支持</h2>
                 <p class="text-xl text-ink-400 max-w-2xl mx-auto">
-                    A tree-sitter-based symbol extraction engine covering mainstream languages.
+                    基于 tree-sitter 的符号提取引擎，覆盖主流开发语言。
                 </p>
             </div>
 
@@ -891,54 +921,54 @@
                 <div class="section-reveal lang-badge glass-panel rounded-xl p-6 text-center border border-white/5 cursor-default">
                     <div class="text-2xl mb-2">📜</div>
                     <div class="text-white font-medium text-sm">JavaScript</div>
-                    <div class="text-xs text-verdant-400 mt-1">✓ symbols ✓ refs</div>
+                    <div class="text-xs text-verdant-400 mt-1">✓ 符号 ✓ 引用</div>
                 </div>
                 <div class="section-reveal lang-badge glass-panel rounded-xl p-6 text-center border border-white/5 cursor-default">
                     <div class="text-2xl mb-2">🔷</div>
                     <div class="text-white font-medium text-sm">TypeScript</div>
-                    <div class="text-xs text-verdant-400 mt-1">✓ symbols ✓ refs</div>
+                    <div class="text-xs text-verdant-400 mt-1">✓ 符号 ✓ 引用</div>
                 </div>
                 <div class="section-reveal lang-badge glass-panel rounded-xl p-6 text-center border border-white/5 cursor-default">
                     <div class="text-2xl mb-2">⚛️</div>
                     <div class="text-white font-medium text-sm">TSX / JSX</div>
-                    <div class="text-xs text-verdant-400 mt-1">✓ symbols ✓ refs</div>
+                    <div class="text-xs text-verdant-400 mt-1">✓ 符号 ✓ 引用</div>
                 </div>
                 <div class="section-reveal lang-badge glass-panel rounded-xl p-6 text-center border border-white/5 cursor-default">
                     <div class="text-2xl mb-2">🐍</div>
                     <div class="text-white font-medium text-sm">Python</div>
-                    <div class="text-xs text-verdant-400 mt-1">✓ symbols ✓ refs</div>
+                    <div class="text-xs text-verdant-400 mt-1">✓ 符号 ✓ 引用</div>
                 </div>
                 <div class="section-reveal lang-badge glass-panel rounded-xl p-6 text-center border border-white/5 cursor-default">
                     <div class="text-2xl mb-2">🐹</div>
                     <div class="text-white font-medium text-sm">Go</div>
-                    <div class="text-xs text-verdant-400 mt-1">✓ symbols ✓ refs</div>
+                    <div class="text-xs text-verdant-400 mt-1">✓ 符号 ✓ 引用</div>
                 </div>
                 <div class="section-reveal lang-badge glass-panel rounded-xl p-6 text-center border border-white/5 cursor-default">
                     <div class="text-2xl mb-2">⚙️</div>
                     <div class="text-white font-medium text-sm">Rust</div>
-                    <div class="text-xs text-verdant-400 mt-1">✓ symbols ✓ refs</div>
+                    <div class="text-xs text-verdant-400 mt-1">✓ 符号 ✓ 引用</div>
                     <div class="text-xs text-ink-500">impl / trait / enum</div>
                 </div>
                 <div class="section-reveal lang-badge glass-panel rounded-xl p-6 text-center border border-white/5 cursor-default">
                     <div class="text-2xl mb-2">🔧</div>
                     <div class="text-white font-medium text-sm">C / C++</div>
-                    <div class="text-xs text-verdant-400 mt-1">✓ symbols ✓ refs</div>
-                    <div class="text-xs text-ink-500">headers included</div>
+                    <div class="text-xs text-verdant-400 mt-1">✓ 符号 ✓ 引用</div>
+                    <div class="text-xs text-ink-500">含头文件</div>
                 </div>
                 <div class="section-reveal lang-badge glass-panel rounded-xl p-6 text-center border border-white/5 cursor-default">
                     <div class="text-2xl mb-2">☕</div>
                     <div class="text-white font-medium text-sm">Java</div>
-                    <div class="text-xs text-verdant-400 mt-1">✓ symbols ✓ refs</div>
+                    <div class="text-xs text-verdant-400 mt-1">✓ 符号 ✓ 引用</div>
                 </div>
                 <div class="section-reveal lang-badge glass-panel rounded-xl p-6 text-center border border-white/5 cursor-default">
                     <div class="text-2xl mb-2">🐚</div>
                     <div class="text-white font-medium text-sm">Bash</div>
-                    <div class="text-xs text-verdant-400 mt-1">✓ symbols ✓ refs</div>
+                    <div class="text-xs text-verdant-400 mt-1">✓ 符号 ✓ 引用</div>
                 </div>
                 <div class="section-reveal lang-badge glass-panel rounded-xl p-6 text-center border border-white/5 cursor-default">
                     <div class="text-2xl mb-2">📦</div>
                     <div class="text-white font-medium text-sm">MTS / CTS</div>
-                    <div class="text-xs text-verdant-400 mt-1">✓ symbols ✓ refs</div>
+                    <div class="text-xs text-verdant-400 mt-1">✓ 符号 ✓ 引用</div>
                 </div>
             </div>
         </div>
@@ -953,9 +983,9 @@
                     <span class="text-dragon-400 text-sm font-mono uppercase tracking-wider">Quick Start</span>
                     <div class="w-12 h-px bg-dragon-500"></div>
                 </div>
-                <h2 class="font-sans text-4xl md:text-5xl font-bold text-white mb-6">Running in 10 Seconds</h2>
+                <h2 class="font-serif-cn text-4xl md:text-5xl font-bold text-white mb-6">10 秒上手</h2>
                 <p class="text-xl text-ink-400">
-                    Standard install: <code class="text-dragon-300 font-mono text-base">git clone</code> + <code class="text-dragon-300 font-mono text-base">npm ci</code> — up in under a minute.
+                    标准安装：<code class="text-dragon-300 font-mono text-base">git clone</code> + <code class="text-dragon-300 font-mono text-base">npm ci</code>，30 秒内跑起来。
                 </p>
             </div>
 
@@ -969,15 +999,15 @@
                     <span class="text-xs text-ink-500 font-mono">bash</span>
                 </div>
                 <div class="p-6 overflow-x-auto">
-                    <pre class="text-sm text-ink-300 leading-relaxed"><span class="text-ink-500"># 1) Clone and install (full better-sqlite3 backend)</span>
+                    <pre class="text-sm text-ink-300 leading-relaxed"><span class="text-ink-500"># 1) 克隆并安装依赖（better-sqlite3 完整后端）</span>
 <span class="text-dragon-300">git clone</span> &lt;repo-url&gt; liuhe <span class="text-ink-500">&&</span> <span class="text-dragon-300">cd</span> liuhe/malong
-<span class="text-dragon-300">npm ci</span>   <span class="text-ink-500"># full backend, incl. Rust parser binary</span>
+<span class="text-dragon-300">npm ci</span>   <span class="text-ink-500"># 安装完整后端（含 Rust 解析二进制）</span>
 
-<span class="text-ink-500"># 2) Start the MCP server</span>
+<span class="text-ink-500"># 2) 启动 MCP 服务器</span>
 <span class="text-dragon-300">node</span> mcp-server.js --workspace /path/to/project
 
-<span class="text-ink-500"># 3) Self-check (30s)</span>
-<span class="text-dragon-300">node</span> tests/test-mcp-server.js  <span class="text-ink-500"># 25 assertions</span></pre>
+<span class="text-ink-500"># 3) 自检（30 秒）</span>
+<span class="text-dragon-300">node</span> tests/test-mcp-server.js  <span class="text-ink-500"># 25 断言</span></pre>
                 </div>
             </div>
 
@@ -987,18 +1017,18 @@
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
                     </svg>
                     <div>
-                        <div class="text-white text-sm font-medium mb-1">Offline / sandbox? Use the build-free tarball</div>
+                        <div class="text-white text-sm font-medium mb-1">离线 / 沙盒环境？用免构建 tar 包</div>
                         <p class="text-ink-400 text-sm">
-                            When <code class="text-dragon-300 font-mono">npm ci</code> is impossible, grab the tarball for your platform on the
-                            <a href="download.en.html" class="text-dragon-300 hover:text-dragon-200 underline underline-offset-2">download page</a>
-                            and extract it (sql.js sandbox backend; upgrade hint on boot). Full and degraded builds are feature-identical — only the backend differs.
+                            无法 <code class="text-dragon-300 font-mono">npm ci</code> 时，直接从
+                            <a href="download.html" class="text-dragon-300 hover:text-dragon-200 underline underline-offset-2">下载页</a>
+                            取对应平台的 tar 包解压即跑（sql.js 沙盒后端，启动时有升级提示）。完整版与降级版功能一致，仅后端实现不同。
                         </p>
                     </div>
                 </div>
             </div>
 
             <div class="section-reveal glass-panel rounded-2xl p-8 border border-white/5">
-                <h3 class="text-lg font-bold text-white mb-4">MCP client configuration</h3>
+                <h3 class="text-lg font-bold text-white mb-4">MCP 客户端配置示例</h3>
                 <div class="grid md:grid-cols-2 gap-6">
                     <div>
                         <div class="text-xs text-ink-500 mb-2 font-mono">opencode.json</div>
@@ -1049,23 +1079,22 @@
                     <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-dragon-500 to-dragon-700 flex items-center justify-center">
                         <span class="text-white font-bold text-sm font-mono">LH</span>
                     </div>
-                    <span class="font-sans font-bold text-white">Malong·Liuhe Toolkit</span>
+                    <span class="font-serif-cn font-bold text-white">码龙·六合工具</span>
                     <span class="text-ink-600 text-sm">v0.4.5</span>
                 </div>
                 <div class="flex items-center gap-6 text-sm text-ink-500">
                     <a href="https://github.com/wulun811/LiuHe" target="_blank" class="hover:text-white transition-colors">GitHub</a>
-                    <a href="docs.en.html" class="hover:text-white transition-colors">Docs</a>
-                    <a href="download.en.html" class="hover:text-white transition-colors">Download</a>
-                    <a href="https://github.com/wulun811/LiuHe/blob/master/CHANGELOG.md" target="_blank" class="hover:text-white transition-colors">Changelog</a>
+                    <a href="docs.html" class="hover:text-white transition-colors">文档</a>
+                    <a href="download.html" class="hover:text-white transition-colors">下载</a>
+                    <a href="https://github.com/wulun811/LiuHe/blob/master/CHANGELOG.md" target="_blank" class="hover:text-white transition-colors">更新日志</a>
                     <span class="text-ink-700">MIT License</span>
                 </div>
             </div>
             <div class="mt-8 text-center text-xs text-ink-700">
-                Reinventing code operations for LLMs · 2026 Malong Team
+                为 LLM 重新发明代码操作 · 2026 码龙团队
             </div>
         </div>
     </footer>
-
     <script src="assets/site.js"></script>
 </body>
 </html>
