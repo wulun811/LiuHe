@@ -202,6 +202,14 @@ command = "node"
 args = ["/path/to/malong/mcp-server.js", "--workspace", "/path/to/project"]</pre>
             </div>
             <p class="text-sm mb-8" style="color:#6d6d6d">Version note: recent codex releases force the OpenAI Responses API — use a version that still supports <span class="font-mono" style="color:#e8b86e">wire_api = "chat"</span> (verified with 0.50.0).</p>
+
+            <div class="text-white font-bold mb-3 mt-10">DeepSeek Harness (dsh web) — optional convenience</div>
+            <div class="rounded-2xl overflow-hidden mb-4" style="background:#111;border:1px solid rgba(255,255,255,0.08)">
+                <div class="px-6 py-3 text-xs font-mono" style="background:rgba(255,255,255,0.03);border-bottom:1px solid rgba(255,255,255,0.05);color:#e8b86e">bash malong/dsh/install-dsh.sh</div>
+                <pre class="p-5 text-sm font-mono overflow-x-auto" style="color:#b0b0b0">bash malong/dsh/install-dsh.sh        # idempotent; edits ~/.dsh/profiles/web/cordis.patch.yml with backup
+pkill -f "dsh web"; dsh web --port 3456 --host 0.0.0.0 --trusted-host &lt;LAN IP&gt;</pre>
+            </div>
+            <p class="text-sm mb-8" style="color:#6d6d6d">The bridge registers all 38 tools as <span class="font-mono" style="color:#e8b86e">malong__&lt;tool&gt;</span> and auto-fills <span class="font-mono" style="color:#e8b86e">workspace_dir</span> from the current conversation's workspace (explicit paths still win). Full guide incl. index rules: <span class="font-mono">malong/dsh/DSH接入说明.md</span></p>
         </section>
 
         <section id="cli" class="mb-14" style="scroll-margin-top:150px">
