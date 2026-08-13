@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Docs — Malong·Liuhe Toolkit</title>
+    <meta name="description" content="Malong Liuhe documentation: installation guide, quick start, MCP client setup (opencode / Claude Desktop / Claude Code / codex), CLI & env reference, all 44 tools, language support, safety mechanisms, self-checks and FAQ.">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="assets/site.css">
+    <script>
+        tailwind.config = window.tailwindConfig || {
+            theme: { extend: {
+                fontFamily: { 'mono': ['"JetBrains Mono"', 'monospace'], 'sans': ['Inter', 'system-ui', 'sans-serif'] },
+                colors: {
+                    dragon: { 50:'#fdf8f0',100:'#f9ecd6',200:'#f2d5a8',300:'#e8b86e',400:'#dc9940',500:'#c97d2a',600:'#b06220',700:'#8f4c1d',800:'#753e1e',900:'#61331b',950:'#37190c' },
+                    ink: { 50:'#f6f6f6',100:'#e7e7e7',200:'#d1d1d1',300:'#b0b0b0',400:'#888888',500:'#6d6d6d',600:'#5d5d5d',700:'#4f4f4f',800:'#454545',900:'#1a1a1a',950:'#0d0d0d' },
+                    verdant: { 50:'#f0fdf4',100:'#dcfce7',200:'#bbf7d0',300:'#86efac',400:'#4ade80',500:'#22c55e',600:'#16a34a',700:'#15803d',800:'#166534',900:'#14532d' },
+                }
+            } }
+        };
+    </script>
+    <style>
+        summary::-webkit-details-marker { display: none; }
+        summary { list-style: none; }
+        details[open] .chev { transform: rotate(90deg); }
+        .chev { transition: transform 0.2s; }
+    </style>
+</head>
+<body class="antialiased" style="background:#0d0d0d;color:#e7e7e7">
+    <nav class="fixed top-0 left-0 right-0 z-50" style="background:rgba(13,13,13,0.7);backdrop-filter:blur(20px);border-bottom:1px solid rgba(255,255,255,0.06)">
+        <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background:linear-gradient(135deg,#dc9940,#8f4c1d)">
+                    <span class="text-white font-bold text-sm font-mono">LH</span>
+                </div>
+                <a href="index.en.html" class="font-sans font-bold text-lg text-white">Malong·Liuhe</a>
+            </div>
+            <div class="hidden md:flex items-center gap-8 text-sm" style="color:#888">
+                <a href="index.en.html" class="hover:text-white transition-colors">Home</a>
+                <a href="docs.en.html" class="hover:text-white transition-colors" style="color:#e8b86e">Docs</a>
+                <a href="download.en.html" class="hover:text-white transition-colors">Download</a>
+            </div>
+            <div class="flex items-center gap-3">
+                <span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(201,125,42,0.1);border:1px solid rgba(201,125,42,0.2);color:#e8b86e">v0.4.5</span>
+                <a href="docs.html" class="hover:text-white transition-colors text-sm" style="color:#888">中文</a>
+                <a href="https://github.com/wulun811/LiuHe" target="_blank" class="hover:text-white transition-colors text-sm" style="color:#888">GitHub</a>
+            </div>
+        </div>
+    </nav>
+
+    <main class="pt-28 pb-24 max-w-5xl mx-auto px-6">
+        <div class="mb-4 flex items-center gap-3">
+            <div class="w-12 h-px" style="background:#c97d2a"></div>
+            <span class="text-sm font-mono uppercase tracking-wider" style="color:#dc9940">Docs</span>
+        </div>
+        <h1 class="text-4xl md:text-5xl font-bold text-white mb-8">Documentation</h1>
+
+        <div class="sticky z-40 -mx-6 px-6 py-3 mb-12 flex flex-wrap gap-x-6 gap-y-2 text-sm" style="top:72px;background:rgba(13,13,13,0.85);backdrop-filter:blur(20px);border-bottom:1px solid rgba(255,255,255,0.06)">
+            <a href="#install" class="hover:text-white transition-colors font-mono" style="color:#888">Install</a>
+            <a href="#quickstart" class="hover:text-white transition-colors font-mono" style="color:#888">Quick start</a>
+            <a href="#clients" class="hover:text-white transition-colors font-mono" style="color:#888">Clients</a>
+            <a href="#cli" class="hover:text-white transition-colors font-mono" style="color:#888">CLI</a>
+            <a href="#env" class="hover:text-white transition-colors font-mono" style="color:#888">Env vars</a>
+            <a href="#tools" class="hover:text-white transition-colors font-mono" style="color:#888">Tools</a>
+            <a href="#languages" class="hover:text-white transition-colors font-mono" style="color:#888">Languages</a>
+            <a href="#safety" class="hover:text-white transition-colors font-mono" style="color:#888">Safety</a>
+            <a href="#testing" class="hover:text-white transition-colors font-mono" style="color:#888">Testing</a>
+            <a href="#faq" class="hover:text-white transition-colors font-mono" style="color:#888">FAQ</a>
+            <a href="#resources" class="hover:text-white transition-colors font-mono" style="color:#888">Resources</a>
+        </div>
+
+        <section id="install" class="mb-14" style="scroll-margin-top:150px">
+            <h2 class="text-2xl font-bold text-white mb-1">Installation</h2>
+            <p class="text-sm mb-6" style="color:#888">The two paths are functionally identical — only the index backend differs. Requires Node &gt;= 20.</p>
+
+            <div class="rounded-2xl overflow-hidden mb-6" style="background:#111;border:1px solid rgba(255,255,255,0.08)">
+                <div class="px-6 py-3 text-xs font-mono" style="background:rgba(255,255,255,0.03);border-bottom:1px solid rgba(255,255,255,0.05);color:#e8b86e">Standard install (recommended · full better-sqlite3 backend)</div>
+                <div class="p-5 flex items-center gap-3" style="background:rgba(34,197,94,0.02)">
+                    <span class="w-2 h-2 rounded-full" style="background:#4ade80"></span>
+                    <span class="text-sm font-mono" style="color:#b0b0b0">git clone &lt;repo&gt; liuhe && cd liuhe/malong && <span style="color:#e8b86e">npm ci</span> && node mcp-server.js --workspace .</span>
+                </div>
+            </div>
+            <div class="rounded-2xl overflow-hidden mb-6" style="background:#111;border:1px solid rgba(255,255,255,0.08)">
+                <div class="px-6 py-3 text-xs font-mono" style="background:rgba(255,255,255,0.03);border-bottom:1px solid rgba(255,255,255,0.05);color:#e8b86e">Zero-build deployment (offline / sandbox · sql.js backend)</div>
+                <div class="p-5 flex items-center gap-3">
+                    <span class="w-2 h-2 rounded-full" style="background:#c97d2a"></span>
+                    <span class="text-sm font-mono" style="color:#b0b0b0">tar -xzf malong-liuhe-0.4.5-linux-x86_64.tar.gz && cd malong && node mcp-server.js --workspace .</span>
+                </div>
+            </div>
+            <p class="text-sm mb-6" style="color:#6d6d6d">
+                The tarball prints a <span class="font-mono" style="color:#e8b86e">SQLITE BACKEND</span> upgrade hint at startup; on a networked machine <span class="font-mono" style="color:#e8b86e">cd malong && npm ci</span> upgrades it to the full backend.
+            </p>
+
+            <div class="rounded-2xl p-6 mb-6" style="background:rgba(201,125,42,0.04);border:1px solid rgba(201,125,42,0.15)">
+                <div class="text-white font-bold mb-3" style="color:#e8b86e">Parsing daemon (malong-parse)</div>
+                <p class="text-sm leading-6" style="color:#b0b0b0">
+                    Both install paths bundle the Rust parsing binary — the MCP server <span class="text-white">auto-starts it</span> on launch; no manual start needed.<br>
+                    Linux / macOS communicate over a Unix socket (default <span class="font-mono" style="color:#e8b86e">/tmp/malong-parse-$(id -u).sock</span>); Windows uses TCP <span class="font-mono" style="color:#e8b86e">127.0.0.1:31001</span> and the server spawns <span class="font-mono">malong-parse.exe</span> automatically.<br>
+                    Override the socket, port or binary with <span class="font-mono" style="color:#e8b86e">MALONG_SOCKET</span> / <span class="font-mono" style="color:#e8b86e">MALONG_PORT</span> / <span class="font-mono" style="color:#e8b86e">MALONG_PARSE_BIN</span> (see <a href="#env" class="hover:text-white transition-colors" style="color:#dc9940">environment variables</a>).
+                </p>
+            </div>
+        </section>
+
+        <section id="quickstart" class="mb-14" style="scroll-margin-top:150px">
+            <h2 class="text-2xl font-bold text-white mb-6">Quick start</h2>
+            <div class="grid md:grid-cols-4 gap-4 mb-8">
+                <div class="rounded-xl p-5" style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06)">
+                    <div class="text-xs font-mono mb-2" style="color:#dc9940">01</div>
+                    <div class="text-white font-medium mb-2">Get the toolkit</div>
+                    <div class="text-sm" style="color:#888">Clone the repo, <span class="font-mono" style="color:#e8b86e">npm ci</span> inside malong/; or extract the platform tarball.</div>
+                </div>
+                <div class="rounded-xl p-5" style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06)">
+                    <div class="text-xs font-mono mb-2" style="color:#dc9940">02</div>
+                    <div class="text-white font-medium mb-2">Register an MCP client</div>
+                    <div class="text-sm" style="color:#888">Pick opencode / Claude Desktop / Claude Code / codex — see <a href="#clients" class="hover:text-white transition-colors" style="color:#dc9940">clients</a>.</div>
+                </div>
+                <div class="rounded-xl p-5" style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06)">
+                    <div class="text-xs font-mono mb-2" style="color:#dc9940">03</div>
+                    <div class="text-white font-medium mb-2">Build the index</div>
+                    <div class="text-sm" style="color:#888">Run <span class="font-mono" style="color:#e8b86e">reindex</span> once per workspace (optionally <span class="font-mono" style="color:#e8b86e">blocking=true</span>) so symbol search and impact analysis have an index.</div>
+                </div>
+                <div class="rounded-xl p-5" style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06)">
+                    <div class="text-xs font-mono mb-2" style="color:#dc9940">04</div>
+                    <div class="text-white font-medium mb-2">Just ask</div>
+                    <div class="text-sm" style="color:#888">e.g. <span class="font-mono" style="color:#e8b86e">"search for the symbol 'handle' in my workspace"</span></div>
+                </div>
+            </div>
+
+            <div class="rounded-2xl overflow-hidden" style="background:#111;border:1px solid rgba(255,255,255,0.08)">
+                <div class="px-6 py-3 text-xs font-mono" style="background:rgba(255,255,255,0.03);border-bottom:1px solid rgba(255,255,255,0.05);color:#e8b86e">Typical workflow · from search to safe edit</div>
+                <div class="p-5">
+                    <div class="flex flex-wrap items-center gap-3 text-sm font-mono" style="color:#b0b0b0">
+                        <span style="color:#93c5fd">reindex</span><span style="color:#6d6d6d">→</span>
+                        <span style="color:#93c5fd">symbol_search</span><span style="color:#6d6d6d">→</span>
+                        <span style="color:#67e8f9">impact_analysis</span><span style="color:#6d6d6d">→</span>
+                        <span style="color:#fcd34d">edit_transaction</span><span style="color:#6d6d6d">→</span>
+                        <span style="color:#f9a8d4">test_bridge</span><span style="color:#6d6d6d">→</span>
+                        <span style="color:#f9a8d4">verify_pipeline</span>
+                    </div>
+                    <p class="text-sm mt-3" style="color:#888">Index → locate the target symbol → assess blast radius → transactional edit (reversible) → run tests → lint/typecheck to finish.</p>
+                </div>
+            </div>
+        </section>
+
+        <section id="clients" class="mb-14" style="scroll-margin-top:150px">
+            <h2 class="text-2xl font-bold text-white mb-1">MCP clients</h2>
+            <p class="text-sm mb-6" style="color:#888">The MCP layer is standard JSON-RPC over stdio, so any MCP client works. All configs below are tested end-to-end.</p>
+
+            <div class="text-white font-bold mb-3">opencode (project-root opencode.json)</div>
+            <div class="rounded-2xl overflow-hidden mb-8" style="background:#111;border:1px solid rgba(255,255,255,0.08)">
+                <div class="px-6 py-3 text-xs font-mono" style="background:rgba(255,255,255,0.03);border-bottom:1px solid rgba(255,255,255,0.05);color:#e8b86e">opencode.json</div>
+                <pre class="p-5 text-sm font-mono overflow-x-auto" style="color:#b0b0b0">{ "&#36;schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "malong": {
+      "type": "local",
+      "command": ["node", "--max-old-space-size=512", "malong/mcp-server.js", "--workspace", "."],
+      "enabled": true
+    }
+  }
+}</pre>
+            </div>
+
+            <div class="text-white font-bold mb-3">Claude Desktop (tested on Windows: %APPDATA%\Claude\claude_desktop_config.json)</div>
+            <div class="rounded-2xl overflow-hidden mb-8" style="background:#111;border:1px solid rgba(255,255,255,0.08)">
+                <div class="px-6 py-3 text-xs font-mono" style="background:rgba(255,255,255,0.03);border-bottom:1px solid rgba(255,255,255,0.05);color:#e8b86e">claude_desktop_config.json</div>
+                <pre class="p-5 text-sm font-mono overflow-x-auto" style="color:#b0b0b0">{ "mcpServers": {
+    "malong": { "command": "node", "args": ["/path/to/malong/mcp-server.js"] }
+  }
+}</pre>
+            </div>
+
+            <div class="text-white font-bold mb-3">Claude Code (CLI registration; tools exposed as mcp__liuhe__&lt;tool&gt;)</div>
+            <div class="rounded-2xl overflow-hidden mb-8" style="background:#111;border:1px solid rgba(255,255,255,0.08)">
+                <div class="px-6 py-3 text-xs font-mono" style="background:rgba(255,255,255,0.03);border-bottom:1px solid rgba(255,255,255,0.05);color:#e8b86e">claude mcp add</div>
+                <pre class="p-5 text-sm font-mono overflow-x-auto" style="color:#b0b0b0">claude mcp add liuhe -- node /path/to/malong/mcp-server.js --workspace /path/to/project
+claude mcp list        # → "liuhe … ✔ Connected"
+
+# Headless example
+claude -p "index the workspace with reindex, then find createDb with symbol_search" \
+  --allowedTools "mcp__liuhe__reindex" "mcp__liuhe__symbol_search"</pre>
+            </div>
+
+            <div class="text-white font-bold mb-3">codex (~/.codex/config.toml; tools exposed as liuhe.&lt;tool&gt;)</div>
+            <div class="rounded-2xl overflow-hidden mb-4" style="background:#111;border:1px solid rgba(255,255,255,0.08)">
+                <div class="px-6 py-3 text-xs font-mono" style="background:rgba(255,255,255,0.03);border-bottom:1px solid rgba(255,255,255,0.05);color:#e8b86e">config.toml</div>
+                <pre class="p-5 text-sm font-mono overflow-x-auto" style="color:#b0b0b0">model = "deepseek-v4-flash"
+model_provider = "opencode-zen"
+
+[model_providers.opencode-zen]
+name = "OpenCode Zen"
+base_url = "https://opencode.ai/zen/go/v1"   # any OpenAI-compatible endpoint
+wire_api = "chat"
+env_key = "OPENCODE_ZEN_API_KEY"             # codex reads the API key from this env var
+
+[mcp_servers.liuhe]
+command = "node"
+args = ["/path/to/malong/mcp-server.js", "--workspace", "/path/to/project"]</pre>
+            </div>
+            <p class="text-sm mb-8" style="color:#6d6d6d">Version note: recent codex releases force the OpenAI Responses API — use a version that still supports <span class="font-mono" style="color:#e8b86e">wire_api = "chat"</span> (verified with 0.50.0).</p>
+        </section>
+
+        <section id="cli" class="mb-14" style="scroll-margin-top:150px">
+            <h2 class="text-2xl font-bold text-white mb-6">CLI options</h2>
+            <div class="overflow-x-auto rounded-2xl" style="border:1px solid rgba(255,255,255,0.08)">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr style="background:rgba(255,255,255,0.03);border-bottom:1px solid rgba(255,255,255,0.05)">
+                            <th class="text-left px-5 py-3 font-mono text-xs font-normal" style="color:#e8b86e">Option</th>
+                            <th class="text-left px-5 py-3 font-mono text-xs font-normal" style="color:#e8b86e">Description</th>
+                        </tr>
+                    </thead>
+                    <tbody class="font-mono" style="color:#b0b0b0">
+                        <tr style="border-bottom:1px solid rgba(255,255,255,0.04)"><td class="px-5 py-3" style="color:#93c5fd">--workspace &lt;dir&gt;</td><td class="px-5 py-3">Root directory to index and operate on</td></tr>
+                        <tr style="border-bottom:1px solid rgba(255,255,255,0.04)"><td class="px-5 py-3" style="color:#93c5fd">--concurrency &lt;n&gt;</td><td class="px-5 py-3">Number of parallel tasks</td></tr>
+                        <tr style="border-bottom:1px solid rgba(255,255,255,0.04)"><td class="px-5 py-3" style="color:#93c5fd">--max-old-space-size=&lt;MB&gt;</td><td class="px-5 py-3">V8 heap cap, 512 recommended; warns at startup if unset and the heap is unlimited</td></tr>
+                        <tr><td class="px-5 py-3" style="color:#93c5fd">--expose-gc</td><td class="px-5 py-3">Enables periodic GC + memory monitoring (pairs with the <span style="color:#cbd5e1">health</span> / <span style="color:#cbd5e1">gc</span> tools)</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section id="env" class="mb-14" style="scroll-margin-top:150px">
+            <h2 class="text-2xl font-bold text-white mb-6">Environment variables</h2>
+            <p class="text-sm mb-6" style="color:#888">All optional — sensible defaults apply when unset.</p>
+            <div class="overflow-x-auto rounded-2xl" style="border:1px solid rgba(255,255,255,0.08)">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr style="background:rgba(255,255,255,0.03);border-bottom:1px solid rgba(255,255,255,0.05)">
+                            <th class="text-left px-5 py-3 font-mono text-xs font-normal" style="color:#e8b86e">Variable</th>
+                            <th class="text-left px-5 py-3 font-mono text-xs font-normal" style="color:#e8b86e">Default</th>
+                            <th class="text-left px-5 py-3 font-mono text-xs font-normal" style="color:#e8b86e">Purpose</th>
+                        </tr>
+                    </thead>
+                    <tbody class="font-mono" style="color:#b0b0b0">
+                        <tr style="border-bottom:1px solid rgba(255,255,255,0.04)"><td class="px-5 py-3" style="color:#93c5fd">MALONG_STATE_DIR</td><td class="px-5 py-3">~/.config/malong</td><td class="px-5 py-3">Where usage / feedback / edit-stats files are written; override for tests or sandboxed hosts</td></tr>
+                        <tr style="border-bottom:1px solid rgba(255,255,255,0.04)"><td class="px-5 py-3" style="color:#93c5fd">MALONG_SOCKET</td><td class="px-5 py-3">/tmp/malong-parse-$(id -u).sock</td><td class="px-5 py-3">Unix socket path to the parse daemon (Linux / macOS)</td></tr>
+                        <tr style="border-bottom:1px solid rgba(255,255,255,0.04)"><td class="px-5 py-3" style="color:#93c5fd">MALONG_PORT</td><td class="px-5 py-3">31001</td><td class="px-5 py-3">TCP port for the parse daemon (Windows)</td></tr>
+                        <tr style="border-bottom:1px solid rgba(255,255,255,0.04)"><td class="px-5 py-3" style="color:#93c5fd">MALONG_PARSE_BIN</td><td class="px-5 py-3">bundled / PATH</td><td class="px-5 py-3">Binary used when the client auto-starts the daemon</td></tr>
+                        <tr style="border-bottom:1px solid rgba(255,255,255,0.04)"><td class="px-5 py-3" style="color:#93c5fd">MALONG_PARSE_MODE</td><td class="px-5 py-3">rust-service</td><td class="px-5 py-3">Parse transport; only rust-service is supported in the current version</td></tr>
+                        <tr><td class="px-5 py-3" style="color:#93c5fd">MALONG_WS_GC_DAYS</td><td class="px-5 py-3">14</td><td class="px-5 py-3">Days a workspace index cache may sit untouched before health cleanup prunes it; 0 disables</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section id="tools" class="mb-14" style="scroll-margin-top:150px">
+            <h2 class="text-2xl font-bold text-white mb-1">44 MCP tools</h2>
+            <p class="text-sm mb-6" style="color:#888">Every tool is pure regex / AST — zero LLM calls, reproducible, auditable, CI-friendly. Expand a group for per-tool descriptions.</p>
+
+            <div class="flex flex-wrap gap-2 mb-8">
+                <span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.2);color:#93c5fd">I/O primitives ×3</span>
+                <span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(168,85,247,0.08);border:1px solid rgba(168,85,247,0.2);color:#d8b4fe">Index &amp; search ×5</span>
+                <span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,211,238,0.08);border:1px solid rgba(34,211,238,0.2);color:#67e8f9">Analysis ×8</span>
+                <span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(201,125,42,0.08);border:1px solid rgba(201,125,42,0.2);color:#fcd34d">Editing &amp; refactor ×7</span>
+                <span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);color:#86efac">Quality &amp; security ×8</span>
+                <span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(244,114,182,0.08);border:1px solid rgba(244,114,182,0.2);color:#f9a8d4">Engineering ×8</span>
+                <span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(148,163,184,0.08);border:1px solid rgba(148,163,184,0.2);color:#cbd5e1">Deps &amp; system ×5</span>
+            </div>
+
+            <details class="rounded-2xl mb-4 overflow-hidden" style="background:#111;border:1px solid rgba(255,255,255,0.08)">
+                <summary class="px-6 py-4 cursor-pointer select-none flex items-center justify-between">
+                    <span class="text-white font-bold" style="color:#60a5fa">I/O primitives <span class="text-xs font-mono" style="color:#6d6d6d">3</span></span>
+                    <span class="text-xs font-mono chev" style="color:#6d6d6d">▸</span>
+                </summary>
+                <div class="px-6 pb-5 space-y-3 border-t" style="border-color:rgba(255,255,255,0.05)">
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1 pt-4"><span class="font-mono text-sm shrink-0" style="color:#93c5fd">read_symbol</span><span class="text-sm" style="color:#888">Reads symbol body + version; the required base anchor before any write</span></div>
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#93c5fd">write_symbol</span><span class="text-sm" style="color:#888">Guarded symbol-level write: version / lock / conflict detection against stale overwrites</span></div>
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#93c5fd">write_symbols</span><span class="text-sm" style="color:#888">Batch cross-file writes, all-or-nothing, deadlock-safe</span></div>
+                </div>
+            </details>
+
+            <details class="rounded-2xl mb-4 overflow-hidden" style="background:#111;border:1px solid rgba(255,255,255,0.08)">
+                <summary class="px-6 py-4 cursor-pointer select-none flex items-center justify-between">
+                    <span class="text-white font-bold" style="color:#c084fc">Index &amp; search <span class="text-xs font-mono" style="color:#6d6d6d">5</span></span>
+                    <span class="text-xs font-mono chev" style="color:#6d6d6d">▸</span>
+                </summary>
+                <div class="px-6 pb-5 space-y-3 border-t" style="border-color:rgba(255,255,255,0.05)">
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1 pt-4"><span class="font-mono text-sm shrink-0" style="color:#d8b4fe">reindex</span><span class="text-sm" style="color:#888">Full-workspace symbol index; always the first step in a new workspace</span></div>
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#d8b4fe">symbol_search</span><span class="text-sm" style="color:#888">Finds definitions by symbol-name substring (incl. fully-qualified paths)</span></div>
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#d8b4fe">code_search</span><span class="text-sm" style="color:#888">Natural-language intent search over code; deterministic, zero LLM</span></div>
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#d8b4fe">repo_map</span><span class="text-sm" style="color:#888">File ↔ symbol project map; built for 100+ file codebases</span></div>
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#d8b4fe">outline_reader</span><span class="text-sm" style="color:#888">File structure outline (functions / classes / signatures) without reading it all</span></div>
+                </div>
+            </details>
+
+            <details class="rounded-2xl mb-4 overflow-hidden" style="background:#111;border:1px solid rgba(255,255,255,0.08)">
+                <summary class="px-6 py-4 cursor-pointer select-none flex items-center justify-between">
+                    <span class="text-white font-bold" style="color:#22d3ee">Analysis <span class="text-xs font-mono" style="color:#6d6d6d">8</span></span>
+                    <span class="text-xs font-mono chev" style="color:#6d6d6d">▸</span>
+                </summary>
+                <div class="px-6 pb-5 space-y-3 border-t" style="border-color:rgba(255,255,255,0.05)">
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1 pt-4"><span class="font-mono text-sm shrink-0" style="color:#67e8f9">impact_analysis</span><span class="text-sm" style="color:#888">Assesses blast radius and caller scope before modifying / renaming</span></div>
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#67e8f9">call_chain</span><span class="text-sm" style="color:#888">Pinpoint a line; get its caller / callee chain</span></div>
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#67e8f9">references</span><span class="text-sm" style="color:#888">Cross-file usages of a symbol with usage counts</span></div>
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#67e8f9">dep_graph</span><span class="text-sm" style="color:#888">Import dependency graph with cycle detection</span></div>
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#67e8f9">inspect</span><span class="text-sm" style="color:#888">Outline + references + call chain in one call — replaces three separate ones</span></div>
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#67e8f9">trace_symbol</span><span class="text-sm" style="color:#888">Traces constant values and finds hardcoded copies</span></div>
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#67e8f9">active_todos</span><span class="text-sm" style="color:#888">TODO / FIXME scan prioritized by current work</span></div>
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#67e8f9">code_quality</span><span class="text-sm" style="color:#888">Five-dimension shape probe: tech debt / architecture / blast radius</span></div>
+                </div>
+            </details>
+
+            <details class="rounded-2xl mb-4 overflow-hidden" style="background:#111;border:1px solid rgba(255,255,255,0.08)">
+                <summary class="px-6 py-4 cursor-pointer select-none flex items-center justify-between">
+                    <span class="text-white font-bold" style="color:#fbbf24">Editing &amp; refactor <span class="text-xs font-mono" style="color:#6d6d6d">7</span></span>
+                    <span class="text-xs font-mono chev" style="color:#6d6d6d">▸</span>
+                </summary>
+                <div class="px-6 pb-5 space-y-3 border-t" style="border-color:rgba(255,255,255,0.05)">
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1 pt-4"><span class="font-mono text-sm shrink-0" style="color:#fcd34d">batch_edit</span><span class="text-sm" style="color:#888">Multiple edits to one file applied atomically; dry-run preview supported</span></div>
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#fcd34d">edit_transaction</span><span class="text-sm" style="color:#888">Multi-file transaction: begin → edit → commit, with rollback / undo</span></div>
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#fcd34d">edit_collision_guard</span><span class="text-sm" style="color:#888">Snapshot compare between read and write; detects concurrent external edits</span></div>
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#fcd34d">git_worktree</span><span class="text-sm" style="color:#888">Isolated-branch multi-file changes: zero working-tree pollution, rollback on failure</span></div>
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#fcd34d">rename_symbol</span><span class="text-sm" style="color:#888">Cross-file symbol rename (word-boundary, string / comment aware)</span></div>
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#fcd34d">fix_imports</span><span class="text-sm" style="color:#888">Removes unused imports, resolves undefined symbols, breaks circular deps</span></div>
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#fcd34d">edit_sandbox</span><span class="text-sm" style="color:#888">Pre-edit validation (syntax / structure dry-run)</span></div>
+                </div>
+            </details>
+
+            <details class="rounded-2xl mb-4 overflow-hidden" style="background:#111;border:1px solid rgba(255,255,255,0.08)">
+                <summary class="px-6 py-4 cursor-pointer select-none flex items-center justify-between">
+                    <span class="text-white font-bold" style="color:#4ade80">Quality &amp; security <span class="text-xs font-mono" style="color:#6d6d6d">8</span></span>
+                    <span class="text-xs font-mono chev" style="color:#6d6d6d">▸</span>
+                </summary>
+                <div class="px-6 pb-5 space-y-3 border-t" style="border-color:rgba(255,255,255,0.05)">
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1 pt-4"><span class="font-mono text-sm shrink-0" style="color:#86efac">code_review</span><span class="text-sm" style="color:#888">Shape-level check: naming / comments / long functions / duplicated blocks</span></div>
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#86efac">security_review</span><span class="text-sm" style="color:#888">Scans for injection / XSS / secrets / CORS patterns, severity-graded</span></div>
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#86efac">dead_code_sweeper</span><span class="text-sm" style="color:#888">Dead code detection: unused imports / orphan files (miss-over-delete bias)</span></div>
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#86efac">guard_patterns</span><span class="text-sm" style="color:#888">AST rule gate: no bare except / debugger / eval</span></div>
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#86efac">exception_guard</span><span class="text-sm" style="color:#888">Checks project exceptions vs builtins; pair with <span style="color:#cbd5e1">test_bridge</span> to verify fixes</span></div>
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#86efac">config_drift</span><span class="text-sm" style="color:#888">Detects env vars / tables / services missing from .env.example</span></div>
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#86efac">mock_syncer</span><span class="text-sm" style="color:#888">Detects mock / patch mismatches after signature changes</span></div>
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#86efac">naming_consistency</span><span class="text-sm" style="color:#888">Checks new symbol names against project style</span></div>
+                </div>
+            </details>
+
+            <details class="rounded-2xl mb-4 overflow-hidden" style="background:#111;border:1px solid rgba(255,255,255,0.08)">
+                <summary class="px-6 py-4 cursor-pointer select-none flex items-center justify-between">
+                    <span class="text-white font-bold" style="color:#f472b6">Engineering <span class="text-xs font-mono" style="color:#6d6d6d">8</span></span>
+                    <span class="text-xs font-mono chev" style="color:#6d6d6d">▸</span>
+                </summary>
+                <div class="px-6 pb-5 space-y-3 border-t" style="border-color:rgba(255,255,255,0.05)">
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1 pt-4"><span class="font-mono text-sm shrink-0" style="color:#f9a8d4">test_bridge</span><span class="text-sm" style="color:#888">Runs tests, parses output, enriches failures with context</span></div>
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#f9a8d4">verify_pipeline</span><span class="text-sm" style="color:#888">Runs lint / test / typecheck from package.json in one go</span></div>
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#f9a8d4">debug_runner</span><span class="text-sm" style="color:#888">Runs commands / scripts with 14-class error pattern analysis</span></div>
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#f9a8d4">patch_parser</span><span class="text-sm" style="color:#888">SEARCH/REPLACE patch parsing with dry-run preview</span></div>
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#f9a8d4">diff_facts</span><span class="text-sm" style="color:#888">AST symbol-change facts after an edit transaction + test-sync hints</span></div>
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#f9a8d4">find_tests</span><span class="text-sm" style="color:#888">Reverse-lookup tests for a source file (naming + imports)</span></div>
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#f9a8d4">spec_gen</span><span class="text-sm" style="color:#888">Generates module / API specs from a source file's symbols</span></div>
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#f9a8d4">style_sniffer</span><span class="text-sm" style="color:#888">Sniffs project code style and produces a style spec</span></div>
+                </div>
+            </details>
+
+            <details class="rounded-2xl mb-4 overflow-hidden" style="background:#111;border:1px solid rgba(255,255,255,0.08)">
+                <summary class="px-6 py-4 cursor-pointer select-none flex items-center justify-between">
+                    <span class="text-white font-bold" style="color:#94a3b8">Deps &amp; system <span class="text-xs font-mono" style="color:#6d6d6d">5</span></span>
+                    <span class="text-xs font-mono chev" style="color:#6d6d6d">▸</span>
+                </summary>
+                <div class="px-6 pb-5 space-y-3 border-t" style="border-color:rgba(255,255,255,0.05)">
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1 pt-4"><span class="font-mono text-sm shrink-0" style="color:#cbd5e1">dependency_gatekeeper</span><span class="text-sm" style="color:#888">Imports vs manifests: undeclared deps + install hints</span></div>
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#cbd5e1">tsc_check</span><span class="text-sm" style="color:#888">TypeScript type-check (tsc --noEmit)</span></div>
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#cbd5e1">health</span><span class="text-sm" style="color:#888">System check + self-healing (DB integrity / memory / semaphores)</span></div>
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#cbd5e1">gc</span><span class="text-sm" style="color:#888">Manual GC trigger (requires --expose-gc)</span></div>
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#cbd5e1">feedback</span><span class="text-sm" style="color:#888">Reports tool issues / ideas, collected locally</span></div>
+                </div>
+            </details>
+        </section>
+
+        <section id="languages" class="mb-14" style="scroll-margin-top:150px">
+            <h2 class="text-2xl font-bold text-white mb-6">Language support</h2>
+            <p class="text-sm mb-4" style="color:#888">Symbol-level read / write (read &amp; write_symbol) supports 10 language families, with automatic syntax self-check after writes (node --check / py_compile).</p>
+            <div class="flex flex-wrap gap-2">
+                <span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);color:#86efac">JavaScript (.js/.mjs/.cjs/.jsx)</span>
+                <span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);color:#86efac">TypeScript (.ts)</span>
+                <span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);color:#86efac">MTS / CTS (.mts/.cts)</span>
+                <span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);color:#86efac">TSX</span>
+                <span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);color:#86efac">Python</span>
+                <span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);color:#86efac">Go</span>
+                <span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);color:#86efac">Rust (impl/trait/enum)</span>
+                <span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);color:#86efac">C / C++ (incl. headers)</span>
+                <span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);color:#86efac">Java</span>
+                <span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);color:#86efac">Bash</span>
+            </div>
+        </section>
+
+        <section id="safety" class="mb-14" style="scroll-margin-top:150px">
+            <h2 class="text-2xl font-bold text-white mb-6">Safety mechanisms</h2>
+            <div class="space-y-4">
+                <div class="rounded-xl p-5" style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06)">
+                    <div class="text-white font-medium mb-1">Inline suppression <span class="font-mono text-xs" style="color:#6d6d6d">malong-ignore</span></div>
+                    <div class="text-sm" style="color:#888">Append <span class="font-mono" style="color:#e8b86e">malong-ignore</span> at end of a line to suppress all findings on it; <span class="font-mono" style="color:#e8b86e">malong-ignore[eval,exec-cmd]</span> targets specific rules; a reason is encouraged.</div>
+                </div>
+                <div class="rounded-xl p-5" style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06)">
+                    <div class="text-white font-medium mb-1">Declarative config <span class="font-mono text-xs" style="color:#6d6d6d">.ai-patterns.json</span></div>
+                    <div class="text-sm" style="color:#888">Declare ignores by files / rules in the <span class="font-mono" style="color:#e8b86e">securityIgnore</span> array (<span class="font-mono" style="color:#e8b86e">*</span> / <span class="font-mono" style="color:#e8b86e">**</span> globs supported); injection rules (eval / exec / SQL / spawn) are only ever suppressed by an explicit marker you authored — never heuristically. Suppressed findings still count in the summary's <span class="font-mono" style="color:#e8b86e">suppressed</span> field.</div>
+                </div>
+                <div class="rounded-xl p-5" style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06)">
+                    <div class="text-white font-medium mb-1">Undo journal <span class="font-mono text-xs" style="color:#6d6d6d">.malong/journal/</span></div>
+                    <div class="text-sm" style="color:#888">Every safe write (write_symbol / write_symbols / batch_edit) leaves a rollback journal in the workspace's <span class="font-mono" style="color:#e8b86e">.malong/journal/</span>; terminal transactions are pruned after a 24h TTL (at most once per hour per workspace). In-flight and <span class="font-mono" style="color:#e8b86e">needs_review</span> journals are never auto-deleted — and only the tool's own rollback backups are touched, never your source files.</div>
+                </div>
+            </div>
+        </section>
+
+        <section id="testing" class="mb-14" style="scroll-margin-top:150px">
+            <h2 class="text-2xl font-bold text-white mb-6">Self-checks</h2>
+            <div class="rounded-2xl overflow-hidden mb-6" style="background:#111;border:1px solid rgba(255,255,255,0.08)">
+                <div class="px-6 py-3 text-xs font-mono" style="background:rgba(255,255,255,0.03);border-bottom:1px solid rgba(255,255,255,0.05);color:#e8b86e">One-shot full chain (daemon must be running)</div>
+                <div class="p-5">
+                    <div class="text-sm font-mono mb-3" style="color:#b0b0b0">./scripts/ci.sh    <span style="color:#6d6d6d"># cargo test + npm test + dogfood</span></div>
+                    <div class="text-sm font-mono" style="color:#b0b0b0">npm test    <span style="color:#6d6d6d"># 2015 assertions / 81 test files</span></div>
+                </div>
+            </div>
+            <div class="space-y-3 text-sm font-mono" style="color:#b0b0b0">
+                <div>node tests/test-db-adapter.js   <span style="color:#6d6d6d"># 22 assertions: sql.js backend + persistence</span></div>
+                <div>node tests/test-mcp-server.js    <span style="color:#6d6d6d"># 25 assertions: MCP stdio + daemon round-trip</span></div>
+                <div>cd malong-parse && cargo test    <span style="color:#6d6d6d"># 109 assertions: extraction / protocol / cache / dispatch</span></div>
+            </div>
+        </section>
+
+        <section id="faq" class="mb-14" style="scroll-margin-top:150px">
+            <h2 class="text-2xl font-bold text-white mb-6">FAQ</h2>
+            <div class="space-y-4">
+                <div class="rounded-xl p-5" style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06)">
+                    <div class="text-white font-medium mb-1">How does the MCP server start the parsing service?</div>
+                    <div class="text-sm" style="color:#888">Both npm ci and the tarball bundle the Rust parsing binary (malong-parse); the server auto-starts it on launch. Parse crashes are isolated by catch_unwind and never take down the MCP process.</div>
+                </div>
+                <div class="rounded-xl p-5" style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06)">
+                    <div class="text-white font-medium mb-1">Where is the index stored?</div>
+                    <div class="text-sm" style="color:#888">Each workspace gets its own SQLite file (WAL mode) under the workspace's <span class="font-mono" style="color:#e8b86e">.malong/</span> directory (gitignored). Corruption is auto-healed via integrity_check rebuild.</div>
+                </div>
+                <div class="rounded-xl p-5" style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06)">
+                    <div class="text-white font-medium mb-1">Which languages support symbol-level writes?</div>
+                    <div class="text-sm" style="color:#888">read / write_symbol cover 10 language families: JS / TS / TSX / Python / Go / Rust / C-C++ / Java / Bash; writes are followed by an automatic syntax self-check (node --check / py_compile).</div>
+                </div>
+                <div class="rounded-xl p-5" style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06)">
+                    <div class="text-white font-medium mb-1">Do the quality-gate tools call an LLM?</div>
+                    <div class="text-sm" style="color:#888">No. All quality / security tools are deterministic regex / AST implementations — the same input always yields the same output. Reproducible, CI-friendly, auditable.</div>
+                </div>
+                <div class="rounded-xl p-5" style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06)">
+                    <div class="text-white font-medium mb-1">What if the parsing daemon is not running?</div>
+                    <div class="text-sm" style="color:#888">Parse-dependent tools (symbol extraction etc.) degrade; SQLite-backed tools (repo-map / code-index / health-check) keep working. The MCP server auto-starts the daemon by default — manual starts are only needed when calling the parse-client API directly.</div>
+                </div>
+                <div class="rounded-xl p-5" style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06)">
+                    <div class="text-white font-medium mb-1">How should Windows paths be written?</div>
+                    <div class="text-sm" style="color:#888">Escape backslashes as <span class="font-mono" style="color:#e8b86e">\\</span> in JSON; relative paths resolve against the directory where the client is launched, so prefer absolute paths; <span class="font-mono" style="color:#e8b86e">tar -xzf</span> works on Win10+.</div>
+                </div>
+                <div class="rounded-xl p-5" style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06)">
+                    <div class="text-white font-medium mb-1">Are the two SQL backends data-compatible?</div>
+                    <div class="text-sm" style="color:#888">Yes. Both better-sqlite3 and sql.js use SQLite, so index data files are fully interchangeable and you can switch freely.</div>
+                </div>
+                <div class="rounded-xl p-5" style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06)">
+                    <div class="text-white font-medium mb-1">Can edits be undone?</div>
+                    <div class="text-sm" style="color:#888">Every safe write leaves a rollback journal under <span class="font-mono" style="color:#e8b86e">.malong/journal/</span>; terminal transactions are pruned on a 24h TTL while in-flight / needs-review journals are never deleted — only the tool's own backups are cleaned, never your source.</div>
+                </div>
+            </div>
+        </section>
+
+        <section id="resources">
+            <h2 class="text-2xl font-bold text-white mb-4">More resources</h2>
+            <div class="flex flex-wrap gap-3">
+                <a href="https://github.com/wulun811/LiuHe/blob/master/README.md" target="_blank" class="px-4 py-2 rounded-lg text-sm" style="background:rgba(201,125,42,0.1);border:1px solid rgba(201,125,42,0.25);color:#e8b86e">README</a>
+                <a href="https://github.com/wulun811/LiuHe/blob/master/CHANGELOG.md" target="_blank" class="px-4 py-2 rounded-lg text-sm" style="background:rgba(201,125,42,0.1);border:1px solid rgba(201,125,42,0.25);color:#e8b86e">Changelog</a>
+                <a href="https://github.com/wulun811/LiuHe/blob/master/CONTRIBUTING.md" target="_blank" class="px-4 py-2 rounded-lg text-sm" style="background:rgba(201,125,42,0.1);border:1px solid rgba(201,125,42,0.25);color:#e8b86e">Contributing</a>
+                <a href="https://github.com/wulun811/LiuHe/blob/master/SECURITY.md" target="_blank" class="px-4 py-2 rounded-lg text-sm" style="background:rgba(201,125,42,0.1);border:1px solid rgba(201,125,42,0.25);color:#e8b86e">Security</a>
+                <a href="https://github.com/wulun811/LiuHe" target="_blank" class="px-4 py-2 rounded-lg text-sm" style="background:rgba(201,125,42,0.1);border:1px solid rgba(201,125,42,0.25);color:#e8b86e">GitHub repo</a>
+                <a href="https://github.com/wulun811/LiuHe/blob/master/THIRD_PARTY_NOTICES.md" target="_blank" class="px-4 py-2 rounded-lg text-sm" style="background:rgba(201,125,42,0.1);border:1px solid rgba(201,125,42,0.25);color:#e8b86e">Third-party notices</a>
+            </div>
+        </section>
+    </main>
+
+    <footer class="py-10 border-t" style="border-color:rgba(255,255,255,0.05)">
+        <div class="max-w-5xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-4 text-sm" style="color:#6d6d6d">
+            <div>Malong·Liuhe Toolkit v0.4.5 · MIT License</div>
+            <div class="flex gap-6">
+                <a href="download.en.html" class="hover:text-white transition-colors">Download</a>
+                <a href="https://github.com/wulun811/LiuHe" target="_blank" class="hover:text-white transition-colors">GitHub</a>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        document.querySelectorAll('a[href^="#"]').forEach(a => {
+            a.addEventListener('click', function (e) {
+                const t = document.querySelector(this.getAttribute('href'));
+                if (t) { e.preventDefault(); t.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+            });
+        });
+    </script>
+</body>
+</html>
