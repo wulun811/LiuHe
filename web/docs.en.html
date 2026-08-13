@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Docs — Malong·Liuhe Toolkit</title>
+    <meta name="description" content="Malong Liuhe documentation: installation guide, MCP client config, full 44-tool matrix, language support and FAQ.">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="assets/site.css">
+    <script>
+        tailwind.config = window.tailwindConfig || {
+            theme: { extend: {
+                fontFamily: { 'mono': ['"JetBrains Mono"', 'monospace'], 'sans': ['Inter', 'system-ui', 'sans-serif'] },
+                colors: {
+                    dragon: { 50:'#fdf8f0',100:'#f9ecd6',200:'#f2d5a8',300:'#e8b86e',400:'#dc9940',500:'#c97d2a',600:'#b06220',700:'#8f4c1d',800:'#753e1e',900:'#61331b',950:'#37190c' },
+                    ink: { 50:'#f6f6f6',100:'#e7e7e7',200:'#d1d1d1',300:'#b0b0b0',400:'#888888',500:'#6d6d6d',600:'#5d5d5d',700:'#4f4f4f',800:'#454545',900:'#1a1a1a',950:'#0d0d0d' },
+                    verdant: { 50:'#f0fdf4',100:'#dcfce7',200:'#bbf7d0',300:'#86efac',400:'#4ade80',500:'#22c55e',600:'#16a34a',700:'#15803d',800:'#166534',900:'#14532d' },
+                }
+            } }
+        };
+    </script>
+</head>
+<body class="antialiased" style="background:#0d0d0d;color:#e7e7e7">
+    <nav class="fixed top-0 left-0 right-0 z-50" style="background:rgba(13,13,13,0.7);backdrop-filter:blur(20px);border-bottom:1px solid rgba(255,255,255,0.06)">
+        <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background:linear-gradient(135deg,#dc9940,#8f4c1d)">
+                    <span class="text-white font-bold text-sm font-mono">LH</span>
+                </div>
+                <a href="index.en.html" class="font-sans font-bold text-lg text-white">Malong·Liuhe</a>
+            </div>
+            <div class="hidden md:flex items-center gap-8 text-sm" style="color:#888">
+                <a href="index.en.html" class="hover:text-white transition-colors">Home</a>
+                <a href="docs.en.html" class="hover:text-white transition-colors" style="color:#e8b86e">Docs</a>
+                <a href="download.en.html" class="hover:text-white transition-colors">Download</a>
+            </div>
+            <div class="flex items-center gap-3">
+                <span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(201,125,42,0.1);border:1px solid rgba(201,125,42,0.2);color:#e8b86e">v0.4.5</span>
+                <a href="docs.html" class="hover:text-white transition-colors text-sm" style="color:#888">中文</a>
+                <a href="https://github.com/wulun811/LiuHe" target="_blank" class="hover:text-white transition-colors text-sm" style="color:#888">GitHub</a>
+            </div>
+        </div>
+    </nav>
+
+    <main class="pt-28 pb-24 max-w-5xl mx-auto px-6">
+        <div class="mb-4 flex items-center gap-3">
+            <div class="w-12 h-px" style="background:#c97d2a"></div>
+            <span class="text-sm font-mono uppercase tracking-wider" style="color:#dc9940">Docs</span>
+        </div>
+        <h1 class="text-4xl md:text-5xl font-bold text-white mb-12">Documentation</h1>
+
+        <section class="mb-12">
+            <h2 class="text-2xl font-bold text-white mb-4">Installation</h2>
+            <div class="rounded-2xl overflow-hidden mb-6" style="background:#111;border:1px solid rgba(255,255,255,0.08)">
+                <div class="px-6 py-3 text-xs font-mono" style="background:rgba(255,255,255,0.03);border-bottom:1px solid rgba(255,255,255,0.05);color:#e8b86e">Standard install (recommended · full better-sqlite3 backend)</div>
+                <div class="p-5 flex items-center gap-3" style="background:rgba(34,197,94,0.02)">
+                    <span class="w-2 h-2 rounded-full" style="background:#4ade80"></span>
+                    <span class="text-sm font-mono" style="color:#b0b0b0">git clone &lt;repo&gt; liuhe && cd liuhe/malong && <span style="color:#e8b86e">npm ci</span> && node mcp-server.js --workspace .</span>
+                </div>
+            </div>
+            <div class="rounded-2xl overflow-hidden" style="background:#111;border:1px solid rgba(255,255,255,0.08)">
+                <div class="px-6 py-3 text-xs font-mono" style="background:rgba(255,255,255,0.03);border-bottom:1px solid rgba(255,255,255,0.05);color:#e8b86e">Build-free deploy (offline / sandbox · sql.js backend)</div>
+                <div class="p-5 flex items-center gap-3">
+                    <span class="w-2 h-2 rounded-full" style="background:#c97d2a"></span>
+                    <span class="text-sm font-mono" style="color:#b0b0b0">tar -xzf malong-liuhe-0.4.5-linux-x86_64.tar.gz && cd malong && node mcp-server.js --workspace .</span>
+                </div>
+            </div>
+            <p class="text-sm mt-3" style="color:#6d6d6d">
+                Both paths offer identical features — only the index backend differs. On boot the tarball prints a
+                <span class="font-mono" style="color:#e8b86e">SQLITE BACKEND</span> upgrade hint; on a networked machine,
+                <span class="font-mono" style="color:#e8b86e">cd malong && npm ci</span> upgrades to the full backend.
+            </p>
+        </section>
+
+        <section class="mb-12">
+            <h2 class="text-2xl font-bold text-white mb-4">The 44 MCP tools</h2>
+            <p class="text-sm mb-6" style="color:#888">All tools are pure regex/AST — zero LLM calls, reproducible, auditable, CI-friendly.</p>
+
+            <div class="space-y-6">
+                <div>
+                    <div class="text-white font-bold mb-2" style="color:#60a5fa">I/O primitives</div>
+                    <div class="flex flex-wrap gap-2"><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.2);color:#93c5fd">read_symbol</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.2);color:#93c5fd">write_symbol</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.2);color:#93c5fd">write_symbols</span></div>
+                </div>
+                <div>
+                    <div class="text-white font-bold mb-2" style="color:#c084fc">Index &amp; search</div>
+                    <div class="flex flex-wrap gap-2"><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(168,85,247,0.08);border:1px solid rgba(168,85,247,0.2);color:#d8b4fe">reindex</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(168,85,247,0.08);border:1px solid rgba(168,85,247,0.2);color:#d8b4fe">symbol_search</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(168,85,247,0.08);border:1px solid rgba(168,85,247,0.2);color:#d8b4fe">code_search</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(168,85,247,0.08);border:1px solid rgba(168,85,247,0.2);color:#d8b4fe">repo_map</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(168,85,247,0.08);border:1px solid rgba(168,85,247,0.2);color:#d8b4fe">outline_reader</span></div>
+                </div>
+                <div>
+                    <div class="text-white font-bold mb-2" style="color:#22d3ee">Analysis</div>
+                    <div class="flex flex-wrap gap-2"><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,211,238,0.08);border:1px solid rgba(34,211,238,0.2);color:#67e8f9">impact_analysis</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,211,238,0.08);border:1px solid rgba(34,211,238,0.2);color:#67e8f9">call_chain</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,211,238,0.08);border:1px solid rgba(34,211,238,0.2);color:#67e8f9">references</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,211,238,0.08);border:1px solid rgba(34,211,238,0.2);color:#67e8f9">dep_graph</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,211,238,0.08);border:1px solid rgba(34,211,238,0.2);color:#67e8f9">inspect</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,211,238,0.08);border:1px solid rgba(34,211,238,0.2);color:#67e8f9">trace_symbol</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,211,238,0.08);border:1px solid rgba(34,211,238,0.2);color:#67e8f9">active_todos</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,211,238,0.08);border:1px solid rgba(34,211,238,0.2);color:#67e8f9">code_quality</span></div>
+                </div>
+                <div>
+                    <div class="text-white font-bold mb-2" style="color:#fbbf24">Editing &amp; refactoring</div>
+                    <div class="flex flex-wrap gap-2"><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(201,125,42,0.08);border:1px solid rgba(201,125,42,0.2);color:#fcd34d">batch_edit</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(201,125,42,0.08);border:1px solid rgba(201,125,42,0.2);color:#fcd34d">edit_transaction</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(201,125,42,0.08);border:1px solid rgba(201,125,42,0.2);color:#fcd34d">edit_sandbox</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(201,125,42,0.08);border:1px solid rgba(201,125,42,0.2);color:#fcd34d">rename_symbol</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(201,125,42,0.08);border:1px solid rgba(201,125,42,0.2);color:#fcd34d">edit_collision_guard</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(201,125,42,0.08);border:1px solid rgba(201,125,42,0.2);color:#fcd34d">git_worktree</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(201,125,42,0.08);border:1px solid rgba(201,125,42,0.2);color:#fcd34d">fix_imports</span></div>
+                </div>
+                <div>
+                    <div class="text-white font-bold mb-2" style="color:#4ade80">Quality &amp; security</div>
+                    <div class="flex flex-wrap gap-2"><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);color:#86efac">code_review</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);color:#86efac">security_review</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);color:#86efac">dead_code_sweeper</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);color:#86efac">guard_patterns</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);color:#86efac">exception_guard</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);color:#86efac">config_drift</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);color:#86efac">mock_syncer</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);color:#86efac">naming_consistency</span></div>
+                </div>
+                <div>
+                    <div class="text-white font-bold mb-2" style="color:#f472b6">Engineering &amp; verification</div>
+                    <div class="flex flex-wrap gap-2"><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(244,114,182,0.08);border:1px solid rgba(244,114,182,0.2);color:#f9a8d4">test_bridge</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(244,114,182,0.08);border:1px solid rgba(244,114,182,0.2);color:#f9a8d4">verify_pipeline</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(244,114,182,0.08);border:1px solid rgba(244,114,182,0.2);color:#f9a8d4">debug_runner</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(244,114,182,0.08);border:1px solid rgba(244,114,182,0.2);color:#f9a8d4">patch_parser</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(244,114,182,0.08);border:1px solid rgba(244,114,182,0.2);color:#f9a8d4">diff_facts</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(244,114,182,0.08);border:1px solid rgba(244,114,182,0.2);color:#f9a8d4">find_tests</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(244,114,182,0.08);border:1px solid rgba(244,114,182,0.2);color:#f9a8d4">spec_gen</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(244,114,182,0.08);border:1px solid rgba(244,114,182,0.2);color:#f9a8d4">style_sniffer</span></div>
+                </div>
+                <div>
+                    <div class="text-white font-bold mb-2" style="color:#94a3b8">Dependencies &amp; system</div>
+                    <div class="flex flex-wrap gap-2"><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(148,163,184,0.08);border:1px solid rgba(148,163,184,0.2);color:#cbd5e1">dependency_gatekeeper</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(148,163,184,0.08);border:1px solid rgba(148,163,184,0.2);color:#cbd5e1">tsc_check</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(148,163,184,0.08);border:1px solid rgba(148,163,184,0.2);color:#cbd5e1">health</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(148,163,184,0.08);border:1px solid rgba(148,163,184,0.2);color:#cbd5e1">gc</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(148,163,184,0.08);border:1px solid rgba(148,163,184,0.2);color:#cbd5e1">feedback</span></div>
+                </div>
+            </div>
+        </section>
+
+        <section class="mb-12">
+            <h2 class="text-2xl font-bold text-white mb-4">Language support</h2>
+            <div class="flex flex-wrap gap-2">
+                <span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);color:#86efac">JavaScript (.js/.mjs/.cjs/.jsx)</span>
+                <span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);color:#86efac">TypeScript (.ts/.mts/.cts)</span>
+                <span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);color:#86efac">TSX</span>
+                <span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);color:#86efac">Python</span>
+                <span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);color:#86efac">Go</span>
+                <span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);color:#86efac">Rust (impl/trait/enum)</span>
+                <span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);color:#86efac">C / C++ (headers incl.)</span>
+                <span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);color:#86efac">Java</span>
+                <span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);color:#86efac">Bash</span>
+            </div>
+        </section>
+
+        <section class="mb-12">
+            <h2 class="text-2xl font-bold text-white mb-4">FAQ</h2>
+            <div class="space-y-4">
+                <div class="rounded-xl p-5" style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06)">
+                    <div class="text-white font-medium mb-1">How does the MCP server start the parser?</div>
+                    <div class="text-sm" style="color:#888">Both npm ci and the tarball bundle the Rust parser binary (malong-parse); the server spawns it on boot. Parser panics are isolated via catch_unwind and never kill the MCP process.</div>
+                </div>
+                <div class="rounded-xl p-5" style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06)">
+                    <div class="text-white font-medium mb-1">Where is the index stored?</div>
+                    <div class="text-sm" style="color:#888">One SQLite file per workspace (WAL mode) under the workspace's .malong/ directory (gitignored). Corrupt databases self-heal via integrity_check rebuild.</div>
+                </div>
+                <div class="rounded-xl p-5" style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06)">
+                    <div class="text-white font-medium mb-1">Which languages support symbol-level writes?</div>
+                    <div class="text-sm" style="color:#888">read/write_symbol cover 10 language families: JS/TS/TSX/Python/Go/Rust/C-C++/Java/Bash. Writes are followed by automatic syntax checks (node --check / py_compile).</div>
+                </div>
+                <div class="rounded-xl p-5" style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06)">
+                    <div class="text-white font-medium mb-1">Do quality-gate tools call an LLM?</div>
+                    <div class="text-sm" style="color:#888">No. All quality/security tools are deterministic pure regex/AST implementations — same input, same output, always. Reproducible, CI-ready and auditable.</div>
+                </div>
+            </div>
+        </section>
+
+        <section>
+            <h2 class="text-2xl font-bold text-white mb-4">More resources</h2>
+            <div class="flex flex-wrap gap-3">
+                <a href="https://github.com/wulun811/LiuHe/blob/master/README.md" target="_blank" class="px-4 py-2 rounded-lg text-sm" style="background:rgba(201,125,42,0.1);border:1px solid rgba(201,125,42,0.25);color:#e8b86e">README (EN + 中文)</a>
+                <a href="https://github.com/wulun811/LiuHe/blob/master/CHANGELOG.md" target="_blank" class="px-4 py-2 rounded-lg text-sm" style="background:rgba(201,125,42,0.1);border:1px solid rgba(201,125,42,0.25);color:#e8b86e">Changelog</a>
+                <a href="https://github.com/wulun811/LiuHe/blob/master/CONTRIBUTING.md" target="_blank" class="px-4 py-2 rounded-lg text-sm" style="background:rgba(201,125,42,0.1);border:1px solid rgba(201,125,42,0.25);color:#e8b86e">Contributing</a>
+                <a href="https://github.com/wulun811/LiuHe/blob/master/SECURITY.md" target="_blank" class="px-4 py-2 rounded-lg text-sm" style="background:rgba(201,125,42,0.1);border:1px solid rgba(201,125,42,0.25);color:#e8b86e">Security</a>
+                <a href="https://github.com/wulun811/LiuHe" target="_blank" class="px-4 py-2 rounded-lg text-sm" style="background:rgba(201,125,42,0.1);border:1px solid rgba(201,125,42,0.25);color:#e8b86e">GitHub repo</a>
+                <a href="https://github.com/wulun811/LiuHe/blob/master/THIRD_PARTY_NOTICES.md" target="_blank" class="px-4 py-2 rounded-lg text-sm" style="background:rgba(201,125,42,0.1);border:1px solid rgba(201,125,42,0.25);color:#e8b86e">Third-party notices</a>
+            </div>
+        </section>
+    </main>
+
+    <footer class="py-10 border-t" style="border-color:rgba(255,255,255,0.05)">
+        <div class="max-w-5xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-4 text-sm" style="color:#6d6d6d">
+            <div>Malong·Liuhe Toolkit v0.4.5 · MIT License</div>
+            <div class="flex gap-6">
+                <a href="download.en.html" class="hover:text-white transition-colors">Download</a>
+                <a href="https://github.com/wulun811/LiuHe" target="_blank" class="hover:text-white transition-colors">GitHub</a>
+            </div>
+        </div>
+    </footer>
+</body>
+</html>

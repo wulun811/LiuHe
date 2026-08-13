@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>文档 — 码龙·六合工具</title>
+    <meta name="description" content="码龙·六合工具文档：安装指南、MCP 客户端配置、44 个工具全量矩阵、多语言支持与 FAQ。">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700;900&family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="assets/site.css">
+    <script>
+        tailwind.config = window.tailwindConfig || {
+            theme: { extend: {
+                fontFamily: { 'serif-cn': ['"Noto Serif SC"', 'serif'], 'mono': ['"JetBrains Mono"', 'monospace'], 'sans': ['Inter', 'system-ui', 'sans-serif'] },
+                colors: {
+                    dragon: { 50:'#fdf8f0',100:'#f9ecd6',200:'#f2d5a8',300:'#e8b86e',400:'#dc9940',500:'#c97d2a',600:'#b06220',700:'#8f4c1d',800:'#753e1e',900:'#61331b',950:'#37190c' },
+                    ink: { 50:'#f6f6f6',100:'#e7e7e7',200:'#d1d1d1',300:'#b0b0b0',400:'#888888',500:'#6d6d6d',600:'#5d5d5d',700:'#4f4f4f',800:'#454545',900:'#1a1a1a',950:'#0d0d0d' },
+                    verdant: { 50:'#f0fdf4',100:'#dcfce7',200:'#bbf7d0',300:'#86efac',400:'#4ade80',500:'#22c55e',600:'#16a34a',700:'#15803d',800:'#166534',900:'#14532d' },
+                }
+            } }
+        };
+    </script>
+</head>
+<body class="antialiased" style="background:#0d0d0d;color:#e7e7e7">
+    <nav class="fixed top-0 left-0 right-0 z-50" style="background:rgba(13,13,13,0.7);backdrop-filter:blur(20px);border-bottom:1px solid rgba(255,255,255,0.06)">
+        <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background:linear-gradient(135deg,#dc9940,#8f4c1d)">
+                    <span class="text-white font-bold text-sm font-mono">LH</span>
+                </div>
+                <a href="index.html" class="font-serif-cn font-bold text-lg text-white">码龙·六合</a>
+            </div>
+            <div class="hidden md:flex items-center gap-8 text-sm" style="color:#888">
+                <a href="index.html" class="hover:text-white transition-colors">首页</a>
+                <a href="docs.html" class="hover:text-white transition-colors" style="color:#e8b86e">文档</a>
+                <a href="download.html" class="hover:text-white transition-colors">下载</a>
+            </div>
+            <div class="flex items-center gap-3">
+                <span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(201,125,42,0.1);border:1px solid rgba(201,125,42,0.2);color:#e8b86e">v0.4.5</span>
+                <a href="docs.en.html" class="hover:text-white transition-colors text-sm" style="color:#888">EN</a>
+                <a href="https://github.com/wulun811/LiuHe" target="_blank" class="hover:text-white transition-colors text-sm" style="color:#888">GitHub</a>
+            </div>
+        </div>
+    </nav>
+
+    <main class="pt-28 pb-24 max-w-5xl mx-auto px-6">
+        <div class="mb-4 flex items-center gap-3">
+            <div class="w-12 h-px" style="background:#c97d2a"></div>
+            <span class="text-sm font-mono uppercase tracking-wider" style="color:#dc9940">Docs</span>
+        </div>
+        <h1 class="font-serif-cn text-4xl md:text-5xl font-bold text-white mb-12">文档</h1>
+
+        <section class="mb-12">
+            <h2 class="font-serif-cn text-2xl font-bold text-white mb-4">安装</h2>
+            <div class="rounded-2xl overflow-hidden mb-6" style="background:#111;border:1px solid rgba(255,255,255,0.08)">
+                <div class="px-6 py-3 text-xs font-mono" style="background:rgba(255,255,255,0.03);border-bottom:1px solid rgba(255,255,255,0.05);color:#e8b86e">标准安装（推荐 · better-sqlite3 完整后端）</div>
+                <div class="p-5 flex items-center gap-3" style="background:rgba(34,197,94,0.02)">
+                    <span class="w-2 h-2 rounded-full" style="background:#4ade80"></span>
+                    <span class="text-sm font-mono" style="color:#b0b0b0">git clone &lt;repo&gt; liuhe && cd liuhe/malong && <span style="color:#e8b86e">npm ci</span> && node mcp-server.js --workspace .</span>
+                </div>
+            </div>
+            <div class="rounded-2xl overflow-hidden" style="background:#111;border:1px solid rgba(255,255,255,0.08)">
+                <div class="px-6 py-3 text-xs font-mono" style="background:rgba(255,255,255,0.03);border-bottom:1px solid rgba(255,255,255,0.05);color:#e8b86e">免构建部署（离线 / 沙盒 · sql.js 后端）</div>
+                <div class="p-5 flex items-center gap-3">
+                    <span class="w-2 h-2 rounded-full" style="background:#c97d2a"></span>
+                    <span class="text-sm font-mono" style="color:#b0b0b0">tar -xzf malong-liuhe-0.4.5-linux-x86_64.tar.gz && cd malong && node mcp-server.js --workspace .</span>
+                </div>
+            </div>
+            <p class="text-sm mt-3" style="color:#6d6d6d">
+                两种方式功能完全一致，仅索引后端实现不同。tar 包启动时会打印 <span class="font-mono" style="color:#e8b86e">SQLITE BACKEND</span> 升级提示；有网环境 <span class="font-mono" style="color:#e8b86e">cd malong && npm ci</span> 即可升级为完整版。
+            </p>
+        </section>
+
+        <section class="mb-12">
+            <h2 class="font-serif-cn text-2xl font-bold text-white mb-4">44 个 MCP 工具</h2>
+            <p class="text-sm mb-6" style="color:#888">全部工具纯正则/AST，零 LLM 调用，可复现、可审计、可 CI。</p>
+
+            <div class="space-y-6">
+                <div>
+                    <div class="text-white font-bold mb-2" style="color:#60a5fa">I/O 原语</div>
+                    <div class="flex flex-wrap gap-2"><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.2);color:#93c5fd">read_symbol</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.2);color:#93c5fd">write_symbol</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.2);color:#93c5fd">write_symbols</span></div>
+                </div>
+                <div>
+                    <div class="text-white font-bold mb-2" style="color:#c084fc">索引与搜索</div>
+                    <div class="flex flex-wrap gap-2"><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(168,85,247,0.08);border:1px solid rgba(168,85,247,0.2);color:#d8b4fe">reindex</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(168,85,247,0.08);border:1px solid rgba(168,85,247,0.2);color:#d8b4fe">symbol_search</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(168,85,247,0.08);border:1px solid rgba(168,85,247,0.2);color:#d8b4fe">code_search</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(168,85,247,0.08);border:1px solid rgba(168,85,247,0.2);color:#d8b4fe">repo_map</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(168,85,247,0.08);border:1px solid rgba(168,85,247,0.2);color:#d8b4fe">outline_reader</span></div>
+                </div>
+                <div>
+                    <div class="text-white font-bold mb-2" style="color:#22d3ee">分析理解</div>
+                    <div class="flex flex-wrap gap-2"><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,211,238,0.08);border:1px solid rgba(34,211,238,0.2);color:#67e8f9">impact_analysis</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,211,238,0.08);border:1px solid rgba(34,211,238,0.2);color:#67e8f9">call_chain</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,211,238,0.08);border:1px solid rgba(34,211,238,0.2);color:#67e8f9">references</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,211,238,0.08);border:1px solid rgba(34,211,238,0.2);color:#67e8f9">dep_graph</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,211,238,0.08);border:1px solid rgba(34,211,238,0.2);color:#67e8f9">inspect</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,211,238,0.08);border:1px solid rgba(34,211,238,0.2);color:#67e8f9">trace_symbol</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,211,238,0.08);border:1px solid rgba(34,211,238,0.2);color:#67e8f9">active_todos</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,211,238,0.08);border:1px solid rgba(34,211,238,0.2);color:#67e8f9">code_quality</span></div>
+                </div>
+                <div>
+                    <div class="text-white font-bold mb-2" style="color:#fbbf24">编辑与重构</div>
+                    <div class="flex flex-wrap gap-2"><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(201,125,42,0.08);border:1px solid rgba(201,125,42,0.2);color:#fcd34d">batch_edit</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(201,125,42,0.08);border:1px solid rgba(201,125,42,0.2);color:#fcd34d">edit_transaction</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(201,125,42,0.08);border:1px solid rgba(201,125,42,0.2);color:#fcd34d">edit_sandbox</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(201,125,42,0.08);border:1px solid rgba(201,125,42,0.2);color:#fcd34d">rename_symbol</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(201,125,42,0.08);border:1px solid rgba(201,125,42,0.2);color:#fcd34d">edit_collision_guard</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(201,125,42,0.08);border:1px solid rgba(201,125,42,0.2);color:#fcd34d">git_worktree</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(201,125,42,0.08);border:1px solid rgba(201,125,42,0.2);color:#fcd34d">fix_imports</span></div>
+                </div>
+                <div>
+                    <div class="text-white font-bold mb-2" style="color:#4ade80">质量与安全</div>
+                    <div class="flex flex-wrap gap-2"><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);color:#86efac">code_review</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);color:#86efac">security_review</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);color:#86efac">dead_code_sweeper</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);color:#86efac">guard_patterns</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);color:#86efac">exception_guard</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);color:#86efac">config_drift</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);color:#86efac">mock_syncer</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);color:#86efac">naming_consistency</span></div>
+                </div>
+                <div>
+                    <div class="text-white font-bold mb-2" style="color:#f472b6">工程与验证</div>
+                    <div class="flex flex-wrap gap-2"><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(244,114,182,0.08);border:1px solid rgba(244,114,182,0.2);color:#f9a8d4">test_bridge</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(244,114,182,0.08);border:1px solid rgba(244,114,182,0.2);color:#f9a8d4">verify_pipeline</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(244,114,182,0.08);border:1px solid rgba(244,114,182,0.2);color:#f9a8d4">debug_runner</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(244,114,182,0.08);border:1px solid rgba(244,114,182,0.2);color:#f9a8d4">patch_parser</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(244,114,182,0.08);border:1px solid rgba(244,114,182,0.2);color:#f9a8d4">diff_facts</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(244,114,182,0.08);border:1px solid rgba(244,114,182,0.2);color:#f9a8d4">find_tests</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(244,114,182,0.08);border:1px solid rgba(244,114,182,0.2);color:#f9a8d4">spec_gen</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(244,114,182,0.08);border:1px solid rgba(244,114,182,0.2);color:#f9a8d4">style_sniffer</span></div>
+                </div>
+                <div>
+                    <div class="text-white font-bold mb-2" style="color:#94a3b8">依赖与系统</div>
+                    <div class="flex flex-wrap gap-2"><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(148,163,184,0.08);border:1px solid rgba(148,163,184,0.2);color:#cbd5e1">dependency_gatekeeper</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(148,163,184,0.08);border:1px solid rgba(148,163,184,0.2);color:#cbd5e1">tsc_check</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(148,163,184,0.08);border:1px solid rgba(148,163,184,0.2);color:#cbd5e1">health</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(148,163,184,0.08);border:1px solid rgba(148,163,184,0.2);color:#cbd5e1">gc</span><span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(148,163,184,0.08);border:1px solid rgba(148,163,184,0.2);color:#cbd5e1">feedback</span></div>
+                </div>
+            </div>
+        </section>
+
+        <section class="mb-12">
+            <h2 class="font-serif-cn text-2xl font-bold text-white mb-4">语言支持</h2>
+            <div class="flex flex-wrap gap-2">
+                <span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);color:#86efac">JavaScript (.js/.mjs/.cjs/.jsx)</span>
+                <span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);color:#86efac">TypeScript (.ts/.mts/.cts)</span>
+                <span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);color:#86efac">TSX</span>
+                <span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);color:#86efac">Python</span>
+                <span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);color:#86efac">Go</span>
+                <span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);color:#86efac">Rust (impl/trait/enum)</span>
+                <span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);color:#86efac">C / C++（含头文件）</span>
+                <span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);color:#86efac">Java</span>
+                <span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);color:#86efac">Bash</span>
+            </div>
+        </section>
+
+        <section class="mb-12">
+            <h2 class="font-serif-cn text-2xl font-bold text-white mb-4">FAQ</h2>
+            <div class="space-y-4">
+                <div class="rounded-xl p-5" style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06)">
+                    <div class="text-white font-medium mb-1">MCP 服务器如何启动解析服务？</div>
+                    <div class="text-sm" style="color:#888">npm ci 或 tar 包均内置 Rust 解析二进制（malong-parse），服务器启动时自动拉起；解析崩溃由 catch_unwind 隔离，不影响 MCP 进程。</div>
+                </div>
+                <div class="rounded-xl p-5" style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06)">
+                    <div class="text-white font-medium mb-1">索引存哪里？</div>
+                    <div class="text-sm" style="color:#888">每个 workspace 独立 SQLite 文件（WAL 模式），位于 workspace 的 .malong/ 目录（gitignore 已排除）。损坏时 integrity_check 自动自愈重建。</div>
+                </div>
+                <div class="rounded-xl p-5" style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06)">
+                    <div class="text-white font-medium mb-1">哪些语言支持符号级写入？</div>
+                    <div class="text-sm" style="color:#888">read/write_symbol 支持 JS/TS/TSX/Python/Go/Rust/C-C++/Java/Bash 共 10 种语言族；写后自动 node --check / py_compile 语法自检。</div>
+                </div>
+                <div class="rounded-xl p-5" style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06)">
+                    <div class="text-white font-medium mb-1">质量门禁工具会不会调用 LLM？</div>
+                    <div class="text-sm" style="color:#888">不会。全部质量/安全工具是纯正则/AST 确定性实现，同一输入必然同一输出，可复现、可 CI、可审计。</div>
+                </div>
+            </div>
+        </section>
+
+        <section>
+            <h2 class="font-serif-cn text-2xl font-bold text-white mb-4">更多资源</h2>
+            <div class="flex flex-wrap gap-3">
+                <a href="https://github.com/wulun811/LiuHe/blob/master/README.md" target="_blank" class="px-4 py-2 rounded-lg text-sm" style="background:rgba(201,125,42,0.1);border:1px solid rgba(201,125,42,0.25);color:#e8b86e">README（中英）</a>
+                <a href="https://github.com/wulun811/LiuHe/blob/master/CHANGELOG.md" target="_blank" class="px-4 py-2 rounded-lg text-sm" style="background:rgba(201,125,42,0.1);border:1px solid rgba(201,125,42,0.25);color:#e8b86e">更新日志</a>
+                <a href="https://github.com/wulun811/LiuHe/blob/master/CONTRIBUTING.md" target="_blank" class="px-4 py-2 rounded-lg text-sm" style="background:rgba(201,125,42,0.1);border:1px solid rgba(201,125,42,0.25);color:#e8b86e">贡献指南</a>
+                <a href="https://github.com/wulun811/LiuHe/blob/master/SECURITY.md" target="_blank" class="px-4 py-2 rounded-lg text-sm" style="background:rgba(201,125,42,0.1);border:1px solid rgba(201,125,42,0.25);color:#e8b86e">安全说明</a>
+                <a href="https://github.com/wulun811/LiuHe" target="_blank" class="px-4 py-2 rounded-lg text-sm" style="background:rgba(201,125,42,0.1);border:1px solid rgba(201,125,42,0.25);color:#e8b86e">GitHub 仓库</a>
+                <a href="https://github.com/wulun811/LiuHe/blob/master/THIRD_PARTY_NOTICES.md" target="_blank" class="px-4 py-2 rounded-lg text-sm" style="background:rgba(201,125,42,0.1);border:1px solid rgba(201,125,42,0.25);color:#e8b86e">第三方声明</a>
+            </div>
+        </section>
+    </main>
+
+    <footer class="py-10 border-t" style="border-color:rgba(255,255,255,0.05)">
+        <div class="max-w-5xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-4 text-sm" style="color:#6d6d6d">
+            <div>码龙·六合工具 v0.4.5 · MIT License</div>
+            <div class="flex gap-6">
+                <a href="download.html" class="hover:text-white transition-colors">下载</a>
+                <a href="https://github.com/wulun811/LiuHe" target="_blank" class="hover:text-white transition-colors">GitHub</a>
+            </div>
+        </div>
+    </footer>
+</body>
+</html>
