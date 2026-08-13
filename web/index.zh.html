@@ -10,6 +10,10 @@
     <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700;900&family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/ScrollTrigger.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/11.15.0/mermaid.min.js"></script>
+    <script>
+        mermaid.initialize({ startOnLoad: true, theme: 'dark', securityLevel: 'loose', flowchart: { htmlLabels: true, curve: 'linear' } });
+    </script>
     <script>
         tailwind.config = {
             theme: {
@@ -55,6 +59,7 @@
                 <span class="font-serif-cn font-bold text-lg text-white">码龙·六合</span>
             </div>
             <div class="hidden md:flex items-center gap-8 text-sm text-ink-400">
+                <a href="#topology" class="nav-link hover:text-white transition-colors">拓扑</a>
                 <a href="#philosophy" class="nav-link hover:text-white transition-colors">理念</a>
                 <a href="#performance" class="nav-link hover:text-white transition-colors">性能</a>
                 <a href="#architecture" class="nav-link hover:text-white transition-colors">架构</a>
@@ -159,6 +164,53 @@
                 <svg class="w-6 h-6 mx-auto text-ink-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"/>
                 </svg>
+            </div>
+        </div>
+    </section>
+
+    <!-- Topology Section -->
+    <section id="topology" class="py-32 relative">
+        <div class="max-w-6xl mx-auto px-6">
+            <div class="section-reveal">
+                <div class="flex items-center gap-3 mb-4">
+                    <div class="w-12 h-px bg-dragon-500"></div>
+                    <span class="text-dragon-400 text-sm font-mono uppercase tracking-wider">工具链拓扑</span>
+                </div>
+                <h2 class="font-serif-cn text-4xl md:text-5xl font-bold text-white mt-4 mb-6">每个工具都告诉你下一步该去哪里</h2>
+                <p class="text-xl text-ink-400 max-w-3xl mb-12">
+                    44 个工具构成一张路由网络——每个结果都携带 <span class="font-mono text-ink-200">next_step</span>：
+                    成功该去哪里、出错该去哪里。六层结构、六条回路线。
+                </p>
+            </div>
+            <div class="overflow-x-auto bg-ink-950/50 border border-white/5 rounded-2xl p-6 section-reveal">
+                <pre class="mermaid">
+flowchart TB
+    classDef layer fill:#141419,stroke:#e8b86e,color:#f9ecd6,font-size:14px,font-weight:600;
+    classDef loop fill:none,stroke:#6d6d6d,color:#b0b0b0,font-size:11px,stroke-dasharray:6 4;
+
+    L1["① 定位与理解<br/><small>查找、读取、勾画符号</small>"]:::layer
+    L2["② 影响与改前评估<br/><small>爆炸半径 · 冲突检查</small>"]:::layer
+    L3["③ 编辑与写入<br/><small>事务化编辑 · 改名</small>"]:::layer
+    L4["④ 验证与测试<br/><small>diff_facts → test_bridge</small>"]:::layer
+    L5["⑤ 质量与净化<br/><small>审核 · 安全 · 死代码</small>"]:::layer
+    L6["⑥ 提交与运维<br/><small>git_worktree · health · feedback</small>"]:::layer
+
+    L1 -->|完成 → 符号定位| L2
+    L2 -->|完成 → 可安全修改| L3
+    L3 -->|完成 → 已提交| L4
+    L4 -->|完成 → 0 失败| L5
+    L5 -->|完成 → 干净| L6
+
+    L4 -. "A · 失败 → debug_runner → 修复" .-> L3
+    L4 -. "B · 提交 → diff_facts" .-> L4
+    L5 -. "C · 问题 → ③修复 → ④验证" .-> L3
+    L2 -. "E · 高风险 → sandbox_validate" .-> L3
+    L2 -. "F · 冲突 → 重读" .-> L3
+    L1 -. "D · 环 → fix_imports (⑤)" .-> L5
+                </pre>
+            </div>
+            <div class="mt-8 section-reveal">
+                <a href="docs.html#routing" class="text-dragon-300 hover:text-dragon-200 text-sm underline underline-offset-4">完整 44 工具路由图见文档 →</a>
             </div>
         </div>
     </section>

@@ -1,0 +1,161 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1160" height="860" viewBox="0 0 1160 860" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">
+  <defs>
+    <marker id="aOk1" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L8,4 L0,8 z" fill="#22c55e"/>
+    </marker>
+    <marker id="aErr1" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L8,4 L0,8 z" fill="#ef4444"/>
+    </marker>
+    <marker id="aMain1" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L8,4 L0,8 z" fill="#34d399"/>
+    </marker>
+  </defs>
+<text x="20" y="22" font-size="13" font-weight="700" fill="#e8b86e">1/4 · 索引、读取与影响 · 11 tools · 19 routes · 4 out-of-group targets (dashed)</text>
+<line x1="108" y1="86" x2="108" y2="822" stroke="#2b3039" stroke-width="1" stroke-dasharray="3 5"/>
+<g>
+      <rect x="32" y="40" width="152" height="46" rx="7" fill="#15151a" stroke="#3a3f4b" stroke-width="1.2"/>
+      <text x="108" y="59" font-size="10" font-weight="700" fill="#e8b86e" text-anchor="middle">T01 索引</text>
+      <text x="108" y="76" font-size="10.5" fill="#e7e7e7" text-anchor="middle">重建索引</text>
+    </g>
+<line x1="284" y1="86" x2="284" y2="822" stroke="#2b3039" stroke-width="1" stroke-dasharray="3 5"/>
+<g>
+      <rect x="208" y="40" width="152" height="46" rx="7" fill="#15151a" stroke="#3a3f4b" stroke-width="1.2"/>
+      <text x="284" y="59" font-size="10" font-weight="700" fill="#e8b86e" text-anchor="middle">T02 待办</text>
+      <text x="284" y="76" font-size="10.5" fill="#e7e7e7" text-anchor="middle">当前待办</text>
+    </g>
+<line x1="460" y1="86" x2="460" y2="822" stroke="#2b3039" stroke-width="1" stroke-dasharray="3 5"/>
+<g>
+      <rect x="384" y="40" width="152" height="46" rx="7" fill="#15151a" stroke="#3a3f4b" stroke-width="1.2"/>
+      <text x="460" y="59" font-size="10" font-weight="700" fill="#e8b86e" text-anchor="middle">T03 查符</text>
+      <text x="460" y="76" font-size="10.5" fill="#e7e7e7" text-anchor="middle">符号查找</text>
+    </g>
+<line x1="636" y1="86" x2="636" y2="822" stroke="#2b3039" stroke-width="1" stroke-dasharray="3 5"/>
+<g>
+      <rect x="560" y="40" width="152" height="46" rx="7" fill="#15151a" stroke="#3a3f4b" stroke-width="1.2"/>
+      <text x="636" y="59" font-size="10" font-weight="700" fill="#e8b86e" text-anchor="middle">T04 搜码</text>
+      <text x="636" y="76" font-size="10.5" fill="#e7e7e7" text-anchor="middle">代码搜索</text>
+    </g>
+<line x1="812" y1="86" x2="812" y2="822" stroke="#2b3039" stroke-width="1" stroke-dasharray="3 5"/>
+<g>
+      <rect x="736" y="40" width="152" height="46" rx="7" fill="#15151a" stroke="#3a3f4b" stroke-width="1.2"/>
+      <text x="812" y="59" font-size="10" font-weight="700" fill="#e8b86e" text-anchor="middle">T05 找测</text>
+      <text x="812" y="76" font-size="10.5" fill="#e7e7e7" text-anchor="middle">查找测试</text>
+    </g>
+<line x1="988" y1="86" x2="988" y2="822" stroke="#2b3039" stroke-width="1" stroke-dasharray="3 5"/>
+<g>
+      <rect x="912" y="40" width="152" height="46" rx="7" fill="#15151a" stroke="#3a3f4b" stroke-width="1.2"/>
+      <text x="988" y="59" font-size="10" font-weight="700" fill="#e8b86e" text-anchor="middle">T06 读符</text>
+      <text x="988" y="76" font-size="10.5" fill="#e7e7e7" text-anchor="middle">读取符号</text>
+    </g>
+<line x1="196" y1="154" x2="196" y2="822" stroke="#2b3039" stroke-width="1" stroke-dasharray="3 5"/>
+<g>
+      <rect x="120" y="108" width="152" height="46" rx="7" fill="#15151a" stroke="#3a3f4b" stroke-width="1.2"/>
+      <text x="196" y="127" font-size="10" font-weight="700" fill="#e8b86e" text-anchor="middle">T07 检视</text>
+      <text x="196" y="144" font-size="10.5" fill="#e7e7e7" text-anchor="middle">结构检视</text>
+    </g>
+<line x1="372" y1="154" x2="372" y2="822" stroke="#2b3039" stroke-width="1" stroke-dasharray="3 5"/>
+<g>
+      <rect x="296" y="108" width="152" height="46" rx="7" fill="#15151a" stroke="#3a3f4b" stroke-width="1.2"/>
+      <text x="372" y="127" font-size="10" font-weight="700" fill="#e8b86e" text-anchor="middle">T08 概览</text>
+      <text x="372" y="144" font-size="10.5" fill="#e7e7e7" text-anchor="middle">概览输出</text>
+    </g>
+<line x1="548" y1="154" x2="548" y2="822" stroke="#2b3039" stroke-width="1" stroke-dasharray="3 5"/>
+<g>
+      <rect x="472" y="108" width="152" height="46" rx="7" fill="#15151a" stroke="#3a3f4b" stroke-width="1.2"/>
+      <text x="548" y="127" font-size="10" font-weight="700" fill="#e8b86e" text-anchor="middle">T09 调用</text>
+      <text x="548" y="144" font-size="10.5" fill="#e7e7e7" text-anchor="middle">调用链</text>
+    </g>
+<line x1="724" y1="154" x2="724" y2="822" stroke="#2b3039" stroke-width="1" stroke-dasharray="3 5"/>
+<g>
+      <rect x="648" y="108" width="152" height="46" rx="7" fill="#15151a" stroke="#3a3f4b" stroke-width="1.2"/>
+      <text x="724" y="127" font-size="10" font-weight="700" fill="#e8b86e" text-anchor="middle">T10 引用</text>
+      <text x="724" y="144" font-size="10.5" fill="#e7e7e7" text-anchor="middle">引用检索</text>
+    </g>
+<line x1="900" y1="154" x2="900" y2="822" stroke="#2b3039" stroke-width="1" stroke-dasharray="3 5"/>
+<g>
+      <rect x="824" y="108" width="152" height="46" rx="7" fill="#15151a" stroke="#3a3f4b" stroke-width="1.2"/>
+      <text x="900" y="127" font-size="10" font-weight="700" fill="#e8b86e" text-anchor="middle">T15 影响</text>
+      <text x="900" y="144" font-size="10.5" fill="#e7e7e7" text-anchor="middle">影响分析</text>
+    </g>
+<line x1="1076" y1="154" x2="1076" y2="822" stroke="#2b3039" stroke-width="1" stroke-dasharray="3 5"/>
+<g>
+      <rect x="1000" y="108" width="152" height="46" rx="7" fill="#131418" stroke-dasharray="4 3" stroke="#4a4f5a" stroke-width="1.2"/>
+      <text x="1076" y="127" font-size="10" font-weight="700" fill="#8b93a3" text-anchor="middle">→ T18 批改</text>
+      <text x="1076" y="144" font-size="10.5" fill="#6b7280" text-anchor="middle">批量编辑</text>
+    </g>
+<line x1="152" y1="222" x2="152" y2="822" stroke="#2b3039" stroke-width="1" stroke-dasharray="3 5"/>
+<g>
+      <rect x="76" y="176" width="152" height="46" rx="7" fill="#131418" stroke-dasharray="4 3" stroke="#4a4f5a" stroke-width="1.2"/>
+      <text x="152" y="195" font-size="10" font-weight="700" fill="#8b93a3" text-anchor="middle">→ T22 预检</text>
+      <text x="152" y="212" font-size="10.5" fill="#6b7280" text-anchor="middle">沙箱校验</text>
+    </g>
+<line x1="328" y1="222" x2="328" y2="822" stroke="#2b3039" stroke-width="1" stroke-dasharray="3 5"/>
+<g>
+      <rect x="252" y="176" width="152" height="46" rx="7" fill="#131418" stroke-dasharray="4 3" stroke="#4a4f5a" stroke-width="1.2"/>
+      <text x="328" y="195" font-size="10" font-weight="700" fill="#8b93a3" text-anchor="middle">→ T26 测试</text>
+      <text x="328" y="212" font-size="10.5" fill="#6b7280" text-anchor="middle">测试桥</text>
+    </g>
+<line x1="504" y1="222" x2="504" y2="822" stroke="#2b3039" stroke-width="1" stroke-dasharray="3 5"/>
+<g>
+      <rect x="428" y="176" width="152" height="46" rx="7" fill="#131418" stroke-dasharray="4 3" stroke="#4a4f5a" stroke-width="1.2"/>
+      <text x="504" y="195" font-size="10" font-weight="700" fill="#8b93a3" text-anchor="middle">→ T43 健康</text>
+      <text x="504" y="212" font-size="10.5" fill="#6b7280" text-anchor="middle">健康</text>
+    </g>
+<line x1="108" y1="260" x2="460" y2="260" stroke="#22c55e" stroke-width="1.5" marker-end="url(#aOk1)"/>
+<circle cx="108" cy="260" r="2.6" fill="#22c55e"/>
+<text x="284" y="255" font-size="10" fill="#22c55e" text-anchor="middle">查符</text>
+<line x1="108" y1="290" x2="988" y2="290" stroke="#22c55e" stroke-width="1.5" marker-end="url(#aOk1)"/>
+<circle cx="108" cy="290" r="2.6" fill="#22c55e"/>
+<text x="548" y="285" font-size="10" fill="#22c55e" text-anchor="middle">读符</text>
+<line x1="108" y1="320" x2="724" y2="320" stroke="#22c55e" stroke-width="1.5" marker-end="url(#aOk1)"/>
+<circle cx="108" cy="320" r="2.6" fill="#22c55e"/>
+<text x="416" y="315" font-size="10" fill="#22c55e" text-anchor="middle">引用</text>
+<line x1="108" y1="350" x2="504" y2="350" stroke="#22c55e" stroke-width="1.5" marker-end="url(#aOk1)"/>
+<circle cx="108" cy="350" r="2.6" fill="#22c55e"/>
+<text x="306" y="345" font-size="10" fill="#22c55e" text-anchor="middle">健康</text>
+<line x1="454" y1="380" x2="108" y2="380" stroke="#ef4444" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#aErr1)"/>
+<circle cx="460" cy="380" r="2.6" fill="#ef4444"/>
+<text x="284" y="375" font-size="10" fill="#ef4444" text-anchor="middle">err 索引</text>
+<line x1="460" y1="410" x2="900" y2="410" stroke="#22c55e" stroke-width="1.5" marker-end="url(#aOk1)"/>
+<circle cx="460" cy="410" r="2.6" fill="#22c55e"/>
+<text x="680" y="405" font-size="10" fill="#22c55e" text-anchor="middle">影响</text>
+<line x1="636" y1="440" x2="988" y2="440" stroke="#22c55e" stroke-width="1.5" marker-end="url(#aOk1)"/>
+<circle cx="636" cy="440" r="2.6" fill="#22c55e"/>
+<text x="812" y="435" font-size="10" fill="#22c55e" text-anchor="middle">读符</text>
+<line x1="636" y1="470" x2="724" y2="470" stroke="#22c55e" stroke-width="1.5" marker-end="url(#aOk1)"/>
+<circle cx="636" cy="470" r="2.6" fill="#22c55e"/>
+<text x="680" y="465" font-size="10" fill="#22c55e" text-anchor="middle">引用</text>
+<line x1="806" y1="500" x2="328" y2="500" stroke="#22c55e" stroke-width="1.5" marker-end="url(#aOk1)"/>
+<circle cx="812" cy="500" r="2.6" fill="#22c55e"/>
+<text x="570" y="495" font-size="10" fill="#22c55e" text-anchor="middle">测试</text>
+<line x1="982" y1="530" x2="900" y2="530" stroke="#22c55e" stroke-width="1.5" marker-end="url(#aOk1)"/>
+<circle cx="988" cy="530" r="2.6" fill="#22c55e"/>
+<text x="944" y="525" font-size="10" fill="#22c55e" text-anchor="middle">影响</text>
+<line x1="988" y1="560" x2="1076" y2="560" stroke="#22c55e" stroke-width="1.5" marker-end="url(#aOk1)"/>
+<circle cx="988" cy="560" r="2.6" fill="#22c55e"/>
+<text x="1032" y="555" font-size="10" fill="#22c55e" text-anchor="middle">批改</text>
+<line x1="982" y1="590" x2="328" y2="590" stroke="#22c55e" stroke-width="1.5" marker-end="url(#aOk1)"/>
+<circle cx="988" cy="590" r="2.6" fill="#22c55e"/>
+<text x="658" y="585" font-size="10" fill="#22c55e" text-anchor="middle">测试</text>
+<line x1="196" y1="620" x2="900" y2="620" stroke="#22c55e" stroke-width="1.5" marker-end="url(#aOk1)"/>
+<circle cx="196" cy="620" r="2.6" fill="#22c55e"/>
+<text x="548" y="615" font-size="10" fill="#22c55e" text-anchor="middle">影响</text>
+<line x1="196" y1="650" x2="328" y2="650" stroke="#22c55e" stroke-width="1.5" marker-end="url(#aOk1)"/>
+<circle cx="196" cy="650" r="2.6" fill="#22c55e"/>
+<text x="262" y="645" font-size="10" fill="#22c55e" text-anchor="middle">测试</text>
+<line x1="372" y1="680" x2="900" y2="680" stroke="#22c55e" stroke-width="1.5" marker-end="url(#aOk1)"/>
+<circle cx="372" cy="680" r="2.6" fill="#22c55e"/>
+<text x="636" y="675" font-size="10" fill="#22c55e" text-anchor="middle">影响</text>
+<line x1="548" y1="710" x2="900" y2="710" stroke="#22c55e" stroke-width="1.5" marker-end="url(#aOk1)"/>
+<circle cx="548" cy="710" r="2.6" fill="#22c55e"/>
+<text x="724" y="705" font-size="10" fill="#22c55e" text-anchor="middle">影响</text>
+<line x1="724" y1="740" x2="812" y2="740" stroke="#22c55e" stroke-width="1.5" marker-end="url(#aOk1)"/>
+<circle cx="724" cy="740" r="2.6" fill="#22c55e"/>
+<text x="768" y="735" font-size="10" fill="#22c55e" text-anchor="middle">找测</text>
+<line x1="894" y1="770" x2="152" y2="770" stroke="#ef4444" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#aErr1)"/>
+<circle cx="900" cy="770" r="2.6" fill="#ef4444"/>
+<text x="526" y="765" font-size="10" fill="#ef4444" text-anchor="middle">err 预检</text>
+<line x1="894" y1="800" x2="328" y2="800" stroke="#22c55e" stroke-width="1.5" marker-end="url(#aOk1)"/>
+<circle cx="900" cy="800" r="2.6" fill="#22c55e"/>
+<text x="614" y="795" font-size="10" fill="#22c55e" text-anchor="middle">测试</text>
+</svg>

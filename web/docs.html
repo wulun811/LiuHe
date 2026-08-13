@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
@@ -66,6 +66,7 @@
             <a href="#cli" class="hover:text-white transition-colors font-mono" style="color:#888">命令行</a>
             <a href="#env" class="hover:text-white transition-colors font-mono" style="color:#888">环境变量</a>
             <a href="#tools" class="hover:text-white transition-colors font-mono" style="color:#888">工具参考</a>
+                <a href="#routing" class="hover:text-white transition-colors font-mono" style="color:#888">路由地图</a>
             <a href="#languages" class="hover:text-white transition-colors font-mono" style="color:#888">语言支持</a>
             <a href="#safety" class="hover:text-white transition-colors font-mono" style="color:#888">安全机制</a>
             <a href="#testing" class="hover:text-white transition-colors font-mono" style="color:#888">自检</a>
@@ -164,7 +165,7 @@
 }</pre>
             </div>
 
-            <div class="text-white font-bold mb-3">Claude Desktop（Windows 已实测：%APPDATA%\Claude\claude_desktop_config.json）</div>
+            <div class="text-white font-bold mb-3 break-words">Claude Desktop（Windows 已实测：%APPDATA%\Claude\claude_desktop_config.json）</div>
             <div class="rounded-2xl overflow-hidden mb-8" style="background:#111;border:1px solid rgba(255,255,255,0.08)">
                 <div class="px-6 py-3 text-xs font-mono" style="background:rgba(255,255,255,0.03);border-bottom:1px solid rgba(255,255,255,0.05);color:#e8b86e">claude_desktop_config.json</div>
                 <pre class="p-5 text-sm font-mono overflow-x-auto" style="color:#b0b0b0">{ "mcpServers": {
@@ -369,6 +370,203 @@ args = ["/path/to/malong/mcp-server.js", "--workspace", "/path/to/project"]</pre
             </details>
         </section>
 
+        <section id="routing" class="mb-14" style="scroll-margin-top:150px">
+    <h2 class="font-serif-cn text-2xl font-bold text-white mb-6">工具路由地图</h2>
+    <p class="text-sm mb-4" style="color:#888">44 个工具拆成 4 份时序图——每一条 ok/err 去向都已画入（绿实线 = 成功，红虚线 = 出错）；虚线卡片 = 目标工具在另一份图里；粗绿线为主链。编辑&rarr;测试闭环（edit_transaction &harr; diff_facts &harr; test_bridge &harr; debug_runner）完整位于 2/4。</p>
+    <div class="rounded-xl border border-white/5 bg-ink-950/50 p-4 overflow-x-auto">
+        <img src="routing-seq-1-zh.svg" alt="1/4 索引、读取与影响" class="max-w-none" style="width:1160px;height:auto;display:block">
+        <img src="routing-seq-2-zh.svg" alt="2/4 编辑、提交与测试闭环" class="max-w-none mt-6" style="width:1160px;height:auto;display:block">
+        <img src="routing-seq-3-zh.svg" alt="3/4 审核、验证与运维" class="max-w-none mt-6" style="width:1160px;height:auto;display:block">
+        <img src="routing-seq-4-zh.svg" alt="4/4 清洁与整理" class="max-w-none mt-6" style="width:1160px;height:auto;display:block">
+        <div class="mt-6">
+    <h3 class="font-serif-cn text-sm mb-3" style="color:#e8b86e">图例</h3>
+    <div class="text-xs mb-6 space-y-1">
+      <div style="color:#888"><span style="color:#86efac">── ok</span> = ok（绿实线）= 成功 → 下一步去向（每条边来自 handler 实测 next_step）</div>
+      <div style="color:#888"><span style="color:#f87171">╌╌ err</span> = err（红虚线）= 出错 → 处理去向</div>
+      <div style="color:#888">粗绿线 = 层间主链</div>
+    </div>
+    <h3 class="font-serif-cn text-sm mb-3" style="color:#e8b86e">节点编号对照（T01–T44） (44)</h3>
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2"><div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T01</span> reindex</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">reindex</span></div><div class="leading-snug"><span style="color:#888">完成 → read_symbol / symbol_search / references</span></div><div class="leading-snug"><span style="color:#888">完成 → health(check) 自检</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T02</span> active</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">active_todos</span></div><div class="leading-snug"><span style="color:#888">有高优 → 处理当前文件 TODO</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T03</span> ss</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">symbol_search</span></div><div class="leading-snug"><span style="color:#888">命中 → impact_analysis</span></div><div class="leading-snug"><span style="color:#888">空结果 → reindex / glob</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T04</span> cs</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">code_search</span></div><div class="leading-snug"><span style="color:#888">命中 → read_symbol / references</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T05</span> ft</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">find_tests</span></div><div class="leading-snug"><span style="color:#888">找到 → test_bridge(scope)</span></div><div class="leading-snug"><span style="color:#888">无 → 新建测试</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T06</span> rs</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">read_symbol</span></div><div class="leading-snug"><span style="color:#888">完成 → impact_analysis → edit_batch</span></div><div class="leading-snug"><span style="color:#888">改后 → test_bridge</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T07</span> insp</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">inspect</span></div><div class="leading-snug"><span style="color:#888">完成 → impact_analysis</span></div><div class="leading-snug"><span style="color:#888">改后 → test_bridge</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T08</span> ol</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">outline_reader</span></div><div class="leading-snug"><span style="color:#888">完成 → impact_analysis</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T09</span> cc</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">call_chain</span></div><div class="leading-snug"><span style="color:#888">完成 → impact_analysis（完整半径）</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T10</span> refs</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">references</span></div><div class="leading-snug"><span style="color:#888">完成 → find_tests（测试引用）</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T11</span> tr</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">trace_symbol</span></div><div class="leading-snug"><span style="color:#888">有硬编码副本 → rename_symbol</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T12</span> dg</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">dep_graph</span></div><div class="leading-snug"><span style="color:#888">有环 → fix_imports</span></div><div class="leading-snug"><span style="color:#888">完成 → impact_analysis</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T13</span> repo_map</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug" style="color:#888">只读概览</div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T14</span> patch_parser</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug" style="color:#888">只读解析预览</div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T15</span> ia</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">impact_analysis</span></div><div class="leading-snug"><span style="color:#888">高危 → sandbox_validate</span></div><div class="leading-snug"><span style="color:#888">中危 → 审查 callers</span></div><div class="leading-snug"><span style="color:#888">完成 → 修改 · 改后 → test_bridge</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T16</span> ecg</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">edit_collision_guard</span></div><div class="leading-snug"><span style="color:#888">安全 → edit_transaction / edit_batch</span></div><div class="leading-snug"><span style="color:#888">外部改动 → 重读 → record_read</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T17</span> et</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">edit_transaction</span></div><div class="leading-snug"><span style="color:#888">提交 → diff_facts → test_bridge</span></div><div class="leading-snug"><span style="color:#888">失败 → debug_runner</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T18</span> eb</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">edit_batch</span></div><div class="leading-snug"><span style="color:#888">完成 → test_bridge → debug_runner</span></div><div class="leading-snug"><span style="color:#888">经事务 → diff_facts · TS → tsc_check</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T19</span> ws</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">write_symbol</span></div><div class="leading-snug"><span style="color:#888">完成 → test_bridge → debug_runner</span></div><div class="leading-snug"><span style="color:#888">经事务 → diff_facts</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T20</span> wss</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">write_symbols</span></div><div class="leading-snug"><span style="color:#888">完成 → test_bridge → debug_runner</span></div><div class="leading-snug"><span style="color:#888">经事务 → diff_facts</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T21</span> rn</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">rename_symbol</span></div><div class="leading-snug"><span style="color:#888">dry_run → 正式改名</span></div><div class="leading-snug"><span style="color:#888">完成 → test_bridge</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T22</span> sv</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">sandbox_validate</span></div><div class="leading-snug"><span style="color:#888">通过 → edit_transaction</span></div><div class="leading-snug"><span style="color:#888">报错 → 修复 → 重新校验</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T23</span> gw</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">git_worktree</span></div><div class="leading-snug"><span style="color:#888">提交 → revert / reset（撤销）</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T24</span> ms</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">mock_syncer</span></div><div class="leading-snug"><span style="color:#888">失配 → 修复 → test_bridge</span></div><div class="leading-snug"><span style="color:#888">同步 → test_bridge</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T25</span> df</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">diff_facts</span></div><div class="leading-snug"><span style="color:#888">陈旧测试 → test_bridge(scope)</span></div><div class="leading-snug"><span style="color:#888">caller 未同步 → impact_analysis</span></div><div class="leading-snug"><span style="color:#888">完成 → 无同步问题</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T26</span> tb</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">test_bridge</span></div><div class="leading-snug"><span style="color:#888">超时 → 加大 timeout / inspect</span></div><div class="leading-snug"><span style="color:#888">失败 → debug_runner / verify_pipeline</span></div><div class="leading-snug"><span style="color:#888">全绿 → edit_transaction 提交</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T27</span> dr</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">debug_runner</span></div><div class="leading-snug"><span style="color:#888">有错 → suggested_action（14 类）</span></div><div class="leading-snug"><span style="color:#888">成功 → 继续</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T28</span> tc</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">tsc_check</span></div><div class="leading-snug"><span style="color:#888">有错 → 修复类型错误</span></div><div class="leading-snug"><span style="color:#888">通过 → 继续</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T29</span> vp</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">verify_pipeline</span></div><div class="leading-snug"><span style="color:#888">超预算 → 单阶段 lint</span></div><div class="leading-snug"><span style="color:#888">或 test_bridge 分批</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T30</span> cr</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">code_review</span></div><div class="leading-snug"><span style="color:#888">告警 → code_quality 深探</span></div><div class="leading-snug"><span style="color:#888">修复后 → test_bridge</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T31</span> cq</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">code_quality</span></div><div class="leading-snug"><span style="color:#888">5 维形状分 → 人工确认</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T32</span> sr</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">security_review</span></div><div class="leading-snug"><span style="color:#888">高危 → 修复注入 / 密钥</span></div><div class="leading-snug"><span style="color:#888">干净 → 非保证声明</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T33</span> eg</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">exception_guard</span></div><div class="leading-snug"><span style="color:#888">问题 → edit_transaction → test_bridge</span></div><div class="leading-snug"><span style="color:#888">测试文件 → 跳过</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T34</span> gp</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">guard_patterns</span></div><div class="leading-snug"><span style="color:#888">违规 → 修复 → 重跑</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T35</span> nc</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">naming_consistency</span></div><div class="leading-snug"><span style="color:#888">问题 → edit_transaction</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T36</span> fi</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">fix_imports</span></div><div class="leading-snug"><span style="color:#888">有误 → edit_transaction → test_bridge</span></div><div class="leading-snug"><span style="color:#888">干净 → sweep_dead_code</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T37</span> sdc</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">sweep_dead_code</span></div><div class="leading-snug"><span style="color:#888">死代码 → edit_transaction</span></div><div class="leading-snug"><span style="color:#888">unused_guard → 人工 trace</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T38</span> cd</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">config_drift</span></div><div class="leading-snug"><span style="color:#888">漂移 → edit_transaction → 重跑</span></div><div class="leading-snug"><span style="color:#888">完成 → 同步</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T39</span> dk</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">dependency_gatekeeper</span></div><div class="leading-snug"><span style="color:#888">缺依赖 → 补 manifest → 重跑</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T40</span> sg</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">spec_gen</span></div><div class="leading-snug"><span style="color:#888">完成 → read_symbol 逐导出</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T41</span> st</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">style_sniffer</span></div><div class="leading-snug"><span style="color:#888">完成 → 审查规则 → 提交</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T42</span> fb</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">feedback</span></div><div class="leading-snug"><span style="color:#888">有反馈 → 修复</span></div><div class="leading-snug"><span style="color:#888">完成 → health(stats) 用量</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T43</span> hth</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">health</span></div><div class="leading-snug"><span style="color:#888">未登记 → 注册 Y004 矩阵</span></div><div class="leading-snug"><span style="color:#888">重启 → MCP host · 清理 → 重跑</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T44</span> gcc</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">gc</span></div><div class="leading-snug"><span style="color:#888">内存回收（无 next_step）</span></div></div>
+          </div>
+    </div>
+  </div>
+    </div>
+</section>
+
         <section id="languages" class="mb-14" style="scroll-margin-top:150px">
             <h2 class="font-serif-cn text-2xl font-bold text-white mb-6">语言支持</h2>
             <p class="text-sm mb-4" style="color:#888">符号级读写（read / write_symbol）支持 10 种语言族，写后自动语法自检（node --check / py_compile）。</p>
@@ -488,6 +686,10 @@ args = ["/path/to/malong/mcp-server.js", "--workspace", "/path/to/project"]</pre
                 if (t) { e.preventDefault(); t.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
             });
         });
+    </script>
+
+    <script>
+        
     </script>
 </body>
 </html>

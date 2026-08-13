@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -66,6 +66,7 @@
             <a href="#cli" class="hover:text-white transition-colors font-mono" style="color:#888">CLI</a>
             <a href="#env" class="hover:text-white transition-colors font-mono" style="color:#888">Env vars</a>
             <a href="#tools" class="hover:text-white transition-colors font-mono" style="color:#888">Tools</a>
+                <a href="#routing" class="hover:text-white transition-colors font-mono" style="color:#888">Routing map</a>
             <a href="#languages" class="hover:text-white transition-colors font-mono" style="color:#888">Languages</a>
             <a href="#safety" class="hover:text-white transition-colors font-mono" style="color:#888">Safety</a>
             <a href="#testing" class="hover:text-white transition-colors font-mono" style="color:#888">Testing</a>
@@ -164,7 +165,7 @@
 }</pre>
             </div>
 
-            <div class="text-white font-bold mb-3">Claude Desktop (tested on Windows: %APPDATA%\Claude\claude_desktop_config.json)</div>
+            <div class="text-white font-bold mb-3 break-words">Claude Desktop (tested on Windows: %APPDATA%\Claude\claude_desktop_config.json)</div>
             <div class="rounded-2xl overflow-hidden mb-8" style="background:#111;border:1px solid rgba(255,255,255,0.08)">
                 <div class="px-6 py-3 text-xs font-mono" style="background:rgba(255,255,255,0.03);border-bottom:1px solid rgba(255,255,255,0.05);color:#e8b86e">claude_desktop_config.json</div>
                 <pre class="p-5 text-sm font-mono overflow-x-auto" style="color:#b0b0b0">{ "mcpServers": {
@@ -369,6 +370,203 @@ args = ["/path/to/malong/mcp-server.js", "--workspace", "/path/to/project"]</pre
             </details>
         </section>
 
+        <section id="routing" class="mb-14" style="scroll-margin-top:150px">
+    <h2 class="text-2xl font-bold text-white mb-6">Tool Routing Map</h2>
+    <p class="text-sm mb-4" style="color:#888">All 44 tools split into 4 sequence diagrams — every ok/err route is drawn (green solid = ok, red dashed = err); dashed card = target lives in another group; thick green = main chain. The edit &rarr; test loop (edit_transaction &harr; diff_facts &harr; test_bridge &harr; debug_runner) is fully inside 2/4.</p>
+    <div class="rounded-xl border border-white/5 bg-ink-950/50 p-4 overflow-x-auto">
+        <img src="routing-seq-1-en.svg" alt="1/4 Indexing, Reading & Impact" class="max-w-none" style="width:1160px;height:auto;display:block">
+        <img src="routing-seq-2-en.svg" alt="2/4 Edit, Commit & Test Loop" class="max-w-none mt-6" style="width:1160px;height:auto;display:block">
+        <img src="routing-seq-3-en.svg" alt="3/4 Review, Verify & Ops" class="max-w-none mt-6" style="width:1160px;height:auto;display:block">
+        <img src="routing-seq-4-en.svg" alt="4/4 Hygiene & Cleanup" class="max-w-none mt-6" style="width:1160px;height:auto;display:block">
+        <div class="mt-6">
+    <h3 class="font-mono text-sm mb-3" style="color:#e8b86e">Legend</h3>
+    <div class="text-xs mb-6 space-y-1">
+      <div style="color:#888"><span style="color:#86efac">── ok</span> = ok (green solid) = success → next step (every edge from measured handler next_step)</div>
+      <div style="color:#888"><span style="color:#f87171">╌╌ err</span> = err (red dashed) = failure → routing</div>
+      <div style="color:#888">thick green = main chain between layers</div>
+    </div>
+    <h3 class="font-mono text-sm mb-3" style="color:#e8b86e">Node index (T01–T44) (44)</h3>
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2"><div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T01</span> reindex</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">reindex</span></div><div class="leading-snug"><span style="color:#86efac">ok</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">read_symbol / symbol_search / references</span></div><div class="leading-snug"><span style="color:#86efac">ok</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">health(check) self-check</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T02</span> active</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">active_todos</span></div><div class="leading-snug"><span style="color:#f87171">err</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">high → address in current files</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T03</span> ss</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">symbol_search</span></div><div class="leading-snug"><span style="color:#86efac">ok</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">impact_analysis</span></div><div class="leading-snug"><span style="color:#f87171">err</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">empty → reindex / glob</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T04</span> cs</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">code_search</span></div><div class="leading-snug"><span style="color:#86efac">ok</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">read_symbol / references</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T05</span> ft</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">find_tests</span></div><div class="leading-snug"><span style="color:#86efac">ok</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">test_bridge(scope)</span></div><div class="leading-snug"><span style="color:#f87171">err</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">none → create tests</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T06</span> rs</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">read_symbol</span></div><div class="leading-snug"><span style="color:#86efac">ok</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">impact_analysis → edit_batch</span></div><div class="leading-snug"><span style="color:#888">after edit → test_bridge</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T07</span> insp</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">inspect</span></div><div class="leading-snug"><span style="color:#86efac">ok</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">impact_analysis</span></div><div class="leading-snug"><span style="color:#888">after edit → test_bridge</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T08</span> ol</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">outline_reader</span></div><div class="leading-snug"><span style="color:#86efac">ok</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">impact_analysis</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T09</span> cc</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">call_chain</span></div><div class="leading-snug"><span style="color:#86efac">ok</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">impact_analysis (full radius)</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T10</span> refs</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">references</span></div><div class="leading-snug"><span style="color:#86efac">ok</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">find_tests (test refs)</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T11</span> tr</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">trace_symbol</span></div><div class="leading-snug"><span style="color:#f87171">err</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">hardcoded copies → rename_symbol</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T12</span> dg</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">dep_graph</span></div><div class="leading-snug"><span style="color:#f87171">err</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">cycles → fix_imports</span></div><div class="leading-snug"><span style="color:#86efac">ok</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">impact_analysis</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T13</span> repo_map</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug" style="color:#888">read-only overview</div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T14</span> patch_parser</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug" style="color:#888">read-only parse preview</div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T15</span> ia</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">impact_analysis</span></div><div class="leading-snug"><span style="color:#f87171">err</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">high → sandbox_validate</span></div><div class="leading-snug"><span style="color:#f87171">err</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">medium → review callers</span></div><div class="leading-snug"><span style="color:#86efac">ok</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">edit · after → test_bridge</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T16</span> ecg</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">edit_collision_guard</span></div><div class="leading-snug"><span style="color:#86efac">ok</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">safe → edit_transaction / edit_batch</span></div><div class="leading-snug"><span style="color:#f87171">err</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">external change → re-read → record_read</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T17</span> et</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">edit_transaction</span></div><div class="leading-snug"><span style="color:#86efac">ok</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">commit → diff_facts → test_bridge</span></div><div class="leading-snug"><span style="color:#f87171">err</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">debug_runner</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T18</span> eb</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">edit_batch</span></div><div class="leading-snug"><span style="color:#86efac">ok</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">test_bridge → debug_runner</span></div><div class="leading-snug"><span style="color:#888">via txn → diff_facts · TS → tsc_check</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T19</span> ws</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">write_symbol</span></div><div class="leading-snug"><span style="color:#86efac">ok</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">test_bridge → debug_runner</span></div><div class="leading-snug"><span style="color:#888">via txn → diff_facts</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T20</span> wss</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">write_symbols</span></div><div class="leading-snug"><span style="color:#86efac">ok</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">test_bridge → debug_runner</span></div><div class="leading-snug"><span style="color:#888">via txn → diff_facts</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T21</span> rn</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">rename_symbol</span></div><div class="leading-snug"><span style="color:#888">dry_run → apply</span></div><div class="leading-snug"><span style="color:#86efac">ok</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">test_bridge</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T22</span> sv</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">sandbox_validate</span></div><div class="leading-snug"><span style="color:#86efac">ok</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">edit_transaction</span></div><div class="leading-snug"><span style="color:#f87171">err</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">fix → re-validate</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T23</span> gw</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">git_worktree</span></div><div class="leading-snug"><span style="color:#86efac">ok</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">commit → revert / reset (undo)</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T24</span> ms</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">mock_syncer</span></div><div class="leading-snug"><span style="color:#f87171">err</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">mismatch → fix → test_bridge</span></div><div class="leading-snug"><span style="color:#86efac">ok</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">test_bridge</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T25</span> df</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">diff_facts</span></div><div class="leading-snug"><span style="color:#f87171">err</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">stale tests → test_bridge(scope)</span></div><div class="leading-snug"><span style="color:#f87171">err</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">callers → impact_analysis</span></div><div class="leading-snug"><span style="color:#86efac">ok</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">no sync issues</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T26</span> tb</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">test_bridge</span></div><div class="leading-snug"><span style="color:#f87171">err</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">timeout → +timeout / inspect</span></div><div class="leading-snug"><span style="color:#f87171">err</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">fail → debug_runner / verify_pipeline</span></div><div class="leading-snug"><span style="color:#86efac">ok</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">pass → edit_transaction commit</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T27</span> dr</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">debug_runner</span></div><div class="leading-snug"><span style="color:#f87171">err</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">suggested_action (14 types)</span></div><div class="leading-snug"><span style="color:#86efac">ok</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">continue</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T28</span> tc</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">tsc_check</span></div><div class="leading-snug"><span style="color:#f87171">err</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">fix type errors</span></div><div class="leading-snug"><span style="color:#86efac">ok</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">continue</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T29</span> vp</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">verify_pipeline</span></div><div class="leading-snug"><span style="color:#f87171">err</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">over-budget → single-stage lint</span></div><div class="leading-snug"><span style="color:#888">or test_bridge by scope</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T30</span> cr</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">code_review</span></div><div class="leading-snug"><span style="color:#f87171">err</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">warnings → code_quality deep probe</span></div><div class="leading-snug"><span style="color:#888">after fix → test_bridge</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T31</span> cq</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">code_quality</span></div><div class="leading-snug"><span style="color:#888">5-dim shape scores → review flagged</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T32</span> sr</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">security_review</span></div><div class="leading-snug"><span style="color:#f87171">err</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">high → fix injection / secrets</span></div><div class="leading-snug"><span style="color:#86efac">ok</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">NOT a guarantee</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T33</span> eg</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">exception_guard</span></div><div class="leading-snug"><span style="color:#f87171">err</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">issues → edit_transaction → test_bridge</span></div><div class="leading-snug"><span style="color:#888">test file → skip</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T34</span> gp</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">guard_patterns</span></div><div class="leading-snug"><span style="color:#f87171">err</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">violations → fix → re-run</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T35</span> nc</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">naming_consistency</span></div><div class="leading-snug"><span style="color:#f87171">err</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">issues → edit_transaction</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T36</span> fi</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">fix_imports</span></div><div class="leading-snug"><span style="color:#f87171">err</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">issues → edit_transaction → test_bridge</span></div><div class="leading-snug"><span style="color:#86efac">ok</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">clean → sweep_dead_code</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T37</span> sdc</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">sweep_dead_code</span></div><div class="leading-snug"><span style="color:#f87171">err</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">dead code → edit_transaction</span></div><div class="leading-snug"><span style="color:#888">unused_guard → manual trace</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T38</span> cd</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">config_drift</span></div><div class="leading-snug"><span style="color:#f87171">err</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">drift → edit_transaction → re-run</span></div><div class="leading-snug"><span style="color:#86efac">ok</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">in sync</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T39</span> dk</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">dependency_gatekeeper</span></div><div class="leading-snug"><span style="color:#f87171">err</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">missing → manifest → re-run</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T40</span> sg</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">spec_gen</span></div><div class="leading-snug"><span style="color:#86efac">ok</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">read_symbol per export</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T41</span> st</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">style_sniffer</span></div><div class="leading-snug"><span style="color:#86efac">ok</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">review rules → commit</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T42</span> fb</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">feedback</span></div><div class="leading-snug"><span style="color:#f87171">err</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">issues → fix</span></div><div class="leading-snug"><span style="color:#86efac">ok</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">health(stats) usage</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T43</span> hth</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">health</span></div><div class="leading-snug"><span style="color:#f87171">err</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">unregistered → register Y004 matrix</span></div><div class="leading-snug"><span style="color:#888">restart → MCP host · cleanup → re-run</span></div></div>
+          </div>
+<div class="rounded border border-white/5 bg-ink-950/40 p-2">
+            <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T44</span> gcc</div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">gc</span></div><div class="leading-snug"><span style="color:#888">memory reclaim (no next_step)</span></div></div>
+          </div>
+    </div>
+  </div>
+    </div>
+</section>
+
         <section id="languages" class="mb-14" style="scroll-margin-top:150px">
             <h2 class="text-2xl font-bold text-white mb-6">Language support</h2>
             <p class="text-sm mb-4" style="color:#888">Symbol-level read / write (read &amp; write_symbol) supports 10 language families, with automatic syntax self-check after writes (node --check / py_compile).</p>
@@ -488,6 +686,10 @@ args = ["/path/to/malong/mcp-server.js", "--workspace", "/path/to/project"]</pre
                 if (t) { e.preventDefault(); t.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
             });
         });
+    </script>
+
+    <script>
+        
     </script>
 </body>
 </html>

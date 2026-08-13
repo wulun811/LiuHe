@@ -12,6 +12,10 @@
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/ScrollTrigger.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/11.15.0/mermaid.min.js"></script>
+    <script>
+        mermaid.initialize({ startOnLoad: true, theme: 'dark', securityLevel: 'loose', flowchart: { htmlLabels: true, curve: 'linear' } });
+    </script>
     <script>
         tailwind.config = window.tailwindConfig || {
             theme: { extend: {
@@ -39,6 +43,7 @@
                 <span class="font-sans font-bold text-lg text-white">Malong·Liuhe</span>
             </div>
             <div class="hidden md:flex items-center gap-8 text-sm text-ink-400">
+                <a href="#topology" class="nav-link hover:text-white transition-colors">Topology</a>
                 <a href="#philosophy" class="nav-link hover:text-white transition-colors">Philosophy</a>
                 <a href="#performance" class="nav-link hover:text-white transition-colors">Performance</a>
                 <a href="#architecture" class="nav-link hover:text-white transition-colors">Architecture</a>
@@ -142,6 +147,53 @@
                 <svg class="w-6 h-6 mx-auto text-ink-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"/>
                 </svg>
+            </div>
+        </div>
+    </section>
+
+    <!-- Topology Section -->
+    <section id="topology" class="py-32 relative">
+        <div class="max-w-6xl mx-auto px-6">
+            <div class="section-reveal">
+                <div class="flex items-center gap-3 mb-4">
+                    <div class="w-12 h-px bg-dragon-500"></div>
+                    <span class="text-dragon-400 text-sm font-mono uppercase tracking-wider">The Routing Map</span>
+                </div>
+                <h2 class="text-4xl font-bold text-white mt-4 mb-6">Every tool tells you where to go next</h2>
+                <p class="text-ink-400 max-w-3xl mb-12">
+                    44 tools form a routing network — every result carries a <span class="font-mono text-ink-200">next_step</span>:
+                    where to go on success, where to go on error. Six layers, six return loops.
+                </p>
+            </div>
+            <div class="overflow-x-auto bg-ink-950/50 border border-white/5 rounded-2xl p-6 section-reveal">
+                <pre class="mermaid">
+flowchart TB
+    classDef layer fill:#141419,stroke:#e8b86e,color:#f9ecd6,font-size:14px,font-weight:600;
+    classDef loop fill:none,stroke:#6d6d6d,color:#b0b0b0,font-size:11px,stroke-dasharray:6 4;
+
+    L1["① Locate & Understand<br/><small>find, read, map the symbol</small>"]:::layer
+    L2["② Impact & Pre-edit<br/><small>blast radius · collision check</small>"]:::layer
+    L3["③ Edit & Write<br/><small>transactional edits · rename</small>"]:::layer
+    L4["④ Verify & Test<br/><small>diff_facts → test_bridge</small>"]:::layer
+    L5["⑤ Quality & Hygiene<br/><small>review · security · dead code</small>"]:::layer
+    L6["⑥ Commit & Ops<br/><small>git_worktree · health · feedback</small>"]:::layer
+
+    L1 -->|ok → symbol found| L2
+    L2 -->|ok → safe to edit| L3
+    L3 -->|ok → committed| L4
+    L4 -->|ok → 0 failures| L5
+    L5 -->|ok → clean| L6
+
+    L4 -. "A · fail → debug_runner → fix" .-> L3
+    L4 -. "B · commit → diff_facts" .-> L4
+    L5 -. "C · issues → ③ fix → ④ verify" .-> L3
+    L2 -. "E · high risk → sandbox_validate" .-> L3
+    L2 -. "F · conflict → re-read" .-> L3
+    L1 -. "D · cycles → fix_imports (⑤)" .-> L5
+                </pre>
+            </div>
+            <div class="mt-8 section-reveal">
+                <a href="docs.en.html#routing" class="text-dragon-300 hover:text-dragon-200 text-sm underline underline-offset-4">Full 44-tool routing map in docs →</a>
             </div>
         </div>
     </section>

@@ -1,0 +1,113 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1160" height="440" viewBox="0 0 1160 440" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">
+  <defs>
+    <marker id="aOk3" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L8,4 L0,8 z" fill="#22c55e"/>
+    </marker>
+    <marker id="aErr3" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L8,4 L0,8 z" fill="#ef4444"/>
+    </marker>
+    <marker id="aMain3" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L8,4 L0,8 z" fill="#34d399"/>
+    </marker>
+  </defs>
+<text x="20" y="22" font-size="13" font-weight="700" fill="#e8b86e">3/4 · 审核、验证与运维 · 11 tools · 5 routes · 3 out-of-group targets (dashed)</text>
+<line x1="108" y1="86" x2="108" y2="402" stroke="#2b3039" stroke-width="1" stroke-dasharray="3 5"/>
+<g>
+      <rect x="32" y="40" width="152" height="46" rx="7" fill="#15151a" stroke="#3a3f4b" stroke-width="1.2"/>
+      <text x="108" y="59" font-size="10" font-weight="700" fill="#e8b86e" text-anchor="middle">T13 地图</text>
+      <text x="108" y="76" font-size="10.5" fill="#e7e7e7" text-anchor="middle">仓库地图</text>
+    </g>
+<line x1="284" y1="86" x2="284" y2="402" stroke="#2b3039" stroke-width="1" stroke-dasharray="3 5"/>
+<g>
+      <rect x="208" y="40" width="152" height="46" rx="7" fill="#15151a" stroke="#3a3f4b" stroke-width="1.2"/>
+      <text x="284" y="59" font-size="10" font-weight="700" fill="#e8b86e" text-anchor="middle">T14 解析</text>
+      <text x="284" y="76" font-size="10.5" fill="#e7e7e7" text-anchor="middle">补丁解析</text>
+    </g>
+<line x1="460" y1="86" x2="460" y2="402" stroke="#2b3039" stroke-width="1" stroke-dasharray="3 5"/>
+<g>
+      <rect x="384" y="40" width="152" height="46" rx="7" fill="#15151a" stroke="#3a3f4b" stroke-width="1.2"/>
+      <text x="460" y="59" font-size="10" font-weight="700" fill="#e8b86e" text-anchor="middle">T28 类型</text>
+      <text x="460" y="76" font-size="10.5" fill="#e7e7e7" text-anchor="middle">TS 检查</text>
+    </g>
+<line x1="636" y1="86" x2="636" y2="402" stroke="#2b3039" stroke-width="1" stroke-dasharray="3 5"/>
+<g>
+      <rect x="560" y="40" width="152" height="46" rx="7" fill="#15151a" stroke="#3a3f4b" stroke-width="1.2"/>
+      <text x="636" y="59" font-size="10" font-weight="700" fill="#e8b86e" text-anchor="middle">T29 流水</text>
+      <text x="636" y="76" font-size="10.5" fill="#e7e7e7" text-anchor="middle">验证流水线</text>
+    </g>
+<line x1="812" y1="86" x2="812" y2="402" stroke="#2b3039" stroke-width="1" stroke-dasharray="3 5"/>
+<g>
+      <rect x="736" y="40" width="152" height="46" rx="7" fill="#15151a" stroke="#3a3f4b" stroke-width="1.2"/>
+      <text x="812" y="59" font-size="10" font-weight="700" fill="#e8b86e" text-anchor="middle">T30 审核</text>
+      <text x="812" y="76" font-size="10.5" fill="#e7e7e7" text-anchor="middle">代码审核</text>
+    </g>
+<line x1="988" y1="86" x2="988" y2="402" stroke="#2b3039" stroke-width="1" stroke-dasharray="3 5"/>
+<g>
+      <rect x="912" y="40" width="152" height="46" rx="7" fill="#15151a" stroke="#3a3f4b" stroke-width="1.2"/>
+      <text x="988" y="59" font-size="10" font-weight="700" fill="#e8b86e" text-anchor="middle">T31 质量</text>
+      <text x="988" y="76" font-size="10.5" fill="#e7e7e7" text-anchor="middle">质量探测</text>
+    </g>
+<line x1="196" y1="154" x2="196" y2="402" stroke="#2b3039" stroke-width="1" stroke-dasharray="3 5"/>
+<g>
+      <rect x="120" y="108" width="152" height="46" rx="7" fill="#15151a" stroke="#3a3f4b" stroke-width="1.2"/>
+      <text x="196" y="127" font-size="10" font-weight="700" fill="#e8b86e" text-anchor="middle">T32 安全</text>
+      <text x="196" y="144" font-size="10.5" fill="#e7e7e7" text-anchor="middle">安全检查</text>
+    </g>
+<line x1="372" y1="154" x2="372" y2="402" stroke="#2b3039" stroke-width="1" stroke-dasharray="3 5"/>
+<g>
+      <rect x="296" y="108" width="152" height="46" rx="7" fill="#15151a" stroke="#3a3f4b" stroke-width="1.2"/>
+      <text x="372" y="127" font-size="10" font-weight="700" fill="#e8b86e" text-anchor="middle">T33 异常</text>
+      <text x="372" y="144" font-size="10.5" fill="#e7e7e7" text-anchor="middle">异常防护</text>
+    </g>
+<line x1="548" y1="154" x2="548" y2="402" stroke="#2b3039" stroke-width="1" stroke-dasharray="3 5"/>
+<g>
+      <rect x="472" y="108" width="152" height="46" rx="7" fill="#15151a" stroke="#3a3f4b" stroke-width="1.2"/>
+      <text x="548" y="127" font-size="10" font-weight="700" fill="#e8b86e" text-anchor="middle">T43 健康</text>
+      <text x="548" y="144" font-size="10.5" fill="#e7e7e7" text-anchor="middle">健康</text>
+    </g>
+<line x1="724" y1="154" x2="724" y2="402" stroke="#2b3039" stroke-width="1" stroke-dasharray="3 5"/>
+<g>
+      <rect x="648" y="108" width="152" height="46" rx="7" fill="#15151a" stroke="#3a3f4b" stroke-width="1.2"/>
+      <text x="724" y="127" font-size="10" font-weight="700" fill="#e8b86e" text-anchor="middle">T44 GC</text>
+      <text x="724" y="144" font-size="10.5" fill="#e7e7e7" text-anchor="middle">GC</text>
+    </g>
+<line x1="900" y1="154" x2="900" y2="402" stroke="#2b3039" stroke-width="1" stroke-dasharray="3 5"/>
+<g>
+      <rect x="824" y="108" width="152" height="46" rx="7" fill="#15151a" stroke="#3a3f4b" stroke-width="1.2"/>
+      <text x="900" y="127" font-size="10" font-weight="700" fill="#e8b86e" text-anchor="middle">T11 溯源</text>
+      <text x="900" y="144" font-size="10.5" fill="#e7e7e7" text-anchor="middle">符号溯源</text>
+    </g>
+<line x1="1076" y1="154" x2="1076" y2="402" stroke="#2b3039" stroke-width="1" stroke-dasharray="3 5"/>
+<g>
+      <rect x="1000" y="108" width="152" height="46" rx="7" fill="#131418" stroke-dasharray="4 3" stroke="#4a4f5a" stroke-width="1.2"/>
+      <text x="1076" y="127" font-size="10" font-weight="700" fill="#8b93a3" text-anchor="middle">→ T17 事务</text>
+      <text x="1076" y="144" font-size="10.5" fill="#6b7280" text-anchor="middle">编辑事务</text>
+    </g>
+<line x1="152" y1="222" x2="152" y2="402" stroke="#2b3039" stroke-width="1" stroke-dasharray="3 5"/>
+<g>
+      <rect x="76" y="176" width="152" height="46" rx="7" fill="#131418" stroke-dasharray="4 3" stroke="#4a4f5a" stroke-width="1.2"/>
+      <text x="152" y="195" font-size="10" font-weight="700" fill="#8b93a3" text-anchor="middle">→ T21 改名</text>
+      <text x="152" y="212" font-size="10.5" fill="#6b7280" text-anchor="middle">符号改名</text>
+    </g>
+<line x1="328" y1="222" x2="328" y2="402" stroke="#2b3039" stroke-width="1" stroke-dasharray="3 5"/>
+<g>
+      <rect x="252" y="176" width="152" height="46" rx="7" fill="#131418" stroke-dasharray="4 3" stroke="#4a4f5a" stroke-width="1.2"/>
+      <text x="328" y="195" font-size="10" font-weight="700" fill="#8b93a3" text-anchor="middle">→ T26 测试</text>
+      <text x="328" y="212" font-size="10.5" fill="#6b7280" text-anchor="middle">测试桥</text>
+    </g>
+<line x1="894" y1="260" x2="152" y2="260" stroke="#ef4444" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#aErr3)"/>
+<circle cx="900" cy="260" r="2.6" fill="#ef4444"/>
+<text x="526" y="255" font-size="10" fill="#ef4444" text-anchor="middle">err 改名</text>
+<line x1="806" y1="290" x2="328" y2="290" stroke="#22c55e" stroke-width="1.5" marker-end="url(#aOk3)"/>
+<circle cx="812" cy="290" r="2.6" fill="#22c55e"/>
+<text x="570" y="285" font-size="10" fill="#22c55e" text-anchor="middle">测试</text>
+<line x1="812" y1="320" x2="988" y2="320" stroke="#ef4444" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#aErr3)"/>
+<circle cx="812" cy="320" r="2.6" fill="#ef4444"/>
+<text x="900" y="315" font-size="10" fill="#ef4444" text-anchor="middle">err 质量</text>
+<line x1="372" y1="350" x2="1076" y2="350" stroke="#ef4444" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#aErr3)"/>
+<circle cx="372" cy="350" r="2.6" fill="#ef4444"/>
+<text x="724" y="345" font-size="10" fill="#ef4444" text-anchor="middle">err 事务</text>
+<line x1="366" y1="380" x2="328" y2="380" stroke="#ef4444" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#aErr3)"/>
+<circle cx="372" cy="380" r="2.6" fill="#ef4444"/>
+<text x="350" y="375" font-size="10" fill="#ef4444" text-anchor="middle">err 测试</text>
+</svg>
