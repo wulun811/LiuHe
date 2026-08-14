@@ -6,5 +6,12 @@
   "cpu": ["x64"],
   "main": "./bin/malong-parse.exe",
   "files": ["bin"],
-  "license": "MIT"
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wulun811/LiuHe.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
 }

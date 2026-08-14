@@ -37,5 +37,12 @@
     "@jieai/malong-parse-darwin-x64": "0.4.5-post6",
     "@jieai/malong-parse-darwin-arm64": "0.4.5-post6",
     "@jieai/malong-parse-win32-x64": "0.4.5-post6"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wulun811/LiuHe.git"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

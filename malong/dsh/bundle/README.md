@@ -20,6 +20,13 @@ cross-platform precompiled binaries), so no extra deployment is needed.
 > `~/.dsh/profiles/web/pnpm-workspace.yaml` and add `better-sqlite3` under
 > `onlyBuiltDependencies`, then `pnpm rebuild better-sqlite3`).
 > Without this, better-sqlite3 has no native binary and tool calls will fail.
+>
+> **Native build fallback**: better-sqlite3 ships prebuilt binaries for common
+> platforms (Node 20+); if your platform lacks a prebuilt and you have no build
+> toolchain (Windows: Visual Studio Build Tools for node-gyp), the server
+> automatically falls back to the vendored sql.js WASM backend
+> (`malong/vendor/`, zero native deps) — the startup log shows which backend is
+> active. Both backends use SQLite with compatible data files.
 
 ## Uninstall
 
