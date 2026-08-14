@@ -4,6 +4,8 @@
 
 ## 变更速览
 
+- **[0.4.5.post6]** (2026-08-15): npm 全平台发布——linux-x64 与主包已上线 0.4.5-post5，本版 bump 0.4.5-post6 补齐 darwin-x64 / darwin-arm64 / win32-x64 三平台包（GitHub Actions 全自动：打 v* tag → 4 runner 构建 → 平台包先行 → 主包 @jieai/dsh-malong-bridge 版本自动对齐）
+
 - **[0.4.5.post5]** (2026-08-14): DSH 四轮试用修复——read_symbol 索引状态单出口（index_status 删 stale 布尔，state 单一权威）+ references file 过滤空结果同响应附 workspace_preview（cap 20，省一次往返）+ repo_map 纯缩进渲染（去树线字符，2000 token 预算多放 7-15% 信息）+ 5 个 manifest 补 AUTO-FRESH 保鲜声明；全链 54 文件 0 失败；**新增 dsh bundle 一体包**（`malong/dsh/bundle/` + repre.sh，`dsh plugin add @jieai/dsh-malong-bridge` 一行安装，版本对齐 0.4.5-post5）——**平台化**：esbuild 式 4 平台子包（npm-platform/ 模板 + release.yml npm 发布步骤 + parse-bin.js 共享解析），主包 optionalDependencies 按 os/cpu 自动拉取二进制
 
 - **[0.4.5.post4]** (2026-08-14): DSH 三轮试用批次 2——config_drift 无 env 清单不再逐条误报（env_manifest_absent + 提示创建 .env.example）+ diff_facts 错误信息补回滚/提交语境 + verify_pipeline 默认超时 120s→30s（全链不再撞 MCP 硬超时）+ manifest 超时警告；全链 81 文件 0 失败
