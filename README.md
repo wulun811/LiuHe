@@ -1,4 +1,4 @@
-﻿# Malong LiuHe（码龙·六合工具）
+# Malong LiuHe（码龙·六合工具）
 
 **LLM-Native Code Operations Toolkit** — Code tooling reinvented for the LLM that has no hands, no eyes, and no memory.
 
@@ -251,7 +251,7 @@ All optional — sensible defaults apply when unset.
 | `MALONG_SOCKET` | `/tmp/malong-parse-$(id -u).sock` | Unix socket path to the parse daemon (Linux / macOS). |
 | `MALONG_PORT` | `31001` | TCP port for the parse daemon (Windows). |
 | `MALONG_PARSE_BIN` | npm platform pkg / `~/.local/bin` | Binary used when the client auto-starts the daemon. Resolution order: this env → `@jieai/malong-parse-<os>-<arch>` npm platform package (installed as an optional dependency of `@jieai/dsh-malong-bridge`) → `~/.local/bin/malong-parse` → `malong-parse/target/release` (dev tree). |
-| `MALONG_PARSE_MODE` | rust-service | Parse transport. Only `rust-service` is supported in v0.7.0 (`builtin` / `shadow` are rejected). |
+| `MALONG_PARSE_MODE` | rust-service | Parse transport. Only `rust-service` is supported (`builtin` / `shadow` are rejected). |
 | `MALONG_WS_GC_DAYS` | `14` | Days a workspace index cache may sit untouched before `health cleanup` prunes it; `0` disables. |
 
 ### Suppressing security false positives

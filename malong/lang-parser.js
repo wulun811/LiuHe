@@ -5,14 +5,14 @@
 import * as parseClient from './parse-client.js'
 
 export const name = 'malong-lang-parser'
-export const version = '0.7.0'
+export const version = '0.4.5-post6'
 
 let _core
 
 export async function init(core) {
   const mode = process.env.MALONG_PARSE_MODE
   if (mode === 'builtin' || mode === 'shadow') {
-    throw new Error(`MALONG_PARSE_MODE=${mode} is not supported in v0.7.0. Only rust-service mode is available.`)
+    throw new Error(`MALONG_PARSE_MODE=${mode} is not supported in v${version}. Only rust-service mode is available.`)
   }
 
   _core = core
@@ -57,7 +57,7 @@ export async function init(core) {
     },
   })
 
-  core.log('info', `[lang-parser] v0.7.0 rust-service only, tree-sitter removed`)
+  core.log('info', `[lang-parser] v${version} rust-service only, tree-sitter removed`)
 }
 
 export async function start() {}

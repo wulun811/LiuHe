@@ -1,4 +1,4 @@
-﻿# 码龙·六合工具（Malong LiuHe）
+# 码龙·六合工具（Malong LiuHe）
 
 **LLM-Native 代码操作工具链** — 为无手、无眼、无记忆的 LLM 重新发明代码操作。
 
@@ -246,7 +246,7 @@ node --max-old-space-size=512 mcp-server.js --workspace /path/to/project
 | `MALONG_SOCKET` | `/tmp/malong-parse-$(id -u).sock` | 解析 daemon 的 Unix socket 路径（Linux / macOS）。 |
 | `MALONG_PORT` | `31001` | 解析 daemon 的 TCP 端口（Windows）。 |
 | `MALONG_PARSE_BIN` | npm 平台包 / `~/.local/bin` | 客户端自动拉起 daemon 时用的二进制。解析顺序：本 env → `@jieai/malong-parse-<os>-<arch>` npm 平台包（`@jieai/dsh-malong-bridge` 的 optionalDependencies 按平台自动拉取）→ `~/.local/bin/malong-parse` → `malong-parse/target/release`（开发树）。 |
-| `MALONG_PARSE_MODE` | rust-service | 解析传输方式。v0.7.0 仅支持 `rust-service`（`builtin` / `shadow` 会被拒绝）。 |
+| `MALONG_PARSE_MODE` | rust-service | 解析传输方式。仅支持 `rust-service`（`builtin` / `shadow` 会被拒绝）。 |
 | `MALONG_WS_GC_DAYS` | `14` | 工作区索引缓存闲置多少天后由 `health cleanup` 清理；`0` 禁用。 |
 
 ### 抑制 security 误报
