@@ -1,0 +1,8 @@
+# @jieai/dsh-malong-bridge — one insert: LiuHe MCP server via the bundle's own bridge.
+# serverPath reads MALONG_SERVER_PATH when set; otherwise the bridge falls back
+# to <package>/server/mcp-server.js (zero-config install).
+- insert:
+    - id: malong-dsh-bridge
+      name: '@jieai/dsh-malong-bridge'
+      config:
+        serverPath: !!js process.env.MALONG_SERVER_PATH

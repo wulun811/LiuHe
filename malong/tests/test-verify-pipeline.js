@@ -84,6 +84,11 @@ const ctx = { getWorkspaceDir: (d) => d }
   const r = await handle({ workspace_dir: WS, stages: 'lint', timeout: 0 }, ctx)
   assert(r.results?.lint?.ran === true, `⑧ timeout=0 → 默认超时不崩（lint ran=${r.results?.lint?.ran}）`)
 }
+// ⑧b r58: manifest 描述含 MCP 120s 硬超时警告（DSH 反馈：全链必撞超时且无预期）
+{
+  const m = JSON.parse(readFileSync(join(__dirname, '..', 'tools', 'tool-verify-pipeline', 'manifest.json'), 'utf-8'))
+  assert(String(m.description).includes('120s hard timeout'), `⑧b manifest 描述含超时警告（${String(m.description).slice(0, 60)}）`)
+}
 // ⑨ 只有 lint:fix 的项目：detectScripts 认 lint:fix 且 runStage 跑的是真实脚本名（回归：硬编码 run lint → Missing script 假失败）
 // ⑨b r10d：超时被杀必须显式标注 killed/timed_out（不再是普通失败）
 {

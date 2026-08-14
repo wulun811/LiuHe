@@ -92,7 +92,9 @@ function queryFilesWithSymbols(db, rootDir, workspaceDir, relevantFiles, relevan
 
   const byFile = new Map()
   let skippedOutside = 0
+  const hitNames = new Set()
   for (const r of rows) {
+    hitNames.add(r.name)
     const normPath = normalizeDbPath(r.path, workspaceDir)
     if (filterSet && !filterSet.has(normPath)) continue
     // scanDir 可能是 workspace 子目录：换算相对路径
@@ -107,7 +109,17 @@ function queryFilesWithSymbols(db, rootDir, workspaceDir, relevantFiles, relevan
     if (!byFile.has(rel)) byFile.set(rel, [])
     byFile.get(rel).push({ name: r.name, type: TYPE_SHORT[r.type] || r.type, line: r.line })
   }
-  return { files: [...byFile.entries()].map(([path, symbols]) => ({ path, symbols })), rows: rows.length, ...(skippedOutside > 0 ? { skipped_outside: skippedOutside } : {}) }
+  const missingEntities = relevantEntities && relevantEntities.length > 0
+    ? relevantEntities.filter(e => !hitNames.has(e))
+    : []
+  return {
+    files: [...byFile.entries()].map(([path, symbols]) => ({ path, symbols })),
+    rows: rows.length,
+    ...(missingEntities.length > 0
+      ? { entities_not_found: missingEntities, note: `Entities not found in index: ${missingEntities.join(', ')} — check symbol names (case-sensitive) or run reindex to refresh` }
+      : {}),
+    ...(skippedOutside > 0 ? { skipped_outside: skippedOutside } : {}),
+  }
 }
 
 function buildTree(entries, rootName) {
@@ -133,22 +145,22 @@ function buildTree(entries, rootName) {
 }
 
 function renderTree(node, indent = '', isLast = true) {
-  const prefix = indent + (isLast ? '└── ' : '├── ')
+  // r59: 纯缩进渲染——树线字符（├──/└──/│）每行 4-5 字符，2000 token 预算下约浪费 7-15%；每层 +2 空格
+  const prefix = indent
   const suffix = node.type === 'dir' ? '/' : ''
   let result = prefix + node.name + suffix + '\n'
 
   if (node.type === 'file' && node.symbols.length > 0) {
-    const childIndent = indent + (isLast ? '    ' : '│   ')
+    const childIndent = indent + '  '
     for (let i = 0; i < node.symbols.length; i++) {
       const s = node.symbols[i]
-      const last = i === node.symbols.length - 1
-      result += childIndent + (last ? '└── ' : '├── ') + s.type + ' ' + s.name + ':' + s.line + '\n'
+      result += childIndent + s.type + ' ' + s.name + ':' + s.line + '\n'
     }
   }
 
   if (node.type === 'dir' && node.children) {
     for (let i = 0; i < node.children.length; i++) {
-      result += renderTree(node.children[i], indent + (isLast ? '    ' : '│   '), i === node.children.length - 1)
+      result += renderTree(node.children[i], indent + '  ', i === node.children.length - 1)
     }
   }
 
@@ -182,21 +194,21 @@ function pruneTree(node, maxChildren, maxSymbols) {
   }
 }
 
-// 渲染单个顶层条目（首行 ├──/└── + name，子树递归 renderTree）
+// 渲染单个顶层条目（纯缩进 + name，子树递归 renderTree）
 function renderEntry(node, isLast) {
-  const prefix = isLast ? '└── ' : '├── '
+  const prefix = ''
   const suffix = node.type === 'dir' ? '/' : ''
   let out = prefix + node.name + suffix + '\n'
-  const childIndent = isLast ? '    ' : '│   '
+  const childIndent = '  '
   if (node.type === 'file' && node.symbols.length > 0) {
     for (let i = 0; i < node.symbols.length; i++) {
       const s = node.symbols[i]
-      out += childIndent + (i === node.symbols.length - 1 ? '└── ' : '├── ') + s.type + ' ' + s.name + ':' + s.line + '\n'
+      out += childIndent + s.type + ' ' + s.name + ':' + s.line + '\n'
     }
   }
   if (node.type === 'dir' && node.children) {
     for (let i = 0; i < node.children.length; i++) {
-      out += renderTree(node.children[i], childIndent, i === node.children.length - 1)
+      out += renderTree(node.children[i], '  ', i === node.children.length - 1)
     }
   }
   return out
@@ -334,7 +346,7 @@ export async function init(core) {
         return { error: 'workspace_not_indexed', message: `Workspace not indexed: ${workspaceDir}`, suggestion: `Call reindex(workspace_dir="${workspaceDir}") first` }
       }
       try {
-        const { files, rows } = queryFilesWithSymbols(db, rootDir, workspaceDir, relevantFiles, relevantEntities)
+        const { files, rows, entities_not_found, note } = queryFilesWithSymbols(db, rootDir, workspaceDir, relevantFiles, relevantEntities)
         const tree = buildTree(files, basename(resolve(rootDir)))
         // r23：骨架化分页——focused 同样保留全局骨架 + 页号，翻页不断导航
         const paginated = renderPaginated(tree, {
@@ -347,7 +359,7 @@ export async function init(core) {
 
         _injectToYingMini(paginated.map)
         const stale = checkRepoMapStaleness(db, rootDir)
-        return { files: files.length, tokens: estimateTokens(paginated.map), ...paginated, ...(stale ? { index_stale_note: stale.note } : {}) }
+        return { files: files.length, tokens: estimateTokens(paginated.map), ...paginated, ...(entities_not_found ? { entities_not_found, note } : {}), ...(stale ? { index_stale_note: stale.note } : {}) }
       } finally {
         db.close()
       }

@@ -74,7 +74,9 @@ assert(r1.map.includes('fn login:1'), '符号行渲染 fn login:1')
 assert(r1.map.includes('cls User:10'), '类渲染 cls User:10')
 assert(r1.map.includes('var DB:5'), '变量渲染 var DB:5')
 assert(r1.map.startsWith(basename(WS) + '/') || r1.map.includes(basename(WS) + '/'), '地图根为 workspace 名')
-assert(r1.map.includes('└──') || r1.map.includes('├──'), '地图使用树形渲染')
+// r59: 纯缩进渲染——树线字符全部移除（省 token，2000 预算下多放信息）；层级靠缩进 + dir 的 / 后缀
+assert(!r1.map.includes('├──') && !r1.map.includes('└──') && !r1.map.includes('│'), '地图无树线字符（纯缩进渲染）')
+assert(r1.map.includes('\n  fn login:1') || r1.map.includes('fn login:1'), '符号行保留类型/名字/行号', )
 
 // ── getSummary 缓存 ──
 const s1 = svc.getSummary()
@@ -91,6 +93,15 @@ assert(!f1.error, 'generateFocused 成功')
 assert(f1.map.includes('login') && f1.map.includes('User'), '过滤后保留目标实体')
 assert(!f1.map.includes('helper_fn'), '过滤后排除非目标实体')
 assert(!f1.map.includes('test_login'), '过滤后排除其他文件实体')
+
+// ── r57: relevantEntities 部分未命中 → entities_not_found 提示（修复前静默空树误导）──
+const f4 = await svc.generateFocused(WS, { relevantEntities: ['login', 'spawnFixer'] })
+assert(!f4.error, '部分未命中 generateFocused 成功')
+assert(Array.isArray(f4.entities_not_found) && f4.entities_not_found.includes('spawnFixer'), `未命中实体透出（得 ${JSON.stringify(f4.entities_not_found)}）`)
+assert(String(f4.note).includes('spawnFixer'), 'note 含未命中实体名')
+assert(f4.map.includes('login'), '命中的实体仍正常渲染')
+const f5 = await svc.generateFocused(WS, { relevantEntities: ['ghostEntity'] })
+assert(Array.isArray(f5.entities_not_found) && f5.entities_not_found.length === 1 && f5.entities_not_found[0] === 'ghostEntity', '全未命中透出列表')
 
 // ── generateFocused：relevantFiles 过滤（绝对路径）──
 const f2 = await svc.generateFocused(WS, { relevantFiles: [join(WS, 'src/auth.js')] })

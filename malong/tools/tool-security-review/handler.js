@@ -224,6 +224,17 @@ function scanOne(source, filePath, maxFindings, configIgnore = []) {
       findings.push({ id: 'dotenv-secret', severity: 'high', category: 'secrets', message: '.env 中的密钥可能被提交进仓库，确认已在 .gitignore', line: lineNum, match: m[0].slice(0, 40) })
     }
   }
+  // r58: 同规则聚合——同一模式多处命中（如 process.exit() 15 处）不再刷屏 N 条，合并为 1 条 + 计数 + 位置列表（前 5 处）
+  const aggMap = new Map()
+  for (const f of findings) {
+    const existing = aggMap.get(f.id)
+    if (existing) {
+      existing.count++
+      if (existing.locations.length < 5) existing.locations.push({ line: f.line, match: f.match })
+    } else {
+      aggMap.set(f.id, { ...f, count: 1, locations: [{ line: f.line, match: f.match }] })
+    }
+  }
   return {
     summary: {
       total: findings.length,
@@ -241,7 +252,7 @@ function scanOne(source, filePath, maxFindings, configIgnore = []) {
       // r8(C2)：时间预算到点截断——构造文件（单行 1MB 全 SQL 关键字）可能触发规则 O(n²)
       time_budget_exceeded: timeBudgetExceeded || undefined,
     },
-    findings,
+    findings: [...aggMap.values()],
     file_path: filePath,
     language: extname(filePath || '').slice(1) || 'unknown',
   }

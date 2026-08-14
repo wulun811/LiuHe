@@ -1,6 +1,7 @@
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { mkdirSync, writeFileSync, symlinkSync, rmSync } from 'node:fs'
+import os from 'node:os'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const FIXTURES = join(__dirname, 'fixtures')
@@ -92,6 +93,31 @@ async function testA3() {
   const envDrifts = (result.drifts || []).filter(d => d.type === 'missing_env_var')
   const redisDrift = envDrifts.find(d => d.name === 'REDIS_URL')
   assert(!redisDrift, `A3: REDIS_URL 不应被误报为 drift`)
+}
+
+// ═══ A3b: config_drift 无 env 文件 → env_manifest_absent 提示而非逐条误报（r58）═══
+async function testA3b() {
+  console.log('\n═══ A3b: config_drift 无 env 文件不误报 ═══')
+  const handle = await loadTool('tool-config-drift')
+  const ws = join(os.tmpdir(), 'opencode', 'cd-noenv-ws')
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
+  mkdirSync(join(ws, 'src'), { recursive: true })
+  writeFileSync(join(ws, 'src', 'app.py'), 'import os\nport = os.environ["APP_PORT"]\nkey = os.getenv("API_KEY")\n')
+
+  const result = await handle({ workspace_dir: ws }, mockContext)
+  const envDrifts = (result.drifts || []).filter(d => d.type === 'missing_env_var')
+  assert(result.env_manifest_absent === true, `A3b: env_manifest_absent 标志（得 ${result.env_manifest_absent}）`)
+  assert(envDrifts.length === 0, `A3b: 无 env 文件时零逐条误报（得 ${envDrifts.length}）`)
+  assert(String(result.note).includes('.env.example'), `A3b: note 提示创建 .env.example（${String(result.note).slice(0, 60)}）`)
+  assert(String(result.next_step).includes('.env.example'), `A3b: next_step 指向创建清单`)
+
+  // 有 .env.example 后恢复正常 drift 检测
+  writeFileSync(join(ws, '.env.example'), 'APP_PORT=8080\n')
+  const result2 = await handle({ workspace_dir: ws }, mockContext)
+  const envDrifts2 = (result2.drifts || []).filter(d => d.type === 'missing_env_var')
+  assert(result2.env_manifest_absent !== true, `A3b: 有清单后不再 manifest_absent`)
+  assert(envDrifts2.some(d => d.name === 'API_KEY'), `A3b: 有清单后 API_KEY 正常报 missing（得 ${JSON.stringify(envDrifts2.map(d => d.name))}）`)
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
 }
 
 // ═══ A4: 绝对路径 file 参数 ═══
@@ -242,6 +268,48 @@ async function testA9() {
   const syntaxErrors = result.checks?.syntax?.errors || []
   const falsePositives = syntaxErrors.filter(e => e.severity === 'error')
   assert(falsePositives.length === 0, `A9: 模板字符串 \${} 不产生语法误报 (errors=${falsePositives.length})`)
+}
+
+// ═══ A9b: edit_sandbox 块注释 /* */（含 JSDoc）内括号不误报（r58：只加一行注释误报 4 处括号失衡）═══
+async function testA9b() {
+  console.log('\n═══ A9b: edit_sandbox 块注释内括号不误报 ═══')
+  const handle = await loadTool('tool-edit-sandbox')
+
+  const content = [
+    '/**',
+    ' * 注释里的括号 ( 和 } 还有 [ 不应被扫',
+    ' * @param {Object} opts',
+    ' */',
+    'export function foo() {',
+    '  return 1',
+    '}',
+    '',
+  ].join('\n')
+  const result = await handle({ workspace_dir: FIXTURES, file: 'src/block-comment.js', new_content: content }, mockContext)
+  const syntaxErrors = (result.checks?.syntax?.errors || []).filter(e => e.severity === 'error')
+  assert(syntaxErrors.length === 0, `A9b: 块注释内括号不误报 (errors=${syntaxErrors.length})`)
+
+  // 跨行块注释（未闭合到下一行才结束）
+  const content2 = [
+    '/* 第一行 { (',
+    '   第二行 } ) */',
+    'const a = [1, 2]',
+    '',
+  ].join('\n')
+  const result2 = await handle({ workspace_dir: FIXTURES, file: 'src/block-comment2.js', new_content: content2 }, mockContext)
+  const errs2 = (result2.checks?.syntax?.errors || []).filter(e => e.severity === 'error')
+  assert(errs2.length === 0, `A9b: 跨行块注释不误报 (errors=${errs2.length})`)
+
+  // 失败路径：块注释外的真实失衡仍要报
+  const content3 = [
+    'export function bar() {',
+    '  return (1',
+    '}',
+    '',
+  ].join('\n')
+  const result3 = await handle({ workspace_dir: FIXTURES, file: 'src/block-comment3.js', new_content: content3 }, mockContext)
+  const errs3 = (result3.checks?.syntax?.errors || []).filter(e => e.severity === 'error')
+  assert(errs3.length >= 1, `A9b: 真实括号失衡仍报错 (errors=${errs3.length})`)
 }
 
 // ═══ A10: test_bridge workspace_dir 不存在 ═══
@@ -472,7 +540,7 @@ async function testA25() {
 }
 
 // Run all
-const tests = [testA1, testA2, testA3, testA4, testA5, testA6, testA7, testA8, testA9, testA10,
+const tests = [testA1, testA2, testA3, testA3b, testA4, testA5, testA6, testA7, testA8, testA9, testA9b, testA10,
                testA11, testA12, testA13, testA14, testA15, testA16, testA17, testA18, testA19, testA20, testA21, testA22, testA23, testA24, testA25]
 
 for (const t of tests) {

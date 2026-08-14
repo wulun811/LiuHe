@@ -136,9 +136,12 @@ cd ../malong && npm ci
 
 #    DeepSeek Harness (dsh web) — auto session-workspace convenience (extra, optional):
 #    Run once on the dsh host (Linux/macOS):
-#      bash malong/dsh/install-dsh.sh         # idempotent; edits ~/.dsh/profiles/web/cordis.patch.yml with backup
-#      pkill -f "dsh web"; dsh web --port 3456 --host 0.0.0.0 --trusted-host <LAN IP>
-#    The bridge registers all 38 tools as malong__* and auto-fills workspace_dir from the
+#      Option A (npm, one line — full backend + platform binary included):
+#        dsh plugin --profile web add @jieai/dsh-malong-bridge
+#        pkill -f "dsh web"; dsh web --port 3456 --host 0.0.0.0 --trusted-host <LAN IP>
+#      Option B (script, points at a checkout of this repo):
+#        bash malong/dsh/install-dsh.sh         # idempotent; edits ~/.dsh/profiles/web/cordis.patch.yml with backup
+#    The bridge registers all 44 tools as malong__* and auto-fills workspace_dir from the
 #    current conversation's workspace (no per-call path needed; explicit paths still win).
 #    Full guide incl. index rules: malong/dsh/DSH接入说明.md
 ```
@@ -247,7 +250,7 @@ All optional — sensible defaults apply when unset.
 | `MALONG_STATE_DIR` | `~/.config/malong` | Where usage / feedback / edit-stats files are written. Override to redirect state (tests, sandboxed hosts). Reads fall back to the legacy `~/.config/opencode/` so pre-0.3.37 data is not lost. |
 | `MALONG_SOCKET` | `/tmp/malong-parse-$(id -u).sock` | Unix socket path to the parse daemon (Linux / macOS). |
 | `MALONG_PORT` | `31001` | TCP port for the parse daemon (Windows). |
-| `MALONG_PARSE_BIN` | bundled / `malong-parse` on PATH | Binary used when the client auto-starts the daemon. |
+| `MALONG_PARSE_BIN` | npm platform pkg / `~/.local/bin` | Binary used when the client auto-starts the daemon. Resolution order: this env → `@jieai/malong-parse-<os>-<arch>` npm platform package (installed as an optional dependency of `@jieai/dsh-malong-bridge`) → `~/.local/bin/malong-parse` → `malong-parse/target/release` (dev tree). |
 | `MALONG_PARSE_MODE` | rust-service | Parse transport. Only `rust-service` is supported in v0.7.0 (`builtin` / `shadow` are rejected). |
 | `MALONG_WS_GC_DAYS` | `14` | Days a workspace index cache may sit untouched before `health cleanup` prunes it; `0` disables. |
 

@@ -217,6 +217,19 @@ console.log('── r43 配置越界防护 ──')
   rmSync(join(WS, 'evil.js'))
 }
 
+// ── r58: 同规则聚合——6 处 process.exit 合并为 1 条 count=6，位置列表前 5 处 ──
+console.log('── r58 同规则聚合 ──')
+{
+  const src = Array.from({ length: 6 }, (_, i) => `process.exit(${i})`).join('\n')
+  const f = await scan(src)
+  const pe = f.find(x => x.id === 'process-exit')
+  assert('r58: process-exit 聚合为 1 条', f.filter(x => x.id === 'process-exit').length === 1, JSON.stringify(f.map(x => x.id)))
+  assert('r58: count=6', pe && pe.count === 6, JSON.stringify(pe))
+  assert('r58: locations 前 5 处', pe && pe.locations.length === 5, JSON.stringify(pe && pe.locations))
+  assert('r58: 首处 line=1', pe && pe.locations[0].line === 1, JSON.stringify(pe && pe.locations))
+}
+
 console.log(`\n═══════════════════════════════════════`)
 console.log(`== test-security-review-rules: ${passed} passed, ${failed} failed ==`)
+
 process.exit(failed > 0 ? 1 : 0)

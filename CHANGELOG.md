@@ -4,6 +4,14 @@
 
 ## 变更速览
 
+- **[0.4.5.post5]** (2026-08-14): DSH 四轮试用修复——read_symbol 索引状态单出口（index_status 删 stale 布尔，state 单一权威）+ references file 过滤空结果同响应附 workspace_preview（cap 20，省一次往返）+ repo_map 纯缩进渲染（去树线字符，2000 token 预算多放 7-15% 信息）+ 5 个 manifest 补 AUTO-FRESH 保鲜声明；全链 54 文件 0 失败；**新增 dsh bundle 一体包**（`malong/dsh/bundle/` + repre.sh，`dsh plugin add @jieai/dsh-malong-bridge` 一行安装，版本对齐 0.4.5-post5）——**平台化**：esbuild 式 4 平台子包（npm-platform/ 模板 + release.yml npm 发布步骤 + parse-bin.js 共享解析），主包 optionalDependencies 按 os/cpu 自动拉取二进制
+
+- **[0.4.5.post4]** (2026-08-14): DSH 三轮试用批次 2——config_drift 无 env 清单不再逐条误报（env_manifest_absent + 提示创建 .env.example）+ diff_facts 错误信息补回滚/提交语境 + verify_pipeline 默认超时 120s→30s（全链不再撞 MCP 硬超时）+ manifest 超时警告；全链 81 文件 0 失败
+
+- **[0.4.5.post3]** (2026-08-14): DSH 三轮试用批次 1 修复——test_bridge discover 识别裸 assert 方法链测试（assert.strictEqual 等）+ security_review 同规则聚合（count+locations）+ edit_sandbox 跳块注释/JSDoc + read_symbol stale 语义修正（service ensureFreshFile 恒返回对象导致 fresh 误判 stale，indexFile 失败加 index_stale 标记）+ code_search 预期声明（确定性匹配非语义搜索）；全链 81 文件 0 失败
+
+- **[0.4.5.post2]** (2026-08-14): DSH 二轮试用修复——dep_graph transitiveDeps 同层去重（两个 from 引同一模块不再重复 push）+ repo_map relevantEntities 未命中返回 entities_not_found 提示（不再静默空树）；0AIT 部署副本整体同步（原 8-01 快照缺 r41-r56，tools 38→44、tests 84，dsh web 重启验证）；find_tests next_step 噪音记录为待确认不修
+
 - **[0.4.5.post1]** (2026-08-14): 新增 DSH 适配包（malong/dsh/：dsh-bridge.mjs 插件 + install-dsh.sh + 接入说明）——自动注入会话工作区、输出结构化、索引规则透明；打包版本主体 0.4.5 不变
 - **[0.4.5]** (2026-08-11): reindex 二次调用提醒——无变化时返回 already_fresh=true + 「索引已是最新无需再建」提示，LLM 不再反复建索引；新增 dev→liuhe 同步脚本（--check/--commit）
 

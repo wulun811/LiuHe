@@ -107,6 +107,10 @@ function extractTestNames(filePath, workspaceDir) {
       }
       if (m) tests.push({ name: m[1], line: i + 1 })
     }
+    // r58: 与 test-bridge 同口径——裸 assert 风格（assert.strictEqual 等）文件给文件级条目，test_symbols 不再恒空
+    if (tests.length === 0 && /^\s*(?:assert(?:\.\w+)?|expect)\(/m.test(content)) {
+      tests.push({ name: basename(filePath, extname(filePath)), line: 1 })
+    }
     return tests
   } catch { return [] }
 }

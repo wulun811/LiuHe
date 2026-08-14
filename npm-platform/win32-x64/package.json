@@ -1,0 +1,10 @@
+{
+  "name": "@jieai/malong-parse-win32-x64",
+  "version": "0.0.0-placeholder",
+  "description": "LiuHe malong-parse binary for win32-x64 (Rust language parser service)",
+  "os": ["win32"],
+  "cpu": ["x64"],
+  "main": "./bin/malong-parse.exe",
+  "files": ["bin"],
+  "license": "MIT"
+}

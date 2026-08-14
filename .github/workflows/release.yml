@@ -18,18 +18,22 @@ jobs:
             artifact: malong-parse-linux-x86_64
             osname: linux
             arch: x86_64
+            npmdir: linux-x64
           - os: macos-15-intel
             artifact: malong-parse-darwin-x86_64
             osname: darwin
             arch: x86_64
+            npmdir: darwin-x64
           - os: macos-15
             artifact: malong-parse-darwin-aarch64
             osname: darwin
             arch: aarch64
+            npmdir: darwin-arm64
           - os: windows-latest
             artifact: malong-parse-windows-x86_64
             osname: windows
             arch: x86_64
+            npmdir: win32-x64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -46,6 +50,29 @@ jobs:
           rm -rf releases && mkdir -p releases
           bash scripts/package-full.sh ${{ matrix.osname }} ${{ matrix.arch }}
 
+      # --- npm platform package: stage binary + align version with malong/package.json ---
+      - name: Stage binary into npm platform package
+        shell: bash
+        run: |
+          set -euo pipefail
+          VER="$(grep -m1 '"version"' malong/package.json | sed 's/.*: "\([0-9][0-9A-Za-z.-]*\)".*/\1/')"
+          DIR="npm-platform/${{ matrix.npmdir }}"
+          mkdir -p "$DIR/bin"
+          if [ "${{ matrix.osname }}" = "windows" ]; then
+            cp malong-parse/target/release/malong-parse.exe "$DIR/bin/"
+          else
+            cp malong-parse/target/release/malong-parse "$DIR/bin/"
+          fi
+          chmod +x "$DIR"/bin/* || true
+          sed -i "s/0.0.0-placeholder/$VER/" "$DIR/package.json"
+
+      # Publish only on tag pushes (the workflow only triggers on v* tags anyway)
+      - name: Publish npm platform package
+        working-directory: npm-platform/${{ matrix.npmdir }}
+        run: npm publish --access public --registry https://registry.npmjs.org
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
       - uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.artifact }}
@@ -55,11 +82,28 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v5
+
       - uses: actions/download-artifact@v7
         with:
           path: artifacts
       - name: List artifacts
         run: find artifacts -type f
+
+      # --- npm main bundle package: build from malong/dsh/bundle + publish after all platform pkgs ---
+      - name: Build and publish main bundle package (npm)
+        shell: bash
+        run: |
+          set -euo pipefail
+          VER="$(grep -m1 '"version"' malong/package.json | sed 's/.*: "\([0-9][0-9A-Za-z.-]*\)".*/\1/')"
+          bash malong/dsh/bundle/reprep.sh
+          cd malong/dsh/bundle
+          sed -i "0,/\"version\": \"[^\"]*\"/s//\"version\": \"$VER\"/" package.json
+          sed -i -E "s/(@jieai\/malong-parse-(linux-x64|darwin-x64|darwin-arm64|win32-x64)\": \")[^\"]*\"/\1$VER\"/" package.json
+          npm publish --access public --registry https://registry.npmjs.org
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
       - uses: softprops/action-gh-release@v3
         with:
           files: artifacts/**/*

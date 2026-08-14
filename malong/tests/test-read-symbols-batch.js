@@ -82,6 +82,46 @@ const ctx = {}
   assert(rMiss.code === 'FILE_NOT_FOUND', `⑥ FILE_NOT_FOUND 带 code（得 ${rMiss.code}）`)
 }
 
+// ── ⑦ r58: index_state 与 stale 自洽（旧实现恒 fresh + stale=true 矛盾）──
+{
+  const staleMock = {
+    initWorkspace: async () => {},
+    ensureFreshFile: async () => ({ auto_indexed: false, index_stale: true }),
+    getFileByPath: () => ({ index_state: undefined }),
+    getSymbolByStableId: () => null,
+    getFileOutline: async () => null,
+    clearCachesForFile: () => {},
+  }
+  const rStale = await handle({ workspace_dir: ws, locator: { file_path: 'a.js' }, source: 'live' }, { codeIndexService: staleMock, getWorkspaceDir: () => ws })
+  assert(rStale.version?.index?.index_state === 'stale' && rStale.version?.index?.stale === true, `⑦ 重索引失败 → index_state=stale（得 ${JSON.stringify(rStale.version?.index)}）`)
+  // r59: 顶层 index_status 单一权威——state 表达 stale，无独立 stale 布尔（删双字段矛盾源）
+  assert(rStale.index_status?.state === 'stale' && rStale.index_status?.stale === undefined, `⑦ r59 index_status.state=stale 且无 stale 布尔（得 ${JSON.stringify(rStale.index_status)}）`)
+
+  const freshMock = {
+    initWorkspace: async () => {},
+    ensureFreshFile: async () => ({ auto_indexed: true, file: 'a.js' }),
+    getFileByPath: () => ({ index_state: undefined }),
+    getSymbolByStableId: () => null,
+    getFileOutline: async () => null,
+    clearCachesForFile: () => {},
+  }
+  const rFresh = await handle({ workspace_dir: ws, locator: { file_path: 'a.js' }, source: 'live' }, { codeIndexService: freshMock, getWorkspaceDir: () => ws })
+  assert(rFresh.version?.index?.index_state === 'fresh' && rFresh.version?.index?.stale === false, `⑦ auto_indexed 时 index_state=fresh（得 ${JSON.stringify(rFresh.version?.index)}）`)
+  assert(rFresh.index_status?.state === 'fresh' && rFresh.index_status?.stale === undefined, `⑦ r59 auto_indexed → index_status.state=fresh 无 stale（得 ${JSON.stringify(rFresh.index_status)}）`)
+
+  const noopMock = {
+    initWorkspace: async () => {},
+    ensureFreshFile: async () => ({ auto_indexed: false }),
+    getFileByPath: () => ({ index_state: undefined }),
+    getSymbolByStableId: () => null,
+    getFileOutline: async () => null,
+    clearCachesForFile: () => {},
+  }
+  const rNoop = await handle({ workspace_dir: ws, locator: { file_path: 'a.js' }, source: 'live' }, { codeIndexService: noopMock, getWorkspaceDir: () => ws })
+  assert(rNoop.version?.index?.index_state === 'fresh' && rNoop.version?.index?.stale === false, `⑦ mtime 相同（无需重索引）不得误判 stale（得 ${JSON.stringify(rNoop.version?.index)}）`)
+  assert(rNoop.index_status?.state === 'fresh' && rNoop.index_status?.stale === undefined, `⑦ r59 mtime 相同 → index_status.state=fresh 无 stale（得 ${JSON.stringify(rNoop.index_status)}）`)
+}
+
 try { rmSync(ws, { recursive: true, force: true }) } catch {}
 console.log(`== test-read-symbols-batch: ${pass} passed, ${fail} failed ==`)
 if (fail > 0) process.exit(1)

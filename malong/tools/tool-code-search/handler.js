@@ -53,6 +53,8 @@ export async function handle(args, context) {
     return {
       query: r.query,
       intent: r.intent,
+      // r58: 预期管理——确定性 token/意图匹配，非语义搜索；长句自然语言退化为松文件级命中（0.5 分档）
+      matching_note: 'Deterministic token+intent matching (NOT semantic/embedding search): exact symbol/file names score highest; long natural-language sentences degrade to loose file-level matches (0.5). Use precise symbol/file names for best results.',
       results: r.results.slice(0, limit),
       count: r.results.length,
       summary: `${r.results.length} matches found`,

@@ -14,7 +14,8 @@ function isInsideWorkspace(ws, abs) {
   return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
 }
 
-const DEFAULT_TIMEOUT = 120000
+// r58: 默认 120s → 30s——旧默认单 stage 就撞 MCP 120s 硬超时（全链必超时）；30s/阶段 × 3 = 90s 留余量，可显式传 timeout 加大
+const DEFAULT_TIMEOUT = 30000
 const MAX_OUTPUT = 4000
 
 function traceId() {

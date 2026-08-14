@@ -25,17 +25,10 @@ const escapeLike = (s) => String(s).replace(/[\\%_]/g, (c) => '\\' + c)
 
 // 13#1：提取器版本戳 = 二进制文件 sha256。二进制内容变（重新部署）→ 版本变 → 触发索引自愈。
 // 路径解析与 mcp-server.js 的 PARSE_SERVICE_BIN / _ALT 对齐（primary 优先，dev 回退 target/release）。
+// r0.4.5-post5: 统一走 parse-bin.js 共享解析（env → npm 平台包 → 包内 server/bin → ~/.local/bin → dev target）
+import { resolveParseBin } from './parse-bin.js'
 export function resolveExtractorBin() {
-  const candidates = [
-    join(os.homedir(), '.local', 'bin', 'malong-parse'),
-    join(__dirname, '..', 'malong-parse', 'target', 'release', 'malong-parse'),
-    join(__dirname, '..', 'malong-parse', 'target', 'debug', 'malong-parse'),
-  ]
-  for (const c of candidates) {
-    if (existsSync(c)) return c
-    if (process.platform === 'win32' && existsSync(c + '.exe')) return c + '.exe'
-  }
-  return null
+  return resolveParseBin()
 }
 
 export function extractorVersion(binPath = resolveExtractorBin()) {
@@ -463,7 +456,9 @@ class CodeIndex {
           // 审核修复：indexFile 对非代码文件返回 null——null 时不算 auto_indexed（避免误导标记）
           return { auto_indexed: r !== null }
         } catch {
-          return { auto_indexed: false }
+          // r58: 重索引失败 → index_stale 标记——与「mtime 相同无需重索引」({auto_indexed:false}) 区分，
+          // 否则 read_symbol 把 fresh 误判 stale（R19 前 checkFileStaleness 返回 null/warning 可区分，R19 后同形丢失）
+          return { auto_indexed: false, index_stale: true }
         }
       }
     } catch {}
@@ -1538,7 +1533,9 @@ class CodeIndex {
               if (!mf) continue
               const sub = this._filterCommentImports(self._db.prepare("SELECT r.target_name AS module, r.source_file_id, r.line FROM refs r WHERE r.source_file_id = ? AND r.kind = 'import' AND (r.call_expr IS NULL OR r.call_expr != ?)").all(mf.id, ALIAS_LOCAL_MARKER))
               for (const s of sub) {
+                // r57: 同层去重——visited 原在下一层才 add，两个不同 from 引用同一 module 时同层重复 push
                 if (!visited.has(s.module) && !s.module.startsWith('node:')) {
+                  visited.add(s.module)
                   transitive.push({ depth: d, from: mf.path, module: s.module })
                   next.push(s.module)
                 }

@@ -1,7 +1,7 @@
 {
   "name": "find_tests",
   "version": "1.0.0",
-  "description": "Find test files for a source file (naming + import reverse lookup). Run them? test_bridge.",
+  "description": "Find test files for a source file (naming + import reverse lookup). Run them? test_bridge. AUTO-FRESH: files modified after last index are re-indexed automatically on read — explicit reindex only needed for brand-new workspaces/files.",
   "inputSchema": {
     "type": "object",
     "properties": {

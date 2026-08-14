@@ -117,5 +117,20 @@ try { rmSync(WS, { recursive: true, force: true }) } catch {}
   try { rmSync(dws, { recursive: true, force: true }) } catch {}
 }
 
+// ⑦ r58：assert 方法链风格（assert.strictEqual 等）——老正则只匹配 assert( 直连括号，方法链漏判
+{
+  const dws = join(os.tmpdir(), 'opencode', 'b13-tb-discover-ws3')
+  try { rmSync(dws, { recursive: true, force: true }) } catch {}
+  mkdirSync(join(dws, 'src'), { recursive: true })
+  mkdirSync(join(dws, 'tests'), { recursive: true })
+  writeFileSync(join(dws, 'src', 'spawn-guard.js'), 'export function guardPath(root, p) { return p }')
+  writeFileSync(join(dws, 'tests', 'test-spawn-guard.js'), "import { guardPath } from '../src/spawn-guard.js'\nimport assert from 'node:assert'\nassert.strictEqual(guardPath('/a', 'b'), 'b')")
+  const r = await handle({ action: 'discover', workspace_dir: dws, file: 'src/spawn-guard.js' }, {})
+  assert(r.total >= 1, `⑦ assert 方法链文件级兜底命中（得 ${r.total}）`)
+  assert(r.tests.some(t => t.file === 'tests/test-spawn-guard.js'), `⑦ 命中 tests/test-spawn-guard.js（${JSON.stringify(r.tests)}）`)
+  assert(r.search_methods.includes('import_graph/text_fallback'), `⑦ search_methods 含 import 层（${JSON.stringify(r.search_methods)}）`)
+  try { rmSync(dws, { recursive: true, force: true }) } catch {}
+}
+
 console.log(`== test-test-bridge-run: ${pass} passed, ${fail} failed ==`)
 if (fail > 0) process.exit(1)

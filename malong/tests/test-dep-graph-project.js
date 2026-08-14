@@ -139,6 +139,20 @@ const ctx = { codeIndexService: svc, getWorkspaceDir: () => WS }
   const deps2 = await svc.getModuleDependencies('src/c.js', { depth: 1 })
   assert(deps2.directImports.some(i => i.module === 'realish.js'), `⑧ 非注释行的 import 保留（c.js 第 1 行是 export 非注释）`)
 }
+// ⑩ r57: 同层去重——y/z 都 import w，x 的 transitiveDeps 中 w 只能 1 条（修复前同层重复 push）
+{
+  const WS3 = join(WS, 'diamond')
+  mkdirSync(WS3, { recursive: true })
+  writeFileSync(join(WS3, 'x.js'), "import { y } from './y.js'\nimport { z } from './z.js'\nexport function x() { return y() + z() }\n")
+  writeFileSync(join(WS3, 'y.js'), "import { w } from './w.js'\nexport function y() { return w() }\n")
+  writeFileSync(join(WS3, 'z.js'), "import { w } from './w.js'\nexport function z() { return w() }\n")
+  writeFileSync(join(WS3, 'w.js'), 'export function w() { return 1 }\n')
+  await svc.initWorkspace(WS)
+  await svc.indexBatch([join(WS3, 'x.js'), join(WS3, 'y.js'), join(WS3, 'z.js'), join(WS3, 'w.js')], WS)
+  const deps = await svc.getModuleDependencies('diamond/x.js', { depth: 2 })
+  const wEntries = deps.transitiveDeps.filter(t => t.module.endsWith('w.js'))
+  assert(wEntries.length === 1, `⑩ 同层去重：w.js 仅 1 条（得 ${wEntries.length}：${JSON.stringify(wEntries)}）`)
+}
 
 try { rmSync(WS, { recursive: true, force: true }) } catch {} // Windows：db 连接未关闭时删除被占用文件报 EBUSY——best-effort，路径固定开头会重建
 console.log(`== test-dep-graph-project: ${pass} passed, ${fail} failed ==`)

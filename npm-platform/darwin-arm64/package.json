@@ -1,0 +1,10 @@
+{
+  "name": "@jieai/malong-parse-darwin-arm64",
+  "version": "0.0.0-placeholder",
+  "description": "LiuHe malong-parse binary for darwin-arm64 (Rust language parser service)",
+  "os": ["darwin"],
+  "cpu": ["arm64"],
+  "main": "./bin/malong-parse",
+  "files": ["bin"],
+  "license": "MIT"
+}

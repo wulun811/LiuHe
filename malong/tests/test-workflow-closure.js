@@ -43,6 +43,7 @@ const ctx = {}
   assert(Array.isArray(r.available_txns) && r.available_txns.length >= 1, `② 列出可用事务（得 ${JSON.stringify(r.available_txns)}）`)
   assert(typeof r.suggestion === 'string' && r.suggestion.includes('use an existing transaction'), `② suggestion 指向现有事务（得 ${r.suggestion}）`)
   assert(typeof r.workflow === 'string' && r.workflow.includes('diff_facts') && r.workflow.includes('test_bridge'), `② workflow 闭环字段（得 ${r.workflow}）`)
+  assert(typeof r.message === 'string' && /rolled back|committed|never existed/.test(r.message), `② r58: message 带回滚/提交/过期语境（得 ${r.message}）`)
   const ok = await diff.handle({ workspace_dir: ws, since: `txn:${r.available_txns[0]}` }, ctx)
   assert(!ok.error_code && ok.txn_id === r.available_txns[0], `② suggestion 的事务真实可用（得 ${ok.txn_id}）`)
 }

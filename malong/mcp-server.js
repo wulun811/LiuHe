@@ -35,7 +35,9 @@ const IS_WIN = process.platform === 'win32'
 const PARSE_SERVICE_SOCKET = process.env.MALONG_SOCKET || `/tmp/malong-parse-${UID}.sock`
 const PARSE_SERVICE_TCP_PORT = parseInt(process.env.MALONG_PORT || '31001', 10)
 // r53: MALONG_PARSE_BIN env 覆盖（与 parse-client 对齐——此前启动 daemon 用硬编码路径，运行期重启用 env 路径，用户设 env 后两个路径 daemon 可能并存）
-const PARSE_SERVICE_BIN = process.env.MALONG_PARSE_BIN || process.env.MALONG_PARSE_BIN_ALT || join(os.homedir(), '.local', 'bin', 'malong-parse')
+// r0.4.5-post5: 统一走 parse-bin.js 共享解析（env → npm 平台包 → 包内 server/bin → ~/.local/bin → dev target）
+import { resolveParseBin } from './parse-bin.js'
+const PARSE_SERVICE_BIN = resolveParseBin() ?? join(os.homedir(), '.local', 'bin', 'malong-parse')
 const PARSE_SERVICE_BIN_ALT = join(__dirname, '..', 'malong-parse', 'target', 'release', 'malong-parse')
 
 // r55: Windows 无 /tmp 语义——spawn 锁放用户数据目录，与 parse-stderr.log 同址

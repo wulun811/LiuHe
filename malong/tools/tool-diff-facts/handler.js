@@ -238,7 +238,8 @@ export async function handle(args, context) {
       })
       .filter(Boolean)
       .slice(0, 5)
-    return makeError(ErrorCodes.TXN_NOT_FOUND, `transaction not found: ${since}`, {
+    // r58: message 补语境——事务可能已回滚（rollback 会清 manifest）/已提交/被 cleanup 轮换/或从未存在
+    return makeError(ErrorCodes.TXN_NOT_FOUND, `transaction not found: ${since} (it may have been rolled back, committed, rotated by cleanup, or never existed)`, {
       suggestion: available.length
         ? `use an existing transaction id: ${available.join(', ')} (or since="last_txn" for the latest)`
         : 'no transactions available yet: use edit_transaction(action=begin) to create one, then edit_transaction(action=edit)',

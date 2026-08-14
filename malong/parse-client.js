@@ -77,7 +77,9 @@ const MAX_RETRIES = 2
 const HEARTBEAT_INTERVAL_MS = 15000 // r9(B1)：旧 30s 恰等于服务端 READ_IDLE_TIMEOUT=30s，零裕量竞态（实测 +40ms 即被杀）→ 周期断连；减半留 2 倍裕量
 const CIRCUIT_BREAKER_THRESHOLD = 3
 // r52: MALONG_PARSE_BIN env 覆盖此前只在 describeConfig 生效，_startProcess 用硬编码路径 → env 覆盖静默失效且配置显示与实际运行路径不一致
-const BINARY_PATH = process.env.MALONG_PARSE_BIN || process.env.MALONG_PARSE_BIN_ALT || `${process.env.HOME || '/home'}/.local/bin/malong-parse`
+// r0.4.5-post5: 统一走 parse-bin.js 共享解析（env → npm 平台包 → 包内 server/bin → ~/.local/bin → dev target）
+import { resolveParseBin } from './parse-bin.js'
+const BINARY_PATH = resolveParseBin() ?? `${process.env.HOME || '/home'}/.local/bin/malong-parse`
 const MAX_RESTART_ATTEMPTS = 3
 const RESTART_COOLDOWN_MS = 10000
 const RESTART_ATTEMPTS_DECAY_MS = 300000 // r9(H5)：旧 60s 衰减 + 每进程独立计数 → 二进制坏时「每 60s 复活 3 次」永续 + N 会话放大；拉长到 5min 收敛

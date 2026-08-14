@@ -1,7 +1,7 @@
 {
   "name": "verify_pipeline",
   "version": "1.0.0",
-  "description": "Run lint/test/typecheck from package.json.",
+  "description": "Run lint/test/typecheck from package.json. WARNING: MCP requests have a 120s hard timeout; default is 30s per stage (3 stages = 90s). Large test suites will time out — prefer stages=lint or test_bridge(action=run) for full test runs.",
   "inputSchema": {
     "type": "object",
     "properties": {

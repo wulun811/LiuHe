@@ -248,12 +248,15 @@ async function readOne(args, context) {
     signature_hash: symbol.signature_hash ? `sha256:${symbol.signature_hash}` : null,
   } : null
   const indexRow = codeIndexService?.getFileByPath(filePath)
+  // r58: stale 语义修正——service 层 ensureFreshFile 恒返回对象：{auto_indexed:true}=已重抽 / {auto_indexed:false}=无需重抽（fresh）/
+  // {auto_indexed:false,index_stale:true}=重索引失败。旧 !staleness.auto_indexed 把 fresh 误判 stale（恒 stale:true 矛盾）
+  const staleIndex = staleness?.index_stale === true
   const version = {
     file: fileVersion,
     symbol: symbolVersion,
     index: {
-      index_state: indexRow?.index_state || (codeIndexService ? 'fresh' : 'unknown'),
-      stale: !!staleness && !staleness.auto_indexed,
+      index_state: staleIndex ? 'stale' : (indexRow?.index_state || (codeIndexService ? 'fresh' : 'unknown')),
+      stale: staleIndex,
     },
   }
 
@@ -305,7 +308,8 @@ async function readOne(args, context) {
     outline,
     navigation,
     budget: { requested: budget, used_estimate: body.length, truncated },
-    index_status: { state: version.index.index_state, auto_indexed: staleness?.auto_indexed || false, stale: version.index.stale },
+    // r59: 单一权威出口——state（fresh/dirty/stale/unknown）+ auto_indexed；stale 由 state='stale' 表达，删双字段矛盾源
+    index_status: { state: version.index.index_state, auto_indexed: staleness?.auto_indexed || false },
     pipeline,
     trace_id,
     duration_ms: Date.now() - t0,

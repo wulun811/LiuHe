@@ -1,7 +1,7 @@
 {
   "name": "references",
   "version": "1.0.0",
-  "description": "Cross-file usages of a symbol, incl. usage counts. Use full member path (obj.method). Prefer over grep.",
+  "description": "Cross-file usages of a symbol, incl. usage counts. Use full member path (obj.method). Prefer over grep. AUTO-FRESH: files modified after last index are re-indexed automatically on read — explicit reindex only needed for brand-new workspaces/files.",
   "inputSchema": {
     "type": "object",
     "properties": {

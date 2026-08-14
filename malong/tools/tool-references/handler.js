@@ -95,7 +95,18 @@ export async function handle(args, context) {
       result.suggestion = `No references match kind="${args.kind}" (${result.kind_filtered.dropped} refs of other kinds in index). Remove the kind filter to see them.`
     } else if (fileArg) {
       // R22-⑤（试用发现）：file 限定空结果时权威声明是误导——符号可能在索引其他文件有引用，只是不在该文件内
-      result.suggestion = `No references to "${symbol}" in ${fileArg}. Remove the file filter to search the whole workspace.`
+      // r59：同响应附带全 workspace 预览（cap 20 + total），省一次往返；全 workspace 也空才维持权威声明
+      try {
+        const allRefs = await codeIndexService.getReferences(symbol)
+        if (Array.isArray(allRefs) && allRefs.length > 0) {
+          result.workspace_preview = { total: allRefs.length, results: allRefs.slice(0, 20) }
+          result.suggestion = `No references to "${symbol}" in ${fileArg}, but ${allRefs.length} found elsewhere in workspace — see workspace_preview (first 20). Call references(workspace_dir=..., symbol="${symbol}") without file filter for the full list.`
+        } else {
+          result.suggestion = `No references to "${symbol}" in ${fileArg} nor elsewhere in the workspace index.`
+        }
+      } catch {
+        result.suggestion = `No references to "${symbol}" in ${fileArg}. Remove the file filter to search the whole workspace.`
+      }
     } else {
       result.suggestion = `No references in index for "${symbol}". This is authoritative: the symbol is not referenced by indexed code (or the file is not indexed — reindex(workspace_dir="${workspaceDir}") if files were recently added).`
     }

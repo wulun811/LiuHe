@@ -137,9 +137,12 @@ cd ../malong && npm ci
 
 #    DeepSeek Harness（dsh web）——自动跟随会话工作区（额外便利，可选）：
 #    在 dsh 宿主机上执行一次（Linux/macOS）：
-#      bash malong/dsh/install-dsh.sh         # 幂等；自动备份并修改 ~/.dsh/profiles/web/cordis.patch.yml
-#      pkill -f "dsh web"; dsh web --port 3456 --host 0.0.0.0 --trusted-host <局域网IP>
-#    桥层将 38 个工具注册为 malong__*，并自动用当前对话的工作区填充 workspace_dir
+#      方式一（npm 一行安装，含完整后端与平台二进制）：
+#        dsh plugin --profile web add @jieai/dsh-malong-bridge
+#        pkill -f "dsh web"; dsh web --port 3456 --host 0.0.0.0 --trusted-host <局域网IP>
+#      方式二（脚本安装，指向本仓库副本）：
+#        bash malong/dsh/install-dsh.sh         # 幂等；自动备份并修改 ~/.dsh/profiles/web/cordis.patch.yml
+#    桥层将 44 个工具注册为 malong__*，并自动用当前对话的工作区填充 workspace_dir
 #    （无需每次指定路径；显式传路径仍优先）。完整指南（含索引规则）：malong/dsh/DSH接入说明.md
 ```
 
@@ -242,7 +245,7 @@ node --max-old-space-size=512 mcp-server.js --workspace /path/to/project
 | `MALONG_STATE_DIR` | `~/.config/malong` | 用量 / 反馈 / 编辑统计文件的写入目录。覆盖可重定向状态（测试、沙盒宿主）。读取会回退旧目录 `~/.config/opencode/`，0.3.37 之前的数据不丢。 |
 | `MALONG_SOCKET` | `/tmp/malong-parse-$(id -u).sock` | 解析 daemon 的 Unix socket 路径（Linux / macOS）。 |
 | `MALONG_PORT` | `31001` | 解析 daemon 的 TCP 端口（Windows）。 |
-| `MALONG_PARSE_BIN` | 内置 / PATH 上的 `malong-parse` | 客户端自动拉起 daemon 时用的二进制。 |
+| `MALONG_PARSE_BIN` | npm 平台包 / `~/.local/bin` | 客户端自动拉起 daemon 时用的二进制。解析顺序：本 env → `@jieai/malong-parse-<os>-<arch>` npm 平台包（`@jieai/dsh-malong-bridge` 的 optionalDependencies 按平台自动拉取）→ `~/.local/bin/malong-parse` → `malong-parse/target/release`（开发树）。 |
 | `MALONG_PARSE_MODE` | rust-service | 解析传输方式。v0.7.0 仅支持 `rust-service`（`builtin` / `shadow` 会被拒绝）。 |
 | `MALONG_WS_GC_DAYS` | `14` | 工作区索引缓存闲置多少天后由 `health cleanup` 清理；`0` 禁用。 |
 

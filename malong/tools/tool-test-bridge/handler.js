@@ -193,7 +193,8 @@ function extractTestNames(filePath, workspaceDir) {
     }
     // r10e(F2)：裸 assert/expect 风格兜底（malong 全量测试都是裸 assert 无 test() 包裹）——
     // 无 it/test 提取时，若文件含断言调用则给文件级条目，discover 不再报 no tests found
-    if (tests.length === 0 && /^\s*(?:assert|expect)\(/m.test(content)) {
+    // r58: assert( 太窄——assert.strictEqual(/equal/ok 等方法调用不匹配 → 裸 assert 文件恒漏判；放宽为 assert 方法链
+    if (tests.length === 0 && /^\s*(?:assert(?:\.\w+)?|expect)\(/m.test(content)) {
       tests.push({ name: basename(filePath, extname(filePath)), line: 1 })
     }
     return tests

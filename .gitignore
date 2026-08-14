@@ -8,26 +8,19 @@ node_modules/
 # SQLite 索引 / 缓存
 *.db
 *.db-journal
+
+# dsh bundle 构建产物（用 malong/dsh/bundle/reprep.sh 重建）
+malong/dsh/bundle/server/
+malong/dsh/bundle/*.tgz
+malong/dsh/bundle/dsh-bridge.mjs
+
+# 发布产物
+releases/
+
+# 运行时产物 / 本地配置（不入库）
 *.db-wal
-.index-cache/
-metadata.json
-
-# 临时
-*.log
-.tmp/
-
-# Python
-__pycache__/
-
-# 运行时产物
 .malong/
 data/
-
-# 本地 LLM 客户端配置（含本机绝对路径，不入库；示例见 README）
+__pycache__/
 opencode.json
-
-# 内部文档（不含开源侧）
 malong/docs/
-
-# 打包产物
-releases/

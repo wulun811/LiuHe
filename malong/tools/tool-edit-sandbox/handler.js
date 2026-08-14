@@ -51,14 +51,24 @@ function checkSyntaxBasic(newContent, ext) {
   const stack = []
   let inMultiLineString = false
   let multiLineStringChar = ''
+  let inBlockComment = false
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
     let inString = inMultiLineString
     let stringChar = multiLineStringChar
+    let blockComment = inBlockComment
 
     for (let j = 0; j < line.length; j++) {
       const ch = line[j]
+      // r58: 块注释（含 JSDoc）跳过——旧实现只跳 // 与 #，注释内括号全进 stack，加一行注释误报括号失衡
+      if (blockComment) {
+        if (line.slice(j, j + 2) === '*/') {
+          blockComment = false
+          j++
+        }
+        continue
+      }
       if (inString) {
         if (stringChar.length === 3) {
           if (line.slice(j, j + 3) === stringChar) {
@@ -87,6 +97,8 @@ function checkSyntaxBasic(newContent, ext) {
       if (ch === '"' || ch === "'" || ch === '`') { inString = true; stringChar = ch; continue }
       if (ch === '#' && ext === '.py') break
       if (ch === '/' && line[j + 1] === '/') break
+      // r58: 块注释起点（JSDoc 双星号同样命中）
+      if (ch === '/' && line[j + 1] === '*') { blockComment = true; j++; continue }
 
       if (openers[ch]) {
         stack.push({ char: ch, line: i + 1, col: j + 1 })
@@ -101,6 +113,7 @@ function checkSyntaxBasic(newContent, ext) {
     }
     inMultiLineString = inString && (stringChar.length === 3 || stringChar === '`')
     multiLineStringChar = inMultiLineString ? stringChar : ''
+    inBlockComment = blockComment
   }
 
   for (const unclosed of stack) {

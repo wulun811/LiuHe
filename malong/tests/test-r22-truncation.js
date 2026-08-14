@@ -68,8 +68,24 @@ const ctx = {
   assert(typeof r.suggestion === 'string' && r.suggestion.includes('authoritative'), `③ suggestion 权威声明（得 ${r.suggestion?.slice(0, 60)}...）`)
   // R22-⑤（试用发现）：file 限定空结果——权威声明误导（符号可能在其他文件有引用），改文件专属建议
   const rf = await handle({ workspace_dir: WS, symbol: 'NO_REF_ZZZ', file: 'src/def.js' }, ctx)
+  // r59: 全 workspace 也空 → 权威延伸声明（不再误导性指向解除 file 限定）
   assert(rf.results.length === 0 && typeof rf.suggestion === 'string' && rf.suggestion.includes('No references to "NO_REF_ZZZ" in src/def.js'), `③f file 限定专属建议（得 ${rf.suggestion?.slice(0, 60)}...）`)
-  assert(rf.suggestion.includes('Remove the file filter'), `③f 建议给出解除 file 限定的出路`)
+  assert(rf.suggestion.includes('nor elsewhere in the workspace index'), `③f 全 workspace 空 → 权威延伸声明（得 ${rf.suggestion?.slice(0, 60)}...）`)
+  assert(rf.workspace_preview === undefined, `③f 全 workspace 空时无 workspace_preview`)
+  // ③g r59: file 限定空但全 workspace 有引用 → 同响应附 preview（cap 20 + total），省一次往返
+  const fakeSvc = {
+    initWorkspace: async () => {},
+    ensureFreshFile: async () => ({ auto_indexed: false }),
+    resolveFileArg: (f) => ({ ok: true, path: f }),
+    getReferences: (sym, fileArg) => fileArg ? [] : Array.from({ length: 25 }, (_, i) => ({ file: 'other' + i + '.js', kind: 'call', line: i + 1, name: sym })),
+  }
+  const rg = await handle({ workspace_dir: WS, symbol: 'FAKE_SYM_X', file: 'src/def.js' }, { ...ctx, codeIndexService: fakeSvc })
+  assert(rg.workspace_preview?.total === 25 && rg.workspace_preview?.results?.length === 20, `③g 附 workspace_preview：total=25, 预览 cap 20（得 ${JSON.stringify(rg.workspace_preview?.total)}/${rg.workspace_preview?.results?.length}）`)
+  assert(typeof rg.suggestion === 'string' && rg.suggestion.includes('found elsewhere'), `③g suggestion 指向 preview（得 ${rg.suggestion?.slice(0, 60)}...）`)
+  // ③h r59 失败路径: 无 fileArg 查询抛异常 → 退回旧指引（catch 分支不炸）
+  const boomSvc = { ...fakeSvc, getReferences: (sym, fileArg) => { if (fileArg) return []; throw new Error('db locked') } }
+  const rh = await handle({ workspace_dir: WS, symbol: 'FAKE_SYM_X', file: 'src/def.js' }, { ...ctx, codeIndexService: boomSvc })
+  assert(rh.workspace_preview === undefined && typeof rh.suggestion === 'string' && rh.suggestion.includes('Remove the file filter'), `③h 查询异常 → 退回旧指引（得 ${rh.suggestion?.slice(0, 60)}...）`)
 }
 
 // ── ④ config_drift：全扫排除 tests/fixtures + file 模式不受影响（独立 WS3） ──
@@ -79,6 +95,8 @@ const ctx = {
   writeFileSync(join(WS3, 'src', 'real.js'), 'const a = process.env.REAL_VAR_X\n')
   writeFileSync(join(WS3, 'tests', 'fixtures', 'mock.js'), 'const b = process.env.MOCK_VAR_X\n')
   writeFileSync(join(WS3, 'tests', 'unit.js'), 'const c = process.env.TEST_VAR_X\n')
+  // r58: 无 env 文件会走 env_manifest_absent（不逐条 drift）——本测试验证排除逻辑，补空清单让 drift 检测生效
+  writeFileSync(join(WS3, '.env.example'), '# empty\n')
   const full = await handle({ workspace_dir: WS3 }, {})
   const names = (full.drifts || []).map(d => d.name)
   assert(names.includes('REAL_VAR_X'), `④ 全扫：src 真变量报（得 ${names.join(',')}）`)

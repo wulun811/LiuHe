@@ -1,7 +1,7 @@
 {
   "name": "code_search",
   "version": "1.0.0",
-  "description": "NL intent search when symbol name unknown (known name? symbol_search).",
+  "description": "NL intent search when symbol name unknown (known name? symbol_search). DETERMINISTIC token+intent matching, NOT semantic/embedding search — long natural-language sentences degrade to loose file-level hits (0.5); prefer precise symbol/file names.",
   "inputSchema": {
     "type": "object",
     "properties": {

@@ -193,8 +193,10 @@ export async function handle(args, context) {
   const services = parseDockerCompose(workspaceDir)
 
   const drifts = []
+  // r58: 无任何 env 文件（.env/.env.example/...）时逐条 missing_env_var 全误报——清单缺失本身才是问题，改用 manifest_absent 提示
+  const envManifestAbsent = allRefs.some(ref => ref.type === 'env_var' && !CI_BUILTIN_VARS.has(ref.name)) && env.files.length === 0
   for (const ref of allRefs) {
-    if (ref.type === 'env_var' && !env.vars.has(ref.name) && !CI_BUILTIN_VARS.has(ref.name)) {
+    if (ref.type === 'env_var' && !CI_BUILTIN_VARS.has(ref.name) && !envManifestAbsent && !env.vars.has(ref.name)) {
       drifts.push({
         type: 'missing_env_var',
         name: ref.name,
@@ -223,7 +225,9 @@ export async function handle(args, context) {
   })
 
   let nextStep = null
-  if (uniqueDrifts.length > 0) {
+  if (envManifestAbsent) {
+    nextStep = `No env manifest found (.env/.env.example): create .env.example listing referenced vars, then re-run.`
+  } else if (uniqueDrifts.length > 0) {
     nextStep = `Add missing vars to .env.example via edit_transaction, then re-run to verify.`
   } else {
     nextStep = `Config is in sync.`
@@ -235,6 +239,7 @@ export async function handle(args, context) {
     // R22-④（审核修复）：全扫 200 文件上限 + 展示 50 条上限都标注——截断必标注（R17 精神）
     ...(file ? {} : { scan_files_capped: filesCapped }),
     ...(allRefs.length > 50 ? { config_references_truncated: allRefs.length - 50 } : {}),
+    ...(envManifestAbsent ? { env_manifest_absent: true, note: `No env file found (checked .env/.env.example/.env.local/.env.development/.env.production); ${allRefs.filter(r => r.type === 'env_var' && !CI_BUILTIN_VARS.has(r.name)).length} env var reference(s) skipped from drift check — create .env.example to enable comparison.` } : {}),
     drifts: uniqueDrifts,
     config_manifest: {
       env_files: env.files,
