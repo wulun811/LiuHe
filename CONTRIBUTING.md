@@ -9,7 +9,7 @@ malong/          MCP toolset (Node.js, ESM)
   tools/         one directory per tool: handler.js + manifest.json
   tests/         test suites (test-*.js) — require a running malong-parse daemon
 malong-parse/    Rust parsing service (tree-sitter, Unix socket daemon)
-scripts/         ci.sh / release.sh / sync-from-dev.sh
+scripts/         ci.sh / release.sh
 ```
 
 ## Development workflow

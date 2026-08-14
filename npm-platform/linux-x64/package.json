@@ -2,9 +2,15 @@
   "name": "@jieai/malong-parse-linux-x64",
   "version": "0.0.0-placeholder",
   "description": "LiuHe malong-parse binary for linux-x64 (Rust language parser service)",
-  "os": ["linux"],
-  "cpu": ["x64"],
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "x64"
+  ],
   "main": "./bin/malong-parse",
-  "files": ["bin"],
+  "files": [
+    "bin"
+  ],
   "license": "MIT"
 }

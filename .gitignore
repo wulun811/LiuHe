@@ -24,3 +24,6 @@ data/
 __pycache__/
 opencode.json
 malong/docs/
+
+# npm 平台子包二进制（CI 发布时生成）
+npm-platform/*/bin/

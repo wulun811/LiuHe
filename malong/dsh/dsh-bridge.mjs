@@ -1,12 +1,15 @@
-// malong-dsh-bridge — 六合工具集 DSH 适配插件（cordis）
-// 自包含最小 MCP stdio client：spawn mcp-server.js → 注册 malong__* 工具 →
-// 每次调用自动注入 workspace_dir = 当前会话工作区（exec.agent.session.header.cwd）。
-// 模型显式传 workspace_dir 时尊重；工具 schema 中 workspace_dir 改为可选（DSH 侧）。
-// 输出结构化：content 为单个 text block 且是合法 JSON 时解析进 structuredContent，
-// 模型直接看对象（含 {error:{code,message}} 错误信封），无需手动 JSON.parse。
-// 不依赖 dsh-mcp-client，不修改 dsh node_modules，dsh 升级无损。
-// 注意：不 import 任何 @deepseek-ai/* 包（插件随六合工具集分发，可能解析不到 dsh 的
-// node_modules）；Config 也刻意不导出（cordis 无 Config 时原样透传配置）。
+// malong-dsh-bridge — LiuHe DSH adapter plugin (cordis)
+// Self-contained minimal MCP stdio client: spawns mcp-server.js → registers malong__* tools →
+// auto-injects workspace_dir = current session workspace (exec.agent.session.header.cwd) on
+// every call. Explicit workspace_dir from the model is respected; the tool schema marks
+// workspace_dir optional (DSH side).
+// Structured output: when content is a single text block and valid JSON, it is parsed into
+// structuredContent so the model sees the object directly (including the {error:{code,message}}
+// envelope) without manual JSON.parse.
+// No dependency on dsh-mcp-client; does not modify dsh node_modules; dsh upgrades are safe.
+// Note: does NOT import any @deepseek-ai/* package (the plugin ships with LiuHe and may not
+// resolve dsh's node_modules); Config is intentionally not exported (cordis passes config
+// through untouched when absent).
 import { spawn } from "node:child_process"
 import { createInterface } from "node:readline"
 import { dirname, join } from "node:path"
@@ -23,7 +26,7 @@ function publicToolName(rawName) {
   return `${SERVER_NAME}__${rawName}`
 }
 
-/** dsh 工具注册要求的 output 结构（与 dsh-mcp-client 的 createOutput 等价，含原生文本投影）。 */
+/** Output shape required by dsh tool registration (equivalent to dsh-mcp-client's createOutput, with a native text projection). */
 function createOutput(rawName) {
   return {
     schema: {
@@ -137,7 +140,7 @@ async function apply(ctx, config) {
     if (parameters && typeof parameters === "object" && parameters.properties?.workspace_dir) {
       parameters = JSON.parse(JSON.stringify(parameters))
       const prop = parameters.properties.workspace_dir
-      prop.description = `${prop.description ?? ""}（DSH 桥：可省略，省略时自动使用当前会话工作区）`
+      prop.description = `${prop.description ?? ""} (DSH bridge: optional; omitted when the current session workspace is used automatically)`
       const required = Array.isArray(parameters.required) ? parameters.required.filter((k) => k !== "workspace_dir") : parameters.required
       if (Array.isArray(required) && required.length === 0) delete parameters.required
       else if (Array.isArray(required)) parameters.required = required

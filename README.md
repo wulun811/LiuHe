@@ -143,7 +143,7 @@ cd ../malong && npm ci
 #        bash malong/dsh/install-dsh.sh         # idempotent; edits ~/.dsh/profiles/web/cordis.patch.yml with backup
 #    The bridge registers all 44 tools as malong__* and auto-fills workspace_dir from the
 #    current conversation's workspace (no per-call path needed; explicit paths still win).
-#    Full guide incl. index rules: malong/dsh/DSH接入说明.md
+#    Full guide incl. index rules: malong/dsh/DSH-INTEGRATION.md
 ```
 
 > **SQL backend note:** the default is the full `better-sqlite3` backend. If `npm install` fails (offline / no build toolchain / Node < 20), the server automatically degrades to the **vendored sql.js WASM sandbox backend** (`malong/vendor/`, zero-dependency, no network) — the startup log shows which backend is active and the upgrade command. Data files are fully compatible between backends (both are SQLite).

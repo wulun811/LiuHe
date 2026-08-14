@@ -1,8 +1,8 @@
 # @jieai/dsh-malong-bridge
 
-六合工具集（LiuHe / malong）官方 DSH（DeepSeek Harness）插件。一行命令把 44 个
-`malong__*` MCP 工具装进 dsh web，且 **malong 的工作区自动跟随当前对话的工作区**
-（选哪个区管哪个区），无需手动指定路径。
+Official DSH (DeepSeek Harness) plugin for LiuHe / malong. One command puts all 44
+`malong__*` MCP tools into dsh web, and **malong's workspace automatically follows
+the current conversation's workspace** — no need to pass a path manually.
 
 ```bash
 dsh plugin --profile web add @jieai/dsh-malong-bridge
@@ -10,16 +10,18 @@ pkill -f "dsh web"
 dsh web --port 3456 --host 0.0.0.0
 ```
 
-安装即用：桥层自动定位包内 `server/mcp-server.js`（含完整工具集后端，唯一原生
-依赖 better-sqlite3 有跨平台预编译），无需额外部署。
+Works out of the box: the bridge locates the bundled `server/mcp-server.js`
+(complete toolset backend; the only native dependency, better-sqlite3, ships
+cross-platform precompiled binaries), so no extra deployment is needed.
 
-> **pnpm 10 提示 `Ignored build scripts: better-sqlite3` 时**：这是 pnpm 的
-> 默认安全策略（阻止依赖 postinstall）。运行 `pnpm approve-builds` 并在列表里
-> 勾选 `better-sqlite3`（或直接编辑 `~/.dsh/profiles/web/pnpm-workspace.yaml`
-> 在 `onlyBuiltDependencies` 下加 `better-sqlite3`，然后 `pnpm rebuild better-sqlite3`）。
-> 不处理则 better-sqlite3 无原生二进制，工具调用会失败。
+> **pnpm 10 warns `Ignored build scripts: better-sqlite3`**: that is pnpm's
+> default security policy (blocks dependency postinstall scripts). Run
+> `pnpm approve-builds` and check `better-sqlite3` in the list (or edit
+> `~/.dsh/profiles/web/pnpm-workspace.yaml` and add `better-sqlite3` under
+> `onlyBuiltDependencies`, then `pnpm rebuild better-sqlite3`).
+> Without this, better-sqlite3 has no native binary and tool calls will fail.
 
-## 卸载
+## Uninstall
 
 ```bash
 dsh plugin --profile web remove @jieai/dsh-malong-bridge
@@ -27,56 +29,63 @@ pkill -f "dsh web"
 dsh web --port 3456 --host 0.0.0.0
 ```
 
-## 配置（可选，默认零配置）
+## Configuration (optional, zero-config by default)
 
-| 环境变量 | 默认 | 说明 |
+| Env var | Default | Description |
 |---|---|---|
-| `MALONG_SERVER_PATH` | 包内 `server/mcp-server.js` | 覆盖 mcp-server 入口（如指向自己的 LiuHe 开发副本） |
-| `MALONG_STATE_DIR` | `~/.local/state/malong-dsh` | 索引/状态存储目录（所有工作区按 hash 隔离其下） |
-| `MALONG_TOOL_TIMEOUT_MS` | `300000` | 单次工具调用超时 |
+| `MALONG_SERVER_PATH` | bundled `server/mcp-server.js` | Override the mcp-server entry (e.g. point at your own LiuHe dev copy) |
+| `MALONG_STATE_DIR` | `~/.local/state/malong-dsh` | Index/state storage dir (all workspaces isolated under it by hash) |
+| `MALONG_TOOL_TIMEOUT_MS` | `300000` | Per tool call timeout |
 
-也可在 profile 的 `cordis.patch.yml`（用户层，后应用覆盖）里给 `malong-dsh-bridge`
-条目写 `config:` 覆盖。
+You can also write a `config:` override on the `malong-dsh-bridge` entry in the
+profile's `cordis.patch.yml` (user layer, applied later).
 
-## 工作机制
+## How It Works
 
 ```
-DSH Agent → malong__read_symbol(...)（不传 workspace_dir）
-         → dsh-bridge 注入 workspace_dir = 当前会话工作区
-         → malong mcp-server（spawn 子进程）→ 按路径 hash 隔离建索引
+DSH Agent → malong__read_symbol(...) (no workspace_dir)
+         → dsh-bridge injects workspace_dir = current session workspace
+         → malong mcp-server (spawned subprocess) → per-path-hash isolated indexes
 ```
 
-- **工作区动态跟随**：dsh 每次工具执行都携带会话工作区
-  （`exec.agent.session.header.cwd`），桥层自动注入；模型显式传路径时尊重（可跨区管理）。
-- **状态目录隔离**：索引按工作区路径 hash 隔离在 `MALONG_STATE_DIR` 下，与项目目录无关。
-- **零侵入**：不改 dsh 的 node_modules，dsh 升级无损。
+- **Dynamic workspace follow**: every tool invocation carries the session
+  workspace (`exec.agent.session.header.cwd`); the bridge injects it
+  automatically; explicit paths from the model are respected (cross-workspace
+  management).
+- **State isolation**: indexes are hash-isolated by workspace path under
+  `MALONG_STATE_DIR`, unrelated to any project directory.
+- **Zero intrusion**: does not touch dsh's node_modules; dsh upgrades are safe.
 
-> **平台支持（自动）**：`malong-parse`（Rust 解析服务）以 esbuild 式平台子包随装——
-> 主包 `optionalDependencies` 声明 `@jieai/malong-parse-linux-x64` /
-> `-darwin-x64` / `-darwin-arm64` / `-win32-x64`，安装时 npm/pnpm 按当前 os/cpu
-> 自动只拉对应平台二进制，无需手动配置。其他平台/自定义二进制可用
-> `MALONG_PARSE_BIN` 环境变量覆盖。
+> **Platform support (automatic)**: `malong-parse` (the Rust parsing service)
+> ships as esbuild-style platform subpackages — the main package declares
+> `@jieai/malong-parse-linux-x64` / `-darwin-x64` / `-darwin-arm64` /
+> `-win32-x64` in `optionalDependencies`, and npm/pnpm pulls only the binary for
+> the current os/cpu at install time. Other platforms / custom binaries can be
+> provided via the `MALONG_PARSE_BIN` env var.
 
-## 与官方 dsh-mcp-client 的差异
+## Differences vs. the official dsh-mcp-client
 
-官方 `dsh-mcp-client` 桥接单个 MCP server；本插件的桥自带 **动态 workspace 注入**
-（每次调用按会话工作区填 `workspace_dir`，模型无需感知路径）——这是 LiuHe 独有的能力。
+The official `dsh-mcp-client` bridges a single MCP server; this plugin's bridge
+adds **dynamic workspace injection** (fills `workspace_dir` per invocation from
+the session workspace, so the model never needs to know the path) — a
+capability unique to LiuHe.
 
-## 常见问题
+## Troubleshooting
 
-| 现象 | 处理 |
+| Symptom | Fix |
 |---|---|
-| 日志报 `mcp tools/list timeout` | 确认安装完整（`dsh plugin` 后 node_modules 无报错）；重启 dsh |
-| 对话里工具列表无 `malong__*` | `dsh web --dump-config \| grep malong` 确认 bundle 层挂上；强刷浏览器 |
-| 调用报 `missing_parameter: workspace_dir` | 会话未关联工作区（无 cwd）时无法注入；对话里指明路径即可 |
-| dsh 升级后插件失效 | 插件在 profile 层，dsh 升级不影响；若 cordis 接口变更，重装插件即可 |
+| Log shows `mcp tools/list timeout` | Verify the install is complete (`dsh plugin` reports no node_modules errors); restart dsh |
+| No `malong__*` tools in the conversation | Confirm the bundle layer is attached (`dsh web --dump-config \| grep malong`); hard-refresh the browser |
+| Call fails with `missing_parameter: workspace_dir` | The conversation has no workspace (no cwd) to inject; pass a path in the prompt |
+| Plugin stops working after a dsh upgrade | The plugin lives at the profile layer, upgrades do not affect it; if the cordis interface changes, reinstall the plugin |
 
-## 索引规则（透明化）
+## Index Rules (Transparency)
 
-- **默认忽略**：`node_modules`、`.git`、`dist`、`build`、`target`、`coverage`、
-  `__pycache__`、`.venv`、`.malong`、`.ai-transactions`、`vendor` 等
-- **md/json 不进索引**：只索引代码文件；查文档内容请用 read 工具
-- **`.malongignore` 自定义**：项目根放该文件可白名单式排除目录（每行一条；支持 `*` 通配；最多 100 条）
+- **Default ignored**: `node_modules`, `.git`, `dist`, `build`, `target`,
+  `coverage`, `__pycache__`, `.venv`, `.malong`, `.ai-transactions`, `vendor`, etc.
+- **md/json not indexed**: only code files are indexed; use a read tool for documents
+- **`.malongignore` customization**: a `.malongignore` file at the project root
+  excludes directories allowlist-style (one per line; `*` wildcards supported; max 100 entries)
 
 ## License
 
