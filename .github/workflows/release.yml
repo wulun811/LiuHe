@@ -64,7 +64,8 @@ jobs:
             cp malong-parse/target/release/malong-parse "$DIR/bin/"
           fi
           chmod +x "$DIR"/bin/* || true
-          sed -i "s/0.0.0-placeholder/$VER/" "$DIR/package.json"
+          # -i.bak: BSD sed (macOS) requires a backup suffix argument; GNU sed accepts it too
+          sed -i.bak "s/0.0.0-placeholder/$VER/" "$DIR/package.json" && rm -f "$DIR/package.json.bak"
 
       # Publish only on tag pushes (the workflow only triggers on v* tags anyway)
       - name: Publish npm platform package
