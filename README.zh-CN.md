@@ -2,8 +2,9 @@
 
 **LLM-Native 代码操作工具链** — 为无手、无眼、无记忆的 LLM 重新发明代码操作。
 
-[English](README.md) | **简体中文** | [官方文档](https://www.ttimmortal.com/) | [GitHub](https://github.com/wulun811/LiuHe)
+[English](README.md) | **简体中文** | [官方文档](https://wulun811.github.io/LiuHe) | [GitHub](https://github.com/wulun811/LiuHe)
 
+[![wulun811/LiuHe MCP server](https://glama.ai/mcp/servers/wulun811/LiuHe/badges/score.svg)](https://glama.ai/mcp/servers/wulun811/LiuHe)
 ![tests](https://img.shields.io/badge/tests-2013%20assertions%20passed-brightgreen)
 ![tools](https://img.shields.io/badge/tools-44%20MCP-blue)
 ![languages](https://img.shields.io/badge/parsers-10%20languages-brightgreen)
@@ -14,7 +15,7 @@
 ![throughput](https://img.shields.io/badge/throughput-588%20calls%2Fs-blue)
 ![token](https://img.shields.io/badge/token%20savings-65%25-brightgreen)
 ![license](https://img.shields.io/badge/license-MIT-blue)
-![version](https://img.shields.io/badge/version-0.4.5-blue)
+![version](https://img.shields.io/badge/version-0.4.5--post7-blue)
 ![commits](https://img.shields.io/badge/commits-264-blue)
 
 **码龙·六合工具** 是一套**为 LLM 而非人类设计**的代码操作工具链，包含两个组件：

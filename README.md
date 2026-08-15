@@ -2,8 +2,9 @@
 
 **LLM-Native Code Operations Toolkit** — Code tooling reinvented for the LLM that has no hands, no eyes, and no memory.
 
-**English** | [简体中文](README.zh-CN.md) | [Docs](https://www.ttimmortal.com/) | [GitHub](https://github.com/wulun811/LiuHe)
+**English** | [简体中文](README.zh-CN.md) | [Docs](https://wulun811.github.io/LiuHe) | [GitHub](https://github.com/wulun811/LiuHe)
 
+[![wulun811/LiuHe MCP server](https://glama.ai/mcp/servers/wulun811/LiuHe/badges/score.svg)](https://glama.ai/mcp/servers/wulun811/LiuHe)
 ![tests](https://img.shields.io/badge/tests-2013%20assertions%20passed-brightgreen)
 ![tools](https://img.shields.io/badge/tools-44%20MCP-blue)
 ![languages](https://img.shields.io/badge/parsers-10%20languages-brightgreen)
@@ -14,7 +15,7 @@
 ![throughput](https://img.shields.io/badge/throughput-588%20calls%2Fs-blue)
 ![token](https://img.shields.io/badge/token%20savings-65%25-brightgreen)
 ![license](https://img.shields.io/badge/license-MIT-blue)
-![version](https://img.shields.io/badge/version-0.4.5-blue)
+![version](https://img.shields.io/badge/version-0.4.5--post7-blue)
 ![commits](https://img.shields.io/badge/commits-264-blue)
 
 **Malong LiuHe** is a toolkit built for LLMs rather than humans. It ships two components:
