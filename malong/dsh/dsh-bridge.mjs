@@ -79,59 +79,142 @@ async function apply(ctx, config) {
   }
   const stateDir = typeof cfg.stateDir === "string" && cfg.stateDir !== "" ? cfg.stateDir : join(os.homedir(), ".local", "state", "malong-dsh")
   const timeoutMs = typeof cfg.toolCallTimeoutMs === "number" && cfg.toolCallTimeoutMs > 0 ? cfg.toolCallTimeoutMs : 300000
+  const BRIDGE_VERSION = "0.4.5-post7"
   const logger = (msg) => process.stderr.write(`[malong-dsh-bridge] ${msg}\n`)
 
   mkdirSync(stateDir, { recursive: true })
-  const child = spawn(process.execPath, [serverPath, "--workspace", stateDir], {
-    cwd: dirname(serverPath),
-    stdio: ["pipe", "pipe", "pipe"],
-  })
-  child.stderr.on("data", (chunk) => {
-    for (const line of String(chunk).split("\n")) {
-      if (line.trim()) logger(`server: ${line.trim()}`)
-    }
-  })
-
   const pending = new Map()
   let seq = 0
-  const rl = createInterface({ input: child.stdout })
-  rl.on("line", (line) => {
-    let msg
-    try {
-      msg = JSON.parse(line)
-    } catch {
-      return
+  let child = null
+  let rl = null
+  let backoffMs = 1000
+  let restartTimer = null
+  let disposed = false
+
+  const failFast = (reason) => {
+    for (const [id, waiter] of pending) {
+      pending.delete(id)
+      waiter.reject(reason)
     }
-    if (msg.id === void 0) return
-    const waiter = pending.get(msg.id)
-    if (!waiter) return
-    pending.delete(msg.id)
-    if (msg.error) waiter.reject(new Error(msg.error.message ?? "mcp error"))
-    else waiter.resolve(msg.result)
-  })
+  }
 
-  const request = (method, params) => new Promise((resolve, reject) => {
-    const id = String(++seq)
-    pending.set(id, { resolve, reject })
-    child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`)
-    setTimeout(() => {
-      if (pending.has(id)) {
-        pending.delete(id)
-        reject(new Error(`mcp ${method} timeout after ${timeoutMs}ms`))
+  const scheduleRestart = () => {
+    if (disposed || restartTimer) return
+    logger(`mcp-server restart scheduled in ${Math.round(backoffMs / 1000)}s (serverPath=${serverPath})`)
+    restartTimer = setTimeout(async () => {
+      restartTimer = null
+      if (disposed) return
+      const tools = await connect()
+      // 仅当真正失败（且无新 child 已接管）才续调度，避免 child 存在时空转
+      if (tools === null && !child) scheduleRestart()
+    }, backoffMs)
+    backoffMs = Math.min(backoffMs * 2, 30000)
+  }
+
+  const connect = async () => {
+    if (disposed || child) return null
+    const c = spawn(process.execPath, [serverPath, "--workspace", stateDir, "--max-old-space-size=512"], {
+      cwd: dirname(serverPath),
+      stdio: ["pipe", "pipe", "pipe"],
+    })
+    child = c
+    c.stderr.on("data", (chunk) => {
+      for (const line of String(chunk).split("\n")) {
+        if (line.trim()) logger(`server: ${line.trim()}`)
       }
-    }, timeoutMs)
-  })
+    })
+    // EPIPE 吞掉记日志：child 死亡后首次 stdin.write 若不监听会以 unhandled error 崩掉 dsh 进程；
+    // 管道断 = server 已死（exit 事件可能未到），顺手 failFast 堵住窗口期
+    c.stdin.on("error", (err) => {
+      logger(`server stdin error: ${err.code ?? err.message} (ignored)`)
+      failFast(new Error("malong mcp-server connection lost; restarting — retry shortly"))
+    })
+    c.on("error", (err) => {
+      // spawn 失败（serverPath 坏/文件缺失）：Node 只发 'error' 不发 'exit'，
+      // 必须在这里清 child + 续调度，否则 watchdog 永远失效
+      const wasCurrent = child === c
+      child = null
+      if (rl) {
+        rl.close()
+        rl = null
+      }
+      logger(`mcp-server spawn error: ${err.code ?? err.message}`)
+      failFast(new Error("malong mcp-server failed to start; restarting — retry shortly"))
+      if (wasCurrent) scheduleRestart()
+    })
+    c.on("exit", (code, signal) => {
+      const wasCurrent = child === c
+      child = null
+      if (rl) {
+        rl.close()
+        rl = null
+      }
+      // fail-fast：pending 立即 reject，不留 300s 空挂
+      failFast(new Error("malong mcp-server exited; restarting — retry shortly"))
+      if (wasCurrent) {
+        logger(`mcp-server exited (code=${code}, signal=${signal})`)
+        scheduleRestart()
+      }
+    })
+    rl = createInterface({ input: c.stdout })
+    rl.on("line", (line) => {
+      let msg
+      try {
+        msg = JSON.parse(line)
+      } catch {
+        return
+      }
+      if (msg.id === void 0) return
+      const waiter = pending.get(msg.id)
+      if (!waiter) return
+      pending.delete(msg.id)
+      if (msg.error) waiter.reject(new Error(msg.error.message ?? "mcp error"))
+      else waiter.resolve(msg.result)
+    })
+    try {
+      const init = await request("initialize", {
+        protocolVersion: "2024-11-05",
+        capabilities: {},
+        clientInfo: { name: "malong-dsh-bridge", version: BRIDGE_VERSION },
+      })
+      logger(`initialized protocol=${init?.protocolVersion}`)
+      const listed = await request("tools/list", {})
+      const tools = Array.isArray(listed?.tools) ? listed.tools : []
+      logger(`tools/list: ${tools.length} tools`)
+      backoffMs = 1000
+      return tools
+    } catch (e) {
+      logger(`connect failed: ${e.message}`)
+      try { c.kill() } catch {}
+      return null
+    }
+  }
 
-  const init = await request("initialize", {
-    protocolVersion: "2024-11-05",
-    capabilities: {},
-    clientInfo: { name: "malong-dsh-bridge", version: "0.4.5.post1" },
-  })
-  logger(`initialized protocol=${init?.protocolVersion}`)
+  const request = (method, params) => {
+    if (!child) return Promise.reject(new Error("malong mcp-server restarting — retry shortly"))
+    return new Promise((resolve, reject) => {
+      const id = String(++seq)
+      pending.set(id, { resolve, reject })
+      child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`)
+      setTimeout(() => {
+        if (pending.has(id)) {
+          pending.delete(id)
+          reject(new Error(`mcp ${method} timeout after ${timeoutMs}ms`))
+        }
+      }, timeoutMs)
+    })
+  }
 
-  const listed = await request("tools/list", {})
-  const tools = Array.isArray(listed?.tools) ? listed.tools : []
-  logger(`tools/list: ${tools.length} tools`)
+  // 首次连接：重试直到成功（spawn 失败 / init 超时都继续退避）
+  let tools = null
+  while (tools === null && !disposed) {
+    tools = await connect()
+    if (tools === null) {
+      logger(`initial connect failed; retrying in ${Math.round(backoffMs / 1000)}s`)
+      await new Promise((r) => setTimeout(r, backoffMs))
+    }
+  }
+  logger(`bridge ready (${tools.length} tools, version=${BRIDGE_VERSION})`)
 
   let registered = 0
   for (const tool of tools) {
@@ -191,7 +274,13 @@ async function apply(ctx, config) {
   logger(`registered ${registered} tools (serverName=${SERVER_NAME}, stateDir=${stateDir})`)
 
   ctx.on("dispose", () => {
-    child.kill()
+    disposed = true
+    if (restartTimer) {
+      clearTimeout(restartTimer)
+      restartTimer = null
+    }
+    failFast(new Error("malong-dsh-bridge disposed"))
+    child?.kill()
   })
 }
 

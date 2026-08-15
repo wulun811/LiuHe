@@ -1,6 +1,6 @@
 {
   "name": "malong",
-  "version": "0.4.5-post6",
+  "version": "0.4.5-post7",
   "description": "码龙 MCP 工具集 — LLM-Native 代码操作工具链（六合工具集底层 AST 基础设施）",
   "type": "module",
   "engines": {

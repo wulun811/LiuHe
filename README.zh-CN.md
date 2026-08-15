@@ -144,6 +144,9 @@ cd ../malong && npm ci
 #        bash malong/dsh/install-dsh.sh         # 幂等；自动备份并修改 ~/.dsh/profiles/web/cordis.patch.yml
 #    桥层将 44 个工具注册为 malong__*，并自动用当前对话的工作区填充 workspace_dir
 #    （无需每次指定路径；显式传路径仍优先）。完整指南（含索引规则）：malong/dsh/DSH-INTEGRATION.md
+#    故障排查：若所有 malong__* 调用都卡到超时 = 桥的 mcp-server 子进程已死。
+#    桥现在会自动重拉（指数退避，挂起调用立即失败并提示 restarting）；仍失败则
+#    重启 dsh web：kill <dsh web pid> && dsh web --port 3456 ...
 ```
 
 > **SQL 后端说明**：默认使用 `better-sqlite3` 完整版。若 `npm install` 失败（离线 / 无编译工具链 / Node < 20），服务自动降级为仓库内置的 **sql.js WASM 沙盒后端**（`malong/vendor/`，零依赖、无需网络）——启动日志会提示当前后端与升级命令。两后端数据文件完全兼容（都是 SQLite 格式）。

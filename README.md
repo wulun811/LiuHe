@@ -144,6 +144,10 @@ cd ../malong && npm ci
 #    The bridge registers all 44 tools as malong__* and auto-fills workspace_dir from the
 #    current conversation's workspace (no per-call path needed; explicit paths still win).
 #    Full guide incl. index rules: malong/dsh/DSH-INTEGRATION.md
+#    Troubleshooting: if EVERY malong__* call hangs until timeout, the bridge's
+#    mcp-server subprocess is gone. The bridge now auto-restarts it (exponential
+#    backoff, pending calls fail fast with "restarting — retry shortly"); if that
+#    keeps failing, restart dsh web: kill <dsh web pid> && dsh web --port 3456 ...
 ```
 
 > **SQL backend note:** the default is the full `better-sqlite3` backend. If `npm install` fails (offline / no build toolchain / Node < 20), the server automatically degrades to the **vendored sql.js WASM sandbox backend** (`malong/vendor/`, zero-dependency, no network) — the startup log shows which backend is active and the upgrade command. Data files are fully compatible between backends (both are SQLite).
