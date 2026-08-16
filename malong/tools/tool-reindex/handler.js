@@ -217,8 +217,25 @@ export async function handle(args, context) {
     }, log)
   }
 
-  // 阶段三：超阈值且未确认 → needs_review + 二次确认（token 复用未过期值）
+  // 阶段三：超阈值且未确认 → 先查已索引过（fresh）则免确认，否则 needs_review + 二次确认
   if (overThreshold) {
+    // 反馈修复（2026-08-16）：超阈值工作区已索引过时免二次确认——
+    // 否则每次带 workspace_dir 调用都重跑预检 + 要 confirm token，即使索引已 up-to-date
+    const last = codeIndexService.lastIndexed
+    if (last && last.workspace_dir === workspaceDir && args?.force !== true) {
+      return {
+        status: 'completed',
+        done: true,
+        workspace_dir: workspaceDir,
+        total_files: totalFiles,
+        files_indexed: 0,
+        unchanged_skipped: totalFiles,
+        already_fresh: true,
+        symbols: last.symbols,
+        refs: last.refs,
+        note: 'Workspace already indexed and exceeds threshold — no confirmation needed; index is up to date. Pass force=true to force a full re-extract.',
+      }
+    }
     const estimateSec = estimateIndexSeconds(totalFiles)
     const existing = _confirmTokens.get(workspaceDir)
     const token = existing && existing.expiresAt >= Date.now()
