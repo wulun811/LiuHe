@@ -15,7 +15,7 @@
 ![throughput](https://img.shields.io/badge/throughput-588%20calls%2Fs-blue)
 ![token](https://img.shields.io/badge/token%20savings-65%25-brightgreen)
 ![license](https://img.shields.io/badge/license-MIT-blue)
-![version](https://img.shields.io/badge/version-0.4.5--post7-blue)
+![version](https://img.shields.io/badge/version-0.4.5--post8-blue)
 ![commits](https://img.shields.io/badge/commits-264-blue)
 
 **码龙·六合工具** 是一套**为 LLM 而非人类设计**的代码操作工具链，包含两个组件：

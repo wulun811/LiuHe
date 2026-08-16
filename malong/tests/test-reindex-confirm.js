@@ -145,5 +145,22 @@ console.log('── ⑥ maxFiles 非数字 → 安全回退默认 ──')
   try { rmSync(ws, { recursive: true, force: true }) } catch {}
 }
 
+console.log('── ⑩ 超阈值 + 已索引（fresh）→ 免确认 completed；force=true 仍确认 ──')
+{
+  const ws = mkws(7)
+  const svc = mockService()
+  const first = await handle({ workspace_dir: ws, threshold: 3 }, { codeIndexService: svc, log: () => {} })
+  await handle({ workspace_dir: ws, threshold: 3, confirm: first.confirm_token, blocking: true }, { codeIndexService: svc, log: () => {} })
+  // lastIndexed 已存在且 workspace_dir 匹配 → 超阈值 fresh 免确认
+  const r = await handle({ workspace_dir: ws, threshold: 3 }, { codeIndexService: svc, log: () => {} })
+  assert(r.status === 'completed' && r.already_fresh === true, `超阈值 fresh 免确认（得 ${r.status}/${r.already_fresh}）`)
+  assert(!r.confirm_required && r.files_indexed === 0, `fresh 不要求确认且不重索引（confirm_required=${r.confirm_required} files_indexed=${r.files_indexed}）`)
+  assert(svc.lastBatch && svc.lastBatch.length === 7, 'fresh 时不触发新的 indexBatch（复用上次索引）')
+  // force=true 仍走确认（用户想强制重索引）
+  const rf = await handle({ workspace_dir: ws, threshold: 3, force: true }, { codeIndexService: svc, log: () => {} })
+  assert(rf.status === 'needs_review', `force=true 仍 needs_review（得 ${rf.status}）`)
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
+}
+
 console.log(`\n=== test-reindex-confirm: ${passed} passed, ${failed} failed ===`)
 process.exit(failed > 0 ? 1 : 0)

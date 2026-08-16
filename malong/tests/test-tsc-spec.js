@@ -33,15 +33,16 @@ const tscCtx = { getWorkspaceDir: (d) => d }
   assert(r.error === 'missing_parameter', `① tsc 缺 workspace_dir（得 ${r.error}）`)
 }
 // ② 无 tsc 环境 → 工具内错误（r46 收紧：此前 npx banner exit 0 被判 pass 假阳性，
-// 宽容断言 `exitCode !== undefined` 放行了它——现在必须显式 tsc_not_found 或 fail）
+// 宽容断言 `exitCode !== undefined` 放行了它——现在必须显式 tsc_not_found 或 fail；
+// 反馈修复后无配置无TS源 → no_tsconfig 同样显式失败，不得 pass 假阳性）
 {
   const r = await tscMod.handle({ workspace_dir: WS }, tscCtx)
-  assert(r.error === 'tsc_not_found' || r.exitCode === 1, `② tsc 缺失必须显式失败（error=${r.error} exitCode=${r.exitCode}，不得 pass 假阳性）`)
+  assert(r.error === 'no_tsconfig' || r.error === 'tsc_not_found' || r.exitCode === 1, `② tsc 缺失必须显式失败（error=${r.error} exitCode=${r.exitCode}，不得 pass 假阳性）`)
 }
 // ②b R22-⑥（试用发现）：无 TS 源 workspace 的 tsc_not_found 建议不再噪音推装 typescript
 {
   const r = await tscMod.handle({ workspace_dir: WS }, tscCtx)
-  if (r.error === 'tsc_not_found' && r.suggestion) {
+  if (r.error && r.suggestion) {
     assert(r.suggestion.includes('No TypeScript sources'), `②b 无 TS 源建议跳过（得 ${r.suggestion.slice(0, 60)}...）`)
   }
 }

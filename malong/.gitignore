@@ -4,3 +4,8 @@ code-index.db
 code-index.db-shm
 code-index.db-wal
 metadata.json
+
+# dsh bundle 构建产物（用 malong/dsh/bundle/reprep.sh 重建）
+dsh/bundle/server/
+dsh/bundle/*.tgz
+dsh/bundle/dsh-bridge.mjs
