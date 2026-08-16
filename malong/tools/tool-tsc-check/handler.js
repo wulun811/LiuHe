@@ -20,6 +20,24 @@ function makeError(code, message, suggestion) {
   return { error: code, message, ...(suggestion ? { suggestion } : {}), trace_id: traceId() }
 }
 
+// 反馈修复（2026-08-16）：无根 tsconfig.json 的项目（拆 tsconfig.src/client/scanner.json）
+// 跑 tsc --noEmit 会打印帮助文本并 exit 1 假 fail——自动发现 tsconfig.*.json 或接受显式 tsconfig 参数
+const TSCONFIG_PRIORITY = ['tsconfig.src.json', 'tsconfig.client.json', 'tsconfig.scanner.json']
+
+function pickTsconfig(dir) {
+  if (existsSync(join(dir, 'tsconfig.json'))) return { project: null, source: 'root' }
+  let names = []
+  try {
+    names = readdirSync(dir).filter((n) => /^tsconfig\..*\.json$/.test(n)).sort()
+  } catch {}
+  if (names.length === 0) return { project: null, source: 'none' }
+  const nonBase = names.filter((n) => !n.includes('base'))
+  if (nonBase.length === 0) return { project: names[0], source: 'base-only' }
+  if (nonBase.length === 1) return { project: nonBase[0], source: 'single' }
+  for (const p of TSCONFIG_PRIORITY) if (nonBase.includes(p)) return { project: p, source: 'priority' }
+  return { project: nonBase[0], source: 'multi' }
+}
+
 // R22-⑥（试用发现）：无 TS 项目 workspace 上 tsc_not_found 建议装 typescript 是噪音——先探测是否有 TS 源
 function hasTypeScriptSources(dir) {
   if (existsSync(join(dir, 'tsconfig.json'))) return true
@@ -42,8 +60,11 @@ function hasTypeScriptSources(dir) {
 }
 
 function findTscBin(dir) {
+  // Windows 上 npm 装的 typescript 其 .bin/tsc 是无扩展名 sh shim，无法直接 spawn
+  // （CreateProcess ENOENT → 误报 tsc_not_found），优先 .cmd 真实入口
+  const isWin = process.platform === 'win32'
   const candidates = [
-    join(dir, 'node_modules', '.bin', 'tsc'),
+    join(dir, 'node_modules', '.bin', isWin ? 'tsc.cmd' : 'tsc'),
     join(dir, 'node_modules', 'typescript', 'bin', 'tsc'),
   ]
   for (const c of candidates) {
@@ -71,10 +92,36 @@ export async function handle(args, context) {
   if (!isInsideWorkspace(root, targetDir)) {
     return makeError('path_blocked', `dir escapes workspace: ${targetDir}`, 'Provide a subdirectory relative to workspace_dir.')
   }
+  // 显式 tsconfig 参数（相对 workspace_dir）——覆盖自动发现
+  if (args?.tsconfig != null && typeof args.tsconfig !== 'string') {
+    return makeError('invalid_input', 'tsconfig must be a string', 'Provide a tsconfig path relative to workspace_dir (e.g. tsconfig.src.json).')
+  }
+  const explicitTsconfig = args?.tsconfig ? join(root, args.tsconfig) : null
+  if (explicitTsconfig && !isInsideWorkspace(root, explicitTsconfig)) {
+    return makeError('path_blocked', `tsconfig escapes workspace: ${explicitTsconfig}`, 'Provide a tsconfig path relative to workspace_dir.')
+  }
+  if (explicitTsconfig && !existsSync(explicitTsconfig)) {
+    return makeError('no_tsconfig', `tsconfig not found: ${args.tsconfig}`, 'Provide an existing tsconfig path relative to workspace_dir, or omit it to auto-discover.')
+  }
   let timeout = parseInt(args?.timeout)
   if (!Number.isFinite(timeout) || timeout <= 0) timeout = 60000
   // r11(H4)：上钳 110s——超大 timeout 会让工具跑满才返回，MCP 120s 已先行超时 → 僵尸占槽（debug-runner/git-worktree 已钳，此处收敛）
   if (timeout > 110_000) timeout = 110_000
+
+  // 决定编译目标：根 tsconfig.json → 现状；无根时自动发现 tsconfig.*.json（--project）；
+  // 一个都没有 → no_tsconfig 明确错误（而非 tsc 打印帮助文本 exit 1 的假 fail）
+  const cfg = explicitTsconfig ? { project: args.tsconfig, source: 'explicit' } : pickTsconfig(targetDir)
+  if (cfg.source === 'none') {
+    const hasTS = hasTypeScriptSources(targetDir)
+    return makeError('no_tsconfig',
+      hasTS
+        ? `No tsconfig.json found in ${targetDir} (TS sources present but no compiler config)`
+        : `No tsconfig.json found in ${targetDir}`,
+      hasTS
+        ? 'tsc needs a tsconfig to know what to compile. Create a tsconfig.json, or pass tsconfig="<path>" to use one of your tsconfig.*.json files (e.g. tsconfig.src.json).'
+        : 'No TypeScript sources (tsconfig.json or .ts/.tsx/.mts/.cts) found — nothing to check here; skip this tool or add TS + a tsconfig.')
+  }
+  const tscArgs = cfg.project ? ['--project', cfg.project, '--noEmit'] : ['--noEmit']
 
   const tscBin = findTscBin(targetDir)
   const t0 = Date.now()
@@ -90,8 +137,8 @@ export async function handle(args, context) {
   }
 
   const run = tscBin
-    ? exec(tscBin, ['--noEmit'])
-    : exec('npx', ['--no-install', 'tsc', '--noEmit'])
+    ? exec(tscBin, tscArgs)
+    : exec('npx', ['--no-install', 'tsc', ...tscArgs])
 
   const r = await run
   const duration_ms = Date.now() - t0
@@ -110,8 +157,20 @@ export async function handle(args, context) {
       : 'No TypeScript sources (tsconfig.json or .ts/.tsx/.mts/.cts) found — nothing to check here; skip this tool or install typescript if you plan to add TS.')
   }
 
-  // 解析 TS 错误输出：file(line,col): error TSxxxx: message
+  // help 文本/空配置兜底：exit≠0 + 0 错误 + 帮助 banner 或 TS18003（No inputs）→ no_tsconfig
+  // 而非假 fail（无根 tsconfig 时 tsc 打印帮助文本 exit 1，errorCount=0 曾误导）
   const errors = []
+  const combined = r.stdout + r.stderr
+  const helpBanner = /Usage:|--all\b|tsc \[options\]/i.test(combined)
+  if (r.exitCode !== 0 && errors.length === 0 && (helpBanner || /TS18003/.test(combined))) {
+    return makeError('no_tsconfig',
+      `tsc could not resolve a usable compiler config in ${targetDir} (exit ${r.exitCode})`,
+      cfg.project
+        ? `Project config ${cfg.project} did not produce a check (empty inputs or bad path). Pass tsconfig="<path>" to target a specific config.`
+        : 'No root tsconfig.json matched. Pass tsconfig="<path>" to use a tsconfig.*.json file (e.g. tsconfig.src.json).')
+  }
+
+  // 解析 TS 错误输出：file(line,col): error TSxxxx: message
   const lines = (r.stdout + '\n' + r.stderr).split('\n')
   for (const line of lines) {
     const m = line.match(/^([^(\n]+)\((\d+)(?:,(\d+))?\):\s+(error|warning)\s+(TS\d+):\s+(.+)/)

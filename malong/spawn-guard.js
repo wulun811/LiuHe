@@ -9,8 +9,10 @@ import { spawn, execFileSync } from 'node:child_process'
 // 交 cmd.exe /d /s /c 解析（PATH 查找 shim）；拼串时含空格/引号参数加双引号（cmd 内 "" 转义）。
 // 带路径的 exe（如 C:\Program Files\nodejs\node.exe）返回 null → 数组 spawn，无引号问题。
 function winCmd(cmd, args) {
-  // 带路径的 exe（node.exe 等）与 cmd.exe 本体：数组 spawn 即可
-  if (/[\\/]/.test(cmd) || /^cmd(\.exe)?$/i.test(cmd)) return null
+  // 带路径的 exe（node.exe 等）与 cmd.exe 本体：数组 spawn 即可；
+  // .cmd/.bat 带路径也无法 CreateProcess 直跑，同样交给 cmd.exe 包一层
+  if (/^cmd(\.exe)?$/i.test(cmd)) return null
+  if (/[\\/]/.test(cmd) && !/\.(cmd|bat)$/i.test(cmd)) return null
   const q = (a) => /[\s"]/.test(a) ? `"${String(a).replace(/"/g, '""')}"` : String(a)
   return { cmd: 'cmd.exe', args: ['/d', '/s', '/c', [cmd, ...(args || [])].map(q).join(' ')] }
 }
