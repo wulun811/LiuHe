@@ -123,10 +123,20 @@ function mkws(name, { tsconfigs = [], withTs = true, mode = 'ok', withBin = true
 }
 
 // ⑨ 有配置 + TS 源 + tsc 缺失 → tsc_not_found（原语义保留）
+// PATH 藏起 npx：平台无关地保证 spawn('npx') 必 ENOENT（CI runner 可能预装全局
+// typescript，npx --no-install 会真跑 tsc 编译 → 断言随环境漂移）
 {
-  const ws = mkws('i-notfound', { tsconfigs: ['tsconfig.src.json'], withBin: false })
-  const r = await tscMod.handle({ workspace_dir: ws }, ctx)
-  assert(r.error === 'tsc_not_found', `⑨ tsc 缺失 → tsc_not_found（得 ${r.error}）`)
+  const savedPath = process.env.PATH
+  const emptyBin = join(ROOT, 'emptybin')
+  mkdirSync(emptyBin, { recursive: true })
+  process.env.PATH = emptyBin
+  try {
+    const ws = mkws('i-notfound', { tsconfigs: ['tsconfig.src.json'], withBin: false })
+    const r = await tscMod.handle({ workspace_dir: ws }, ctx)
+    assert(r.error === 'tsc_not_found', `⑨ tsc 缺失 → tsc_not_found（得 ${r.error}）`)
+  } finally {
+    process.env.PATH = savedPath
+  }
 }
 
 try { rmSync(ROOT, { recursive: true, force: true }) } catch {}
