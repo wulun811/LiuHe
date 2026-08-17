@@ -15,7 +15,7 @@
 ![throughput](https://img.shields.io/badge/throughput-588%20calls%2Fs-blue)
 ![token](https://img.shields.io/badge/token%20savings-65%25-brightgreen)
 ![license](https://img.shields.io/badge/license-MIT-blue)
-![version](https://img.shields.io/badge/version-0.4.5--post8-blue)
+![version](https://img.shields.io/badge/version-0.4.5--post9-blue)
 ![commits](https://img.shields.io/badge/commits-264-blue)
 
 **Malong LiuHe** is a toolkit built for LLMs rather than humans. It ships two components:

@@ -1,19 +1,21 @@
 {
   "name": "tsc_check",
   "version": "1.0.0",
-  "description": "TS type-check via tsc --noEmit.",
+  "description": "TS type-check via tsc --noEmit -> {status,errorCount}; timeout 60s default; dir = subdir.",
   "inputSchema": {
     "type": "object",
     "properties": {
       "workspace_dir": {
-        "type": "string"
+        "type": "string",
+        "description": "REQUIRED: project root (abs)."
       },
       "dir": {
         "type": "string",
         "description": "subdir"
       },
       "timeout": {
-        "type": "number"
+        "type": "number",
+        "description": "tsc run timeout in ms (default 60000)"
       }
     },
     "required": [

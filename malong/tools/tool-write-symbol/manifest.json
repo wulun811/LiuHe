@@ -31,7 +31,8 @@
         },
         "required": [
           "file_path"
-        ]
+        ],
+        "description": "Symbol anchor: {symbol_id} or {file_path}+{name}. Read first via read_symbol."
       },
       "base_version": {
         "type": "object",

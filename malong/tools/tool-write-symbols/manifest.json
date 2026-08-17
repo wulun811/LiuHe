@@ -103,7 +103,8 @@
             "type": "boolean",
             "description": "Validate and produce diffs without writing (default false)"
           }
-        }
+        },
+        "description": "{all_or_nothing: true} (default) | {false} best-effort"
       },
       "allow_unsafe_no_base": {
         "type": "boolean",
@@ -125,7 +126,8 @@
             "type": "boolean",
             "description": "Block batch if validation fails (default false)"
           }
-        }
+        },
+        "description": "Safety profile: fast|standard|strict (default standard)"
       }
     },
     "required": [

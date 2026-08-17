@@ -6,16 +6,20 @@
     "type": "object",
     "properties": {
       "workspace_dir": {
-        "type": "string"
+        "type": "string",
+        "description": "REQUIRED: project root (abs). reindex first if new."
       },
       "workdir": {
-        "type": "string"
+        "type": "string",
+        "description": "Optional subdir to run in (default workspace_dir)"
       },
       "stages": {
-        "type": "string"
+        "type": "string",
+        "description": "Comma-separated: lint|test|typecheck (default all)"
       },
       "timeout": {
-        "type": "number"
+        "type": "number",
+        "description": "Per-stage timeout in ms (default 30000)"
       }
     },
     "required": [

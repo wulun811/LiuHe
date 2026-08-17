@@ -1,15 +1,17 @@
 {
   "name": "code_quality",
   "version": "1.0.0",
-  "description": "5-dim shape-level quality probe (techDebt/arch/blast): scores, not findings.",
+  "description": "Read-only 5-dim JSON scores (techDebt/archViolation/blastRadius/overEngineering/paradigmFit). Findings? code_review.",
   "inputSchema": {
     "type": "object",
     "properties": {
       "workspace_dir": {
-        "type": "string"
+        "type": "string",
+        "description": "REQUIRED: project root (abs)."
       },
       "file": {
-        "type": "string"
+        "type": "string",
+        "description": "File to probe, relative to workspace_dir"
       }
     },
     "required": [

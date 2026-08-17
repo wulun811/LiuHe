@@ -35,7 +35,8 @@
             },
             "description": "Degraded line_range read for non-code files: [start, end] 1-based inclusive"
           }
-        }
+        },
+        "description": "Symbol anchor: {symbol_id} or {file_path}+{name} (single read)"
       },
       "locators": {
         "type": "array",

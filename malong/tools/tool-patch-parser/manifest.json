@@ -6,14 +6,16 @@
     "type": "object",
     "properties": {
       "workspace_dir": {
-        "type": "string"
+        "type": "string",
+        "description": "REQUIRED: project root (abs). reindex first if new."
       },
       "text": {
         "type": "string",
         "description": "SEARCH/REPLACE"
       },
       "file": {
-        "type": "string"
+        "type": "string",
+        "description": "File path relative to workspace_dir"
       }
     },
     "required": [

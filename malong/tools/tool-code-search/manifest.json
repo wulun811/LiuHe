@@ -6,14 +6,16 @@
     "type": "object",
     "properties": {
       "workspace_dir": {
-        "type": "string"
+        "type": "string",
+        "description": "REQUIRED: project root (abs). reindex first if new."
       },
       "query": {
         "type": "string",
         "description": "NL/symbol"
       },
       "limit": {
-        "type": "number"
+        "type": "number",
+        "description": "Max results (default 30)"
       }
     },
     "required": [
