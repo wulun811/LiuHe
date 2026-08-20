@@ -79,7 +79,7 @@ async function apply(ctx, config) {
   }
   const stateDir = typeof cfg.stateDir === "string" && cfg.stateDir !== "" ? cfg.stateDir : join(os.homedir(), ".local", "state", "malong-dsh")
   const timeoutMs = typeof cfg.toolCallTimeoutMs === "number" && cfg.toolCallTimeoutMs > 0 ? cfg.toolCallTimeoutMs : 300000
-  const BRIDGE_VERSION = "0.4.5-post9"
+  const BRIDGE_VERSION = "0.4.6"
   const logger = (msg) => process.stderr.write(`[malong-dsh-bridge] ${msg}\n`)
 
   mkdirSync(stateDir, { recursive: true })

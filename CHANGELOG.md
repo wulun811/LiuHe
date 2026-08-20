@@ -4,6 +4,8 @@
 
 ## 变更速览
 
+- **[0.4.6]** (2026-08-21): 正式版发布——版本号对齐（0.4.5-post9 → 0.4.6）：主包/平台包/运行时常量（lang-parser.js、dsh-bridge.mjs）/README 双语/官网五页（index、download、docs 中英）全量同步；CI 自动发布 npm 平台包 + 主包 + GitHub Release
+
 - **[0.4.5.post9]** (2026-08-17): Glama B→A 描述工程——四低分工具（code_quality/spec_gen/diff_facts/tsc_check）描述补行为+输出格式（≤90 字符）；18 个参数缺描述补齐（覆盖率 91%→100%）；新增 test-manifest-quality.js 质量门禁（描述长度/覆盖率/输出信号防回归）；backfill Windows/CI 兼容修复（findTscBin tsc.cmd/spawn-guard winCmd/⑨ 藏 PATH 容错）
 
 - **[0.4.5.post8]** (2026-08-16): tsc_check 支持无根 tsconfig 项目——自动发现 tsconfig.*.json（--project，优先级 src>client>scanner）或显式 tsconfig 参数，真无配置报 no_tsconfig 而非假 fail；reindex 超阈值已索引工作区免二次确认（force=true 仍确认）；sync 脚本 --dry-run -i 修复

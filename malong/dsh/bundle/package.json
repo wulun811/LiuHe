@@ -1,6 +1,6 @@
 {
   "name": "@jieai/dsh-malong-bridge",
-  "version": "0.4.5-post9",
+  "version": "0.4.6",
   "description": "LiuHe (Six Harmonies) tool suite as a DeepSeek Harness (dsh) plugin bundle — 44 MCP tools with dynamic workspace injection",
   "keywords": [
     "dsh",
@@ -33,10 +33,10 @@
     }
   },
   "optionalDependencies": {
-    "@jieai/malong-parse-linux-x64": "0.4.5-post6",
-    "@jieai/malong-parse-darwin-x64": "0.4.5-post6",
-    "@jieai/malong-parse-darwin-arm64": "0.4.5-post6",
-    "@jieai/malong-parse-win32-x64": "0.4.5-post6"
+    "@jieai/malong-parse-linux-x64": "0.4.6",
+    "@jieai/malong-parse-darwin-x64": "0.4.6",
+    "@jieai/malong-parse-darwin-arm64": "0.4.6",
+    "@jieai/malong-parse-win32-x64": "0.4.6"
   },
   "repository": {
     "type": "git",
