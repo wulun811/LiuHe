@@ -82,7 +82,7 @@ async function execStage(cmd, args, cwd, timeout) {
   // r45: stdio stdin='ignore'（spawnWithGroup 默认）——从 stdin 读的命令不再挂起
   const res = await spawnWithGroup(cmd, args, { cwd, timeout, maxBuffer: 1024 * 1024 }).catch((e) => ({ code: undefined, stdout: '', stderr: '', killed: false, error: e }))
   return {
-    exitCode: typeof res.code === 'number' ? res.code : (res.error || res.killed ? 1 : 0),
+    exitCode: res.code !== null && typeof res.code === 'number' ? res.code : 1,
     killed: res.killed,
     timed_out: res.killed ? { timeout_ms: timeout } : null,
     stdout: (res.stdout || '').trim(),
@@ -269,7 +269,9 @@ export async function handle(args, context) {
   if (Object.keys(results).length === 0) {
     results.syntax = await runStage('syntax', workdir, timeout, root)
   }
-  const status = Object.values(results).every(r => r.passed) ? 'pass' : 'fail'
+  // 审查修复（三轮）：skipped（无 test 脚本/无可验证阶段）不算失败——旧 `passed`/`passed === true` 对
+  // null 判定等价（skipped 仍拖 fail），本次显式排除
+  const status = Object.values(results).every(r => r.skipped === true || r.passed === true) ? 'pass' : 'fail'
   // r10e(F3)：MCP 请求超时 120s 硬限制——多阶段全链（lint+test+typecheck × timeout）超预算时预警，
   // 否则工具超时后服务端仍继续跑、占满 semaphore 槽导致其他工具排队 60s 超时（实测 verify_pipeline 全链 3-4 分钟）
   const totalBudgetMs = wanted.length * timeout

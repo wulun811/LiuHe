@@ -248,23 +248,31 @@ export async function runHealthCheck({ stateDir, toolsDir, workspacesDir, regist
   }
 
   if (existsSync(toolsDir)) {
-    const entries = readdirSync(toolsDir, { withFileTypes: true })
+    // 审查修复（三轮）：existsSync 后裸 readdirSync——EACCES/竞态删除会抛异常冒泡到启动流程崩溃
+    // 审查修复（四轮）：`return results` 引用未定义变量（作用域内只有 checks）→ 修复即崩点；且 early
+    // return 会跳过 Schema version/Stale socket/Tool registry 等后续检查——改 entries 有效性门控
+    let entries
+    try { entries = readdirSync(toolsDir, { withFileTypes: true }) } catch (e) {
+      add('Tool manifests', 'FAIL', `cannot read ${toolsDir}: ${e.message}`)
+    }
     let total = 0
     let bad = 0
     const badNames = []
-    for (const e of entries) {
-      if (!e.isDirectory() || !e.name.startsWith('tool-')) continue
-      total++
-      const mf = join(toolsDir, e.name, 'manifest.json')
-      if (!existsSync(mf)) { bad++; badNames.push(`${e.name}/manifest.json`); continue }
-      try {
-        const m = JSON.parse(readFileSync(mf, 'utf-8'))
-        if (!m.name || !m.handler) { bad++; badNames.push(`${e.name}/bad manifest`); continue }
-        const hp = join(toolsDir, e.name, m.handler)
-        if (!existsSync(hp)) { bad++; badNames.push(`${e.name}/handler missing`); continue }
-      } catch { bad++; badNames.push(`${e.name}/invalid JSON`) }
+    if (entries) {
+      for (const e of entries) {
+        if (!e.isDirectory() || !e.name.startsWith('tool-')) continue
+        total++
+        const mf = join(toolsDir, e.name, 'manifest.json')
+        if (!existsSync(mf)) { bad++; badNames.push(`${e.name}/manifest.json`); continue }
+        try {
+          const m = JSON.parse(readFileSync(mf, 'utf-8'))
+          if (!m.name || !m.handler) { bad++; badNames.push(`${e.name}/bad manifest`); continue }
+          const hp = join(toolsDir, e.name, m.handler)
+          if (!existsSync(hp)) { bad++; badNames.push(`${e.name}/handler missing`); continue }
+        } catch { bad++; badNames.push(`${e.name}/invalid JSON`) }
+      }
+      add('Tool manifests', bad === 0 ? 'PASS' : 'WARN', `${total} tools, ${bad} issues: ${badNames.join(', ')}`)
     }
-    add('Tool manifests', bad === 0 ? 'PASS' : 'WARN', `${total} tools, ${bad} issues: ${badNames.join(', ')}`)
   } else {
     add('Tool manifests', 'FAIL', `tools dir not found: ${toolsDir}`)
   }

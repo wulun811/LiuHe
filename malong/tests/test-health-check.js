@@ -211,6 +211,21 @@ if (fail > 0) process.exit(1)
     }
     assert(missingT.length === 0, `全部 ${names.length} 工具已登记 Y004，缺: ${missingT.join(',')}`)
   }
+
+  // 三轮→四轮审查修复：readdirSync(toolsDir) 失败（EACCES/文件而非目录）→ FAIL 标记且不崩溃（v2 门控不 early return）
+  {
+    mkdirSync(TMP, { recursive: true })
+    const toolsFile = join(TMP, 'tools-as-file')
+    writeFileSync(toolsFile, 'not a dir')
+    const r = await hc.runHealthCheck({
+      stateDir: TMP, toolsDir: toolsFile, workspacesDir: join(TMP, 'ws'),
+      log: () => {},
+    })
+    const mf = r.checks.find(c => c.name === 'Tool manifests')
+    assert(mf && mf.status === 'FAIL', `toolsDir 为文件时 FAIL 标记（得 ${JSON.stringify(mf)}）——旧 return results 引用未定义变量会 ReferenceError`)
+    assert(r.checks.some(c => c.name === 'Schema version'), 'readdir 失败不跳过后续检查（v2 门控）')
+    rmSync(toolsFile, { force: true })
+  }
 }
 
 try { rmSync(TMP, { recursive: true, force: true }) } catch {}

@@ -3,6 +3,8 @@
 // 详见：docs/六合工具集/docs/P3-rust-parser-service.md
 
 import net from 'node:net'
+import { join } from 'node:path'
+import os from 'node:os'
 import { existsSync, unlinkSync, openSync, writeSync, closeSync, readFileSync, statSync, renameSync, mkdirSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { isInString } from './string-utils.js'

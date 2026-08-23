@@ -42,8 +42,10 @@ function extractSignature(content, functionName, ext) {
     } else {
       // 11#4：补方法简写分支（class/object method `async NAME(`）——旧正则只认
       // `function NAME` 与 `const NAME =`，类方法/对象方法恒报 symbol_not_found。
-      // 第三分支锚定行首（^），避免命中 `obj.NAME(` 调用点
-      startRe = new RegExp(`(?:function\\s+${fnEsc}|(?:const|let|var)\\s+${fnEsc}\\s*=\\s*(?:async\\s+)?(?:function)?\\s*)\\(|^\\s*(?:async\\s+)?${fnEsc}\\s*\\(`)
+      // 第三分支锚定行首（^）且括号闭合后必须跟 { 或 =>（方法体）——
+      // 审查修复（二轮）：旧实现只锚定行首，函数提升的调用点 `helper(1, 2)` 被误判为定义，
+      // 签名比对拿调用点参数（字面量）当形参 → 误报/漏报 mismatch
+      startRe = new RegExp(`(?:function\\s+${fnEsc}|(?:const|let|var)\\s+${fnEsc}\\s*=\\s*(?:async\\s+)?(?:function)?\\s*)\\(|^\\s*(?:async\\s+)?${fnEsc}\\s*\\([^)]*\\)\\s*(?:\\{|=>)`)
     }
     if (startRe.exec(lines[i])) {
       let sigLine = lines[i]

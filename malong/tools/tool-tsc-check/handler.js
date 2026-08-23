@@ -129,7 +129,7 @@ export async function handle(args, context) {
   const exec = async (cmd, argsList) => {
     const res = await spawnWithGroup(cmd, argsList, { cwd: targetDir, timeout, maxBuffer: 4 * 1024 * 1024 }).catch((e) => ({ code: undefined, stdout: '', stderr: '', killed: false, error: e }))
     return {
-      exitCode: typeof res.code === 'number' ? res.code : (res.error || res.killed ? 1 : 0),
+      exitCode: res.code !== null && typeof res.code === 'number' ? res.code : 1,
       stdout: res.stdout || '',
       stderr: res.stderr || '',
       missing: res.error?.code === 'ENOENT',

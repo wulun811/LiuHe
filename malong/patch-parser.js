@@ -181,7 +181,13 @@ export async function init(core) {
     apply: (content, blocks) => applyBlocks(content, blocks),
     applyFromLLM: (content, llmOutput) => {
       const blocks = parseBlocks(llmOutput)
-      return applyBlocks(content, blocks)
+      // 审查修复（二轮）：未闭合块（LLM 输出截断）静默丢弃——半截 SEARCH 段的 REPLACE 内容丢失无感知，
+      // 显式透出 warning（parse 端已有 unclosed_block 标注，apply 端此前不检查）
+      const applied = applyBlocks(content, blocks)
+      if (blocks.unclosed === true) {
+        applied.warning = 'unclosed_block: patch text ends before >>>>>>> REPLACE (truncated output?) — trailing block dropped'
+      }
+      return applied
     },
     extract: extractBlocksFromLLM,
   })

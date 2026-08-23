@@ -5,7 +5,7 @@
 **English** | [简体中文](README.zh-CN.md) | [Docs](https://wulun811.github.io/LiuHe) | [GitHub](https://github.com/wulun811/LiuHe)
 
 [![wulun811/LiuHe MCP server](https://glama.ai/mcp/servers/wulun811/LiuHe/badges/score.svg)](https://glama.ai/mcp/servers/wulun811/LiuHe)
-![tests](https://img.shields.io/badge/tests-2013%20assertions%20passed-brightgreen)
+![tests](https://img.shields.io/badge/tests-2037%20assertions%20passed-brightgreen)
 ![tools](https://img.shields.io/badge/tools-44%20MCP-blue)
 ![languages](https://img.shields.io/badge/parsers-10%20languages-brightgreen)
 ![read](https://img.shields.io/badge/read%20P95-1ms-brightgreen)
@@ -15,7 +15,7 @@
 ![throughput](https://img.shields.io/badge/throughput-588%20calls%2Fs-blue)
 ![token](https://img.shields.io/badge/token%20savings-65%25-brightgreen)
 ![license](https://img.shields.io/badge/license-MIT-blue)
-![version](https://img.shields.io/badge/version-0.4.6-blue)
+![version](https://img.shields.io/badge/version-0.4.7-blue)
 ![commits](https://img.shields.io/badge/commits-264-blue)
 
 **Malong LiuHe** is a toolkit built for LLMs rather than humans. It ships two components:
@@ -91,7 +91,7 @@ Traditional tools (git, sed, IDE) assume a user with hands, eyes, and memory. An
 
 ## Self-Hosting (Dogfooding)
 
-30+ rounds of "Malong reviews Malong": the toolset audits and fixes its **own** code, with dozens of real bugs fixed and locked by tests — including directory-scope filtering gaps, false dead-code reports for registration patterns, lost constant read-sites, and SQL parameterization cleanup. Every round grew the assertion count (now 2013 across 81 JS test files, full chain 0 failures, measured 2026-08-13).
+30+ rounds of "Malong reviews Malong": the toolset audits and fixes its **own** code, with dozens of real bugs fixed and locked by tests — including directory-scope filtering gaps, false dead-code reports for registration patterns, lost constant read-sites, and SQL parameterization cleanup. Every round grew the assertion count (now 2027 across 86 JS test files, full chain 0 failures, measured 2026-08-13).
 
 ## Scan Boundaries (limits acknowledged; committed within)
 
@@ -166,7 +166,7 @@ git clone <repo-url> liuhe && cd liuhe/malong
 
 # 1) Parse daemon — prebuilt binary from releases/ (no cargo needed):
 mkdir -p ~/.local/bin
-tar -xzf ../releases/malong-liuhe-0.4.6-linux-x86_64.tar.gz
+tar -xzf ../releases/malong-liuhe-0.4.7-linux-x86_64.tar.gz
 cp malong-parse/target/release/malong-parse ~/.local/bin
 malong-parse &                                   # start the daemon (socket: /tmp/malong-parse-$UID.sock)
 
@@ -179,7 +179,7 @@ node tests/test-db-adapter.js   # 22 assertions: sql.js backend + persistence
 node tests/test-mcp-server.js   # 25 assertions: MCP stdio + daemon round-trip
 ```
 
-> **Windows users:** use `releases/malong-liuhe-0.4.6-windows-x86_64.tar.gz` (contains `malong-parse.exe`), extract and put it on PATH; the MCP server auto-starts the daemon, so step 1's `malong-parse &` is not required. The `mkdir -p`/`tar -xzf` above are Unix syntax — on Windows use any extractor (`tar -xzf` works on Win10+).
+> **Windows users:** use `releases/malong-liuhe-0.4.7-windows-x86_64.tar.gz` (contains `malong-parse.exe`), extract and put it on PATH; the MCP server auto-starts the daemon, so step 1's `malong-parse &` is not required. The `mkdir -p`/`tar -xzf` above are Unix syntax — on Windows use any extractor (`tar -xzf` works on Win10+).
 
 > Note: if the daemon is not running, parse-dependent tools (symbol extraction
 > etc.) degrade; the SQLite-backed tools (repo-map / code-index / health-check)
@@ -219,7 +219,7 @@ Prebuilt binaries for Linux x86_64 are committed under
 ```bash
 cd malong
 npm ci
-npm test          # 2013 assertions (daemon must be running)
+npm test          # 2037 assertions (daemon must be running)
 ```
 
 ### Start the MCP server
@@ -374,8 +374,8 @@ index to query.
 ## Testing
 
 - Rust: `cargo test` (92 assertions: per-language extraction + protocol framing/decoding + cache LFU + server dispatch/priority queue + batch_extract + deep-nesting guards + hello handshake)
-- JS: 81 test files, 2013 assertions. `npm test` runs the full chain (primitives / embedded / mvp-batch / tool-registry / repo-map / handler-smoke / patch-parser / file-collector / code-search / health-check / db-adapter dual-backend / write-runtime / host-config / mcp-server / security-review-rules / journal-prune / gatekeeper-golden / debug-runner / edit-collision-guard / fix-imports / symbol-search / naming-consistency / call-chain / edit-transaction-ext / batch-edit-write / verify-pipeline / dep-graph-project / code-quality / tsc-spec / batch-edit-tocou / workflow-closure / variable-refs / output-budget / read-symbols-batch / feedback-list / test-bridge-run / mock-syncer-truncation / r54-p0 / r54-p1 / r54-p2 / r8 / r9 / crash-injection / r10 / dogfood-r12); `test-dogfood-r14…r30` (end-to-end against a real daemon) run separately
-- Total: 2013 assertions across 81 JS test files (plus cargo tests)
+- JS: 86 test files, 2037 assertions. `npm test` runs the full chain (primitives / embedded / mvp-batch / tool-registry / repo-map / handler-smoke / patch-parser / file-collector / code-search / health-check / db-adapter dual-backend / write-runtime / host-config / mcp-server / security-review-rules / journal-prune / gatekeeper-golden / debug-runner / edit-collision-guard / fix-imports / symbol-search / naming-consistency / call-chain / edit-transaction-ext / batch-edit-write / verify-pipeline / dep-graph-project / code-quality / tsc-spec / batch-edit-tocou / workflow-closure / variable-refs / output-budget / read-symbols-batch / feedback-list / test-bridge-run / mock-syncer-truncation / r54-p0 / r54-p1 / r54-p2 / r8 / r9 / crash-injection / r10 / dogfood-r12); `test-dogfood-r14…r30` (end-to-end against a real daemon) run separately
+- Total: 2027 assertions across 86 JS test files (plus cargo tests)
 - One-shot: `./scripts/ci.sh` (self-contained: cargo test + npm test + dogfood; reuses or auto-starts the daemon)
 
 ## License

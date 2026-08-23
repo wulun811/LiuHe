@@ -356,7 +356,7 @@ export async function writeSymbol(args, context) {
         pipelineStep(pipeline, 'version_check', 'ok', { note: 'cross_symbol_chain: file-level check' })
       }
       conflict = classifyConflict(
-        { file: { hash: baseForCheck.file?.hash }, symbol: baseForCheck.symbol || null },
+        { file: { hash: baseForCheck.file?.hash, truncated_hash: baseForCheck.file?.truncated_hash }, symbol: baseForCheck.symbol || null },
         current,
         !!symbol
       )
@@ -612,10 +612,17 @@ export async function writeSymbol(args, context) {
       // 同符号链式写（拿 new_version 当下一轮 base）body_hash 不一致被误判 SYMBOL_CHANGED。
       const nvSym = successResult.new_version?.symbol
       if (nvSym?.symbol_id) {
-        const fresh = codeIndexService.getSymbolByStableId(nvSym.symbol_id)
-        if (fresh && fresh.body_hash) {
-          nvSym.body_hash = `sha256:${fresh.body_hash}`
-          nvSym.range = [fresh.start_line, fresh.end_line]
+        // 审查修复（M6）：校正前重读文件哈希比对——锁外重抽可能读到并发写者写入后的内容，
+        // 用他人内容校正 body_hash/range → 链式写（拿 new_version 当下一轮 base）错误基线。
+        // 仅当当前文件 == 自己写入的 newHash 才采纳重抽索引
+        let mine = false
+        try { mine = sha256(readFileSync(absPath)) === sha256(newContent) } catch {}
+        if (mine) {
+          const fresh = codeIndexService.getSymbolByStableId(nvSym.symbol_id)
+          if (fresh && fresh.body_hash) {
+            nvSym.body_hash = `sha256:${fresh.body_hash}`
+            nvSym.range = [fresh.start_line, fresh.end_line]
+          }
         }
       }
     } catch (e) {
@@ -921,7 +928,10 @@ export async function writeSymbols(args, context) {
         try { unlinkSync(tmpPath) } catch {}
         updateJournalState(journal.dir, { state: 'failed', reason: e.message })
         failed = { file: fp, error: { code: 'ATOMIC_WRITE_FAILED', message: e.message, txn_id: journal.txnId } }
-        break
+        // 审查修复（H1）：best_effort 下写失败记录后继续下一文件（r54(P1) 同型），
+        // 旧实现无条件 break → 后续文件静默跳过 + 部分成功被报整体失败
+        if (allOrNothing) break
+        fileFailures.push(failed); failed = null; continue
       }
       updateJournalState(journal.dir, { state: 'committed', committed_at: new Date().toISOString() })
       // r8(E2)：记录写后内容哈希——回滚时比对，防盖掉并行写者的合法改动
@@ -972,15 +982,9 @@ export async function writeSymbols(args, context) {
                 try { updateJournalState(wf.journalDir, { index_pending: true, index_pending_reason: e.message }) } catch {}
               }
             }
-          } else if (!wf.newHash) {
-            // 旧路径兜底（无哈希记录）：直接恢复
-            const rbTmp = _uniqueTmp(wf.absPath, 'rollback')
-            writeFileSync(rbTmp, readFileSync(backup))
-            await renameRetry(rbTmp, wf.absPath)
-            updateJournalState(wf.journalDir, { state: 'rolled_back', rolled_back_at: new Date().toISOString() })
-            rolledBack.push(wf.filePath)
-            auditLog(workspaceDir, { event: 'batch_rollback', file: wf.filePath, reason: failed.error?.code })
           } else {
+            // 审查修复（M5）：删除无哈希记录的盲覆盖分支——newHash 恒存在（L928 必写），
+            // 该分支若未来触发会无比对覆盖并行写者（与 r8(E2) 防覆盖原则矛盾），删除后统一走哈希比对
             pipelineStep(pipeline, 'rollback', 'warn', { reason: `SKIPPED (file changed since write): ${wf.filePath}`, file: wf.filePath })
             auditLog(workspaceDir, { event: 'rollback_skipped', file: wf.filePath, reason: 'concurrent modification' })
           }

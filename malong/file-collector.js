@@ -31,8 +31,11 @@ export function parseMalongignore(filePath) {
 }
 
 export function isIgnored(relPath, rules, isDir) {
-  for (const rule of rules) {
+  for (let rule of rules) {
     if (rule.includes('*')) {
+      // 审查修复（三轮）：`**/dist/` 尾斜杠形式静默失效——post='/dist/' 含 '/' 落入首分支，
+      // seg.includes('dist/') 对单路径段恒 false。gitignore 语义尾斜杠=目录，归一化后走 **/dist 分支
+      if (rule.endsWith('/')) rule = rule.slice(0, -1)
       // **/node_modules → 任意层 node_modules；*.min.js → 文件名后缀匹配
       const post = rule.split('*').pop() || ''
       if (rule.startsWith('**/') && post.includes('/')) {

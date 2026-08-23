@@ -44,7 +44,8 @@ export async function handle(args, context) {
   const symbol = args?.symbol || ''
   const file = args?.file || ''
   const includeLiterals = !!args?.include_literals
-  const maxResults = parseInt(args?.max_results) || 30
+  // 审查修复（二轮）：负值钳制——parseInt(-5) truthy 绕过默认值，SQL LIMIT -5 返回全表
+  const maxResults = Math.max(1, parseInt(args?.max_results, 10) || 30)
 
   if (!symbol) return { error: 'missing_parameter', message: 'symbol is required', suggestion: 'Provide a symbol name to trace (e.g. "MAX_RETRY_COUNT")' }
   if (!file) return { error: 'missing_parameter', message: 'file is required', suggestion: 'Provide a file path relative to workspace_dir where the symbol is defined' }
@@ -174,6 +175,29 @@ export async function handle(args, context) {
   return result
 }
 
+// 审查修复（三轮）：字符串感知剥行尾 # 注释——引号内 # 保留（含转义）
+function stripHashComment(s) {
+  let out = ''
+  let i = 0
+  while (i < s.length) {
+    const c = s[i]
+    if (c === '"' || c === "'" || c === '`') {
+      const q = c
+      let j = i + 1
+      while (j < s.length && s[j] !== q) { if (s[j] === '\\') j++; j++ }
+      out += s.slice(i, j + 1)
+      i = j + 1
+      continue
+    }
+    if (c === '#' && (i === 0 || /\s/.test(s[i - 1]))) {
+      return out.replace(/[\s;]+$/, '')
+    }
+    out += c
+    i++
+  }
+  return out
+}
+
 function extractSymbolValue(absPath, symbol) {
   try {
     if (!existsSync(absPath)) return null
@@ -184,7 +208,9 @@ function extractSymbolValue(absPath, symbol) {
     for (let i = 0; i < lines.length; i++) {
       const match = lines[i].match(assignmentRegex)
       if (match) {
-        let value = match[1].trim().replace(/,$/, '').replace(/#.*$/, '').replace(/;+$/, '').trim()
+        // 审查修复（三轮）：\s#.*$ 误剥字符串内 #（"a #b" → "a 破损）——字符串感知剥注释：
+        // # 仅在引号外且前邻空白时视为行尾注释（\"a #b\" 的 # 在字符串内整体保留）
+        let value = stripHashComment(match[1].trim()).replace(/,$/, '').replace(/;+$/, '').trim()
         if (value.length > 0 && value.length < 200) {
           if (/^[a-zA-Z_]\w*\(/.test(value) || value.includes(' lambda ') || value.includes(' new ')) {
             return { value: null, dynamic: true, raw: value, line: i + 1 }

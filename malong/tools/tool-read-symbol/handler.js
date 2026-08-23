@@ -58,9 +58,17 @@ async function readOne(args, context) {
   }
   const locator = args?.locator || {}
   let filePath = locator?.file_path
-  if (!filePath && locator?.symbol_id && codeIndexService) {
+  if (!filePath && locator?.symbol_id) {
+    // 审查修复（二轮）：symbol_id 给了但索引查不到 → 报 SYMBOL_NOT_FOUND（旧实现谎报 missing_parameter）
+    if (!codeIndexService) {
+      return { error: 'missing_parameter', code: 'missing_parameter', message: 'codeIndexService unavailable for symbol_id resolution; provide locator.file_path instead', trace_id }
+    }
     const byId = codeIndexService.getSymbolByStableId(locator.symbol_id)
-    if (byId) filePath = byId.file_path
+    if (byId) {
+      filePath = byId.file_path
+    } else {
+      return { error: 'SYMBOL_NOT_FOUND', code: 'SYMBOL_NOT_FOUND', message: `symbol_id ${locator.symbol_id} not found in index — it may be stale; reindex or provide locator.file_path`, trace_id }
+    }
   }
   if (!filePath) {
     return { error: 'missing_parameter', code: 'missing_parameter', message: 'locator.file_path is required (or provide a resolvable symbol_id)', trace_id }

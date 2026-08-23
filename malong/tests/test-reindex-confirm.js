@@ -151,11 +151,19 @@ console.log('── ⑩ 超阈值 + 已索引（fresh）→ 免确认 completed�
   const svc = mockService()
   const first = await handle({ workspace_dir: ws, threshold: 3 }, { codeIndexService: svc, log: () => {} })
   await handle({ workspace_dir: ws, threshold: 3, confirm: first.confirm_token, blocking: true }, { codeIndexService: svc, log: () => {} })
+  // 审查修复（二轮）：免确认必须跑 mtime 增量判定——mock 增量 0 变化 = fresh
+  svc.indexBatchReturn = []
   // lastIndexed 已存在且 workspace_dir 匹配 → 超阈值 fresh 免确认
   const r = await handle({ workspace_dir: ws, threshold: 3 }, { codeIndexService: svc, log: () => {} })
   assert(r.status === 'completed' && r.already_fresh === true, `超阈值 fresh 免确认（得 ${r.status}/${r.already_fresh}）`)
   assert(!r.confirm_required && r.files_indexed === 0, `fresh 不要求确认且不重索引（confirm_required=${r.confirm_required} files_indexed=${r.files_indexed}）`)
-  assert(svc.lastBatch && svc.lastBatch.length === 7, 'fresh 时不触发新的 indexBatch（复用上次索引）')
+  // 新语义：触发增量判定但 0 变化（旧断言「不触发 indexBatch」已废弃——不跑判定无法感知文件变化；
+  // 注意：免确认路径的增量判定限于预检 hardCap 截断集合，完整增量需确认全量索引）
+  assert(svc.lastBatch && svc.lastBatch.length > 0, 'fresh 路径跑一次增量判定（复用预检收集的文件列表）')
+  // 增量检测到变化 → 应用增量并如实报告（不再谎报 already_fresh）
+  svc.indexBatchReturn = ['a0.js']
+  const rc = await handle({ workspace_dir: ws, threshold: 3 }, { codeIndexService: svc, log: () => {} })
+  assert(rc.status === 'completed' && rc.already_fresh === false && rc.files_indexed === 1, `增量变化如实报告（得 ${rc.status}/${rc.already_fresh}/${rc.files_indexed}）`)
   // force=true 仍走确认（用户想强制重索引）
   const rf = await handle({ workspace_dir: ws, threshold: 3, force: true }, { codeIndexService: svc, log: () => {} })
   assert(rf.status === 'needs_review', `force=true 仍 needs_review（得 ${rf.status}）`)

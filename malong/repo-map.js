@@ -329,7 +329,7 @@ export async function init(core) {
           pageSizeTokens: MAX_FULL_TOKENS,
           focused: false,
         })
-        _cache = { map: paginated.map, files: files.length, timestamp: Date.now() }
+        _cache = { workspace: workspaceDir, map: paginated.map, files: files.length, timestamp: Date.now() }
         _cacheTime = Date.now()
         _injectToYingMini(paginated.map)
         const stale = checkRepoMapStaleness(db, rootDir)
@@ -365,11 +365,13 @@ export async function init(core) {
       }
     },
 
-    getSummary() {
-      if (_cache && (Date.now() - _cacheTime) < MAX_CACHE_AGE) {
+    getSummary(workspaceDir) {
+      // 审查修复（二轮）：缓存单槽曾无 workspace 隔离——同进程多工作区时 A 的 map 会被 B 读到。
+      // 调用方传 workspace_dir；不一致时视为 miss（不跨工作区串台）
+      if (_cache && (!workspaceDir || _cache.workspace === workspaceDir) && (Date.now() - _cacheTime) < MAX_CACHE_AGE) {
         return { ..._cache, cached: true }
       }
-      return _cache ? { ..._cache, cached: false, stale: true } : null
+      return _cache && (!workspaceDir || _cache.workspace === workspaceDir) ? { ..._cache, cached: false, stale: true } : null
     },
 
     invalidate(filePath) {

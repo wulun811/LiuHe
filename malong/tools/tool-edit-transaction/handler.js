@@ -6,6 +6,10 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 
 export async function handle(args, context) {
   const workspaceDir = args?.workspace_dir
+  // 审查修复（M2）：workspace_dir 非字符串 → new TransactionStore 内 join 抛 TypeError 裸崩 MCP
+  if (workspaceDir != null && typeof workspaceDir !== 'string') {
+    return makeError(ErrorCodes.INVALID_INPUT, 'workspace_dir must be a string', { suggestion: 'Provide the absolute path to the project root directory.' })
+  }
   if (!workspaceDir) {
     return makeError(ErrorCodes.INVALID_INPUT, 'workspace_dir is required', { suggestion: 'Provide the absolute path to the project root directory.' })
   }
@@ -13,6 +17,8 @@ export async function handle(args, context) {
   const action = args?.action || ''
   const store = new TransactionStore(workspaceDir)
 
+  // 审查修复（M1）：顶层兜底——唯一无 catch 的写路径，edits=[null] 等异常输入裸崩 MCP
+  try {
   switch (action) {
     case 'begin': {
       // R4a：begin 时自愈——崩溃残留的 staged 事务先恢复（幂等）
@@ -34,6 +40,10 @@ export async function handle(args, context) {
       if (!txnId) return makeError(ErrorCodes.INVALID_INPUT, 'txn_id is required', { suggestion: 'Provide the transaction ID returned by begin()' })
       if (!file) return makeError(ErrorCodes.INVALID_INPUT, 'file is required', { suggestion: 'Provide a file path relative to workspace_dir' })
       if (!edits || !Array.isArray(edits)) return makeError(ErrorCodes.INVALID_INPUT, 'edits array is required', { suggestion: 'Provide an array of edits: [{"old_string": "...", "new_string": "..."}]' })
+      // 审查修复（M1）：元素级校验——edits=[null] 会让 applyEdits 的 edit.old_string 抛 TypeError 裸崩 MCP
+      if (!edits.every(e => e && typeof e === 'object' && typeof e.old_string === 'string')) {
+        return makeError(ErrorCodes.INVALID_INPUT, 'each edit must be an object with string old_string', { suggestion: 'edits: [{"old_string": "...", "new_string": "..."}]' })
+      }
 
       const pathCheck = validateFilePath(file)
       if (pathCheck.blocked) {
@@ -96,8 +106,8 @@ export async function handle(args, context) {
 
       let workItems
       if (fileEdits && Array.isArray(fileEdits) && fileEdits.length > 0) {
-        if (!fileEdits.every(fe => fe.file && Array.isArray(fe.edits))) {
-          return makeError(ErrorCodes.INVALID_INPUT, 'file_edits must be array of {file, edits}', { suggestion: 'Each item needs file (string) and edits (array)' })
+        if (!fileEdits.every(fe => fe && typeof fe === 'object' && typeof fe.file === 'string' && Array.isArray(fe.edits) && fe.edits.every(e => e && typeof e === 'object' && typeof e.old_string === 'string'))) {
+          return makeError(ErrorCodes.INVALID_INPUT, 'file_edits must be array of {file, edits} with valid edit objects', { suggestion: 'Each item needs file (string), edits (array of {old_string, new_string})' })
         }
         workItems = fileEdits.map(fe => ({ file: fe.file, edits: fe.edits }))
       } else if (files && Array.isArray(files) && edits && Array.isArray(edits)) {
@@ -140,7 +150,12 @@ export async function handle(args, context) {
       }
 
       if (hasError && atomic) {
-        await store.rollback(txnId)
+        // 审查修复（M4）：rollback 返回值透传——旧实现丢弃，partial（锁忙/外部修改跳过项）时
+        // 用户以为全部还原，实际部分文件未动且事务目录保留
+        const rb = await store.rollback(txnId)
+        if (rb?.status && rb.status !== 'rolled_back') {
+          return { status: rb.status, error_code: rb.error_code, message: rb.message, skipped: rb.skipped, files: results, txn_id: txnId, suggestion: 'Partial rollback: some files not restored (external change / lock busy). Transaction preserved for manual review.' }
+        }
         return {
           status: 'rolled_back',
           reason: 'atomic edit failed',
@@ -217,5 +232,8 @@ export async function handle(args, context) {
 
     default:
       return makeError(ErrorCodes.INVALID_ACTION, 'action must be: begin, edit, edit_multi, commit, undo_commit, rollback, info', { suggestion: 'See docs/P0/02-edit-transaction.md for details' })
+  }
+  } catch (e) {
+    return makeError(ErrorCodes.INTERNAL, `edit_transaction failed: ${e.message}`, { suggestion: 'Check arguments; if edits contain invalid entries, validate each {old_string, new_string} pair.' })
   }
 }

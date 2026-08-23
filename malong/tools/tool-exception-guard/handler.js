@@ -80,13 +80,42 @@ function checkRaises(content, ext) {
         raises.push({ line: i + 1, exception: m[1], message: msgM ? msgM[1] : null, raw: line.trim() })
       }
     } else if (isJS) {
-      m = /throw\s+new\s+(\w+)(?:\s*\(\s*["'`](.+?)["'`]\s*\))?/.exec(line)
+      // 审查修复（二轮）：旧实现全文无锚定——注释/字符串里的 throw 文本误报 builtin_exception。
+      // 审查修复（三轮）：正则链剥字符串对异类引号嵌套（'a"b' + throw new Error("x")）漏检——
+      // 改用状态机单遍扫描（字符串整体跳过含转义，注释截断），任何引号组合都正确
+      m = /throw\s+new\s+(\w+)(?:\s*\(\s*["'`](.+?)["'`]\s*\))?/.exec(stripJSStrings(line))
       if (m) {
         raises.push({ line: i + 1, exception: m[1], message: m[2] || null, raw: line.trim() })
       }
     }
   }
   return raises
+}
+
+// 审查修复（三轮）：JS 字符串/注释剥离状态机——正则链无法处理引号嵌套（'a"b' 与 throw 消息的双引号配对误剥）
+function stripJSStrings(line) {
+  let out = ''
+  let i = 0
+  while (i < line.length) {
+    const c = line[i]
+    if (c === '"' || c === "'" || c === '`') {
+      const q = c
+      i++
+      while (i < line.length && line[i] !== q) { if (line[i] === '\\') i++; i++ }
+      i++ // skip closing quote
+      out += '""'
+      continue
+    }
+    if (c === '/' && line[i + 1] === '/') break
+    if (c === '/' && line[i + 1] === '*') {
+      const end = line.indexOf('*/', i + 2)
+      i = end === -1 ? line.length : end + 2
+      continue
+    }
+    out += c
+    i++
+  }
+  return out
 }
 
 // 8：Rust panic-family 启发式检查。Rust 无异常层级——错误用 Result/Option + ? 传播，

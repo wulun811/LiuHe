@@ -99,7 +99,8 @@ function extractTestNames(filePath, workspaceDir) {
         m = /^\s*(?:async\s+)?def\s+(test_\w+)/.exec(lines[i])
       } else if (['.js', '.mjs', '.ts', '.tsx'].includes(ext)) {
         // R22-⑯：只剥注释不剥字符串——旧 P2-B6 把字符串一起剥掉，但正则要求紧跟引号，造成 JS/TS test_symbols 恒空（实证：it("works") 剥后变 it( ) → 永远不匹配）
-        const code = lines[i].replace(/\/\/.*$/, '')
+        // 审查修复（二轮）：剥整行注释而非行内 `//.*`——`it('loads http://x')` 的 URL 会被误剥导致测试名丢失
+        const code = lines[i].replace(/^\s*\/\/.*$/, '')
         m = /^\s*(?:it|test)(?:\.(?:only|skip))?\s*\(\s*['"`](.+?)['"`]/.exec(code)
         if (!m) m = /^\s*describe\s*\(\s*['"`](.+?)['"`]/.exec(code)
       } else if (ext === '.go') {

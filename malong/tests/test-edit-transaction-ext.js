@@ -238,6 +238,56 @@ const f = (n, c) => writeFileSync(join(ws, n), c)
   assert(u3.error_code === 'TXN_NOT_FOUND', `⑬ 顶层 abandoned 不误撤（得 ${u3.status}:${u3.error_code || ''}）`)
 }
 
+// ⑭ 审查修复 M1/M2：edits 元素非对象 / workspace_dir 非字符串 → 结构化错误不崩 MCP
+{
+  f('m1.js', 'keep\n')
+  const b = await handle({ workspace_dir: ws, action: 'begin', name: 'm1-guard' }, ctx)
+  const r1 = await handle({ workspace_dir: ws, action: 'edit', txn_id: b.txnId, file: 'm1.js', edits: [null] }, ctx)
+  assert(r1.error_code === 'INVALID_INPUT', `⑭a edits=[null] → INVALID_INPUT（得 ${r1.error_code || r1.status}）`)
+  const r2 = await handle({ workspace_dir: ws, action: 'edit_multi', txn_id: b.txnId, file_edits: [{ file: 'm1.js', edits: [null] }] }, ctx)
+  assert(r2.error_code === 'INVALID_INPUT', `⑭b file_edits edits=[null] → INVALID_INPUT（得 ${r2.error_code || r2.status}）`)
+  const r3 = await handle({ workspace_dir: 12345, action: 'begin', name: 'x' }, ctx)
+  assert(r3.error_code === 'INVALID_INPUT' && r3.message.includes('string'), `⑭c workspace_dir=数字 → INVALID_INPUT（得 ${r3.error_code || r3.status}:${r3.message}）`)
+  const r4 = await handle({ workspace_dir: { a: 1 }, action: 'begin', name: 'x' }, ctx)
+  assert(r4.error_code === 'INVALID_INPUT', `⑭d workspace_dir=对象 → INVALID_INPUT（得 ${r4.error_code || r4.status}）`)
+  await handle({ workspace_dir: ws, action: 'rollback', txn_id: b.txnId }, ctx)
+}
+
+// ⑮ 审查修复 M4：edit_multi atomic 失败回滚透传 partial
+{
+  f('m4a.js', 'origA\n')
+  f('m4b.js', 'origB\n')
+  const b = await handle({ workspace_dir: ws, action: 'begin', name: 'm4-partial-rb' }, ctx)
+  const r = await handle({ workspace_dir: ws, action: 'edit_multi', txn_id: b.txnId, file_edits: [
+    { file: 'm4a.js', edits: [{ old_string: 'origA', new_string: 'newA' }] },
+    { file: 'm4b.js', edits: [{ old_string: 'nonexistent', new_string: 'x' }] },
+  ] }, ctx)
+  assert(r.status === 'rolled_back', `⑮a 正常回滚仍是 rolled_back（得 ${r.status}）`)
+  assert(readFileSync(join(ws, 'm4a.js'), 'utf-8').includes('origA'), '⑮a m4a 已还原')
+}
+
+// ⑯ 审查修复 L5：commit rename 失败 → 状态回写 staged
+{
+  f('l5.js', 'abc\n')
+  const b = await handle({ workspace_dir: ws, action: 'begin', name: 'l5-commit-fail' }, ctx)
+  await handle({ workspace_dir: ws, action: 'edit', txn_id: b.txnId, file: 'l5.js', edits: [{ old_string: 'abc', new_string: 'xyz' }] }, ctx)
+  const txnDir = join(ws, '.ai-transactions', b.txnId)
+  const recentDir = join(ws, '.ai-transactions', 'recent')
+  mkdirSync(recentDir, { recursive: true })
+  // 非空目录占位（rename 目录→非空目录：POSIX 报 ENOTEMPTY / Windows MoveFileExW 报 EPERM，
+  // 重试后仍失败；空目录会被 rename 覆盖、文件占位会被 Windows 目录覆盖——都不能触发失败）
+  const occupyDir = join(recentDir, b.txnId)
+  mkdirSync(occupyDir)
+  writeFileSync(join(occupyDir, 'occupied'), 'x')
+  const c = await handle({ workspace_dir: ws, action: 'commit', txn_id: b.txnId }, ctx)
+  assert(c.code === 'commit_failed', `⑯a commit rename 失败 → commit_failed（得 ${c.code || c.status}）`)
+  const m = JSON.parse(readFileSync(join(txnDir, 'manifest.json'), 'utf-8'))
+  assert(m.state === 'staged', `⑯b rename 失败后 state 回写 staged（得 ${m.state}）`)
+  const rb = await handle({ workspace_dir: ws, action: 'rollback', txn_id: b.txnId }, ctx)
+  assert(rb.status === 'rolled_back', `⑯c 回滚仍可用（得 ${rb.status}）`)
+  rmSync(join(recentDir, b.txnId), { recursive: true, force: true })
+}
+
 try { rmSync(ws, { recursive: true, force: true }) } catch {}
 
 console.log(`== test-edit-transaction-ext: ${pass} passed, ${fail} failed ==`)

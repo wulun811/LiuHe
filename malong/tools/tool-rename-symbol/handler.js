@@ -53,6 +53,29 @@ function getStringRanges(line) {
         }
       }
       ranges.push([start, i])
+    } else if (ch === '/' && line[i + 1] !== '/' && line[i + 1] !== '*' &&
+               (i === 0 || /[\s(,=:[\]!&|?(){};]/.test(line.slice(0, i).trimEnd().slice(-1)) || /(?:return|typeof|instanceof|case|in|of|new|delete|void|yield)$/.test(line.slice(0, i).trimEnd()))) {
+      // 审查修复（二轮）：正则字面量内 `\/\/`（转义斜杠+斜杠）会被下行 `//` 注释分支误判，
+      // 从转义处到行尾全部标为注释 → 行尾真实代码符号漏改（实测 `const urlRe = /https?:\/\//; process.env.X = 1`）。
+      // 正则字面量整体跳过（含 [..] 字符类与转义），闭合 `/` 后可能还有 flags。
+      // 审查修复（三轮→四轮）：前导判定用「最近非空白字符」+ keyword 判定 trimEnd（`return /re/` 的 / 前是
+      // 空格且 return 后带尾空格，旧 $ 锚定失效→`\/\/` 复发实测漏改名，已修）；四轮恢复 \s/)/} 前导——
+      // 除法误判由 abandoned 保护兜底（`(x) / 2 // c` 扫描跨到 // 即回退注释分支；无注释除法 phantom 扫描
+      // 到行尾 break，无副作用）；扫描遇 `//`/`/*` 中止回退（phantom 扫描跨到注释前说明是除法误判）
+      let j = i + 1
+      let inClass = false
+      let abandoned = false
+      for (; j < line.length; j++) {
+        const cc = line[j]
+        if (cc === '\\') { j++; continue }
+        if (cc === '[') inClass = true
+        else if (cc === ']') inClass = false
+        else if (!inClass && cc === '/' && (line[j + 1] === '/' || line[j + 1] === '*')) { abandoned = true; break }
+        else if (cc === '/' && !inClass) break
+      }
+      if (abandoned) { i++; continue } // 除法误判：回退一格让注释分支处理（`//` 的 `/` 交给下行分支）
+      i = j
+      continue
     } else if (ch === '/' && line[i + 1] === '/') {
       ranges.push([i, line.length])
       break

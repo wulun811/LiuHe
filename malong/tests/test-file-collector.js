@@ -45,6 +45,10 @@ assert(isIgnored('src/generated_foo.js', ['generated_*'], false) === false, '子
 // R22-⑱：dir/ 目录规则任意层级匹配（gitignore 语义——旧只匹配顶层）
 assert(isIgnored('src/build/x.js', ['build/'], false) === true, 'R22-⑱ src/build/ 任意层级命中 build/ 规则')
 assert(isIgnored('a/b/c/dist/f.js', ['dist/'], false) === true, 'R22-⑱ 深层 dist/ 命中')
+// 三轮审查：**/xxx/ 尾斜杠形式（gitignore 语义=目录）——旧实现静默失效
+assert(isIgnored('dist/x.js', ['**/dist/'], false) === true, '**/dist/ 尾斜杠根层匹配')
+assert(isIgnored('a/node_modules/x.js', ['**/node_modules/'], false) === true, '**/node_modules/ 尾斜杠深层匹配')
+
 assert(isIgnored('src/app.js', ['build/'], false) === false, 'R22-⑱ 无关文件不命中')
 assert(isIgnored('src/build.py', ['build/'], false) === false, 'R22-⑱ 同名文件（非目录）不命中')
 

@@ -20,11 +20,13 @@ function stripCommentsAndStrings(source) {
       l = l.slice(end + 2)
       inBlock = false
     }
-    const bs = l.indexOf('/*')
-    if (bs !== -1) {
+    // 审查修复（二轮）：循环剥所有块注释——旧实现只剥第一个，`a /* c1 */ b /* eval */ c` 第二块残留误计数
+    while (true) {
+      const bs = l.indexOf('/*')
+      if (bs === -1) break
       const be = l.indexOf('*/', bs + 2)
-      if (be === -1) { l = l.slice(0, bs); inBlock = true }
-      else l = l.slice(0, bs) + l.slice(be + 2)
+      if (be === -1) { l = l.slice(0, bs); inBlock = true; break }
+      l = l.slice(0, bs) + l.slice(be + 2)
     }
     l = l.replace(/^\s*\/\/.*$/, '').replace(/^\s*#.*$/, '').replace(/^\s*--.*$/, '')
     return stripStrings(l)

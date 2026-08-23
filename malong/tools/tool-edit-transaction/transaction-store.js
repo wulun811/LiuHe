@@ -109,7 +109,14 @@ export class TransactionStore {
       state: 'staged', // R4a：崩溃恢复判定依据——commit 写 committed，终态不参与恢复
       files: {}
     }, null, 2))
-    renameSync(tmpPath, txnPath)
+    // 审查修复（L4）：begin renameSync 无重试——Windows EPERM 裸抛（handler 无 catch）。
+    // begin 保持同步（测试/调用方直接取 txnId），内联同步重试（对齐 renameRetry 语义）
+    for (let i = 0; ; i++) {
+      try { renameSync(tmpPath, txnPath); break } catch (e) {
+        if (i >= 3 || !['EPERM', 'EBUSY', 'EACCES'].includes(e.code)) throw e
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 150)
+      }
+    }
     this._ensureGitignore()
     return txnId
   }
@@ -238,6 +245,15 @@ export class TransactionStore {
 
       const validationWarnings = checkBracketBalance(result)
 
+      // 审查修复（H3）：锁内用刚读到的 content 刷新备份——backupFile 在锁外复制（backup=X），
+      // 若外部修改 Y 发生在其后，旧 backup=X 比事务读到的 Y 旧；rollback 恢复 X 会覆盖 Y 的外部修改。
+      // 锁内覆盖 backup == 事务读到的内容（含外部修改），回滚只撤事务自己的改动，不丢外部修改。
+      try {
+        const m = this._readManifest(txnId)
+        const bname = m.files[fileRel]?.backupName
+        if (bname) writeFileSync(join(this._txnPath(txnId), 'backup', bname), content, 'utf-8')
+      } catch {}
+
       _atomicWrite(absPath, result, { fsync: true })
       // Y002-S1：事务写落盘后登记写者（collision_guard classify 识别 transaction）
       registerWriter(this.projectRoot, fileRel, 'transaction')
@@ -286,6 +302,13 @@ export class TransactionStore {
     try {
       await renameRetry(txnPath, recentPath)
     } catch (e) {
+      // 审查修复（L5）：rename 失败回写 staged——旧实现状态已标 committed 但目录卡顶层，
+      // undoCommit 只查 recent/ + committed_recovered → 该事务无法撤销且状态矛盾（可 rollback 但无人告知）
+      try {
+        const m = this._readManifest(txnId)
+        m.state = 'staged'
+        this._writeManifest(txnId, m)
+      } catch {}
       return { error: 'commit_failed', code: 'commit_failed', message: `Commit rename failed: ${e.message}`, retryable: true, txn_id: txnId }
     }
     this._cleanRecent(3)

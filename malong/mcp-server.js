@@ -12,7 +12,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 
 import { Semaphore, heavyToolWeight } from './semaphore.js'
 
-const REQUEST_TIMEOUT_MS = 120_000
+const REQUEST_TIMEOUT_MS = parseInt(process.env.MALONG_REQUEST_TIMEOUT_MS || '120000', 10)
 const SEMAPHORE_TIMEOUT_MS = 60_000
 const RECOMMENDED_HEAP_MB = 512
 // r10e(F3)：并发 3 → 5——实测 RSS 194MB/heap 12MB 内存充足（上限 480MB），3 槽在 verify_pipeline 120s 长任务占 1 槽时
@@ -434,6 +434,7 @@ function handleRequest(req) {
             semaphore.release(weight)
           }
         }
+        let rawPromise
         try {
           const context = buildContext()
           const timeoutPromise = new Promise((_, reject) => {
@@ -445,7 +446,7 @@ function handleRequest(req) {
           // r8(F9)：信号量在工具真正结束时释放——旧实现超时即放账，僵尸工具仍在跑 → 并发超限 + 客户端重试与僵尸写交错
           // r9(F9)：先响应后释放——finally 挂工具上会让 release 先于 safeRespond（大结果 stringify 可达百 ms 级同步），
           // 期间新重工具（reindex weight=3）抢占全部槽位 → 旧响应被推迟 → 客户端超时重试 → 重复副作用
-          const rawPromise = registry.callTool(name, toolArgs, context)
+          rawPromise = registry.callTool(name, toolArgs, context)
           rawPromise.catch(() => {})
           await Promise.race([rawPromise, timeoutPromise])
           if (!timedOut) {
@@ -456,14 +457,15 @@ function handleRequest(req) {
             } finally {
               releaseSlot()
             }
-          } else {
-            // 超时路径：release 挂到工具真正结束（r8 F9 语义保留）——僵尸未停槽位不放
-            rawPromise.then(releaseSlot, releaseSlot)
           }
         } catch (e) {
           if (timedOut) {
             // B1：race 超时必以 rejection 结算，之前 try 内 else 分支不可达 = 超时零响应（A5 死代码）。
-            // 超时响应必须在 catch 里发；工具本身仍在跑（已 .catch 兜住），结果丢弃
+            // 超时响应必须在 catch 里发；工具本身仍在跑（已 .catch 兜住），结果丢弃。
+            // 审查修复（二轮）：槽位释放原挂在不可达的 else 分支 → 每次工具超时泄漏 1 槽，
+            // 5 次超时后 semaphore 全被僵尸占满、所有新工具调用排队 60s 超时降级。
+            // 释放语义保留 r8(F9)：僵尸工具真正结束时才还槽（挂 then/release）
+            rawPromise.then(releaseSlot, releaseSlot)
             safeRespondError(id, -32603, `Request timeout after ${REQUEST_TIMEOUT_MS}ms`)
             crashLog(`tool ${name} completed AFTER timeout (${REQUEST_TIMEOUT_MS}ms) — result discarded`)
           } else {

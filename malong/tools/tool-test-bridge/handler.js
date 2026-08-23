@@ -220,7 +220,9 @@ async function handleRun(args, context) {
   }
   // r11(H4)：上钳 110s（MCP 120s 硬超时）——超大 timeout 时客户端先断、工具僵尸占槽数分钟
   const effectiveTimeout = Math.min(timeout, 110_000)
-  const framework = args.framework || detectFramework(workspaceDir, args.scope)
+  // 审查修复（二轮）：detectFramework 用生效 scope（args.scope 优先，缺省回退 file）——
+  // 旧实现传 args.scope：只传 file 时扩展名锁定被跳过，.js 文件可能被判成 pytest（扩展名优先契约失效）
+  const framework = args.framework || detectFramework(workspaceDir, scope)
 
   if (framework === 'unknown') {
     return {
@@ -256,10 +258,11 @@ async function handleRun(args, context) {
       env: { FORCE_COLOR: '0', NO_COLOR: '1', TERM: 'dumb' },
     })
     rawOutput = res.stdout + (res.stderr ? '\n' + res.stderr : '')
-    exitCode = typeof res.code === 'number' ? res.code : (res.killed ? 1 : 0)
+    exitCode = res.code !== null && typeof res.code === 'number' ? res.code : 1
     if (res.killed) timedOut = true
   } catch (e) {
-    exitCode = e.code ?? 1
+    // 审查修复（二轮）：spawn error 的 e.code 是字符串（'ENOENT'/'EACCES'）——旧实现 exit_code 变字符串类型错乱
+    exitCode = typeof e.code === 'number' ? e.code : 1
     rawOutput = ''
     if (e.code === 'ETIMEDOUT') timedOut = true
   }

@@ -220,7 +220,7 @@ function checkTestSync(changes, workspaceDir) {
 
 export async function handle(args, context) {
   const workspaceDir = args?.workspace_dir
-  if (!workspaceDir) return makeError(ErrorCodes.INVALID_INPUT, 'workspace_dir is required')
+  if (typeof workspaceDir !== 'string' || workspaceDir === '') return makeError(ErrorCodes.INVALID_INPUT, 'workspace_dir is required (string)')
 
   const since = args?.since || 'last_txn'
   const txnRoot = join(workspaceDir, '.ai-transactions')

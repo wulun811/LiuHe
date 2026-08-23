@@ -4,6 +4,7 @@
 
 ## 变更速览
 
+- **[0.4.7]** (2026-08-24): 发布前第四轮审查——rename-symbol 前导判定回归修复（`return /re/`/`if (x) /re/` 正则识别 + 除法豁免 8 场景矩阵）、health-check readdir 失败路径崩点修复（修复即崩点：`return results` 未定义变量 → entries 门控）、verify-pipeline skipped 顶层 status 语义锁定、exception-guard/trace-symbol 状态机断言补全、git-worktree 断链 symlink 友好拒绝、parse-client import 回归锁定；npm test 链补 2 个测试文件（83→85），README 计数 81→85 文件 / 2013→2027 断言
 - **[0.4.6]** (2026-08-21): 正式版发布——版本号对齐（0.4.5-post9 → 0.4.6）：主包/平台包/运行时常量（lang-parser.js、dsh-bridge.mjs）/README 双语/官网五页（index、download、docs 中英）全量同步；CI 自动发布 npm 平台包 + 主包 + GitHub Release
 
 - **[0.4.5.post9]** (2026-08-17): Glama B→A 描述工程——四低分工具（code_quality/spec_gen/diff_facts/tsc_check）描述补行为+输出格式（≤90 字符）；18 个参数缺描述补齐（覆盖率 91%→100%）；新增 test-manifest-quality.js 质量门禁（描述长度/覆盖率/输出信号防回归）；backfill Windows/CI 兼容修复（findTscBin tsc.cmd/spawn-guard winCmd/⑨ 藏 PATH 容错）

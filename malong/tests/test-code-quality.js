@@ -3,7 +3,7 @@
 //       （techDebt 用圈复杂度）/ 危险 API blastRadius / 嵌套 overEngineering /
 //       paradigmFit 风格 / 复杂度分支文件 vs 简单文件区分度
 import { join, dirname } from 'node:path'
-import { mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs'
 import os from 'node:os'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
@@ -84,6 +84,15 @@ const ctx = { langParserService, getWorkspaceDir: () => WS }
 {
   const r = await handle({ workspace_dir: WS, file: '../outside.js' }, ctx)
   assert(r.error === 'path_blocked', `⑥ file 逃逸 → path_blocked（得 ${r.error}）`)
+}
+
+// 三轮审查修复：parse-client 缺 node:path join / node:os os import（stderr 落盘 ReferenceError 被吞）——静态回归锁定
+{
+  const src = readFileSync(join(__dirname, '..', 'parse-client.js'), 'utf-8')
+  const pathLine = src.split('\n').find(l => l.includes("from 'node:path'"))
+  const osLine = src.split('\n').find(l => l.includes("from 'node:os'"))
+  assert(pathLine && pathLine.includes('join'), `parse-client 导入 node:path join（得 ${pathLine}）——删 import 会复活 stderr 落盘静默失效`)
+  assert(osLine && /\bos\b/.test(osLine), `parse-client 导入 node:os（得 ${osLine}）`)
 }
 
 try { rmSync(WS, { recursive: true, force: true }) } catch {}

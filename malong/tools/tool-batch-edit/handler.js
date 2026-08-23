@@ -153,7 +153,9 @@ export async function delegateWrite({ absPath, filePath, workspaceDir, originalC
     }
     if (journal) updateJournalState(journal.dir, { state: 'committed', committed_at: new Date().toISOString() })
     // Y002-S1：batch 写后登记写者（collision_guard classify 识别 batch_edit）
-    if (workspaceDir) registerWriter(workspaceDir, filePath, 'batch_edit')
+    // 审查修复（H4）：key 归一化为 workspace-relative——旧实现传 filePath（绝对），
+    // collision-guard 查询用相对路径 → key 永不匹配 → 四态分类恒判 external，写后登记失效
+    if (workspaceDir) registerWriter(workspaceDir, isAbsolute(filePath) ? relative(workspaceDir, filePath) : filePath, 'batch_edit')
 
     let reindex = null
     if (codeIndexService && workspaceDir) {
@@ -174,6 +176,10 @@ export async function delegateWrite({ absPath, filePath, workspaceDir, originalC
 }
 
 export async function handle(args, context) {
+  // 审查修复（M2）：workspace_dir 非字符串 → join 抛 TypeError（校验在 try 外，裸崩 MCP）
+  if (args?.workspace_dir != null && typeof args.workspace_dir !== 'string') {
+    return { error: 'invalid_input', message: 'workspace_dir must be a string', suggestion: 'Provide the absolute path to the project root directory.' }
+  }
   const workspaceDir = args?.workspace_dir || null
   const fileRel = args?.file || ''
   const filePathAbs = args?.file_path || ''
@@ -207,7 +213,9 @@ export async function handle(args, context) {
     if (workspaceDir && !isInsideWorkspace(workspaceDir, candidate)) return makeError(ErrorCodes.PATH_BLOCKED, `file_path outside workspace_dir: ${candidate}`, { file: filePathAbs, reason: 'outside_workspace' })
     filePath = candidate
   } else {
-    return { error: 'missing_parameter', message: 'file or file_path is required', suggestion: 'Prefer file (workspace-relative) + workspace_dir, e.g. { workspace_dir: "/repo", file: "src/auth.py" }; file_path (absolute) kept as deprecated alias' }
+    // r21d: 参数残缺多因客户端序列化丢字段（含 ${...} 模板串 + 大量 \" 转义时 opencode 客户端可能整字段丢失，非服务端 bug）
+    // 报错时带自愈提示：不要原样重试，改用内置 edit 分小块或 python 脚本整文件替换
+    return { error: 'missing_parameter', message: 'file or file_path is required (参数残缺：客户端序列化可能丢字段)', suggestion: '不要原样重试——若参数含 ${...} 模板串或大量转义引号，opencode 客户端可能整字段丢失（r21d）；改用内置 edit 分小块提交，或用 python 脚本整文件替换' }
   }
   if (!editsRaw) return { error: 'missing_parameter', message: 'edits is required', suggestion: 'Provide a JSON array of edits: [{"old_string": "...", "new_string": "..."}]' }
 
@@ -215,6 +223,12 @@ export async function handle(args, context) {
   const pathCheck = validateFilePath(filePath, workspaceDir)
   if (pathCheck.blocked) {
     return makeError(ErrorCodes.PATH_BLOCKED, pathCheck.detail, { file: filePath, reason: pathCheck.reason })
+  }
+
+  // 审查修复（L7）：edits 非数组对象 → JSON.stringify 后 Python enumerate(dict) 出字符串键 → AttributeError INTERNAL
+  // 改为结构化 invalid_input（对齐 file/workspace_dir 同款守卫）
+  if (editsRaw != null && !Array.isArray(editsRaw) && typeof editsRaw !== 'string') {
+    return { error: 'invalid_input', message: 'edits must be an array or JSON string', suggestion: 'Provide a JSON array of edits: [{"old_string": "...", "new_string": "..."}]' }
   }
 
   const pythonScript = join(__dirname, 'batch_edit_mvp.py')

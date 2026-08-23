@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
-import { mkdtempSync, writeFileSync, existsSync, rmSync, mkdirSync, realpathSync } from 'node:fs'
-import { join, dirname, resolve, sep } from 'node:path'
+import { mkdtempSync, writeFileSync, existsSync, rmSync, mkdirSync, realpathSync, lstatSync } from 'node:fs'
+import { join, dirname, resolve, sep, relative, isAbsolute } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 
@@ -13,6 +13,41 @@ function guardPath(root, userPath) {
   const rootResolved = resolve(root)
   const resolved = resolve(rootResolved, userPath)
   return resolved === rootResolved || resolved.startsWith(rootResolved + sep) ? resolved : null
+}
+
+function assertInsideWorktree(realWorktree, fullPath) {
+  // 审查修复（二轮）：r8(B4) 旧守卫只 realpath 目标+父目录——中间层 symlink 且深层路径不存在时
+  // 两个 realpathSync 都 ENOENT → 守卫整体跳过 → mkdirSync(recursive) 跟随 symlink 写穿仓库外。
+  // 逐层下降：每层 lstat 查 symlink，命中则 realpath 解析并校验仍在 worktree 内
+  const rel = relative(realWorktree, fullPath)
+  if (rel.startsWith('..') || isAbsolute(rel)) {
+    throw new Error(`refusing to write outside worktree: ${fullPath}`)
+  }
+  let cur = realWorktree
+  for (const part of rel.split(sep)) {
+    if (!part) continue
+    cur = join(cur, part)
+    let st = null
+    try { st = lstatSync(cur) } catch (e) {
+      if (e.code === 'ENOENT' || e.code === 'ENOTDIR') break // 路径不存在 → 后续层必不存在，安全
+      throw e
+    }
+    if (st.isSymbolicLink()) {
+      let targetReal
+      try { targetReal = realpathSync(cur) } catch {
+        // 审查修复（三轮）：断链 symlink（目标不存在）裸 ENOENT 抛 → 事务回滚消息不友好。视为拒绝（安全侧）
+        throw new Error(`refusing to write through broken symlink: ${cur}`)
+      }
+      if (targetReal !== realWorktree && !targetReal.startsWith(realWorktree + sep)) {
+        throw new Error(`refusing to write through symlink: ${cur} resolves outside worktree (${targetReal})`)
+      }
+      cur = targetReal
+    }
+  }
+}
+
+export function _assertInsideWorktreeForTest(realWorktree, fullPath) {
+  assertInsideWorktree(realWorktree, fullPath)
 }
 
 function git(args, cwd, timeout) {
@@ -120,40 +155,15 @@ async function _runTransaction(repoDir, changes, args) {
 
     for (const change of changes) {
       const fullPath = join(worktreePath, change.path)
+      const realWorktree = realpathSync(worktreePath)
+      // 审查修复（二轮）：逐层 symlink 守卫（覆盖中间层 symlink + 深层不存在场景）
+      assertInsideWorktree(realWorktree, fullPath)
       if (change.new_content !== undefined) {
-        // r8(B4)：symlink 守卫——仓库提交的 symlink 会被 worktree checkout 重现，裸 writeFileSync 会写穿到外部
-        const realWorktree = realpathSync(worktreePath)
-        let targetReal = null
-        try { targetReal = realpathSync(fullPath) } catch {}
-        if (targetReal) {
-          if (targetReal !== realWorktree && !targetReal.startsWith(realWorktree + sep)) {
-            throw new Error(`refusing to write through symlink: ${change.path} resolves outside worktree (${targetReal})`)
-          }
-        } else {
-          let parentReal = null
-          try { parentReal = realpathSync(dirname(fullPath)) } catch {}
-          if (parentReal && parentReal !== realWorktree && !parentReal.startsWith(realWorktree + sep)) {
-            throw new Error(`refusing to write through symlinked dir: ${change.path} resolves outside worktree (${parentReal})`)
-          }
-        }
         const dir = join(fullPath, '..')
         if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
         writeFileSync(fullPath, change.new_content, 'utf-8')
       } else if (change.delete) {
-        // r9(P4)：delete 分支同样过 realpath 守卫——仓库提交的 symlink（指向 ~/.ssh 等）会被
-        // worktree checkout 重现，裸 rmSync 跟随 symlink 删外部文件；write 分支有守卫而 delete 没有
-        const realWorktree = realpathSync(worktreePath)
-        const parentReal = realpathSync(dirname(fullPath))
-        if (parentReal !== realWorktree && !parentReal.startsWith(realWorktree + sep)) {
-          throw new Error(`refusing to delete through symlinked dir: ${change.path} resolves outside worktree (${parentReal})`)
-        }
-        if (existsSync(fullPath)) {
-          const targetReal = realpathSync(fullPath)
-          if (targetReal !== realWorktree && !targetReal.startsWith(realWorktree + sep)) {
-            throw new Error(`refusing to delete through symlink: ${change.path} resolves outside worktree (${targetReal})`)
-          }
-          rmSync(fullPath)
-        }
+        if (existsSync(fullPath)) rmSync(fullPath)
       } else {
         throw new Error(`change for ${change.path} needs new_content or delete`)
       }

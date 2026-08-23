@@ -128,7 +128,11 @@ export async function recoverJournals(workspaceDir, options = {}) {
   const root = join(workspaceDir, JOURNAL_ROOT, 'journal')
   if (!existsSync(root)) return []
   const recovered = []
-  for (const txnDir of readdirSync(root)) {
+  for (const d of readdirSync(root, { withFileTypes: true })) {
+    // 审查修复（M7）：.last_prune 等非目录条目跳过——旧实现 readdirSync 无过滤，
+    // 把 .last_prune 文件当 txnDir 读 state.json → ENOTDIR → 孤儿清理分支误删 prune 节流 marker
+    if (!d.isDirectory()) continue
+    const txnDir = d.name
     const dir = join(root, txnDir)
     let state = null
     const statePath = join(dir, 'state.json')
@@ -180,7 +184,7 @@ export async function recoverJournals(workspaceDir, options = {}) {
       const manifest = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf-8'))
       const absPath = join(workspaceDir, manifest.file)
       const backup = join(dir, 'backup', basename(manifest.file))
-      if (state.state === 'staged' && existsSync(backup) && existsSync(absPath)) {
+      if ((state.state === 'staged' || state.state === 'created') && existsSync(backup) && existsSync(absPath)) {
         // 哈希三方判定（防覆盖后来的合法写入）：
         // 当前 == 写前 → 事务从未落地（dryRun 残留/崩溃在 rename 前）→ 不覆盖，标 abandoned
         // 当前 == 写后(new_hash) → rename 已成功、崩溃在 committed 前 → 补标 committed
@@ -188,6 +192,8 @@ export async function recoverJournals(workspaceDir, options = {}) {
         const curHash = sha256(readFileSync(absPath))
         const oldHash = sha256(readFileSync(backup))
         if (curHash === oldHash) {
+          // 审查修复（M3）：created/staged + 文件==写前 → 事务从未落地 → abandoned
+          // （旧实现只对 staged 判 abandoned，created 落入无条件 rolled_back 谎报）
           atomicWrite(join(dir, 'state.json'), JSON.stringify({ ...state, state: 'abandoned', abandoned_at: new Date().toISOString() }), { fsync: true })
           recovered.push({ txn_id: txnDir, file: manifest.file, action: 'abandoned' })
           continue
@@ -201,8 +207,12 @@ export async function recoverJournals(workspaceDir, options = {}) {
         recovered.push({ txn_id: txnDir, file: manifest.file, action: 'kept_external_change' })
         continue
       }
-      atomicWrite(join(dir, 'state.json'), JSON.stringify({ ...state, state: 'rolled_back', rolled_back_at: new Date().toISOString() }), { fsync: true })
-      recovered.push({ txn_id: txnDir, file: manifest.file, action: 'rolled_back' })
+      // 审查修复（M3）：created 且 backup/目标缺失 → 事务从未执行 → abandoned（无资产可恢复，非谎报回滚）；
+      // staged 缺失 → needs_review 待审（可能已执行但资产丢失，保守保留）
+      const m3State = state.state === 'created' ? 'abandoned' : 'needs_review'
+      const m3Reason = state.state === 'created' ? 'created txn never executed (backup/target missing)' : 'staged txn without recoverable backup/target'
+      atomicWrite(join(dir, 'state.json'), JSON.stringify({ ...state, state: m3State, reason: m3Reason, needs_review_at: new Date().toISOString() }), { fsync: true })
+      recovered.push({ txn_id: txnDir, file: manifest.file, action: m3State, reason: m3Reason })
     } catch (e) {
       atomicWrite(join(dir, 'state.json'), JSON.stringify({ ...state, state: 'failed', reason: e.message }), { fsync: true })
       recovered.push({ txn_id: txnDir, file: null, action: 'rollback_failed', reason: e.message })
@@ -420,6 +430,7 @@ async function recoverBatches(workspaceDir, recovered) {
             const backup = join(txnDir, 'backup', basename(manifest.file))
             const absPath = join(workspaceDir, manifest.file)
             const state = JSON.parse(readFileSync(join(txnDir, 'state.json'), 'utf-8'))
+            let didRollback = false
             if (existsSync(backup) && existsSync(absPath) && state.new_hash && sha256(readFileSync(absPath)) === state.new_hash) {
               // r9(F5)：恢复写原子化 + 取 .mlock（防恢复与并发写者交错覆盖 / 恢复期间再崩溃留半截）
               const rl = await acquireLock(absPath, 30000)
@@ -428,6 +439,7 @@ async function recoverBatches(workspaceDir, recovered) {
                   if (sha256(readFileSync(absPath)) === state.new_hash) {
                     atomicWrite(absPath, readFileSync(backup), { fsync: true })
                     recovered.push({ txn_id: txnId, file: manifest.file, action: 'batch_partial_rollback' })
+                    didRollback = true
                   }
                 } finally {
                   rl.release()
@@ -436,7 +448,11 @@ async function recoverBatches(workspaceDir, recovered) {
                 recovered.push({ txn_id: txnId, file: manifest.file, action: 'batch_partial_rollback_skipped', reason: 'lock busy' })
               }
             }
-            updateJournalState(txnDir, { state: 'rolled_back', rolled_back_at: new Date().toISOString(), reason: 'batch_partial' })
+            // 审查修复（H2）：只有实际恢复成功才标终态 rolled_back；
+            // 旧实现无条件标 → backup 缺失/哈希不匹配/锁忙时谎报已回滚，终态永不再审
+            updateJournalState(txnDir, didRollback
+              ? { state: 'rolled_back', rolled_back_at: new Date().toISOString(), reason: 'batch_partial' }
+              : { state: 'needs_review', reason: 'batch_partial rollback not executed (backup missing / hash mismatch / lock busy)' })
           } catch {}
         }
       }

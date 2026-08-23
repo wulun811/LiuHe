@@ -223,17 +223,48 @@ export async function handle(args, context) {
     // 否则每次带 workspace_dir 调用都重跑预检 + 要 confirm token，即使索引已 up-to-date
     const last = codeIndexService.lastIndexed
     if (last && last.workspace_dir === workspaceDir && args?.force !== true) {
-      return {
-        status: 'completed',
-        done: true,
-        workspace_dir: workspaceDir,
-        total_files: totalFiles,
-        files_indexed: 0,
-        unchanged_skipped: totalFiles,
-        already_fresh: true,
-        symbols: last.symbols,
-        refs: last.refs,
-        note: 'Workspace already indexed and exceeds threshold — no confirmation needed; index is up to date. Pass force=true to force a full re-extract.',
+      // 审查修复（二轮）：旧实现只看 lastIndexed 存在即报 already_fresh——新增/修改文件后索引实际过期
+      // 却谎报 up to date，新文件永不入索引（symbol_search/repo_map 等全仓查询永久缺失）。
+      // 免确认语义保留，但必须先跑 mtime 增量判定（indexBatch 自身按 mtime 跳过未变文件）
+      const incStart = Date.now()
+      try {
+        const result = await codeIndexService.indexBatch(pre.files.map(f => f.path), workspaceDir)
+        const indexedCount = Array.isArray(result) ? result.length : 0
+        if (indexedCount === 0) {
+          codeIndexService.indexing = false // 触发 stats 记录
+          return {
+            status: 'completed',
+            done: true,
+            workspace_dir: workspaceDir,
+            total_files: totalFiles,
+            files_indexed: 0,
+            unchanged_skipped: totalFiles,
+            already_fresh: true,
+            symbols: last.symbols,
+            refs: last.refs,
+            duration_seconds: Math.round((Date.now() - incStart) / 1000),
+            note: `Workspace already indexed and exceeds threshold — no mtime changes among the first ${totalFiles} files checked (precheck hardCap limits incremental scan to the collected set; tail files beyond the cap are not scanned). Pass force=true to force a full re-extract.`,
+          }
+        }
+        codeIndexService.indexing = false
+        const incLast = codeIndexService.lastIndexed || {}
+        return {
+          status: 'completed',
+          done: true,
+          workspace_dir: workspaceDir,
+          total_files: totalFiles,
+          files_indexed: indexedCount,
+          unchanged_skipped: Math.max(totalFiles - indexedCount, 0),
+          already_fresh: false,
+          symbols: incLast.symbols,
+          refs: incLast.refs,
+          duration_seconds: Math.round((Date.now() - incStart) / 1000),
+          note: `Incremental reindex applied (${indexedCount} changed files detected by mtime). Pass force=true to force a full re-extract.`,
+        }
+      } catch (e) {
+        log('error', `[reindex] incremental check failed: ${e.message}`)
+        codeIndexService.indexing = false
+        return makeError(ErrorCodes.SERVICE_UNAVAILABLE, `Indexing failed: ${e.message}`)
       }
     }
     const estimateSec = estimateIndexSeconds(totalFiles)

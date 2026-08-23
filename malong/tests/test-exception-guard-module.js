@@ -62,5 +62,21 @@ const namesC = Object.keys(rc.project_exceptions || {})
 console.log('  module-c project_exceptions:', JSON.stringify(namesC), 'scope:', rc.hierarchy_scope)
 assert(rc.hierarchy_scope === 'project', `module-c scope=project（回退全库），实际 ${rc.hierarchy_scope}`)
 
+// 三轮→四轮审查修复：JS 引号嵌套漏检（状态机）——'a"b' + throw new Error("x") 必须检出；
+// 注释内 throw 文本不得误报；字符串内 // 不干扰
+{
+  const wsj = join(WS, 'js-nested')
+  mkdirSync(wsj, { recursive: true })
+  writeFileSync(join(wsj, 'n1.js'), "const s = 'a\"b'; throw new Error('x')\n")
+  writeFileSync(join(wsj, 'n2.js'), '// TODO: throw new Error("comment")\n')
+  writeFileSync(join(wsj, 'n3.js'), 'const t = "str // not comment"; throw new Error("y")\n')
+  for (const [f, expectRaises] of [['n1.js', 1], ['n2.js', 0], ['n3.js', 1]]) {
+    const r = await handle({ workspace_dir: wsj, file: f }, ctx)
+    assert(r.summary && r.summary.raises_checked === expectRaises,
+      `${f}: raises_checked=${expectRaises}（得 ${r.summary && r.summary.raises_checked}）——JS 状态机剥字符串（旧正则链对引号嵌套漏检）`)
+  }
+  try { rmSync(wsj, { recursive: true, force: true }) } catch {}
+}
+
 console.log(`\n== test-exception-guard-module: ${pass} passed, ${fail} failed ==`)
 process.exit(fail > 0 ? 1 : 0)

@@ -48,6 +48,21 @@ const ctx = {
   assert(r.direct_references.length === 0, `① 零命中（含 SYM 的文件在截断窗口外）（得 ${r.direct_references.length}）`)
 }
 
+// ── ①b 三轮→四轮：字符串内 # 不误剥（stripHashComment）——常量值原样返回 ──
+{
+  const { handle } = await imp(join(MALONG_DIR, 'tools', 'tool-trace-symbol', 'handler.js'))
+  writeFileSync(join(WS, 'src', 'hash.js'), [
+    'const C1 = "#fff"',
+    'const C2 = 5 # comment',
+    'const U = "http://x/#frag"',
+    'const C3 = 5#frag',
+  ].join('\n') + '\n')
+  for (const [sym, exp] of [['C1', '#fff'], ['C2', 5], ['U', 'http://x/#frag'], ['C3', '5#frag']]) {
+    const r = await handle({ workspace_dir: WS, symbol: sym, file: 'src/hash.js' }, ctx)
+    assert(JSON.stringify(r.value) === JSON.stringify(exp), `${sym}: value=${JSON.stringify(r.value)}（expect ${JSON.stringify(exp)}）——旧 \\s#.*$ 会误剥字符串内 #）`)
+  }
+}
+
 // ── ② trace-symbol：literal 200 文件上限截断标注（独立 WS2，避免①的 500+ 文件干扰） ──
 // 注意：literal 值用数字（字符串值会被 isInCommentOrString 剔除——既有设计，见 CHANGELOG debt）
 {

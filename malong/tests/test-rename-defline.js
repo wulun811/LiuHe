@@ -5,7 +5,8 @@
 // 修复：定义行解析提前，显式补入 allRefs。
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -71,6 +72,54 @@ assert(defLines.includes(2), `调用行 2 在编辑集内（得行 ${JSON.string
 const defEdit = defEdits && defEdits.edits.find(e => e.line === 1)
 assert(defEdit && defEdit.new.includes('function mySymbolRenamed'), `定义行改为新名（得 ${defEdit && defEdit.new}）`)
 assert(res.definition && res.definition.line === 1, `definition 字段指向定义行（得 ${JSON.stringify(res.definition)}）`)
+
+// 二轮审查修复：正则字面量内 \/\/ 不再误判为行注释——行尾符号必须仍可改名
+console.log('\n── 正则字面量内转义斜杠不吞行尾符号 ──')
+{
+  const ws2 = mkdtempSync(join(tmpdir(), 'ren-re-'))
+  writeFileSync(join(ws2, 're.js'), 'const urlRe = /https?:\\/\\//; process.env.X = 1\n')
+  await svc.initWorkspace(ws2)
+  await svc.indexBatch([join(ws2, 're.js')], ws2)
+  const res2 = await rename.handle(
+    { workspace_dir: ws2, file: 're.js', symbol: 'process', new_name: 'proc2', dry_run: false },
+    { codeIndexService: svc, getWorkspaceDir: () => DATA },
+  )
+  assert(!res2.error, `正则场景 rename 无错误（得 ${res2.error && res2.error.message}）`)
+  const out = readFileSync(join(ws2, 're.js'), 'utf-8')
+  assert(out.includes('proc2.env.X'), `行尾符号被改名（旧实现 \\/\\/ 误判注释吞掉行尾，得 ${out.trim()}）`)
+  assert(out.includes('/https?:\\/\\//'), '正则字面量保持原样')
+  try { rmSync(ws2, { recursive: true, force: true }) } catch {}
+}
+
+// 三轮→四轮审查修复：前导判定（return/if 括号/等号后的正则）+ 除法豁免——8 场景矩阵
+console.log('\n── 正则/除法前导判定矩阵（三轮→四轮）──')
+{
+  const cases = [
+    ['return /https?:\\/\\//; foo.baz = 2\n', 1, 'return 后正则（keyword trimEnd 兜底）'],
+    ['if (x) /a\\/\\//.test(y); foo.sym = 1\n', 1, 'if 括号后正则（空格+右括号前导）'],
+    ['const urlRe = /https?:\\/\\//; foo.x = 1\n', 1, '等号后正则'],
+    ['x = 3 / 2 // foo.comment = 1\n', 0, '除法+注释：注释内不改名'],
+    ['(total + 1) / 2 // foo.note = 9\n', 0, '括号除法+注释'],
+    ['arr[0] / 2 // foo.idx\n', 0, '下标除法+注释'],
+    ['{ a: 1 } / 2 // foo.b\n', 0, '块除法+注释'],
+    ['x = a / b / c; foo.end = 1\n', 1, '连除后行尾代码仍改名'],
+  ]
+  for (const [content, expect, label] of cases) {
+    const ws3 = mkdtempSync(join(tmpdir(), 'ren-mx-'))
+    writeFileSync(join(ws3, 't.js'), content)
+    await svc.initWorkspace(ws3)
+    await svc.indexBatch([join(ws3, 't.js')], ws3)
+    const res3 = await rename.handle(
+      { workspace_dir: ws3, file: 't.js', symbol: 'foo', new_name: 'FOO', dry_run: false },
+      { codeIndexService: svc, getWorkspaceDir: () => DATA },
+    )
+    assert(!res3.error, `${label}: rename 无错误（得 ${res3.error && res3.error.message}）`)
+    const out = readFileSync(join(ws3, 't.js'), 'utf-8')
+    const n = (out.match(/FOO/g) || []).length
+    assert(n === expect, `${label}: FOO 出现 ${n} 次（expect ${expect}，得 ${out.trim()}）——前导判定回归`)
+    try { rmSync(ws3, { recursive: true, force: true }) } catch {}
+  }
+}
 
 console.log(`\n== test-rename-defline: ${pass} passed, ${fail} failed ==`)
 process.exit(fail > 0 ? 1 : 0)

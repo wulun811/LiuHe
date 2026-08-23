@@ -95,7 +95,7 @@ process.kill(process.pid, 'SIGKILL')`
   })
   assert(res.signal === 'SIGKILL' || (process.platform === 'win32' && res.status !== 0), '子进程确被 SIGKILL 杀死')
   const r = await recoverJournals(ws)
-  assert(r.some(x => x.action === 'rolled_back'), `created 残留 → rolled_back（得 ${JSON.stringify(r.map(x => x.action))}）`)
+  assert(r.some(x => x.action === 'abandoned'), `created 残留 → abandoned（事务从未执行；旧实现谎报 rolled_back，得 ${JSON.stringify(r.map(x => x.action))}）`)
   assert(readFileSync(join(ws, 't.js'), 'utf-8') === 'let a = 1;', '目标文件未被修改')
 }
 
@@ -241,7 +241,7 @@ console.log('\n── ⑩ recover re-entrancy ──')
   writeFileSync(join(dir, 'manifest.json'), JSON.stringify({ txn_id: 'txn_r', file: 'r.js' }))
   const r1 = await recoverJournals(ws)
   const r2 = await recoverJournals(ws)
-  assert(r1.some(x => x.action === 'rolled_back'), `首次 recover → rolled_back`)
+  assert(r1.some(x => x.action === 'abandoned'), `首次 recover → abandoned（created 从未执行；旧实现谎报 rolled_back）`)
   assert(r2.every(x => x.action !== 'rolled_back' || !x.txn_id), '二次 recover 无重复回滚动作')
 }
 
