@@ -89,5 +89,13 @@ export function atomicWrite(absPath, content, opts = {}) {
     const fd = openSync(tmp, 'r+')
     try { fsyncSync(fd) } finally { closeSync(fd) }
   }
-  renameSync(tmp, absPath)
+  // 审查修复（五轮）：Windows Defender/杀软短暂占用刚写入的 tmp 句柄 → rename EPERM 偶发崩。
+  // atomicWrite 是 journal/manifest 等崩溃恢复资产的核心写路径，无重试时一次 EPERM 整链中断
+  // （实测 test-rename-defline 崩于此）——内联同步重试（对齐 L4 begin / renameRetry 语义）
+  for (let i = 0; ; i++) {
+    try { renameSync(tmp, absPath); break } catch (e) {
+      if (i >= 3 || !['EPERM', 'EBUSY', 'EACCES'].includes(e.code)) throw e
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 150)
+    }
+  }
 }

@@ -5,7 +5,7 @@
 **English** | [简体中文](README.zh-CN.md) | [Docs](https://wulun811.github.io/LiuHe) | [GitHub](https://github.com/wulun811/LiuHe)
 
 [![wulun811/LiuHe MCP server](https://glama.ai/mcp/servers/wulun811/LiuHe/badges/score.svg)](https://glama.ai/mcp/servers/wulun811/LiuHe)
-![tests](https://img.shields.io/badge/tests-2037%20assertions%20passed-brightgreen)
+![tests](https://img.shields.io/badge/tests-2231%20assertions%20passed-brightgreen)
 ![tools](https://img.shields.io/badge/tools-44%20MCP-blue)
 ![languages](https://img.shields.io/badge/parsers-10%20languages-brightgreen)
 ![read](https://img.shields.io/badge/read%20P95-1ms-brightgreen)
@@ -16,7 +16,7 @@
 ![token](https://img.shields.io/badge/token%20savings-65%25-brightgreen)
 ![license](https://img.shields.io/badge/license-MIT-blue)
 ![version](https://img.shields.io/badge/version-0.4.7-blue)
-![commits](https://img.shields.io/badge/commits-264-blue)
+![commits](https://img.shields.io/badge/commits-249-blue)
 
 **Malong LiuHe** is a toolkit built for LLMs rather than humans. It ships two components:
 - **`malong/`** — an MCP toolset (44 tools): symbol read/write, indexing, impact analysis, reference tracing, call graphs, dead-code detection, code review, security scanning, atomic batch editing, test orchestration, pipeline verification — served to the LLM over MCP (JSON-RPC over stdio).
@@ -91,7 +91,7 @@ Traditional tools (git, sed, IDE) assume a user with hands, eyes, and memory. An
 
 ## Self-Hosting (Dogfooding)
 
-30+ rounds of "Malong reviews Malong": the toolset audits and fixes its **own** code, with dozens of real bugs fixed and locked by tests — including directory-scope filtering gaps, false dead-code reports for registration patterns, lost constant read-sites, and SQL parameterization cleanup. Every round grew the assertion count (now 2027 across 86 JS test files, full chain 0 failures, measured 2026-08-13).
+30+ rounds of "Malong reviews Malong": the toolset audits and fixes its **own** code, with dozens of real bugs fixed and locked by tests — including directory-scope filtering gaps, false dead-code reports for registration patterns, lost constant read-sites, and SQL parameterization cleanup. Every round grew the assertion count (now 2231 across 86 JS test files, full chain 0 failures, measured 2026-08-24).
 
 ## Scan Boundaries (limits acknowledged; committed within)
 
@@ -219,7 +219,7 @@ Prebuilt binaries for Linux x86_64 are committed under
 ```bash
 cd malong
 npm ci
-npm test          # 2037 assertions (daemon must be running)
+npm test          # 2231 assertions (daemon must be running)
 ```
 
 ### Start the MCP server
@@ -374,8 +374,8 @@ index to query.
 ## Testing
 
 - Rust: `cargo test` (92 assertions: per-language extraction + protocol framing/decoding + cache LFU + server dispatch/priority queue + batch_extract + deep-nesting guards + hello handshake)
-- JS: 86 test files, 2037 assertions. `npm test` runs the full chain (primitives / embedded / mvp-batch / tool-registry / repo-map / handler-smoke / patch-parser / file-collector / code-search / health-check / db-adapter dual-backend / write-runtime / host-config / mcp-server / security-review-rules / journal-prune / gatekeeper-golden / debug-runner / edit-collision-guard / fix-imports / symbol-search / naming-consistency / call-chain / edit-transaction-ext / batch-edit-write / verify-pipeline / dep-graph-project / code-quality / tsc-spec / batch-edit-tocou / workflow-closure / variable-refs / output-budget / read-symbols-batch / feedback-list / test-bridge-run / mock-syncer-truncation / r54-p0 / r54-p1 / r54-p2 / r8 / r9 / crash-injection / r10 / dogfood-r12); `test-dogfood-r14…r30` (end-to-end against a real daemon) run separately
-- Total: 2027 assertions across 86 JS test files (plus cargo tests)
+- JS: 86 test files, 2231 assertions. `npm test` runs the full chain (primitives / embedded / mvp-batch / tool-registry / repo-map / handler-smoke / patch-parser / file-collector / code-search / health-check / db-adapter dual-backend / write-runtime / host-config / mcp-server / security-review-rules / journal-prune / gatekeeper-golden / debug-runner / edit-collision-guard / fix-imports / symbol-search / naming-consistency / call-chain / edit-transaction-ext / batch-edit-write / verify-pipeline / dep-graph-project / code-quality / tsc-spec / batch-edit-tocou / workflow-closure / variable-refs / output-budget / read-symbols-batch / feedback-list / test-bridge-run / mock-syncer-truncation / r54-p0 / r54-p1 / r54-p2 / r8 / r9 / crash-injection / r10 / dogfood-r12); `test-dogfood-r14…r30` (end-to-end against a real daemon) run separately
+- Total: 2231 assertions across 86 JS test files (plus cargo tests)
 - One-shot: `./scripts/ci.sh` (self-contained: cargo test + npm test + dogfood; reuses or auto-starts the daemon)
 
 ## License
