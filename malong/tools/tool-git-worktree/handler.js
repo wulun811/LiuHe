@@ -19,6 +19,26 @@ function assertInsideWorktree(realWorktree, fullPath) {
   // 审查修复（二轮）：r8(B4) 旧守卫只 realpath 目标+父目录——中间层 symlink 且深层路径不存在时
   // 两个 realpathSync 都 ENOENT → 守卫整体跳过 → mkdirSync(recursive) 跟随 symlink 写穿仓库外。
   // 逐层下降：每层 lstat 查 symlink，命中则 realpath 解析并校验仍在 worktree 内
+  // 审查修复（五轮）：macOS /var→/private/var 等平台差异——调用方基于未 realpath 的根 join 出 fullPath 时，
+  // relative(realWorktree, fullPath) 前缀错位误判越界（放行场景被拒）。先把 fullPath 已存在最长前缀
+  // realpath 归一（深层不存在逐级上溯），与 realWorktree 同前缀体系后再比较
+  let prefix = fullPath
+  for (;;) {
+    let realPrefix = null
+    try { realPrefix = realpathSync(prefix) } catch (e) {
+      if (e.code !== 'ENOENT' && e.code !== 'ENOTDIR') throw e
+      const parent = dirname(prefix)
+      if (parent === prefix) break
+      prefix = parent
+      continue
+    }
+    if (realPrefix !== realWorktree && !realPrefix.startsWith(realWorktree + sep)) {
+      throw new Error(`refusing to write outside worktree: ${fullPath}`)
+    }
+    const suffix = fullPath.slice(prefix.length)
+    fullPath = suffix ? realPrefix + suffix : realPrefix
+    break
+  }
   const rel = relative(realWorktree, fullPath)
   if (rel.startsWith('..') || isAbsolute(rel)) {
     throw new Error(`refusing to write outside worktree: ${fullPath}`)
