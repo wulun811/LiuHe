@@ -5,7 +5,7 @@
 [English](README.md) | **简体中文** | [官方文档](https://wulun811.github.io/LiuHe) | [GitHub](https://github.com/wulun811/LiuHe)
 
 [![wulun811/LiuHe MCP server](https://glama.ai/mcp/servers/wulun811/LiuHe/badges/score.svg)](https://glama.ai/mcp/servers/wulun811/LiuHe)
-![tests](https://img.shields.io/badge/tests-2231%20assertions%20passed-brightgreen)
+![tests](https://img.shields.io/badge/tests-2240%20assertions%20passed-brightgreen)
 ![tools](https://img.shields.io/badge/tools-44%20MCP-blue)
 ![languages](https://img.shields.io/badge/parsers-10%20languages-brightgreen)
 ![read](https://img.shields.io/badge/read%20P95-1ms-brightgreen)
@@ -92,7 +92,7 @@
 
 ## 自我进化（self-hosting）
 
-30+ 轮「码龙查码龙」：工具集审查并修复**自身**代码，累计修复数十处真实 bug 且全部带测试锁定——包括目录 scope 过滤失效、注册形态死代码误报、常量追踪读取点丢失、SQL 参数化治理等。测试盲区即 bug 潜伏区，每一轮审查都伴随断言增长（现 86 个 JS 测试文件共 2231 断言，2026-08-24 全链 0 失败）。
+30+ 轮「码龙查码龙」：工具集审查并修复**自身**代码，累计修复数十处真实 bug 且全部带测试锁定——包括目录 scope 过滤失效、注册形态死代码误报、常量追踪读取点丢失、SQL 参数化治理等。测试盲区即 bug 潜伏区，每一轮审查都伴随断言增长（现 87 个 JS 测试文件共 2240 断言）。最新一轮修复 Windows 独有的批量索引路径形态失配——收集器产正斜杠路径 vs win32 join 产反斜杠，statMap 必 miss（全部文件 size=0、tokens_estimate 恒 0、content_hash 靠 CWD 兜底侥幸存活），新增收集器→indexBatch 全链路测试锁定，2026-09-04 Windows 实测。
 
 ## 扫描边界（承认局限，边界内承诺必做）
 
@@ -213,7 +213,7 @@ Linux x86_64 预编译二进制已随仓库提交在
 ```bash
 cd malong
 npm ci
-npm test          # 2231 断言全绿（需要 daemon 在跑）
+npm test          # 2240 断言全绿（需要 daemon 在跑）
 ```
 
 ### 启动 MCP 服务
@@ -362,8 +362,8 @@ codex exec "用 reindex 给工作空间建索引，再用 symbol_search 找 crea
 ## 测试
 
 - Rust 侧：`cargo test`（92 断言：各语言提取 + 协议帧编解码 + 缓存 LFU + 服务端 dispatch/优先级队列 + batch_extract + 深嵌套守卫 + 握手认证）
-- JS 侧：86 个测试文件共 2231 断言。`npm test` 跑全链（primitives / embedded / mvp-batch / tool-registry / repo-map / handler-smoke / patch-parser / file-collector / code-search / health-check / db-adapter 双后端 / write-runtime / host-config / mcp-server / security-review-rules / journal-prune / gatekeeper-golden / debug-runner / edit-collision-guard / fix-imports / symbol-search / naming-consistency / call-chain / edit-transaction-ext / batch-edit-write / verify-pipeline / dep-graph-project / code-quality / tsc-spec / batch-edit-tocou / workflow-closure / variable-refs / output-budget / read-symbols-batch / feedback-list / test-bridge-run / mock-syncer-truncation / r54-p0 / r54-p1 / r54-p2 / r8 / r9 / crash-injection / r10 / dogfood-r12）；全链 86 文件含 dogfood-r14…r30（真实 daemon 端到端）
-- 总计：2231 断言（86 文件全链 0 失败；另 cargo test）
+- JS 侧：87 个测试文件共 2240 断言。`npm test` 跑全链（primitives / embedded / mvp-batch / tool-registry / repo-map / handler-smoke / patch-parser / file-collector / batch-collector-chain / code-search / health-check / db-adapter 双后端 / write-runtime / host-config / mcp-server / security-review-rules / journal-prune / gatekeeper-golden / debug-runner / edit-collision-guard / fix-imports / symbol-search / naming-consistency / call-chain / edit-transaction-ext / batch-edit-write / verify-pipeline / dep-graph-project / code-quality / tsc-spec / batch-edit-tocou / workflow-closure / variable-refs / output-budget / read-symbols-batch / feedback-list / test-bridge-run / mock-syncer-truncation / r54-p0 / r54-p1 / r54-p2 / r8 / r9 / crash-injection / r10 / dogfood-r12）；全链 87 文件含 dogfood-r14…r30（真实 daemon 端到端）
+- 总计：2240 断言（87 文件全链 0 失败；另 cargo test）
 - 一键验证：`./scripts/ci.sh`（自包含：cargo test + npm test + dogfood，复用或自起 daemon）
 
 ## 许可证

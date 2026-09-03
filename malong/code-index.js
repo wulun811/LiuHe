@@ -961,7 +961,9 @@ class CodeIndex {
           const results = await this._langParser.batchExtractAsync(files, repo)
           const statMap = new Map()
           for (const fp of chunk) {
-            try { statMap.set(fp, statSync(fp)) } catch {}
+            // 键两侧必须同形态：file-collector 产出正斜杠绝对路径，而 join(repo, r.path) 在 win32 产反斜杠
+            // ——不归一化则 Windows 上查找必 miss（size=0；hash 退化为 CWD 相对路径兜底）。与 mtimeMap 的 toDbRel 同模式
+            try { statMap.set(toDbRel(fp), statSync(fp)) } catch {}
           }
           for (const r of results) {
             if (r.error) {
@@ -970,9 +972,11 @@ class CodeIndex {
               console.error(`[code-index] batch parse error for ${r.path}: ${r.error}`)
               continue
             }
-            const st = statMap.get(join(repo, r.path)) || statMap.get(r.path)
+            const absPath = repo ? join(repo, r.path) : r.path
+            const st = statMap.get(toDbRel(absPath)) || statMap.get(toDbRel(r.path))
             let src = null
-            try { src = readFileSync(st ? join(repo, r.path) : r.path) } catch {}
+            // 固定用绝对路径读源——旧实现在 st miss 时退化为相对 CWD 读，服务器 CWD≠工作区根时 hash 静默丢失
+            try { src = readFileSync(absPath) } catch {}
             parsed.push({
               relPath: r.path,
               sourceLength: st?.size || 0,

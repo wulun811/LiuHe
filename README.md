@@ -5,7 +5,7 @@
 **English** | [简体中文](README.zh-CN.md) | [Docs](https://wulun811.github.io/LiuHe) | [GitHub](https://github.com/wulun811/LiuHe)
 
 [![wulun811/LiuHe MCP server](https://glama.ai/mcp/servers/wulun811/LiuHe/badges/score.svg)](https://glama.ai/mcp/servers/wulun811/LiuHe)
-![tests](https://img.shields.io/badge/tests-2231%20assertions%20passed-brightgreen)
+![tests](https://img.shields.io/badge/tests-2240%20assertions%20passed-brightgreen)
 ![tools](https://img.shields.io/badge/tools-44%20MCP-blue)
 ![languages](https://img.shields.io/badge/parsers-10%20languages-brightgreen)
 ![read](https://img.shields.io/badge/read%20P95-1ms-brightgreen)
@@ -91,7 +91,7 @@ Traditional tools (git, sed, IDE) assume a user with hands, eyes, and memory. An
 
 ## Self-Hosting (Dogfooding)
 
-30+ rounds of "Malong reviews Malong": the toolset audits and fixes its **own** code, with dozens of real bugs fixed and locked by tests — including directory-scope filtering gaps, false dead-code reports for registration patterns, lost constant read-sites, and SQL parameterization cleanup. Every round grew the assertion count (now 2231 across 86 JS test files, full chain 0 failures, measured 2026-08-24).
+30+ rounds of "Malong reviews Malong": the toolset audits and fixes its **own** code, with dozens of real bugs fixed and locked by tests — including directory-scope filtering gaps, false dead-code reports for registration patterns, lost constant read-sites, and SQL parameterization cleanup. Every round grew the assertion count (now 2240 across 87 JS test files, full chain 0 failures). Latest round: fixed a Windows-only path-form mismatch in batch indexing — the file collector emits forward-slash paths while `join(repo, r.path)` produces backslashes on win32, so every `statMap` lookup missed (all `files.size = 0`, outline `tokens_estimate` stuck at 0, `content_hash` surviving only via a CWD-dependent fallback) — locked by a new collector→indexBatch chain test, measured on Windows 2026-09-04.
 
 ## Scan Boundaries (limits acknowledged; committed within)
 
@@ -219,7 +219,7 @@ Prebuilt binaries for Linux x86_64 are committed under
 ```bash
 cd malong
 npm ci
-npm test          # 2231 assertions (daemon must be running)
+npm test          # 2240 assertions (daemon must be running)
 ```
 
 ### Start the MCP server

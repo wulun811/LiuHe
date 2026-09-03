@@ -52,8 +52,10 @@ export async function handle(args, context) {
     res.suggestion = `Single-character query "${query}" is very broad. Use a longer substring for more targeted results.`
   }
   if (results.length === 0) {
-    res.suggestion = `No symbols found. If files were recently added, call reindex(workspace_dir="${workspaceDir}") to update the index.`
-    res.next_step = 'Check if workspace is indexed, or use glob to find the symbol manually.'
+    // 空结果主因是查询词不匹配（大小写敏感子串）而非索引过期——staleness 已由上方 ensureFreshFile 前置保鲜。
+    // 旧实现无条件建议 reindex，agent 在 fresh 索引上会照做白烧一轮全量重抽。
+    res.suggestion = `No symbols match "${query}". Matching is case-sensitive substring: try a shorter or differently-cased substring (snake_case / camelCase variants). Only call reindex(workspace_dir="${workspaceDir}") if files were recently added.`
+    res.next_step = 'Try a shorter or differently-cased substring, or use code_search with a natural-language query.'
   } else {
     res.next_step = `Before modifying found symbols, check blast radius: impact_analysis(symbol="${results[0].name}")`
   }

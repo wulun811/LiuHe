@@ -230,7 +230,8 @@ async function readOne(args, context) {
     }
   } else {
     range = [symbol.start_line, Math.max(symbol.start_line, symbol.end_line)]
-    pipelineStep(pipeline, 'resolve_locator', 'ok', { via: 'symbol' })
+    // 非 resolve_locator：符号已解析，此步只做行号范围提取——旧实现与查找步骤同名，trace 读起来像解析了两遍
+    pipelineStep(pipeline, 'resolve_range', 'ok', { via: 'symbol' })
   }
 
   // ---- 正文切片 + budget 截断 ----
