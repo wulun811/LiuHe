@@ -108,9 +108,21 @@ console.log('\n── ③ 超时后槽位释放 → 后续调用不被排队阻�
 // ── ③ shutdown ──
 await request('shutdown', {})
 child.kill()
-rmSync(SLOW_TOOL, { recursive: true, force: true })
-rmSync(WS, { recursive: true, force: true })
-rmSync(STATE_DIR, { recursive: true, force: true })
+// Windows 善后：子进程 cwd=WS，TerminateProcess 后句柄（CWD/SQLite DB）释放是异步的——
+// 先等 exit 事件，再带重试删目录，否则 rmSync 与句柄释放赛跑报 EBUSY（本地实测稳定复现）
+await new Promise((resolve) => {
+  if (child.exitCode !== null) return resolve()
+  child.once('exit', () => resolve())
+})
+await sleep(200)
+for (const dir of [SLOW_TOOL, WS, STATE_DIR]) {
+  for (let i = 0; ; i++) {
+    try { rmSync(dir, { recursive: true, force: true }); break } catch (e) {
+      if (i >= 10) throw e
+      await sleep(200)
+    }
+  }
+}
 
 console.log(`\n== test-mcp-server-timeout: ${pass} passed, ${fail} failed ==`)
 if (fail > 0) process.exit(1)
