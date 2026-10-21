@@ -11,6 +11,19 @@ export async function handle(args, context) {
   if (!workspaceDir) {
     return { error: 'missing_parameter', message: 'workspace_dir is required', suggestion: 'Provide the absolute path to the project root directory to map' }
   }
+  // 第二轮审查：非字符串/非数组参数不得进入 resolve/map 裸抛
+  if (typeof workspaceDir !== 'string') {
+    return { error: 'invalid_input', message: `workspace_dir must be a string (got ${typeof workspaceDir})` }
+  }
+  if (args?.dir != null && typeof args.dir !== 'string') {
+    return { error: 'invalid_input', message: `dir must be a string (got ${typeof args.dir})` }
+  }
+  if (args?.relevantFiles != null && !Array.isArray(args.relevantFiles)) {
+    return { error: 'invalid_input', message: 'relevantFiles must be an array of strings' }
+  }
+  if (args?.relevantEntities != null && !Array.isArray(args.relevantEntities)) {
+    return { error: 'invalid_input', message: 'relevantEntities must be an array of strings' }
+  }
 
   // 检查 workspace 是否已索引
   const dbPath = join(getWorkspaceDir(workspaceDir), 'code-index.db')

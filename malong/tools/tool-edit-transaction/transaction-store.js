@@ -1,11 +1,16 @@
-import { join, dirname, sep, resolve, basename } from 'node:path'
+import { join, dirname, sep, resolve, basename, extname } from 'node:path'
 import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync, rmSync, statSync, readdirSync, renameSync, realpathSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { ErrorCodes, makeError, validateFilePath, findClosestMatch } from '../../error-codes.js'
 import { registerWriter } from '../../writer-registry.js'
-import { acquireLock, renameRetry } from '../../write-runtime.js'
+import { acquireLock, renameRetry, validateSyntax, reconcileBracketWithSyntax, shouldBlockValidation } from '../../write-runtime.js'
+import { checkBracketBalance as sharedBracketCheck } from '../../write-edit.js'
+import { langOf } from '../../symbol-anchors.js'
+import { spawnSync } from 'node:child_process'
 import { guardRealPath, isSafeTxnId, atomicWrite } from '../../path-guard.js'
 import { sha256 } from '../../hash-utils.js'
+import { restoreJournal } from '../../write-journal.js'
+import { ensureGitExclude, isGitRepo } from '../../git-exclude.js'
 
 // r9：统一走共享 path-guard（realpath 越界守卫 / txnId 消毒 / 原子写）
 const _guardWritePath = guardRealPath
@@ -47,7 +52,9 @@ function truncateBytes(s, maxBytes) {
 // （recoverTransactions/rollback/undoCommit 会把外部文件内容读回/写回 workspace，内容注入面）。
 // realpath 解析后必须落在 backupDir 内；不存在/解析失败 → null（保守跳过）。
 function safeBackupPath(backupDir, backupName) {
-  const resolvedBackup = resolve(join(backupDir, backupName || ''))
+  // 批12-A：空/空白 backupName 拒绝——join(dir,'') 解析为目录本身，readFileSync 读目录 → EISDIR
+  if (!backupName || !String(backupName).trim()) return null
+  const resolvedBackup = resolve(join(backupDir, backupName))
   if (resolvedBackup !== backupDir && !resolvedBackup.startsWith(backupDir + sep)) return null
   if (!existsSync(resolvedBackup)) return null
   try {
@@ -61,6 +68,8 @@ function safeBackupPath(backupDir, backupName) {
 export class TransactionStore {
   constructor(projectRoot, opts = {}) {
     this.projectRoot = projectRoot
+    this.langParser = opts.langParser || null
+    this.safety = opts.safety || null
     this.txnRoot = join(projectRoot, '.ai-transactions')
     if (!existsSync(this.txnRoot)) {
       mkdirSync(this.txnRoot, { recursive: true })
@@ -119,6 +128,27 @@ export class TransactionStore {
     }
     this._ensureGitignore()
     return txnId
+  }
+
+  // 批10-1：committed 事务上继续编辑 → 自动续接新事务（替代 TXN_NOT_FOUND 打断）
+  ensureActive(txnId) {
+    if (!_isSafeTxnId(txnId)) {
+      return { error: makeError(ErrorCodes.TXN_NOT_FOUND, `Transaction not found: ${txnId}`, { txnId }) }
+    }
+    if (existsSync(this._txnPath(txnId))) return { txnId }
+    const recentPath = join(this.txnRoot, 'recent', txnId)
+    if (existsSync(recentPath)) {
+      let manifest = null
+      try { manifest = JSON.parse(readFileSync(join(recentPath, 'manifest.json'), 'utf-8')) } catch {}
+      if (manifest && manifest.state === 'committed') {
+        const newId = this.begin(String(manifest.name || 'txn') + '_r2')
+        const m = this._readManifest(newId)
+        m.continued_from = txnId
+        this._writeManifest(newId, m)
+        return { txnId: newId, continued_from: txnId }
+      }
+    }
+    return { error: makeError(ErrorCodes.TXN_NOT_FOUND, `Transaction not found: ${txnId}`, { txnId, suggestion: 'Transaction may have been rolled back. Use action=begin for a new transaction.' }) }
   }
 
   async backupFile(txnId, fileRel) {
@@ -194,82 +224,338 @@ export class TransactionStore {
       }
 
       const content = readFileSync(absPath, 'utf-8')
-      let result = content
-      let applied = 0
-      const failedEdits = []
-
-      for (let i = 0; i < edits.length; i++) {
-        const edit = edits[i]
-        const oldStr = edit.old_string
-        const newStr = edit.new_string ?? ''
-        if (!oldStr) {
-          // R3：空 old_string 不再静默跳过——记入 failed，防 edits_applied 谎报成功
-          failedEdits.push({ index: i, old_string: '', reason: 'empty_old_string', error_code: ErrorCodes.INVALID_INPUT })
-          continue
-        }
-
-        if (edit.replace_all) {
-          // R3：函数替换器防 $& 作弊——replaceAll 第二参字符串里的 $& 被当捕获引用替换（r12.2 同类）
-          const replaced = result.replaceAll(oldStr, () => newStr)
-          if (replaced !== result) {
-            applied++
-            result = replaced
-          } else {
-            const failed = { index: i, old_string: oldStr, reason: 'not_found', error_code: ErrorCodes.OLD_STRING_NOT_FOUND }
-            const closest = findClosestMatch(result, oldStr)
-            if (closest) failed.closest_match = closest
-            failedEdits.push(failed)
-          }
-        } else {
-          const idx = result.indexOf(oldStr)
-          if (idx === -1) {
-            const failed = { index: i, old_string: oldStr, reason: 'not_found', error_code: ErrorCodes.OLD_STRING_NOT_FOUND }
-            const closest = findClosestMatch(result, oldStr)
-            if (closest) failed.closest_match = closest
-            failedEdits.push(failed)
-            continue
-          }
-          result = result.slice(0, idx) + newStr + result.slice(idx + oldStr.length)
-          applied++
-        }
-      }
+      // 13-A：匹配引擎抽为纯函数（simulateEdits）——dry-run 预览与真实编辑共用同一语义
+      const { result, applied, failedEdits, ambiguousEdits, matches } = simulateEdits(content, edits)
 
       const hasNotEmptyFailure = failedEdits.some(f => f.reason !== 'empty_old_string')
       if (applied === 0 && hasNotEmptyFailure) {
-        return makeError(ErrorCodes.NO_MATCH, 'No edits matched in file', { file: fileRel, failed_edits: failedEdits })
+        // 批10-2：单个失败且带专属错误码（STALE_CONTENT/INVALID_INPUT）时透传，便于定向重试
+        const first = failedEdits.find(f => f.reason !== 'empty_old_string')
+        const onlyOne = failedEdits.filter(f => f.reason !== 'empty_old_string').length === 1
+        const code = (onlyOne && first?.error_code) ? first.error_code : ErrorCodes.NO_MATCH
+        const message = (onlyOne && first?.detail) ? first.detail : 'No edits matched in file'
+        return makeError(code, message, { file: fileRel, failed_edits: failedEdits })
       }
       // R3：全空 old_string → 不写盘，返回 staged + warning（拒绝谎报成功）
       if (applied === 0 && failedEdits.length > 0) {
         return { status: 'staged', file: fileRel, edits_applied: 0, warning: 'no edits applied (all old_string values were empty)' }
       }
 
-      const validationWarnings = checkBracketBalance(result)
+      const res = await this._commitStagedContent(txnId, fileRel, content, result, applied, failedEdits)
+      if (res && res.status === 'staged') {
+        const anchors = matches.filter(m => m.anchor_checked).map(m => m.line)
+        if (anchors.length) res.anchor_checked_lines = anchors
+      }
+      if (res && res.status === 'staged' && ambiguousEdits.length > 0) {
+        res.ambiguous_edits = ambiguousEdits
+        res.warning = (res.warning ? res.warning + '; ' : '') + `${ambiguousEdits.length} edit(s) matched multiple occurrences; first occurrence replaced (pass replace_all:true to replace all)`
+      }
+      return res
+    } finally {
+      lock.release()
+    }
+  }
 
-      // 审查修复（H3）：锁内用刚读到的 content 刷新备份——backupFile 在锁外复制（backup=X），
-      // 若外部修改 Y 发生在其后，旧 backup=X 比事务读到的 Y 旧；rollback 恢复 X 会覆盖 Y 的外部修改。
-      // 锁内覆盖 backup == 事务读到的内容（含外部修改），回滚只撤事务自己的改动，不丢外部修改。
-      try {
-        const m = this._readManifest(txnId)
-        const bname = m.files[fileRel]?.backupName
-        if (bname) writeFileSync(join(this._txnPath(txnId), 'backup', bname), content, 'utf-8')
-      } catch {}
+  // 13-A：dry-run 预览——只验证可匹配性与校验结果，不落盘/不写 manifest/不建备份（用户提：一次不匹配全回滚代价大）
+  async previewEdits(fileRel, edits, opts = {}) {
+    const pathCheck = validateFilePath(fileRel)
+    if (pathCheck.blocked) {
+      return makeError(ErrorCodes.PATH_BLOCKED, pathCheck.detail, { file: fileRel, reason: pathCheck.reason })
+    }
+    if (opts.txnId && !_isSafeTxnId(opts.txnId)) {
+      return makeError(ErrorCodes.TXN_NOT_FOUND, `Transaction not found: ${opts.txnId}`, { txnId: opts.txnId })
+    }
+    const guard = _guardWritePath(this.projectRoot, fileRel)
+    if (guard.blocked) {
+      return makeError(ErrorCodes.PATH_BLOCKED, guard.detail, { file: fileRel, reason: guard.reason })
+    }
+    const absPath = join(this.projectRoot, fileRel)
+    if (!existsSync(absPath)) {
+      return makeError(ErrorCodes.FILE_NOT_FOUND, `File does not exist: ${fileRel}`, { file: fileRel })
+    }
+    const content = readFileSync(absPath, 'utf-8')
+    const sim = simulateEdits(content, edits)
+    const res = {
+      status: 'preview',
+      dry_run: true,
+      file: fileRel,
+      edits_total: edits.length,
+      would_apply: sim.applied,
+      matches: sim.matches,
+    }
+    if (opts.txnId) res.txn_id = opts.txnId
+    if (sim.failedEdits.length) res.failed_edits = sim.failedEdits
+    if (sim.ambiguousEdits.length) {
+      res.ambiguous_edits = sim.ambiguousEdits
+      res.warning = sim.ambiguousEdits.length + ' edit(s) match multiple occurrences; first occurrence would be replaced (pass replace_all:true to replace all)'
+    }
+    if (sim.applied > 0) {
+      const validation = await this._validateContent(fileRel, sim.result)
+      res.validation = validation
+      if (shouldBlockValidation(this.safety, validation)) {
+        res.would_block = true
+        res.diagnostics = validation.diagnostics || []
+        res.suggestion = 'Resulting content fails validation; fix the marked region before applying.'
+      }
+    }
+    return res
+  }
 
-      _atomicWrite(absPath, result, { fsync: true })
-      // Y002-S1：事务写落盘后登记写者（collision_guard classify 识别 transaction）
+  // 13-A：事务内新建文件（用户提：支持 create 才能真正一个工具打天下）——落盘即 staged，rollback/undo_commit 删除
+  async createFile(txnId, fileRel, content) {
+    if (!_isSafeTxnId(txnId)) {
+      return makeError(ErrorCodes.TXN_NOT_FOUND, `Transaction not found: ${txnId}`, { txnId })
+    }
+    const pathCheck = validateFilePath(fileRel)
+    if (pathCheck.blocked) {
+      return makeError(ErrorCodes.PATH_BLOCKED, pathCheck.detail, { file: fileRel, reason: pathCheck.reason })
+    }
+    if (!existsSync(this._txnPath(txnId))) {
+      return makeError(ErrorCodes.TXN_NOT_FOUND, `Transaction not found: ${txnId}`, { txnId })
+    }
+    if (typeof content !== 'string') {
+      return makeError(ErrorCodes.INVALID_INPUT, 'content (string) is required when create=true', { file: fileRel })
+    }
+    const guard = _guardWritePath(this.projectRoot, fileRel)
+    if (guard.blocked) {
+      return makeError(ErrorCodes.PATH_BLOCKED, guard.detail, { file: fileRel, reason: guard.reason })
+    }
+    const absPath = join(this.projectRoot, fileRel)
+    // acquireLock 在父目录不存在时 ENOENT 裸抛——先建目录再取锁（竞争 create 同一路径时锁串行化）
+    try { mkdirSync(dirname(absPath), { recursive: true }) } catch {}
+    const lock = await acquireLock(absPath, 30000)
+    if (lock.locked) {
+      return makeError(ErrorCodes.TIMEOUT, `File is locked by another writer (30s): ${fileRel}`, { file: fileRel })
+    }
+    try {
+      if (existsSync(absPath)) {
+        return makeError(ErrorCodes.INVALID_INPUT, `File already exists: ${fileRel} (use action=edit instead of create)`, { file: fileRel })
+      }
+      const validation = await this._validateContent(fileRel, content)
+      if (shouldBlockValidation(this.safety, validation)) {
+        return {
+          error_code: 'VALIDATION_FAILED',
+          message: 'validation failed: syntax/bracket errors detected; refusing write. Pass safety.block_on_validation_error=false to override.',
+          file: fileRel,
+          validation,
+          diagnostics: validation.diagnostics || [],
+          suggestion: 'Fix the marked region and retry (only the changed region needs re-sending).',
+        }
+      }
+      _atomicWrite(absPath, content, { fsync: true, preservePermissions: true })
       registerWriter(this.projectRoot, fileRel, 'transaction')
-      // R4a：记录 new_hash——崩溃恢复三方判定的「已落盘」依据（对齐 recoverJournals 模式）
       await _withManifestLock(txnId, () => {
         const m = this._readManifest(txnId)
-        m.files[fileRel] = { ...(m.files[fileRel] || {}), new_hash: sha256(Buffer.from(result, 'utf-8')) }
+        m.files[fileRel] = { ...(m.files[fileRel] || {}), created: true, new_hash: sha256(Buffer.from(content, 'utf-8')) }
         this._writeManifest(txnId, m)
       })
-      const res = { status: 'staged', file: fileRel, edits_applied: applied }
-      if (failedEdits.length > 0) {
-        res.failed_edits = failedEdits
-        res.warning = `${failedEdits.length} edit(s) did not match`
+      const res = { status: 'staged', file: fileRel, created: true, validation }
+      const validationWarnings = (validation.diagnostics || []).map(d => ({ type: d.source, bracket: d.bracket, line: d.line, detail: d.message }))
+      if (validationWarnings.length > 0) res.validation_warnings = validationWarnings
+      return res
+    } finally {
+      lock.release()
+    }
+  }
+
+  // 13-A：created 文件回退——仅当内容仍为事务写入字节时删除（外部改动 → skip，防误删）
+  async _removeCreatedFile(fileRel, meta) {
+    const destPath = join(this.projectRoot, fileRel)
+    if (!existsSync(destPath)) return { restored: true }
+    const lock = await acquireLock(destPath, 30000)
+    if (lock.locked) return { skipped: 'file_locked' }
+    try {
+      const curHash = sha256(readFileSync(destPath))
+      if (meta.new_hash && curHash !== meta.new_hash) return { skipped: 'external_change' }
+      rmSync(destPath, { force: true })
+      return { restored: true }
+    } finally {
+      lock.release()
+    }
+  }
+
+  // 批10-3：写盘收尾共用（applyEdits / assemble）——校验拦截 → 备份刷新 → 原子写 → manifest
+  async _commitStagedContent(txnId, fileRel, content, result, applied, failedEdits) {
+    const absPath = join(this.projectRoot, fileRel)
+    // 批10-1：写盘前语法/bracket 校验（与 write-runtime 同套护栏）；失败不写盘、不改 manifest
+    const validation = await this._validateContent(fileRel, result)
+    if (shouldBlockValidation(this.safety, validation)) {
+      return {
+        error_code: 'VALIDATION_FAILED',
+        message: 'validation failed: syntax/bracket errors detected; refusing write. Pass safety.block_on_validation_error=false to override.',
+        file: fileRel,
+        validation,
+        diagnostics: validation.diagnostics || [],
+        suggestion: 'Fix the marked region and retry this edit (only the changed region needs re-sending).',
       }
-      if (validationWarnings.length > 0) {
-        res.validation_warnings = validationWarnings
+    }
+    const validationWarnings = (validation.diagnostics || []).map(d => ({ type: d.source, bracket: d.bracket, line: d.line, detail: d.message }))
+
+    // 审查修复（H3）：锁内用刚读到的 content 刷新备份——backupFile 在锁外复制（backup=X），
+    // 若外部修改 Y 发生在其后，旧 backup=X 比事务读到的 Y 旧；rollback 恢复 X 会覆盖 Y 的外部修改。
+    // 锁内覆盖 backup == 事务读到的内容（含外部修改），回滚只撤事务自己的改动，不丢外部修改。
+    try {
+      const m = this._readManifest(txnId)
+      const bname = m.files[fileRel]?.backupName
+      if (bname) writeFileSync(join(this._txnPath(txnId), 'backup', bname), content, 'utf-8')
+    } catch {}
+
+    _atomicWrite(absPath, result, { fsync: true, preservePermissions: true })
+    // Y002-S1：事务写落盘后登记写者（collision_guard classify 识别 transaction）
+    registerWriter(this.projectRoot, fileRel, 'transaction')
+    // R4a：记录 new_hash——崩溃恢复三方判定的「已落盘」依据（对齐 recoverJournals 模式）
+    // WP04：new_hash 同步透出——响应级「应用后实际写入内容 hash」（manifest 与 receipt 共用同源）
+    const newHash = sha256(Buffer.from(result, 'utf-8'))
+    await _withManifestLock(txnId, () => {
+      const m = this._readManifest(txnId)
+      m.files[fileRel] = { ...(m.files[fileRel] || {}), new_hash: newHash }
+      this._writeManifest(txnId, m)
+    })
+    const res = { status: 'staged', file: fileRel, edits_applied: applied, validation, new_hash: newHash }
+    if (failedEdits.length > 0) {
+      res.failed_edits = failedEdits
+      res.warning = `${failedEdits.length} edit(s) did not match`
+    }
+    if (validationWarnings.length > 0) {
+      res.validation_warnings = validationWarnings
+    }
+    return res
+  }
+
+  // 批10-3：分块累积——大文件重写拆小块，每块独立传输，坏块只重发该块
+  _stagingDir(txnId) {
+    return join(this._txnPath(txnId), 'staging')
+  }
+
+  async writeChunk(txnId, fileRel, seq, lines, total) {
+    if (!_isSafeTxnId(txnId)) {
+      return makeError(ErrorCodes.TXN_NOT_FOUND, `Transaction not found: ${txnId}`, { txnId })
+    }
+    const pathCheck = validateFilePath(fileRel)
+    if (pathCheck.blocked) {
+      return makeError(ErrorCodes.PATH_BLOCKED, pathCheck.detail, { file: fileRel, reason: pathCheck.reason })
+    }
+    if (!existsSync(this._txnPath(txnId))) {
+      return makeError(ErrorCodes.TXN_NOT_FOUND, `Transaction not found: ${txnId}`, { txnId })
+    }
+    if (!existsSync(join(this.projectRoot, fileRel))) {
+      return makeError(ErrorCodes.FILE_NOT_FOUND, `File does not exist: ${fileRel} (edit_chunk/assemble rewrites existing files; create new files via code_patch create:true)`, { file: fileRel })
+    }
+    if (!Number.isInteger(seq) || seq < 1) {
+      return makeError(ErrorCodes.INVALID_INPUT, 'seq must be an integer >= 1', { file: fileRel })
+    }
+    if (!Array.isArray(lines) || !lines.every(l => typeof l === 'string')) {
+      return makeError(ErrorCodes.INVALID_INPUT, 'lines must be an array of strings', { file: fileRel })
+    }
+    if (total !== undefined && total !== null && (!Number.isInteger(total) || total < 1)) {
+      return makeError(ErrorCodes.INVALID_INPUT, 'total must be an integer >= 1', { file: fileRel })
+    }
+    if (Number.isInteger(total) && seq > total) {
+      return makeError(ErrorCodes.INVALID_INPUT, 'seq exceeds total', { file: fileRel, seq, total })
+    }
+    const prefix = sha256(fileRel).slice(0, 16)
+    const dir = this._stagingDir(txnId)
+    mkdirSync(dir, { recursive: true })
+    let existing = []
+    try { existing = readdirSync(dir).filter(n => n.startsWith(prefix + '.part-')) } catch {}
+    const seqs = existing.map(n => Number(n.split('.part-')[1])).filter(Number.isInteger)
+    const maxSeq = seqs.length ? Math.max(...seqs) : 0
+    const isResend = seqs.includes(seq)
+    if (!isResend && seq !== maxSeq + 1) {
+      return makeError(ErrorCodes.CHUNK_SEQ_GAP, `chunk seq gap: expected ${maxSeq + 1}, got ${seq}`, { file: fileRel, expected_seq: maxSeq + 1, received: seqs.length })
+    }
+    _atomicWrite(join(dir, `${prefix}.part-${seq}`), lines.join('\n'), { fsync: true })
+    const received = new Set(seqs)
+    received.add(seq)
+    if (Number.isInteger(total)) {
+      await _withManifestLock(txnId, () => {
+        const m = this._readManifest(txnId)
+        m.staging = m.staging || {}
+        m.staging[fileRel] = { prefix, total }
+        this._writeManifest(txnId, m)
+      })
+    }
+    const out = { status: 'chunk_received', file: fileRel, seq, received: received.size }
+    if (Number.isInteger(total)) {
+      out.total = total
+      out.ready_to_assemble = received.size >= total && Math.max(...received) <= total
+    }
+    return out
+  }
+
+  async assemble(txnId, fileRel, opts = {}) {
+    if (!_isSafeTxnId(txnId)) {
+      return makeError(ErrorCodes.TXN_NOT_FOUND, `Transaction not found: ${txnId}`, { txnId })
+    }
+    const pathCheck = validateFilePath(fileRel)
+    if (pathCheck.blocked) {
+      return makeError(ErrorCodes.PATH_BLOCKED, pathCheck.detail, { file: fileRel, reason: pathCheck.reason })
+    }
+    if (!existsSync(this._txnPath(txnId))) {
+      return makeError(ErrorCodes.TXN_NOT_FOUND, `Transaction not found: ${txnId}`, { txnId })
+    }
+    const absPath = join(this.projectRoot, fileRel)
+    if (!existsSync(absPath)) {
+      return makeError(ErrorCodes.FILE_NOT_FOUND, `File does not exist: ${fileRel}`, { file: fileRel })
+    }
+    const guard = _guardWritePath(this.projectRoot, fileRel)
+    if (guard.blocked) {
+      return makeError(ErrorCodes.PATH_BLOCKED, guard.detail, { file: fileRel, reason: guard.reason })
+    }
+    const prefix = sha256(fileRel).slice(0, 16)
+    const dir = this._stagingDir(txnId)
+    let names = []
+    try { names = readdirSync(dir).filter(n => n.startsWith(prefix + '.part-')) } catch {}
+    if (names.length === 0) {
+      return makeError(ErrorCodes.CHUNK_INCOMPLETE, 'no chunks received for this file', { file: fileRel })
+    }
+    const seqs = names.map(n => Number(n.split('.part-')[1])).filter(Number.isInteger).sort((a, b) => a - b)
+    const maxSeq = seqs[seqs.length - 1]
+    const missing = []
+    for (let i = 1; i <= maxSeq; i++) if (!seqs.includes(i)) missing.push(i)
+    let total = null
+    try { total = this._readManifest(txnId)?.staging?.[fileRel]?.total ?? null } catch {}
+    if (Number.isInteger(total)) {
+      for (let i = 1; i <= total; i++) if (!seqs.includes(i) && !missing.includes(i)) missing.push(i)
+    }
+    if (missing.length > 0) {
+      return makeError(ErrorCodes.CHUNK_INCOMPLETE, 'missing chunk seq: ' + missing.join(','), { file: fileRel, missing, received: seqs.length, total })
+    }
+    const allLines = []
+    for (const s of seqs) allLines.push(...readFileSync(join(dir, `${prefix}.part-${s}`), 'utf-8').split('\n'))
+    const result = allLines.join('\n')
+    const lock = await acquireLock(absPath, 30000)
+    if (lock.locked) {
+      return makeError(ErrorCodes.TIMEOUT, `File is locked by another writer (30s): ${fileRel}`, { file: fileRel })
+    }
+    try {
+      const content = readFileSync(absPath, 'utf-8')
+      if (opts.expect_sha) {
+        const want = String(opts.expect_sha).replace(/^sha256:/, '')
+        if (sha256(Buffer.from(content, 'utf-8')) !== want) {
+          return makeError(ErrorCodes.STALE_CONTENT, 'expect_sha mismatch: file changed since read; re-read then re-send chunks if needed', { file: fileRel })
+        }
+      }
+      // 批12-A：首次落盘前登记备份（写锁内）——assemble 此前不登记 backupName，
+      // rollback/undoCommit 拿到空 backupName → 读 backup 目录 EISDIR，原文件无法恢复。
+      // 备份失败必须中止写入（不落盘、无 new_hash）。
+      let bres
+      try {
+        bres = await this.backupFile(txnId, fileRel)
+      } catch (e) {
+        return makeError(ErrorCodes.BACKUP_FAILED, `backup failed; refusing to write ${fileRel}: ${e.message}`, { file: fileRel })
+      }
+      if (bres && bres.error_code) return bres
+      const res = await this._commitStagedContent(txnId, fileRel, content, result, seqs.length, [])
+      if (res && !res.error_code) {
+        for (const s of seqs) { try { rmSync(join(dir, `${prefix}.part-${s}`), { force: true }) } catch {} }
+        try {
+          await _withManifestLock(txnId, () => {
+            const m = this._readManifest(txnId)
+            if (m.staging && m.staging[fileRel]) { delete m.staging[fileRel]; this._writeManifest(txnId, m) }
+          })
+        } catch {}
+        res.assembled_chunks = seqs.length
       }
       return res
     } finally {
@@ -287,6 +573,26 @@ export class TransactionStore {
     }
     const manifest = this._readManifest(txnId)
     const filesChanged = Object.keys(manifest.files)
+    // 批10-1：commit 复检——staged 后外部改动（hash 不符）或坏语法内容不得入档
+    for (const [fileRel, meta] of Object.entries(manifest.files || {})) {
+      if (meta.skipped || !meta.new_hash) continue
+      const guard = _guardWritePath(this.projectRoot, fileRel)
+      if (guard.blocked) {
+        return { error: 'commit_conflict', code: 'PATH_BLOCKED', file: fileRel, message: guard.detail, txn_id: txnId }
+      }
+      const abs = join(this.projectRoot, fileRel)
+      if (!existsSync(abs)) {
+        return { error: 'commit_conflict', code: 'FILE_NOT_FOUND', file: fileRel, message: 'staged file missing at commit time', txn_id: txnId }
+      }
+      const curBuf = readFileSync(abs)
+      if (sha256(curBuf) !== meta.new_hash) {
+        return { error: 'commit_conflict', code: 'EXTERNAL_CHANGE', file: fileRel, message: 'file changed after staging (external writer); commit refused', txn_id: txnId, suggestion: 'rollback or re-edit the file, then commit again' }
+      }
+      const validation = await this._validateContent(fileRel, curBuf.toString('utf-8'))
+      if (shouldBlockValidation(this.safety, validation)) {
+        return { error: 'commit_blocked', code: 'VALIDATION_FAILED', file: fileRel, validation, diagnostics: validation.diagnostics || [], txn_id: txnId, suggestion: 'fix the marked region with a small edit, then commit again' }
+      }
+    }
     // r8(D4)：淘汰键 = commit 时间——目录 mtime 是 begin 时间，交错事务下“最晚提交”会被误删
     manifest.committed_at = new Date().toISOString()
     manifest.state = 'committed' // R4a：终态标记，崩溃恢复跳过
@@ -312,7 +618,18 @@ export class TransactionStore {
       return { error: 'commit_failed', code: 'commit_failed', message: `Commit rename failed: ${e.message}`, retryable: true, txn_id: txnId }
     }
     this._cleanRecent(3)
-    return { status: 'committed', files_changed: filesChanged.length, files: filesChanged }
+    // 批10-1：回执带每文件行数变化（+/- 真值走 git no-index，缺 git 时退行数差）
+    const stats = []
+    for (const fileRel of filesChanged) {
+      const meta = manifest.files[fileRel] || {}
+      if (!meta.new_hash) continue
+      try {
+        const curText = readFileSync(join(this.projectRoot, fileRel), 'utf-8')
+        const bp = safeBackupPath(join(recentPath, 'backup'), meta.backupName || '')
+        stats.push(_diffStats(fileRel, bp ? readFileSync(bp, 'utf-8') : '', curText, bp, join(this.projectRoot, fileRel)))
+      } catch {}
+    }
+    return { status: 'committed', files_changed: filesChanged.length, files: filesChanged, stats }
   }
 
   async undoCommit(txnId) {
@@ -336,7 +653,28 @@ export class TransactionStore {
       }
     }
     if (!txnPath) {
-      return makeError(ErrorCodes.TXN_NOT_FOUND, `Recent transaction not found: ${txnId}`, { txnId, suggestion: 'Only the last 3 committed transactions can be undone' })
+      // Q1：双命名空间——write_symbol / write_symbols / edit_batch / code_patch 的写链 journal
+      // 在 <ws>/.malong/journal（保留 24h）；经典 .ai-transactions 未命中时委托 restoreJournal。
+      const jr = await restoreJournal(this.projectRoot, txnId)
+      if (jr.ok) {
+        return {
+          status: jr.status === 'already_undone' ? 'already_undone' : (jr.status === 'undone_partial' ? 'undone_partial' : 'undone'),
+          files_restored: jr.files_restored,
+          files: jr.files,
+          ...(jr.deleted ? { deleted: true } : {}),
+          ...(jr.note ? { note: jr.note } : {}),
+          // 16-B：批量 undo 归因（batch_id/成员统计）与部分失败重试口径透传
+          ...(jr.batch ? { batch: jr.batch } : {}),
+          ...(jr.failures ? { failures: jr.failures } : {}),
+          ...(jr.retryable ? { retryable: true } : {}),
+          via: 'write-journal',
+        }
+      }
+      if (jr.code === 'TXN_NOT_FOUND' || jr.code === 'JOURNAL_NOT_FOUND') {
+        return makeError(ErrorCodes.TXN_NOT_FOUND, jr.message, { txnId, suggestion: jr.suggestion || 'Only the last 3 committed transactions can be undone; write journals are retained 24h.' })
+      }
+      const code = (jr.code === 'EXTERNAL_CHANGE' || jr.code === 'BATCH_BLOCKED') ? 'undo_conflict' : (jr.code === 'FILE_LOCKED' ? 'file_locked' : 'undo_failed')
+      return makeError(code, jr.message, { txnId, suggestion: jr.suggestion, ...(jr.batch ? { batch: jr.batch } : {}) })
     }
     const manifest = JSON.parse(readFileSync(join(txnPath, 'manifest.json'), 'utf-8'))
     const backupDir = join(txnPath, 'backup')
@@ -347,9 +685,21 @@ export class TransactionStore {
       // r8(B2)：manifest 内容不可信——每个 fileRel 过路径守卫，防植入 manifest 越界写
       const guard = _guardWritePath(this.projectRoot, fileRel)
       if (guard.blocked) { skipped.push({ file: fileRel, reason: guard.reason }); continue }
+      // 13-A：created 文件回退 = 删除（仅内容仍为事务字节；外部改动 → skip）
+      if (meta.created) {
+        const rc = await this._removeCreatedFile(fileRel, meta)
+        if (rc.restored) filesRestored++
+        else skipped.push({ file: fileRel, reason: rc.skipped })
+        continue
+      }
       const backupPath = join(backupDir, meta.backupName || '')
       // r9(P6)：manifest 的 backupName 不可信——join(backupDir, 绝对路径) 会返回绝对路径（前缀丢弃）→ 读穿任意文件；resolve 后必须落在 backupDir 内
       // R22-④：补 realpath 守卫（词法 resolve 拦不住 backup 内 symlink 指向外部文件）
+      // 批12-A：无备份登记 → 明确诊断，不得读目录（EISDIR）
+      if (!meta.backupName) {
+        skipped.push({ file: fileRel, reason: 'backup_missing', detail: 'no backup registered for this file; cannot restore; file left unchanged' })
+        continue
+      }
       const resolvedBackup = safeBackupPath(backupDir, meta.backupName || '')
       if (!resolvedBackup) { skipped.push({ file: fileRel, reason: 'backup_escape' }); continue }
       const destPath = join(this.projectRoot, fileRel)
@@ -364,7 +714,7 @@ export class TransactionStore {
           skipped.push({ file: fileRel, reason: 'external_change' })
           continue
         }
-        _atomicWrite(destPath, readFileSync(resolvedBackup, 'utf-8'), { fsync: true })
+        _atomicWrite(destPath, readFileSync(resolvedBackup, 'utf-8'), { fsync: true, preservePermissions: true })
         filesRestored++
       } finally {
         lock.release()
@@ -422,9 +772,21 @@ export class TransactionStore {
         skipped.push({ file: fileRel, reason: guard.reason })
         continue
       }
+      // 13-A：created 文件回退 = 删除（仅内容仍为事务字节；外部改动 → skip）
+      if (meta.created) {
+        const rc = await this._removeCreatedFile(fileRel, meta)
+        if (rc.restored) filesRestored++
+        else skipped.push({ file: fileRel, reason: rc.skipped })
+        continue
+      }
       const backupPath = join(backupDir, meta.backupName || '')
       // r9(P6)：backupName 不可信——resolve 后必须落在 backupDir 内
       // R22-④：补 realpath 守卫（词法 resolve 拦不住 backup 内 symlink 指向外部文件）
+      // 批12-A：无备份登记（如旧版 assemble 只记 new_hash）→ 明确诊断，不得读目录（EISDIR）
+      if (!meta.backupName) {
+        skipped.push({ file: fileRel, reason: 'backup_missing', detail: 'no backup registered for this file; cannot restore; file left unchanged' })
+        continue
+      }
       const resolvedBackup = safeBackupPath(backupDir, meta.backupName || '')
       if (!resolvedBackup) {
         skipped.push({ file: fileRel, reason: 'backup_escape' })
@@ -445,7 +807,7 @@ export class TransactionStore {
           skipped.push({ file: fileRel, reason: 'external_change' })
           continue
         }
-        _atomicWrite(destPath, readFileSync(resolvedBackup, 'utf-8'), { fsync: true })
+        _atomicWrite(destPath, readFileSync(resolvedBackup, 'utf-8'), { fsync: true, preservePermissions: true })
         filesRestored++
       } finally {
         lock.release()
@@ -499,6 +861,12 @@ export class TransactionStore {
   }
 
   _ensureGitignore() {
+    // dogfood-050 修复：git 仓内优先写 .git/info/exclude——旧实现恒写 .gitignore，
+    // git 仓里反而制造未跟踪 .gitignore 噪声（与 ensureGitExclude 双机制不同步）
+    if (isGitRepo(this.projectRoot)) {
+      ensureGitExclude(this.projectRoot)
+      return
+    }
     const entry = '.ai-transactions/'
     // 任一父目录 .gitignore 已含该条目时跳过（子项目嵌入大仓时避免创建冗余 .gitignore）
     let dir = this.projectRoot
@@ -517,6 +885,36 @@ export class TransactionStore {
     }
   }
 
+  // 批10-1：写盘/commit 共用的内容校验（语法 + bracket，与 write-runtime 同套仲裁）
+  async _validateContent(fileRel, content) {
+    const validation = {}
+    if (langOf(fileRel)) {
+      validation.syntax = await validateSyntax(this.langParser, content, extname(fileRel))
+      const b = sharedBracketCheck(content)
+      validation.bracket = b.ok ? { status: 'pass' } : { status: 'fail', errors: [b.detail] }
+    } else {
+      validation.syntax = { status: 'skip', reason: 'non-code file' }
+      validation.bracket = { status: 'skip', reason: 'non-code file' }
+    }
+    reconcileBracketWithSyntax(validation)
+    if (validation.syntax?.status === 'fail' || validation.bracket?.status === 'fail') {
+      const diag = []
+      if (validation.syntax?.status === 'fail') {
+        for (const e of validation.syntax.errors || ['syntax errors detected']) diag.push({ source: 'syntax', message: e })
+      }
+      if (validation.bracket?.status === 'fail') {
+        const hints = bracketWarnings(content)
+        if (hints.length === 0) {
+          for (const e of validation.bracket.errors || ['unbalanced brackets']) diag.push({ source: 'bracket', message: e })
+        } else {
+          for (const w of hints) diag.push({ source: 'bracket', bracket: w.bracket, line: w.line, message: w.detail })
+        }
+      }
+      validation.diagnostics = diag
+    }
+    return validation
+  }
+
   _fastHash(filePath) {
     const content = readFileSync(filePath, 'utf-8')
     let hash = 0
@@ -528,7 +926,169 @@ export class TransactionStore {
   }
 }
 
-function checkBracketBalance(content) {
+// 13-A：编辑匹配引擎（纯函数）——applyEdits（真实写盘）与 previewEdits（dry-run）共用。
+// 返回演化后的 result + 逐编辑匹配回执（line 为 1-based 首个命中行号）与失败/歧义列表。
+function simulateEdits(content, edits) {
+  let result = content
+  let applied = 0
+  const failedEdits = []
+  const ambiguousEdits = []
+  const matches = []
+  for (let i = 0; i < edits.length; i++) {
+    const edit = edits[i]
+    // 批10-2：line_span 锚定编辑（行级，防漂移 expect_sha）
+    if (edit && edit.line_span) {
+      const spanRes = applyLineSpan(result, content, edit)
+      if (spanRes.error) {
+        failedEdits.push({ index: i, reason: spanRes.reason, error_code: spanRes.error_code, detail: spanRes.detail })
+        continue
+      }
+      matches.push({ index: i, mode: 'line_span', line: edit.line_span.start_line, ...(spanRes.anchor_checked ? { anchor_checked: true } : {}) })
+      result = spanRes.result
+      applied++
+      continue
+    }
+    const oldStr = edit.old_string
+    // 批10-2：new_lines 数组形式（消换行转义）
+    const newStr = edit.new_string ?? (Array.isArray(edit.new_lines) ? edit.new_lines.map(String).join('\n') : '')
+    if (!oldStr) {
+      // R3：空 old_string 不再静默跳过——记入 failed，防 edits_applied 谎报成功
+      failedEdits.push({ index: i, old_string: '', reason: 'empty_old_string', error_code: ErrorCodes.INVALID_INPUT })
+      continue
+    }
+    if (edit.replace_all) {
+      // R3：函数替换器防 $& 作弊——replaceAll 第二参字符串里的 $& 被当捕获引用替换（r12.2 同类）
+      const occurrences = result.split(oldStr).length - 1
+      const replaced = result.replaceAll(oldStr, () => newStr)
+      if (replaced !== result) {
+        applied++
+        matches.push({ index: i, mode: 'replace_all', occurrences })
+        result = replaced
+      } else {
+        const failed = { index: i, old_string: oldStr, reason: 'not_found', error_code: ErrorCodes.OLD_STRING_NOT_FOUND }
+        const closest = findClosestMatch(result, oldStr)
+        if (closest) failed.closest_match = closest
+        addLongLineHint(failed, oldStr)
+        failedEdits.push(failed)
+      }
+    } else {
+      const idx = result.indexOf(oldStr)
+      if (idx === -1) {
+        const failed = { index: i, old_string: oldStr, reason: 'not_found', error_code: ErrorCodes.OLD_STRING_NOT_FOUND }
+        const closest = findClosestMatch(result, oldStr)
+        if (closest) failed.closest_match = closest
+        addLongLineHint(failed, oldStr)
+        failedEdits.push(failed)
+        continue
+      }
+      const occurrences = result.split(oldStr).length - 1
+      if (occurrences > 1) ambiguousEdits.push({ index: i, occurrences })
+      const line = result.slice(0, idx).split('\n').length
+      matches.push({ index: i, mode: 'first', line, occurrences })
+      result = result.slice(0, idx) + newStr + result.slice(idx + oldStr.length)
+      applied++
+    }
+  }
+  return { result, applied, failedEdits, ambiguousEdits, matches }
+}
+
+// 13-A：长行匹配脆性提示（用户实测：超长 CJK/Markdown 行字节级漂移是唯一失误来源）
+const LONG_LINE_HINT_THRESHOLD = 120
+function addLongLineHint(failed, oldStr) {
+  try {
+    const longest = String(oldStr).split('\n').reduce((m, l) => Math.max(m, l.length), 0)
+    if (longest > LONG_LINE_HINT_THRESHOLD) {
+      failed.hint = 'old_string has a very long line (' + longest + ' chars); long CJK/Markdown lines drift easily — prefer line_span + expect_sha anchoring'
+    }
+  } catch {}
+}
+
+// 批10-2：line_span 编辑——1-based 行号；end_line 缺省=纯插入（在 start_line 前）；null=替换到 EOF
+function applyLineSpan(content, baseContent, edit) {
+  const ls = edit.line_span || {}
+  const start = ls.start_line
+  if (!Number.isInteger(start) || start < 1) {
+    return { error: true, reason: 'invalid_line_span', error_code: ErrorCodes.INVALID_INPUT, detail: 'line_span.start_line must be an integer >= 1' }
+  }
+  // 14-A AC29：公开 schema 把 expect_sha 定义在 line_span 内，旧实现只读 edit.expect_sha（兄弟位）——
+  // 按 schema 传参被静默忽略、锚点守卫失效。两位置都接受；同一锚点等价，异值拒绝（防中途换锚）。
+  const normSha = (v) => String(v).replace(/^sha256:/, '')
+  const outerSha = edit.expect_sha
+  const innerSha = ls.expect_sha
+  if (outerSha != null && innerSha != null && normSha(outerSha) !== normSha(innerSha)) {
+    return { error: true, reason: 'conflicting_expect_sha', error_code: ErrorCodes.INVALID_INPUT, detail: 'expect_sha given both as edit.expect_sha and edit.line_span.expect_sha with different values; pass a single anchor (or identical values)' }
+  }
+  const expectSha = innerSha != null ? innerSha : outerSha
+  if (expectSha) {
+    const want = normSha(expectSha)
+    if (sha256(Buffer.from(baseContent, 'utf-8')) !== want) {
+      return { error: true, reason: 'stale_content', error_code: ErrorCodes.STALE_CONTENT, detail: 'expect_sha mismatch: file changed since read; re-read then edit only the marked region' }
+    }
+  }
+  const hadTrailing = content.endsWith('\n')
+  const lines = content.split('\n')
+  if (hadTrailing) lines.pop()
+  if (start > lines.length + 1) {
+    return { error: true, reason: 'line_span_out_of_range', error_code: ErrorCodes.INVALID_INPUT, detail: 'start_line ' + start + ' beyond EOF (' + lines.length + ' lines)' }
+  }
+  let newLines
+  if (Array.isArray(edit.new_lines)) newLines = edit.new_lines.map(String)
+  else if (typeof edit.new_string === 'string') newLines = edit.new_string === '' ? [] : edit.new_string.split('\n')
+  else return { error: true, reason: 'missing_new_content', error_code: ErrorCodes.INVALID_INPUT, detail: 'line_span edit needs new_lines or new_string' }
+  // 15-B（专家 621f6f8 Windows 验收 §4.2）：行尾继承——新行默认沿用锚点行的真实行尾（CRLF→CRLF），
+  // 不静默产生混合行尾；未触碰行保持原字节（不做全局行尾转换）。new_lines/new_string 元素先归一。
+  const eol = (() => {
+    for (const l of [lines[start - 1], lines[start - 2]]) {
+      if (typeof l === 'string' && l.length > 0) return l.endsWith('\r') ? '\r\n' : '\n'
+    }
+    return content.includes('\r\n') ? '\r\n' : '\n'
+  })()
+  newLines = newLines.map(l => {
+    const s = String(l)
+    if (eol === '\r\n') return s.endsWith('\r') ? s : s + '\r'
+    return s.endsWith('\r') ? s.slice(0, -1) : s
+  })
+  const endRaw = ls.end_line
+  const tail = hadTrailing ? '\n' : ''
+  if (endRaw === undefined) {
+    return { result: lines.slice(0, start - 1).concat(newLines, lines.slice(start - 1)).join('\n') + tail, anchor_checked: !!expectSha }
+  }
+  if (endRaw !== null) {
+    if (!Number.isInteger(endRaw) || endRaw < start) {
+      return { error: true, reason: 'invalid_line_span', error_code: ErrorCodes.INVALID_INPUT, detail: 'line_span.end_line must be an integer >= start_line (or null for EOF)' }
+    }
+    if (endRaw > lines.length) {
+      return { error: true, reason: 'line_span_out_of_range', error_code: ErrorCodes.INVALID_INPUT, detail: 'end_line ' + endRaw + ' beyond EOF (' + lines.length + ' lines)' }
+    }
+    return { result: lines.slice(0, start - 1).concat(newLines, lines.slice(endRaw)).join('\n') + tail, anchor_checked: !!expectSha }
+  }
+  return { result: lines.slice(0, start - 1).concat(newLines).join('\n') + tail, anchor_checked: !!expectSha }
+}
+
+function _countLines(t) {
+  if (!t) return 0
+  const s = t.endsWith('\n') ? t.slice(0, -1) : t
+  return s.split('\n').length
+}
+
+function _diffStats(file, oldText, newText, backupPath, curPath) {
+  const out = { file, lines_before: _countLines(oldText), lines_after: _countLines(newText) }
+  out.delta = out.lines_after - out.lines_before
+  if (backupPath && curPath) {
+    try {
+      const r = spawnSync('git', ['diff', '--no-index', '--numstat', '--', backupPath, curPath], { encoding: 'utf-8', timeout: 5000 })
+      const line = (r.stdout || '').trim().split('\n')[0] || ''
+      const m = line.match(/^(\d+|-)\t(\d+|-)\t/)
+      if (m) {
+        out.added = m[1] === '-' ? null : Number(m[1])
+        out.removed = m[2] === '-' ? null : Number(m[2])
+      }
+    } catch {}
+  }
+  return out
+}
+
+function bracketWarnings(content) {
   const warnings = []
   const pairs = { ')': '(', ']': '[', '}': '{' }
   const opens = new Set(['(', '[', '{'])
@@ -563,19 +1123,20 @@ function checkBracketBalance(content) {
     if (opens.has(ch)) {
       stack.push({ char: ch, line: content.slice(0, i).split('\n').length })
     } else if (pairs[ch]) {
+      const line = content.slice(0, i).split('\n').length
       if (stack.length === 0) {
-        warnings.push({ type: 'bracket_imbalance', bracket: ch, detail: `extra closing "${ch}"` })
+        warnings.push({ type: 'bracket_imbalance', bracket: ch, line, detail: `extra closing "${ch}"` })
       } else {
         const top = stack.pop()
         if (top.char !== pairs[ch]) {
-          warnings.push({ type: 'bracket_mismatch', detail: `"${top.char}" at line ${top.line} closed by "${ch}"` })
+          warnings.push({ type: 'bracket_mismatch', line: top.line, detail: `"${top.char}" at line ${top.line} closed by "${ch}"` })
         }
       }
     }
   }
 
   for (const unclosed of stack) {
-    warnings.push({ type: 'bracket_imbalance', bracket: unclosed.char, detail: `unclosed "${unclosed.char}" opened at line ${unclosed.line}` })
+    warnings.push({ type: 'bracket_imbalance', bracket: unclosed.char, line: unclosed.line, detail: `unclosed "${unclosed.char}" opened at line ${unclosed.line}` })
   }
 
   return warnings

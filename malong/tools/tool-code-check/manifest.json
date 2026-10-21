@@ -1,0 +1,25 @@
+{
+  "name": "code_check",
+  "version": "0.1.0",
+  "interface": "graph",
+  "requires_state": true,
+  "description": "Run checks (test/typecheck/lint) + record evidence. Preview default; async:true for long suites.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "workspace_dir": { "type": "string", "description": "Project root (abs)." },
+      "task_id": { "type": "string", "description": "Task id." },
+      "checks": { "type": "array", "description": "Default [test].", "items": { "type": "string", "enum": ["test", "typecheck", "lint"] } },
+      "run": { "type": "boolean", "description": "true = execute." },
+      "async": { "type": "boolean", "description": "Background; query code_control." },
+      "workdir": { "type": "string", "description": "Subdir; verification stages run here (tsc-check dir equivalent)." },
+      "timeout": { "type": "integer", "description": "Per-stage ms (30000)." },
+      "verifier": { "type": "string", "enum": ["protocol", "exit"], "description": "protocol default; or exit." },
+      "expected_state_revision": { "type": "integer", "description": "Guard." },
+      "request_id": { "type": "string", "description": "Idempotency key." }
+    },
+    "required": ["workspace_dir", "task_id"]
+  },
+  "handler": "./handler.js",
+  "protocol_version": "1.0"
+}

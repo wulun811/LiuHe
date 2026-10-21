@@ -1,0 +1,40 @@
+{
+  "name": "code_query",
+  "version": "0.1.0",
+  "interface": "graph",
+  "description": "Read-only lookups, no task — fast path for known file/symbol questions. mode: outline|symbols|body|map|search|impact|references|callers|callees|tests|validate|capabilities|capability. search=code_search, tests=find_tests, validate=sandbox_validate; capabilities describes the classic 44. To edit: code_task → code_read → code_batch.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "workspace_dir": { "type": "string", "description": "Root (abs)." },
+      "mode": { "type": "string", "enum": ["outline", "symbols", "references", "callers", "callees", "impact", "map", "body", "search", "tests", "validate", "capabilities", "capability"], "description": "map=compact paged overview (+dir drill); body=read file/symbol content without a task; search=code_search intent search; tests=find_tests candidates; validate=sandbox_validate content; capabilities=list; capability=describe by name." },
+      "file": { "type": "string", "description": "Required for outline/callers/callees/impact/tests/validate; optional with symbol for references." },
+      "symbol": { "type": "string", "description": "Required for references; optional with file for callers/callees/impact." },
+      "query": { "type": "string", "description": "Required for symbols (substring); capabilities: optional name/summary filter." },
+      "name": { "type": "string", "description": "capability mode: exact original tool name." },
+      "category": { "type": "string", "description": "capabilities mode: filter by category (e.g. query/audit/maintain)." },
+      "cursor": { "type": "integer", "description": "capabilities mode: pagination offset (from next_cursor)." },
+      "kind": { "type": "string", "description": "references only: filter by kind (call,import,use,assign,extends,implements; comma-separated)." },
+      "line": { "type": "integer", "description": "callers/callees: disambiguate a line." },
+      "depth": { "type": "integer", "description": "callers/callees/impact: traversal depth." },
+      "limit": { "type": "integer", "description": "Max rows (symbols, references)." },
+      "max_tokens": { "type": "integer", "description": "map only: map token budget (default 700)." },
+      "page_size": { "type": "integer", "description": "map only: entries per page (default 12; packing hint)." },
+      "page": { "type": "integer", "description": "map only: page number (default 1; pass next_page)." },
+      "dir": { "type": "string", "description": "map only: subdir inside workspace_dir (escapes rejected)." },
+      "budget_hint": { "type": "integer", "description": "body only: max chars (default 1200; 0 = full, hard-capped)." },
+      "rich": { "type": "boolean", "description": "body only: include rich projection (outline)." },
+      "new_content": { "type": "string", "description": "validate only: candidate full content to check (no write)." },
+      "options": { "type": "object", "description": "Advanced per-mode passthrough to the original tool (e.g. callers: max_callers; impact: symbols/change_type; body: locators/context_lines). Protected keys rejected; full schema via mode=capability." }
+    },
+    "required": ["workspace_dir", "mode"],
+    "allOf": [
+      { "if": { "properties": { "mode": { "enum": ["outline", "callers", "callees", "impact", "tests", "validate"] } }, "required": ["mode"] }, "then": { "required": ["file"] } },
+      { "if": { "properties": { "mode": { "enum": ["symbols", "search"] } }, "required": ["mode"] }, "then": { "required": ["query"] } },
+      { "if": { "properties": { "mode": { "enum": ["references"] } }, "required": ["mode"] }, "then": { "required": ["symbol"] } },
+      { "if": { "properties": { "mode": { "enum": ["body"] } }, "required": ["mode"] }, "then": { "anyOf": [{ "required": ["file"] }, { "required": ["symbol"] }] } },
+      { "if": { "properties": { "mode": { "enum": ["validate"] } }, "required": ["mode"] }, "then": { "required": ["new_content"] } }
+    ]
+  },
+  "handler": "handler.js"
+}

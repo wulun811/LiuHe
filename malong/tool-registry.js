@@ -5,6 +5,7 @@
 import { readdirSync, readFileSync, existsSync, appendFileSync, statSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { gateReason } from './workflow/public-catalog.js'
 
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -92,6 +93,7 @@ class ToolRegistry {
   constructor(toolsDir, options = {}) {
     this.toolsDir = toolsDir || join(__dirname, 'tools')
     this.tools = new Map()
+    this.hidden = [] // LH-007：被门控隐藏的工具 {name, reason}——供 mcp-server 显式拒绝时归因
     this._handlerMtimes = new Map() // R13: ESM 热更新检测——handler 磁盘 mtime
     this.log = options.log || ((level, msg) => process.stderr.write(`[registry] [${level}] ${msg}\n`))
     // r34：usagePath 可注入（测试隔离）；r37：默认走 ~/.config/malong（host-config）
@@ -108,6 +110,7 @@ class ToolRegistry {
 
     const entries = readdirSync(this.toolsDir, { withFileTypes: true })
     let loaded = 0
+    this.hidden = []
 
     for (const entry of entries) {
       if (!entry.isDirectory()) continue
@@ -130,6 +133,14 @@ class ToolRegistry {
         }
         if (!manifest.handler) {
           this.log('error', `${entry.name}/manifest.json missing 'handler' field`)
+          continue
+        }
+
+        // 门控单一来源（workflow/public-catalog.js）：graph 接口 + requires_state（router/registry 共用）
+        const gate = gateReason(manifest, process.env)
+        if (gate) {
+          this.hidden.push({ name: manifest.name, reason: gate })
+          this.log('info', `skipped (${gate}): ${manifest.name} (${entry.name})`)
           continue
         }
 
@@ -190,6 +201,12 @@ class ToolRegistry {
     return this.tools.has(name)
   }
 
+  // LH-007：门控隐藏原因（mcp-server 对隐藏工具调用给出显式归因，而不是笼统 not found）
+  getHiddenReason(name) {
+    const h = this.hidden.find(x => x.name === name)
+    return h ? h.reason : null
+  }
+
   async callTool(name, args, context) {
     const tool = this.tools.get(name)
     if (!tool) {
@@ -209,6 +226,8 @@ class ToolRegistry {
           if (result && typeof result === 'object' && !Array.isArray(result) && !result.error) {
             result = { ...result, note: 'handler code changed on disk (mtime) — restart MCP to load new version' }
           }
+          // dogfood-050 P3：旧实现不更新 map → 每条响应都贴 note（噪声）；贴一次后收口（再次变更会再贴一次）
+          this._handlerMtimes.set(name, curMtime)
         }
       } catch {}
       if (result?.error) { status = 'error'; errorCode = result.error_code || result.error || '' }

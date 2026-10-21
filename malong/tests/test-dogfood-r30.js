@@ -63,6 +63,11 @@ assert(traceRes.suspected_literals?.some(l => l.line === 5), `① 硬编码副�
 assert(traceRes.search_method !== 'text_fallback', `① search_method 不再用旧名 text_fallback（得 ${traceRes.search_method}）`)
 const traceJ = await trace.handle({ workspace_dir: WS, symbol: 'magic-text-probe', file: 'app.js' }, { codeIndexService: svc, getWorkspaceDir: () => DATA })
 assert(traceJ.search_method === 'text_scan' && traceJ.direct_references?.length > 0, `① 零索引 token（注释文本）→文本扫描兜底标 text_scan（得 ${traceJ.search_method}/${traceJ.direct_references?.length}）`)
+// 12-D：export const 多前缀词值提取（旧正则只吃一个前缀词 → export const X=3 恒 null）
+writeFileSync(`${WS}/exported.js`, 'export const MAX_EXPORTED = 5;\n')
+await svc.indexFile(join(WS, 'exported.js'), WS)
+const traceE = await trace.handle({ workspace_dir: WS, symbol: 'MAX_EXPORTED', file: 'exported.js' }, { codeIndexService: svc, getWorkspaceDir: () => DATA })
+assert(traceE.value === 5, `① export const 值提取=5（得 ${traceE.value}）`)
 
 // ── spec-gen：R22-⑪ 类方法进 exports + 参数提取（Python/JS） ──
 console.log('\u2500\u2500 spec-gen \u7c7b\u65b9\u6cd5 + \u53c2\u6570 \u2500\u2500')

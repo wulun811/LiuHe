@@ -1,0 +1,2123 @@
+{
+  "contract_version": 1,
+  "kind": "classic-44",
+  "generator": "scripts/gen-capability-contract.mjs",
+  "note": "G0 合同：名称集合/manifest+handler 哈希/参数面/enum/action 调度/原测试位置。unresolved 字段为显式待判定（不得静默省略）。",
+  "tools": [
+    {
+      "name": "active_todos",
+      "dir": "tool-active-todos",
+      "version": "1.0.0",
+      "protocol_version": "1.0",
+      "tags": [
+        "quality",
+        "todo"
+      ],
+      "dependencies": [],
+      "manifest_sha256": "sha256:64c2e4919aacaa624da73ade8cc63c5ca057f41da6de2dee6b4b132b10a97b9f",
+      "schema_sha256": "sha256:700a5925e4c87f8df3ef32d537b4142456afef6b5a839ade5764f9373cfcdd92",
+      "handler": "./handler.js",
+      "handler_sha256": "sha256:3f1155c68b8388ae0c714ff200c40931da60ee7f8254709632fa7416a01e1ec2",
+      "params": {
+        "required": [
+          "workspace_dir"
+        ],
+        "properties": [
+          "current_files",
+          "scope",
+          "workspace_dir"
+        ]
+      },
+      "enums": {},
+      "action_dispatch": {
+        "status": "none"
+      },
+      "test_refs": [
+        "tests/test-g3-acceptance.js",
+        "tests/test-invoke-capability.js",
+        "tests/test-invoke-stdio.js",
+        "tests/test-s5-catalog.js"
+      ],
+      "unresolved": [
+        "effects",
+        "preconditions",
+        "limits",
+        "outputs"
+      ]
+    },
+    {
+      "name": "call_chain",
+      "dir": "tool-call-chain",
+      "version": "1.1.0",
+      "protocol_version": "1.0",
+      "tags": [
+        "call",
+        "callees",
+        "callers",
+        "chain"
+      ],
+      "dependencies": [
+        "reindex"
+      ],
+      "manifest_sha256": "sha256:85dd06b8b6f2450ac029825f909ba29f95d5d425178a8497f6d88f8c1a04259c",
+      "schema_sha256": "sha256:acd801ea4a8596493bf2e3b0c0fc1ef4399d57b5ff901ce87b6288b5835d627b",
+      "handler": "./handler.js",
+      "handler_sha256": "sha256:3c46ffa14507ff527c8a1a70af4ccd309ecf030417b4f315032d6e37dfe41612",
+      "params": {
+        "required": [
+          "file",
+          "workspace_dir"
+        ],
+        "properties": [
+          "depth",
+          "file",
+          "line",
+          "max_callees",
+          "max_callers",
+          "symbol",
+          "workspace_dir"
+        ]
+      },
+      "enums": {},
+      "action_dispatch": {
+        "status": "none"
+      },
+      "test_refs": [
+        "tests/test-code-query.js",
+        "tests/test-g3-acceptance.js",
+        "tests/test-inspect.js",
+        "tests/test-s5-catalog.js",
+        "tests/test-tool-registry.js"
+      ],
+      "unresolved": [
+        "effects",
+        "preconditions",
+        "limits",
+        "outputs"
+      ]
+    },
+    {
+      "name": "code_quality",
+      "dir": "tool-code-quality",
+      "version": "1.0.0",
+      "protocol_version": "1.0",
+      "tags": [
+        "analysis",
+        "quality"
+      ],
+      "dependencies": [],
+      "manifest_sha256": "sha256:aa5cd1af8bd6875b224272d2729543f48cd25c704ca2bfa41bcd3a5f48ed8c53",
+      "schema_sha256": "sha256:836eaf573e343bdf42194c1cb7c26f9dd28b79d24d5c3123e0dea1bbb05cc9ef",
+      "handler": "./handler.js",
+      "handler_sha256": "sha256:79198bb839258efc2a0f83e6c722bf43ede7289339d44792d01275f68eb261e0",
+      "params": {
+        "required": [
+          "file",
+          "workspace_dir"
+        ],
+        "properties": [
+          "file",
+          "workspace_dir"
+        ]
+      },
+      "enums": {},
+      "action_dispatch": {
+        "status": "none"
+      },
+      "test_refs": [
+        "tests/test-g3-acceptance.js",
+        "tests/test-s5-catalog.js"
+      ],
+      "unresolved": [
+        "effects",
+        "preconditions",
+        "limits",
+        "outputs"
+      ]
+    },
+    {
+      "name": "code_review",
+      "dir": "tool-code-review",
+      "version": "1.0.0",
+      "protocol_version": "1.0",
+      "tags": [
+        "quality",
+        "review"
+      ],
+      "dependencies": [],
+      "manifest_sha256": "sha256:3582c52439eaafbde0cc6ab3be6905c73ce4b565c0bd324940be97deee2454cd",
+      "schema_sha256": "sha256:fb376b77551eb8910e1e08e502520e0c5f3ac09fa1be072939bd1a190e60062d",
+      "handler": "./handler.js",
+      "handler_sha256": "sha256:d4361bccb0144c169a00b29eb3cbfc7e2330c8f2a00a11fc3a2f11cba760d741",
+      "params": {
+        "required": [
+          "workspace_dir"
+        ],
+        "properties": [
+          "diff",
+          "file",
+          "max_issues",
+          "source",
+          "workspace_dir"
+        ]
+      },
+      "enums": {},
+      "action_dispatch": {
+        "status": "none"
+      },
+      "test_refs": [
+        "tests/test-g3-acceptance.js",
+        "tests/test-s4-audit.js",
+        "tests/test-s5-catalog.js",
+        "tests/test-wp03-routes-edges.js"
+      ],
+      "unresolved": [
+        "effects",
+        "preconditions",
+        "limits",
+        "outputs"
+      ]
+    },
+    {
+      "name": "code_search",
+      "dir": "tool-code-search",
+      "version": "1.0.0",
+      "protocol_version": "1.0",
+      "tags": [
+        "search",
+        "symbol"
+      ],
+      "dependencies": [
+        "reindex"
+      ],
+      "manifest_sha256": "sha256:bcb5eddcb8434d8c1d073a6fc963ec0da815337e60438d5176327854f32e85fb",
+      "schema_sha256": "sha256:041b05273eefc32230f60e63739bd3d0cebe43cdba8f7e9fe566578d57b4dd1d",
+      "handler": "./handler.js",
+      "handler_sha256": "sha256:787520fbc24cae5a8ca136fae5861b1d98f0e5476bd93e0cbd6bb8cabe38c5aa",
+      "params": {
+        "required": [
+          "query",
+          "workspace_dir"
+        ],
+        "properties": [
+          "limit",
+          "query",
+          "workspace_dir"
+        ]
+      },
+      "enums": {},
+      "action_dispatch": {
+        "status": "none"
+      },
+      "test_refs": [
+        "tests/test-code-query.js",
+        "tests/test-g3-acceptance.js",
+        "tests/test-mcp-server.js",
+        "tests/test-s5-catalog.js"
+      ],
+      "unresolved": [
+        "effects",
+        "preconditions",
+        "limits",
+        "outputs"
+      ]
+    },
+    {
+      "name": "config_drift",
+      "dir": "tool-config-drift",
+      "version": "1.0.0",
+      "protocol_version": "1.0",
+      "tags": [
+        "config",
+        "quality"
+      ],
+      "dependencies": [],
+      "manifest_sha256": "sha256:915b4767e4b62b59ff7ce28aa858dbc54f5cce733e95e3d4e90722534accb6d8",
+      "schema_sha256": "sha256:9d324461592f19af487f9234c9af93b790d1f44059627cf8d40afdb6f3f3efaf",
+      "handler": "./handler.js",
+      "handler_sha256": "sha256:4efb969980a024ac1722722709d6f824518497ee931820d16ed4de4da2204faa",
+      "params": {
+        "required": [
+          "workspace_dir"
+        ],
+        "properties": [
+          "file",
+          "workspace_dir"
+        ]
+      },
+      "enums": {},
+      "action_dispatch": {
+        "status": "none"
+      },
+      "test_refs": [
+        "tests/test-g3-acceptance.js",
+        "tests/test-s5-catalog.js"
+      ],
+      "unresolved": [
+        "effects",
+        "preconditions",
+        "limits",
+        "outputs"
+      ]
+    },
+    {
+      "name": "debug_runner",
+      "dir": "tool-debug-runner",
+      "version": "1.0.0",
+      "protocol_version": "1.0",
+      "tags": [
+        "debug",
+        "run"
+      ],
+      "dependencies": [],
+      "manifest_sha256": "sha256:0cc2d67af5f2c223c5d8965617ba29c166db6203138f502b21b1f33546b87f5f",
+      "schema_sha256": "sha256:8fd4cd122a52a618f8e33d4d9b8a1967b1fb0613f41fe670c889d94ca149bf7e",
+      "handler": "./handler.js",
+      "handler_sha256": "sha256:8b98151c7cb12d388d741656c1295f936101a612b6e42a2c6a5c4c466cae3dea",
+      "params": {
+        "required": [
+          "workspace_dir"
+        ],
+        "properties": [
+          "command",
+          "cwd",
+          "script",
+          "test",
+          "timeout",
+          "workspace_dir"
+        ]
+      },
+      "enums": {},
+      "action_dispatch": {
+        "status": "none"
+      },
+      "test_refs": [
+        "tests/test-capability-catalog.js",
+        "tests/test-feedback-list.js",
+        "tests/test-g3-acceptance.js",
+        "tests/test-invoke-claim-race.js",
+        "tests/test-invoke-outlet-crash.js",
+        "tests/test-invoke-safety.js",
+        "tests/test-invoke-stdio.js",
+        "tests/test-r1-retention-protection.js",
+        "tests/test-s5-catalog.js",
+        "tests/test-workflow-closure.js"
+      ],
+      "unresolved": [
+        "effects",
+        "preconditions",
+        "limits",
+        "outputs"
+      ]
+    },
+    {
+      "name": "dep_graph",
+      "dir": "tool-dep-graph",
+      "version": "1.1.0",
+      "protocol_version": "1.0",
+      "tags": [
+        "dependency",
+        "graph"
+      ],
+      "dependencies": [
+        "reindex"
+      ],
+      "manifest_sha256": "sha256:c1b4898e5d075f69e875346e93f9c2d3c439b078cd0795fb78d493378ed9df80",
+      "schema_sha256": "sha256:2f3bfa5a0dc87ac958934a51a95db2fc51c2fda2061a4972f98bf4bbef866fea",
+      "handler": "./handler.js",
+      "handler_sha256": "sha256:2392fd832daf059743c82a722c4fe57400b2b21c0371646c1f2ed222884790c9",
+      "params": {
+        "required": [
+          "workspace_dir"
+        ],
+        "properties": [
+          "depth",
+          "file",
+          "scope",
+          "workspace_dir"
+        ]
+      },
+      "enums": {
+        "scope": [
+          "project"
+        ]
+      },
+      "action_dispatch": {
+        "status": "none"
+      },
+      "test_refs": [
+        "tests/test-g3-acceptance.js",
+        "tests/test-h07-capability-hints.js",
+        "tests/test-s5-catalog.js"
+      ],
+      "unresolved": [
+        "effects",
+        "preconditions",
+        "limits",
+        "outputs"
+      ]
+    },
+    {
+      "name": "dependency_gatekeeper",
+      "dir": "tool-dependency-gatekeeper",
+      "version": "1.1.0",
+      "protocol_version": "1.0",
+      "tags": [
+        "dependency",
+        "import",
+        "manifest"
+      ],
+      "dependencies": [],
+      "manifest_sha256": "sha256:00afa2ae366649b6c5e9d3131624b957ab7221bc44613954c2d5557728ed3ed5",
+      "schema_sha256": "sha256:defee397382a7d8550b9eac97128ee82306e579f94b2df77c7087410730010d8",
+      "handler": "./handler.js",
+      "handler_sha256": "sha256:114becd122c087418d0c860e32d0e11cef09f714eed01f041f7717f693bf011c",
+      "params": {
+        "required": [
+          "file",
+          "workspace_dir"
+        ],
+        "properties": [
+          "file",
+          "workspace_dir"
+        ]
+      },
+      "enums": {},
+      "action_dispatch": {
+        "status": "none"
+      },
+      "test_refs": [
+        "tests/test-g3-acceptance.js",
+        "tests/test-s5-catalog.js"
+      ],
+      "unresolved": [
+        "effects",
+        "preconditions",
+        "limits",
+        "outputs"
+      ]
+    },
+    {
+      "name": "diff_facts",
+      "dir": "tool-diff-facts",
+      "version": "1.1.0",
+      "protocol_version": "1.0",
+      "tags": [
+        "ast",
+        "diff",
+        "transaction"
+      ],
+      "dependencies": [
+        "edit_transaction"
+      ],
+      "manifest_sha256": "sha256:0bf2a0212a27efb58798fb041f1da1d15be7832553ca75c78ab0582b0099da7e",
+      "schema_sha256": "sha256:5c493917b26d9afd89eba737e8e165a7fa06936ccb49a484dcc1bfc73f97a8ee",
+      "handler": "./handler.js",
+      "handler_sha256": "sha256:ec6b0f0abe6fbb9cf7b0fcf8e291572b07aef34fef340f08ea6b03a3529542c6",
+      "params": {
+        "required": [
+          "workspace_dir"
+        ],
+        "properties": [
+          "since",
+          "workspace_dir"
+        ]
+      },
+      "enums": {},
+      "action_dispatch": {
+        "status": "none"
+      },
+      "test_refs": [
+        "tests/test-g3-acceptance.js",
+        "tests/test-h07-capability-hints.js",
+        "tests/test-s5-catalog.js",
+        "tests/test-workflow-closure.js"
+      ],
+      "unresolved": [
+        "effects",
+        "preconditions",
+        "limits",
+        "outputs"
+      ]
+    },
+    {
+      "name": "edit_batch",
+      "dir": "tool-batch-edit",
+      "version": "1.0.0",
+      "protocol_version": "1.0",
+      "tags": [
+        "atomic",
+        "batch",
+        "edit",
+        "whitespace-tolerant"
+      ],
+      "dependencies": [],
+      "manifest_sha256": "sha256:e788207cd9379c4a7bdb73aa441f347eaf7a0019bb90ce426b49596ce15d01ab",
+      "schema_sha256": "sha256:198d15a0920e710375898669a6fb4128a03a6bca36e35b9773625f1e06c40c59",
+      "handler": "./handler.js",
+      "handler_sha256": "sha256:da6a4b950355196739c329846cbfa4bc98a8e3a3bdec921e6d95aad2e185a4e7",
+      "params": {
+        "required": [
+          "edits",
+          "file"
+        ],
+        "properties": [
+          "dry_run",
+          "edits",
+          "file",
+          "file_path",
+          "partial",
+          "verbose",
+          "workspace_dir"
+        ]
+      },
+      "enums": {},
+      "action_dispatch": {
+        "status": "none"
+      },
+      "test_refs": [
+        "tests/measure-trail.js",
+        "tests/test-g3-acceptance.js",
+        "tests/test-graph-catalog-budget.js",
+        "tests/test-health-check.js",
+        "tests/test-r10.js",
+        "tests/test-s1-entry.js",
+        "tests/test-s5-catalog.js",
+        "tests/test-tool-registry.js",
+        "tests/test-undo-journal.js"
+      ],
+      "unresolved": [
+        "effects",
+        "preconditions",
+        "limits",
+        "outputs"
+      ]
+    },
+    {
+      "name": "edit_collision_guard",
+      "dir": "tool-edit-collision-guard",
+      "version": "1.1.0",
+      "protocol_version": "1.0",
+      "tags": [
+        "collision",
+        "safety",
+        "staleness"
+      ],
+      "dependencies": [
+        "edit_transaction"
+      ],
+      "manifest_sha256": "sha256:ee4006b8de8c2e55e846005394a614dcb2c35fb83ab77f1736e211a698bdc694",
+      "schema_sha256": "sha256:002d14a15c749fb08abb9b96aa3e4de2f59ce08e760ec03dd53adedd1d2fb303",
+      "handler": "./handler.js",
+      "handler_sha256": "sha256:8321144da6746e0d0049df47657e0ba819aa32f4a83868106152f6579eb361d0",
+      "params": {
+        "required": [
+          "action",
+          "file",
+          "workspace_dir"
+        ],
+        "properties": [
+          "action",
+          "file",
+          "session_id",
+          "workspace_dir"
+        ]
+      },
+      "enums": {
+        "action": [
+          "record_read",
+          "check"
+        ]
+      },
+      "action_dispatch": {
+        "status": "declared",
+        "values": [
+          "check",
+          "record_read"
+        ],
+        "source": "manifest.inputSchema.properties.action.enum"
+      },
+      "test_refs": [
+        "tests/test-capability-catalog.js",
+        "tests/test-feedback-list.js",
+        "tests/test-g3-acceptance.js",
+        "tests/test-s5-catalog.js"
+      ],
+      "unresolved": [
+        "effects",
+        "preconditions",
+        "limits",
+        "outputs"
+      ]
+    },
+    {
+      "name": "edit_transaction",
+      "dir": "tool-edit-transaction",
+      "version": "1.4.1",
+      "protocol_version": "1.0",
+      "tags": [
+        "atomic",
+        "backup",
+        "edit",
+        "transaction"
+      ],
+      "dependencies": [],
+      "manifest_sha256": "sha256:b45b7ef9dd34b1d21b4074c8f5756d1be0fcb0be578ba3b61c4630c9b73ca06a",
+      "schema_sha256": "sha256:bade4ed048417e8d54c7cacae5ed5aeaa36123e6d39477700a86a87255e82593",
+      "handler": "./handler.js",
+      "handler_sha256": "sha256:5179137fab4a966c2ae14095b8bc2f5c8c5fae5553cb517557c8dddf7d90a0cf",
+      "params": {
+        "required": [
+          "action",
+          "workspace_dir"
+        ],
+        "properties": [
+          "action",
+          "atomic",
+          "content",
+          "create",
+          "dry_run",
+          "edits",
+          "expect_sha",
+          "file",
+          "file_edits",
+          "files",
+          "lines",
+          "name",
+          "seq",
+          "total",
+          "txn_id",
+          "workspace_dir"
+        ]
+      },
+      "enums": {
+        "action": [
+          "begin",
+          "edit",
+          "edit_multi",
+          "edit_chunk",
+          "assemble",
+          "commit",
+          "undo_commit",
+          "rollback",
+          "info"
+        ]
+      },
+      "action_dispatch": {
+        "status": "declared",
+        "values": [
+          "assemble",
+          "begin",
+          "commit",
+          "edit",
+          "edit_chunk",
+          "edit_multi",
+          "info",
+          "rollback",
+          "undo_commit"
+        ],
+        "source": "manifest.inputSchema.properties.action.enum"
+      },
+      "test_refs": [
+        "tests/test-g3-acceptance.js",
+        "tests/test-graph-catalog-budget.js",
+        "tests/test-s1-entry.js",
+        "tests/test-s5-catalog.js",
+        "tests/test-tool-registry.js",
+        "tests/test-workflow-closure.js"
+      ],
+      "unresolved": [
+        "effects",
+        "preconditions",
+        "limits",
+        "outputs"
+      ]
+    },
+    {
+      "name": "exception_guard",
+      "dir": "tool-exception-guard",
+      "version": "1.0.0",
+      "protocol_version": "1.0",
+      "tags": [
+        "exceptions",
+        "quality"
+      ],
+      "dependencies": [
+        "reindex"
+      ],
+      "manifest_sha256": "sha256:303ceea577a15ca83dcc00ed2ec47cc789282af0ac9512a350553295904bc25c",
+      "schema_sha256": "sha256:d77e0b7936017d50e376b839e7a50890f6ff9e5f91b618f751ae26de039d40fd",
+      "handler": "./handler.js",
+      "handler_sha256": "sha256:37f78e87a9980ca248c6ab87b9cbdadb2bc2080745eaeb5dfa1441d33a9624d9",
+      "params": {
+        "required": [
+          "file",
+          "workspace_dir"
+        ],
+        "properties": [
+          "file",
+          "workspace_dir"
+        ]
+      },
+      "enums": {},
+      "action_dispatch": {
+        "status": "none"
+      },
+      "test_refs": [
+        "tests/test-g3-acceptance.js",
+        "tests/test-s5-catalog.js"
+      ],
+      "unresolved": [
+        "effects",
+        "preconditions",
+        "limits",
+        "outputs"
+      ]
+    },
+    {
+      "name": "feedback",
+      "dir": "tool-feedback",
+      "version": "1.0.0",
+      "protocol_version": "1.0",
+      "tags": [
+        "feedback",
+        "system"
+      ],
+      "dependencies": [],
+      "manifest_sha256": "sha256:ef2c207df1b8c693a877842d500a781f07b28153f1fe1f3064b34947062003ff",
+      "schema_sha256": "sha256:21374438f842b640c52f2b9e05e33a68d69e7005eb12a594925e55f3b98506c5",
+      "handler": "./handler.js",
+      "handler_sha256": "sha256:73687ba082bea8b35c964583d9d79e401a9674d70464d7e08696124583bcb272",
+      "params": {
+        "required": [],
+        "properties": [
+          "action",
+          "error_code",
+          "issue",
+          "limit",
+          "note",
+          "tool"
+        ]
+      },
+      "enums": {
+        "action": [
+          "record",
+          "list"
+        ]
+      },
+      "action_dispatch": {
+        "status": "declared",
+        "values": [
+          "list",
+          "record"
+        ],
+        "source": "manifest.inputSchema.properties.action.enum"
+      },
+      "test_refs": [
+        "tests/test-g3-acceptance.js",
+        "tests/test-s5-catalog.js"
+      ],
+      "unresolved": [
+        "effects",
+        "preconditions",
+        "limits",
+        "outputs"
+      ]
+    },
+    {
+      "name": "find_tests",
+      "dir": "tool-find-tests",
+      "version": "1.0.0",
+      "protocol_version": "1.0",
+      "tags": [
+        "discovery",
+        "test"
+      ],
+      "dependencies": [
+        "reindex"
+      ],
+      "manifest_sha256": "sha256:d3f1b9c8db21a65ef09024cb6794de37d345a32533e46393f710c8fb9bb33f87",
+      "schema_sha256": "sha256:cdb56474dd572104aa93098f19e16ea87a21700f50f4beb8bb80693224416702",
+      "handler": "./handler.js",
+      "handler_sha256": "sha256:06d27a52b2db0b3cd30770d735e1212cdf404b809924d5123a3cdb96e6c58542",
+      "params": {
+        "required": [
+          "file",
+          "workspace_dir"
+        ],
+        "properties": [
+          "file",
+          "symbol",
+          "workspace_dir"
+        ]
+      },
+      "enums": {},
+      "action_dispatch": {
+        "status": "none"
+      },
+      "test_refs": [
+        "tests/test-code-query.js",
+        "tests/test-g3-acceptance.js",
+        "tests/test-s5-catalog.js"
+      ],
+      "unresolved": [
+        "effects",
+        "preconditions",
+        "limits",
+        "outputs"
+      ]
+    },
+    {
+      "name": "fix_imports",
+      "dir": "tool-fix-imports",
+      "version": "1.1.0",
+      "protocol_version": "1.0",
+      "tags": [
+        "circular",
+        "fix",
+        "import",
+        "unused"
+      ],
+      "dependencies": [
+        "reindex"
+      ],
+      "manifest_sha256": "sha256:8e1c548a4e2f7b3b197061f67c7d223a336eda0cf0022c8f913e4c8c0b0409df",
+      "schema_sha256": "sha256:43ec76ce8ade61b82256020539bd370614ab5efb5ac28bf6e6985eeafbfe610f",
+      "handler": "./handler.js",
+      "handler_sha256": "sha256:014b54b430f157d5e85ce631252c96acd0c9198c49bbbde4a3f43e783867f283",
+      "params": {
+        "required": [
+          "file",
+          "workspace_dir"
+        ],
+        "properties": [
+          "auto_fix",
+          "file",
+          "max_candidates",
+          "workspace_dir"
+        ]
+      },
+      "enums": {},
+      "action_dispatch": {
+        "status": "none"
+      },
+      "test_refs": [
+        "tests/test-dep-graph-project.js",
+        "tests/test-feedback-list.js",
+        "tests/test-g3-acceptance.js",
+        "tests/test-s4-maintain.js",
+        "tests/test-s5-catalog.js"
+      ],
+      "unresolved": [
+        "effects",
+        "preconditions",
+        "limits",
+        "outputs"
+      ]
+    },
+    {
+      "name": "gc",
+      "dir": "tool-gc",
+      "version": "1.0.0",
+      "protocol_version": "1.0",
+      "tags": [
+        "maintenance",
+        "memory"
+      ],
+      "dependencies": [],
+      "manifest_sha256": "sha256:05836f1dc7f5c7523c697c4ae75349c1ba6e05db9f0c2577c8bbc5b2dc24d71b",
+      "schema_sha256": "sha256:32062bdb9024160d3b9816f12ba2f337808ee107449f8bf08d55b0026944f51e",
+      "handler": "./handler.js",
+      "handler_sha256": "sha256:dd136f101ab29690392181dbb74d2162e6c6dafbaa68e86ae6dc2300706c1580",
+      "params": {
+        "required": [],
+        "properties": []
+      },
+      "enums": {},
+      "action_dispatch": {
+        "status": "none"
+      },
+      "test_refs": [
+        "tests/test-g3-acceptance.js",
+        "tests/test-s5-catalog.js"
+      ],
+      "unresolved": [
+        "effects",
+        "preconditions",
+        "limits",
+        "outputs"
+      ]
+    },
+    {
+      "name": "git_worktree",
+      "dir": "tool-git-worktree",
+      "version": "1.0.0",
+      "protocol_version": "1.0",
+      "tags": [
+        "git",
+        "transaction"
+      ],
+      "dependencies": [],
+      "manifest_sha256": "sha256:69a8f1281236069a4a4201fa4cfd2fec8bfb3eb811db372ef5ed3a462943200f",
+      "schema_sha256": "sha256:6ac8bd16031106a88c9ba7b5ef59d42536d00159701192cab26fef9bcc433e56",
+      "handler": "./handler.js",
+      "handler_sha256": "sha256:3b5c67d5c7e4a16ba322387c8d8810c7e87973c3aaf0f216775a8bde1f96094a",
+      "params": {
+        "required": [
+          "changes",
+          "workspace_dir"
+        ],
+        "properties": [
+          "changes",
+          "message",
+          "timeout",
+          "verify_cmd",
+          "workspace_dir"
+        ]
+      },
+      "enums": {},
+      "action_dispatch": {
+        "status": "none"
+      },
+      "test_refs": [
+        "tests/test-capability-catalog.js",
+        "tests/test-g3-acceptance.js",
+        "tests/test-s5-catalog.js",
+        "tests/test-s5-worktree.js"
+      ],
+      "unresolved": [
+        "effects",
+        "preconditions",
+        "limits",
+        "outputs"
+      ]
+    },
+    {
+      "name": "guard_patterns",
+      "dir": "tool-guard-patterns",
+      "version": "1.1.0",
+      "protocol_version": "1.0",
+      "tags": [
+        "ast",
+        "guard",
+        "lint",
+        "rules"
+      ],
+      "dependencies": [],
+      "manifest_sha256": "sha256:b4f5d5164a084ed32acc22ebd5427495149bc15b8f9799898ec39e12c29990fa",
+      "schema_sha256": "sha256:1ea371fa274e46e957ec5a399419170dc0dcf432c0236e3eb2cdaa524f84c43a",
+      "handler": "./handler.js",
+      "handler_sha256": "sha256:cefbaed03145c9d515346483fe4e09e6365bb33a8ceaa804e4c5d7c4354d14b1",
+      "params": {
+        "required": [
+          "file",
+          "workspace_dir"
+        ],
+        "properties": [
+          "file",
+          "ruleset",
+          "workspace_dir"
+        ]
+      },
+      "enums": {},
+      "action_dispatch": {
+        "status": "none"
+      },
+      "test_refs": [
+        "tests/test-g3-acceptance.js",
+        "tests/test-s5-catalog.js"
+      ],
+      "unresolved": [
+        "effects",
+        "preconditions",
+        "limits",
+        "outputs"
+      ]
+    },
+    {
+      "name": "health",
+      "dir": "tool-health",
+      "version": "1.2.0",
+      "protocol_version": "1.0",
+      "tags": [
+        "health",
+        "self-healing",
+        "system"
+      ],
+      "dependencies": [],
+      "manifest_sha256": "sha256:b2a2bda9a5d385c54b015776281c11ba9f3f6567d671a0a9a1e5b5a4b09b81a1",
+      "schema_sha256": "sha256:63fd6fbaf327d6915692fa71f87160eca34c414fc23fa58d4c905c41b70b6efd",
+      "handler": "./handler.js",
+      "handler_sha256": "sha256:eee1cab3d577f40d51535e49edeeaaf321cc6781581d91c8bcf74d72f4d7ebab",
+      "params": {
+        "required": [],
+        "properties": [
+          "action",
+          "dry_run",
+          "max_age_days",
+          "stats"
+        ]
+      },
+      "enums": {},
+      "action_dispatch": {
+        "status": "extracted",
+        "values": [
+          "check",
+          "cleanup",
+          "matrix",
+          "restart"
+        ],
+        "source": "handler source literals (valid_actions/action===/default)"
+      },
+      "test_refs": [
+        "tests/test-capability-contract.js",
+        "tests/test-g3-acceptance.js",
+        "tests/test-health-check.js",
+        "tests/test-invoke-capability.js",
+        "tests/test-mcp-server-timeout.js",
+        "tests/test-mcp-server.js",
+        "tests/test-r2-semaphore.js",
+        "tests/test-r9.js",
+        "tests/test-s5-catalog.js",
+        "tests/test-tool-registry.js",
+        "tests/test-verify.js"
+      ],
+      "unresolved": [
+        "effects",
+        "preconditions",
+        "limits",
+        "outputs"
+      ]
+    },
+    {
+      "name": "impact_analysis",
+      "dir": "tool-impact-analysis",
+      "version": "2.1.0",
+      "protocol_version": "1.0",
+      "tags": [
+        "analysis",
+        "impact"
+      ],
+      "dependencies": [
+        "reindex"
+      ],
+      "manifest_sha256": "sha256:41d79b7be9b78bdd68641dd7972d789a03e5e3044f8ba666d59b4a3b0877fed4",
+      "schema_sha256": "sha256:3e1d48497824ff57e3b978a7ca8801eb9a19d5120c3c4b5f8cacd316de4f17ba",
+      "handler": "./handler.js",
+      "handler_sha256": "sha256:7ac6ae7cdf36882135774506372e1ae3c2e0f2e2c7d7ce35373ea8c5ed85c9f4",
+      "params": {
+        "required": [
+          "file",
+          "workspace_dir"
+        ],
+        "properties": [
+          "change_type",
+          "context_mode",
+          "depth",
+          "file",
+          "max_callers",
+          "max_results",
+          "symbol",
+          "symbols",
+          "workspace_dir"
+        ]
+      },
+      "enums": {
+        "change_type": [
+          "modify",
+          "delete",
+          "rename"
+        ],
+        "context_mode": [
+          "none",
+          "snippet",
+          "full"
+        ]
+      },
+      "action_dispatch": {
+        "status": "none"
+      },
+      "test_refs": [
+        "tests/measure-trail.js",
+        "tests/test-code-query.js",
+        "tests/test-g3-acceptance.js",
+        "tests/test-s5-catalog.js",
+        "tests/test-tool-registry.js"
+      ],
+      "unresolved": [
+        "effects",
+        "preconditions",
+        "limits",
+        "outputs"
+      ]
+    },
+    {
+      "name": "inspect",
+      "dir": "tool-inspect",
+      "version": "1.0.0",
+      "protocol_version": "1.0",
+      "tags": [
+        "analysis",
+        "combined"
+      ],
+      "dependencies": [
+        "reindex"
+      ],
+      "manifest_sha256": "sha256:c0f3699d32b9fcdee306b053c21387faba59dc4740ba71357662402cc373a5e7",
+      "schema_sha256": "sha256:3269db832a6b309df7a76105eae3ef91c258479b2efbb6352f24a8d02f321000",
+      "handler": "./handler.js",
+      "handler_sha256": "sha256:d4dbbf11799178a038cf8c52f276bb5c0398f84433ff3241ac32ed2b765c7698",
+      "params": {
+        "required": [
+          "file",
+          "symbol",
+          "workspace_dir"
+        ],
+        "properties": [
+          "file",
+          "include_chain",
+          "include_outline",
+          "include_refs",
+          "symbol",
+          "workspace_dir"
+        ]
+      },
+      "enums": {},
+      "action_dispatch": {
+        "status": "none"
+      },
+      "test_refs": [
+        "tests/measure-trail.js",
+        "tests/test-g3-acceptance.js",
+        "tests/test-h07-capability-hints.js",
+        "tests/test-s5-catalog.js"
+      ],
+      "unresolved": [
+        "effects",
+        "preconditions",
+        "limits",
+        "outputs"
+      ]
+    },
+    {
+      "name": "mock_sync",
+      "dir": "tool-mock-syncer",
+      "version": "1.0.0",
+      "protocol_version": "1.0",
+      "tags": [
+        "mock",
+        "quality",
+        "test"
+      ],
+      "dependencies": [],
+      "manifest_sha256": "sha256:e2d5d9bbb933a78f7f4ce9e93c54d7cedca8f9d75854265e46753b809f49c13b",
+      "schema_sha256": "sha256:47ca7efcb63eb137666a16d8acc047e0063ffeb0ab40be6f606dcdce77d66c78",
+      "handler": "./handler.js",
+      "handler_sha256": "sha256:199c2fa64b973927100244648eafb52daf796b26ffa9dc100f3250744396bdb6",
+      "params": {
+        "required": [
+          "file",
+          "function",
+          "workspace_dir"
+        ],
+        "properties": [
+          "file",
+          "function",
+          "workspace_dir"
+        ]
+      },
+      "enums": {},
+      "action_dispatch": {
+        "status": "none"
+      },
+      "test_refs": [
+        "tests/test-g3-acceptance.js",
+        "tests/test-s5-catalog.js"
+      ],
+      "unresolved": [
+        "effects",
+        "preconditions",
+        "limits",
+        "outputs"
+      ]
+    },
+    {
+      "name": "naming_consistency",
+      "dir": "tool-naming-consistency",
+      "version": "1.1.0",
+      "protocol_version": "1.0",
+      "tags": [
+        "consistency",
+        "naming",
+        "style"
+      ],
+      "dependencies": [
+        "reindex"
+      ],
+      "manifest_sha256": "sha256:7778a86aa6f691c9f4d54514f4c50b45962bc1faa12730d81a03424a1add80b1",
+      "schema_sha256": "sha256:2cd58431e7e47efbaf295bafa8d26bc7061bd200e8a800b4e1ca9b3e4ba65204",
+      "handler": "./handler.js",
+      "handler_sha256": "sha256:7fbeddb9a8ac1c92f1869d1ff14425aec56b03af60c6084d22118f8147518e35",
+      "params": {
+        "required": [
+          "file",
+          "new_symbols",
+          "workspace_dir"
+        ],
+        "properties": [
+          "file",
+          "lang",
+          "new_symbols",
+          "workspace_dir"
+        ]
+      },
+      "enums": {},
+      "action_dispatch": {
+        "status": "none"
+      },
+      "test_refs": [
+        "tests/test-g3-acceptance.js",
+        "tests/test-s5-catalog.js"
+      ],
+      "unresolved": [
+        "effects",
+        "preconditions",
+        "limits",
+        "outputs"
+      ]
+    },
+    {
+      "name": "patch_parser",
+      "dir": "tool-patch-parser",
+      "version": "1.0.0",
+      "protocol_version": "1.0",
+      "tags": [
+        "parse",
+        "patch"
+      ],
+      "dependencies": [],
+      "manifest_sha256": "sha256:7f5e62ac5541a16d6779b6c9a16d29b323052cc6ed36713d9e26120fe8ad49a3",
+      "schema_sha256": "sha256:7dc9a943d378e0e014a02fc2efc9841814ccb203ff0c4fec9cfe044ecc5655ac",
+      "handler": "./handler.js",
+      "handler_sha256": "sha256:82e2116b04355cc53c73fc8041b1230feda4bedb9115cfaa43b1ee7dfbee69ac",
+      "params": {
+        "required": [
+          "text",
+          "workspace_dir"
+        ],
+        "properties": [
+          "file",
+          "text",
+          "workspace_dir"
+        ]
+      },
+      "enums": {},
+      "action_dispatch": {
+        "status": "none"
+      },
+      "test_refs": [
+        "tests/test-capability-catalog.js",
+        "tests/test-g3-acceptance.js",
+        "tests/test-invoke-capability.js",
+        "tests/test-s5-catalog.js"
+      ],
+      "unresolved": [
+        "effects",
+        "preconditions",
+        "limits",
+        "outputs"
+      ]
+    },
+    {
+      "name": "read_outline",
+      "dir": "tool-outline-reader",
+      "version": "1.1.0",
+      "protocol_version": "1.0",
+      "tags": [
+        "outline",
+        "structure",
+        "symbols"
+      ],
+      "dependencies": [
+        "reindex"
+      ],
+      "manifest_sha256": "sha256:bd9bb0313ccb28d0724f8758b80ebbf33833f526240c5fa3b672c0d063a85539",
+      "schema_sha256": "sha256:1096e0cf78fdef03394c8b49d80fe29a3273e683a65bd0c49f0aa1c33de6fdd4",
+      "handler": "./handler.js",
+      "handler_sha256": "sha256:e0c57e4d67831ff8502387c671ced288cc5ff0ae318b522963668205e99c103e",
+      "params": {
+        "required": [
+          "file",
+          "workspace_dir"
+        ],
+        "properties": [
+          "depth",
+          "file",
+          "include_refs",
+          "include_test_refs",
+          "max_items",
+          "workspace_dir"
+        ]
+      },
+      "enums": {},
+      "action_dispatch": {
+        "status": "none"
+      },
+      "test_refs": [
+        "tests/measure-trail.js",
+        "tests/test-capability-catalog.js",
+        "tests/test-g3-acceptance.js",
+        "tests/test-invoke-capability.js",
+        "tests/test-s5-catalog.js",
+        "tests/test-tool-registry.js"
+      ],
+      "unresolved": [
+        "effects",
+        "preconditions",
+        "limits",
+        "outputs"
+      ]
+    },
+    {
+      "name": "read_symbol",
+      "dir": "tool-read-symbol",
+      "version": "1.0.0",
+      "protocol_version": "1.0",
+      "tags": [
+        "primitive",
+        "read"
+      ],
+      "dependencies": [],
+      "manifest_sha256": "sha256:8e86fa8056deac937ca213da844c49564baed0c60105259e8116ac1b6d3a2032",
+      "schema_sha256": "sha256:3e832a4f7bfec67853b5bb1d237f496bbd3ae05d80d3cc131c33c36b0cfa005c",
+      "handler": "./handler.js",
+      "handler_sha256": "sha256:836252a142ebe8ca9e05ce8db15213a33e690ea03e830aa2b0b96d813d6ac9cc",
+      "params": {
+        "required": [
+          "workspace_dir"
+        ],
+        "properties": [
+          "budget_hint",
+          "context_lines",
+          "include_outline",
+          "locator",
+          "locators",
+          "mode",
+          "on_ambiguous",
+          "outline_depth",
+          "source",
+          "workspace_dir"
+        ]
+      },
+      "enums": {
+        "mode": [
+          "core",
+          "rich"
+        ],
+        "on_ambiguous": [
+          "fail"
+        ],
+        "source": [
+          "live",
+          "indexed"
+        ]
+      },
+      "action_dispatch": {
+        "status": "none"
+      },
+      "test_refs": [
+        "tests/measure-trail.js",
+        "tests/test-capability-catalog.js",
+        "tests/test-code-query.js",
+        "tests/test-code-read-rich.js",
+        "tests/test-dogfood-r24.js",
+        "tests/test-g3-acceptance.js",
+        "tests/test-health-check.js",
+        "tests/test-invoke-capability.js",
+        "tests/test-invoke-safety.js",
+        "tests/test-invoke-stdio.js",
+        "tests/test-mcp-server.js",
+        "tests/test-mvp-batch.js",
+        "tests/test-primitives.js",
+        "tests/test-s1-entry.js",
+        "tests/test-s4-maintain.js",
+        "tests/test-s5-catalog.js",
+        "tests/test-tool-registry.js",
+        "tests/test-wp07-host-contract.js"
+      ],
+      "unresolved": [
+        "effects",
+        "preconditions",
+        "limits",
+        "outputs"
+      ]
+    },
+    {
+      "name": "references",
+      "dir": "tool-references",
+      "version": "1.0.0",
+      "protocol_version": "1.0",
+      "tags": [
+        "references",
+        "symbol"
+      ],
+      "dependencies": [
+        "reindex"
+      ],
+      "manifest_sha256": "sha256:d06673477307b583503f0343ed71a484034a77f847a670e326c44eda1ff7a883",
+      "schema_sha256": "sha256:136ebc37c2e05596d711d412febab496fcd131f8515e79d60d939993f14b7766",
+      "handler": "./handler.js",
+      "handler_sha256": "sha256:130c9b38fa73c264b2f3b6ac547ecc9ab27d293e0090e077eabe4b618de656ce",
+      "params": {
+        "required": [
+          "symbol",
+          "workspace_dir"
+        ],
+        "properties": [
+          "file",
+          "kind",
+          "symbol",
+          "workspace_dir"
+        ]
+      },
+      "enums": {},
+      "action_dispatch": {
+        "status": "none"
+      },
+      "test_refs": [
+        "tests/test-code-query.js",
+        "tests/test-dogfood-r16.js",
+        "tests/test-g3-acceptance.js",
+        "tests/test-graph-catalog-budget.js",
+        "tests/test-inspect.js",
+        "tests/test-s5-catalog.js"
+      ],
+      "unresolved": [
+        "effects",
+        "preconditions",
+        "limits",
+        "outputs"
+      ]
+    },
+    {
+      "name": "reindex",
+      "dir": "tool-reindex",
+      "version": "0.0.5",
+      "protocol_version": "1.0",
+      "tags": [
+        "index",
+        "init"
+      ],
+      "dependencies": [],
+      "manifest_sha256": "sha256:ef70b54ab9b4e521a5663cae6b86fbf285685be8be6cb02be8a38ecaa6e2246e",
+      "schema_sha256": "sha256:c2f0e99fb44db5f41112e2d9276b7258b71beaa42613d119223fb805dd2e26bd",
+      "handler": "./handler.js",
+      "handler_sha256": "sha256:adcc1dc76b97309019b842848b79f31c23d9e5c37dcb3d593ee2dbd6e14869bb",
+      "params": {
+        "required": [],
+        "properties": [
+          "blocking",
+          "confirm",
+          "force",
+          "ignoreDirs",
+          "maxFiles",
+          "skipDirs",
+          "threshold",
+          "workspace_dir"
+        ]
+      },
+      "enums": {},
+      "action_dispatch": {
+        "status": "none"
+      },
+      "test_refs": [
+        "tests/test-code-query.js",
+        "tests/test-g3-acceptance.js",
+        "tests/test-health-check.js",
+        "tests/test-mcp-server.js",
+        "tests/test-primitives.js",
+        "tests/test-r10.js",
+        "tests/test-repo-map.js",
+        "tests/test-s5-catalog.js",
+        "tests/test-symbol-search.js",
+        "tests/test-tool-registry.js"
+      ],
+      "unresolved": [
+        "effects",
+        "preconditions",
+        "limits",
+        "outputs"
+      ]
+    },
+    {
+      "name": "rename_symbol",
+      "dir": "tool-rename-symbol",
+      "version": "1.0.0",
+      "protocol_version": "1.0",
+      "tags": [
+        "refactor",
+        "rename"
+      ],
+      "dependencies": [
+        "reindex"
+      ],
+      "manifest_sha256": "sha256:ab18ae15405a6fb263f7d9f1e4928f4ad83e0f6f54f74cd114e0849e89273b40",
+      "schema_sha256": "sha256:776c3c70d8e6078cd8efdf85938281066cd384cbd3e5747ceb915231bc36ff06",
+      "handler": "./handler.js",
+      "handler_sha256": "sha256:ef212e23bb6852d52fb5971876fdf58549ad875706557fd20041c8d20988116f",
+      "params": {
+        "required": [
+          "file",
+          "new_name",
+          "symbol",
+          "workspace_dir"
+        ],
+        "properties": [
+          "dry_run",
+          "file",
+          "new_name",
+          "symbol",
+          "workspace_dir"
+        ]
+      },
+      "enums": {},
+      "action_dispatch": {
+        "status": "none"
+      },
+      "test_refs": [
+        "tests/test-g3-acceptance.js",
+        "tests/test-h07-capability-hints.js",
+        "tests/test-invoke-safety.js",
+        "tests/test-s5-catalog.js"
+      ],
+      "unresolved": [
+        "effects",
+        "preconditions",
+        "limits",
+        "outputs"
+      ]
+    },
+    {
+      "name": "repo_map",
+      "dir": "tool-repo-map",
+      "version": "1.0.0",
+      "protocol_version": "1.0",
+      "tags": [
+        "map",
+        "overview"
+      ],
+      "dependencies": [],
+      "manifest_sha256": "sha256:4a940ca29c40b621fe7a7ab2afad937f244b34e411b8bf02a94beaae99b77d8e",
+      "schema_sha256": "sha256:0f01dcad77989dc61baf0788bd7d7406db545202237e4648c6c66eab043f9c0c",
+      "handler": "./handler.js",
+      "handler_sha256": "sha256:97fa719ad7350efbdec95facbaeaa07cbecc3cbd7ffae28b2f265472c07abfa9",
+      "params": {
+        "required": [
+          "workspace_dir"
+        ],
+        "properties": [
+          "dir",
+          "focused",
+          "page",
+          "page_size",
+          "prefix",
+          "relevantEntities",
+          "relevantFiles",
+          "workspace_dir"
+        ]
+      },
+      "enums": {},
+      "action_dispatch": {
+        "status": "none"
+      },
+      "test_refs": [
+        "tests/test-code-query.js",
+        "tests/test-g3-acceptance.js",
+        "tests/test-r10.js",
+        "tests/test-s5-catalog.js",
+        "tests/test-tool-registry.js"
+      ],
+      "unresolved": [
+        "effects",
+        "preconditions",
+        "limits",
+        "outputs"
+      ]
+    },
+    {
+      "name": "sandbox_validate",
+      "dir": "tool-edit-sandbox",
+      "version": "1.0.0",
+      "protocol_version": "1.0",
+      "tags": [
+        "quality",
+        "validation"
+      ],
+      "dependencies": [],
+      "manifest_sha256": "sha256:b9a60fa7b3f66e1f883d4070fd907ac319be4f7df9fdfceb2513750f322f7220",
+      "schema_sha256": "sha256:50b5f69174a5f52d94e76b2d4376dc1a0b8f55d9392dcafd2ea97f758d0ded5c",
+      "handler": "./handler.js",
+      "handler_sha256": "sha256:30f181dbfee87fc2c884fec914215b921b1fb119f314aab0ffad0469f82b8209",
+      "params": {
+        "required": [
+          "file",
+          "new_content",
+          "workspace_dir"
+        ],
+        "properties": [
+          "file",
+          "new_content",
+          "workspace_dir"
+        ]
+      },
+      "enums": {},
+      "action_dispatch": {
+        "status": "none"
+      },
+      "test_refs": [
+        "tests/test-code-query.js",
+        "tests/test-g3-acceptance.js",
+        "tests/test-s5-catalog.js"
+      ],
+      "unresolved": [
+        "effects",
+        "preconditions",
+        "limits",
+        "outputs"
+      ]
+    },
+    {
+      "name": "security_review",
+      "dir": "tool-security-review",
+      "version": "1.0.0",
+      "protocol_version": "1.0",
+      "tags": [
+        "review",
+        "security"
+      ],
+      "dependencies": [],
+      "manifest_sha256": "sha256:d14e06f86c820852944952bb1d7111d5255c25503ee45cc945f4e92fe1a332b5",
+      "schema_sha256": "sha256:34296627aaece6942de17ccfcce04887b2f1844c4e3430ed2eaa1f7c0858c52a",
+      "handler": "./handler.js",
+      "handler_sha256": "sha256:dfad0603a44279e533086737a60584ab36c4fae2c484daea79dbf959ba11eae2",
+      "params": {
+        "required": [
+          "workspace_dir"
+        ],
+        "properties": [
+          "file",
+          "max_findings",
+          "scope",
+          "source",
+          "workspace_dir"
+        ]
+      },
+      "enums": {},
+      "action_dispatch": {
+        "status": "none"
+      },
+      "test_refs": [
+        "tests/test-capability-catalog.js",
+        "tests/test-g3-acceptance.js",
+        "tests/test-s4-audit.js",
+        "tests/test-s5-catalog.js"
+      ],
+      "unresolved": [
+        "effects",
+        "preconditions",
+        "limits",
+        "outputs"
+      ]
+    },
+    {
+      "name": "spec_gen",
+      "dir": "tool-spec-gen",
+      "version": "1.0.0",
+      "protocol_version": "1.0",
+      "tags": [
+        "doc",
+        "spec"
+      ],
+      "dependencies": [
+        "reindex"
+      ],
+      "manifest_sha256": "sha256:4760632248f3bd165c07cd22cf73595aa6df04511cf0c6e776db1207d2e83b60",
+      "schema_sha256": "sha256:0f91af80e917176c0d50fb0a86e1df81b2d2e243c2bd25cdd902d36696f13e1a",
+      "handler": "./handler.js",
+      "handler_sha256": "sha256:de45afdd8ff894b92ca253c9a84689b99d015377204937034542721893b97881",
+      "params": {
+        "required": [
+          "file",
+          "workspace_dir"
+        ],
+        "properties": [
+          "file",
+          "workspace_dir"
+        ]
+      },
+      "enums": {},
+      "action_dispatch": {
+        "status": "none"
+      },
+      "test_refs": [
+        "tests/test-g3-acceptance.js",
+        "tests/test-h07-capability-hints.js",
+        "tests/test-s5-catalog.js"
+      ],
+      "unresolved": [
+        "effects",
+        "preconditions",
+        "limits",
+        "outputs"
+      ]
+    },
+    {
+      "name": "style_sniffer",
+      "dir": "tool-style-sniffer",
+      "version": "1.0.0",
+      "protocol_version": "1.0",
+      "tags": [
+        "quality",
+        "style"
+      ],
+      "dependencies": [],
+      "manifest_sha256": "sha256:3356d85d67921351aca758792bd7586e9640a4283c81a6cd5388aac8abc9acce",
+      "schema_sha256": "sha256:2e0fcb38e0d1f7c168b7e2b646d13ca2bebed75ccaf987f83f8b96a4d51fc847",
+      "handler": "./handler.js",
+      "handler_sha256": "sha256:49d56249b2e19dbf7b6f87d68a320faf33e216de3047ecedcfcde76248ffd1cf",
+      "params": {
+        "required": [
+          "workspace_dir"
+        ],
+        "properties": [
+          "force",
+          "output",
+          "scope",
+          "workspace_dir"
+        ]
+      },
+      "enums": {},
+      "action_dispatch": {
+        "status": "none"
+      },
+      "test_refs": [
+        "tests/test-g3-acceptance.js",
+        "tests/test-s5-catalog.js"
+      ],
+      "unresolved": [
+        "effects",
+        "preconditions",
+        "limits",
+        "outputs"
+      ]
+    },
+    {
+      "name": "sweep_dead_code",
+      "dir": "tool-dead-code-sweeper",
+      "version": "1.0.0",
+      "protocol_version": "1.0",
+      "tags": [
+        "dead-code",
+        "quality"
+      ],
+      "dependencies": [
+        "reindex"
+      ],
+      "manifest_sha256": "sha256:1d0772ef8a8fc2c9ff4dc60f073996d0950bc93a8745698ae9e64d52c88afa56",
+      "schema_sha256": "sha256:a5695a0ca21d0bf466afa006dc7f5e168988219d02463ae05bc9f659a19bb7a7",
+      "handler": "./handler.js",
+      "handler_sha256": "sha256:36c73e3cfc10a1c923f402ac15501a4b04388f7a3c6426bdbca05d1752c3ac3c",
+      "params": {
+        "required": [
+          "workspace_dir"
+        ],
+        "properties": [
+          "include_files",
+          "scope",
+          "workspace_dir"
+        ]
+      },
+      "enums": {},
+      "action_dispatch": {
+        "status": "none"
+      },
+      "test_refs": [
+        "tests/test-g3-acceptance.js",
+        "tests/test-s4-audit.js",
+        "tests/test-s5-catalog.js",
+        "tests/test-tool-registry.js"
+      ],
+      "unresolved": [
+        "effects",
+        "preconditions",
+        "limits",
+        "outputs"
+      ]
+    },
+    {
+      "name": "symbol_search",
+      "dir": "tool-symbol-search",
+      "version": "1.0.0",
+      "protocol_version": "1.0",
+      "tags": [
+        "search",
+        "symbol"
+      ],
+      "dependencies": [
+        "reindex"
+      ],
+      "manifest_sha256": "sha256:877387c111e9e0c01b09efe00d98ee218b0acf1eb36c54b46710d31e7fa3498e",
+      "schema_sha256": "sha256:59d44124ad8859a1402310f26c5a696803e234c80f4c69f1733bdd31758d8092",
+      "handler": "./handler.js",
+      "handler_sha256": "sha256:e505f0a657ea674fbd0473904ede7cb884a43fb5f289076dd06db16a09154ac7",
+      "params": {
+        "required": [
+          "query",
+          "workspace_dir"
+        ],
+        "properties": [
+          "limit",
+          "query",
+          "workspace_dir"
+        ]
+      },
+      "enums": {},
+      "action_dispatch": {
+        "status": "none"
+      },
+      "test_refs": [
+        "tests/test-code-query.js",
+        "tests/test-g3-acceptance.js",
+        "tests/test-s5-catalog.js"
+      ],
+      "unresolved": [
+        "effects",
+        "preconditions",
+        "limits",
+        "outputs"
+      ]
+    },
+    {
+      "name": "test_bridge",
+      "dir": "tool-test-bridge",
+      "version": "1.0.0",
+      "protocol_version": "1.0",
+      "tags": [
+        "loop",
+        "test",
+        "verification"
+      ],
+      "dependencies": [],
+      "manifest_sha256": "sha256:a9c376e0303bc42e2fce13af9a291e0421eec8e9edd7ff01395ab379de1e09a7",
+      "schema_sha256": "sha256:12e62e33bc3ed591554ff634a84c4aac9676c69520367e20fefee79ed4849756",
+      "handler": "./handler.js",
+      "handler_sha256": "sha256:c5b4eea1d0b1ca2333bef6a3c91e649941e20eec3876c3691b9fe2463f0a20c9",
+      "params": {
+        "required": [
+          "action",
+          "workspace_dir"
+        ],
+        "properties": [
+          "action",
+          "file",
+          "framework",
+          "scope",
+          "symbol",
+          "timeout",
+          "workspace_dir"
+        ]
+      },
+      "enums": {
+        "action": [
+          "run",
+          "suggest",
+          "discover"
+        ]
+      },
+      "action_dispatch": {
+        "status": "declared",
+        "values": [
+          "discover",
+          "run",
+          "suggest"
+        ],
+        "source": "manifest.inputSchema.properties.action.enum"
+      },
+      "test_refs": [
+        "tests/test-code-query.js",
+        "tests/test-g3-acceptance.js",
+        "tests/test-s5-catalog.js",
+        "tests/test-tool-registry.js",
+        "tests/test-workflow-closure.js"
+      ],
+      "unresolved": [
+        "effects",
+        "preconditions",
+        "limits",
+        "outputs"
+      ]
+    },
+    {
+      "name": "trace_symbol",
+      "dir": "tool-trace-symbol",
+      "version": "1.1.0",
+      "protocol_version": "1.0",
+      "tags": [
+        "literals",
+        "references",
+        "trace"
+      ],
+      "dependencies": [
+        "reindex"
+      ],
+      "manifest_sha256": "sha256:417a66c5d37a99386f15be1e2b5552a129f7e26f2260aa93047a425044cc126f",
+      "schema_sha256": "sha256:50225a512c2afd608159a00587d3adc3f38685d45ace58e29bd6fdc43c3eafe5",
+      "handler": "./handler.js",
+      "handler_sha256": "sha256:f83f755bf5ae45d346c94f6d7ff31b7e95951a899d2d8173d01bfb6812a547f3",
+      "params": {
+        "required": [
+          "file",
+          "symbol",
+          "workspace_dir"
+        ],
+        "properties": [
+          "file",
+          "include_literals",
+          "max_results",
+          "symbol",
+          "workspace_dir"
+        ]
+      },
+      "enums": {},
+      "action_dispatch": {
+        "status": "none"
+      },
+      "test_refs": [
+        "tests/test-g3-acceptance.js",
+        "tests/test-s5-catalog.js",
+        "tests/test-tool-registry.js"
+      ],
+      "unresolved": [
+        "effects",
+        "preconditions",
+        "limits",
+        "outputs"
+      ]
+    },
+    {
+      "name": "tsc_check",
+      "dir": "tool-tsc-check",
+      "version": "1.0.0",
+      "protocol_version": "1.0",
+      "tags": [
+        "tsc",
+        "typecheck"
+      ],
+      "dependencies": [],
+      "manifest_sha256": "sha256:828daae6b5d708a3f296f979dfbaba3db0ff36b03c1b1d09777a21914f2ccaa4",
+      "schema_sha256": "sha256:26eccf4d444d82d5f9c7a0541b6164d8a53dee4ea80ac3cea45f23200f00eb91",
+      "handler": "./handler.js",
+      "handler_sha256": "sha256:14b3915723f62d9af135ff892a9bbada33cad27fff5248a43b5e66078f20e685",
+      "params": {
+        "required": [
+          "workspace_dir"
+        ],
+        "properties": [
+          "dir",
+          "timeout",
+          "workspace_dir"
+        ]
+      },
+      "enums": {},
+      "action_dispatch": {
+        "status": "none"
+      },
+      "test_refs": [
+        "tests/test-g3-acceptance.js",
+        "tests/test-s5-catalog.js"
+      ],
+      "unresolved": [
+        "effects",
+        "preconditions",
+        "limits",
+        "outputs"
+      ]
+    },
+    {
+      "name": "verify_pipeline",
+      "dir": "tool-verify-pipeline",
+      "version": "1.0.0",
+      "protocol_version": "1.0",
+      "tags": [
+        "run",
+        "verify"
+      ],
+      "dependencies": [],
+      "manifest_sha256": "sha256:c89a7a063fb34109f4075f812fca3bce26f73f02c80554564992c2f2bc3c379d",
+      "schema_sha256": "sha256:42928f1de6dbe0881ea837216912697f2e1140f7feb2aba8ecb132fd044dff97",
+      "handler": "./handler.js",
+      "handler_sha256": "sha256:88fc3884cd2eed0e7a763099eb5969f5e8619a8cbe9f182fef56abe9265c6a11",
+      "params": {
+        "required": [
+          "workspace_dir"
+        ],
+        "properties": [
+          "stages",
+          "timeout",
+          "workdir",
+          "workspace_dir"
+        ]
+      },
+      "enums": {},
+      "action_dispatch": {
+        "status": "none"
+      },
+      "test_refs": [
+        "tests/test-g3-acceptance.js",
+        "tests/test-invoke-capability.js",
+        "tests/test-r3-unverified-handoff.js",
+        "tests/test-s2-check.js",
+        "tests/test-s5-catalog.js",
+        "tests/test-test-bridge-run.js"
+      ],
+      "unresolved": [
+        "effects",
+        "preconditions",
+        "limits",
+        "outputs"
+      ]
+    },
+    {
+      "name": "write_symbol",
+      "dir": "tool-write-symbol",
+      "version": "1.0.0",
+      "protocol_version": "1.0",
+      "tags": [
+        "primitive",
+        "write"
+      ],
+      "dependencies": [],
+      "manifest_sha256": "sha256:e5970228e0d657da74badd6597a53becb5688abdbd584edc80f8c47da4991ee5",
+      "schema_sha256": "sha256:cb077be33d4eadd3f8b76671ae69ae75eeec902500498652d0d032475732e51a",
+      "handler": "./handler.js",
+      "handler_sha256": "sha256:2e45c2b322f9af3d9bf45f37420d5e04ee15ae0a46b0c1d587c491d4b89a693a",
+      "params": {
+        "required": [
+          "base_version",
+          "content",
+          "locator",
+          "workspace_dir"
+        ],
+        "properties": [
+          "allow_unsafe_no_base",
+          "base_version",
+          "boundary",
+          "content",
+          "create",
+          "dry_run",
+          "edit_mode",
+          "locator",
+          "patch",
+          "preserve_decorators",
+          "safety",
+          "workspace_dir"
+        ]
+      },
+      "enums": {
+        "boundary": [
+          "full",
+          "body"
+        ],
+        "edit_mode": [
+          "replace_symbol",
+          "patch",
+          "insert_after_symbol"
+        ],
+        "safety.profile": [
+          "fast",
+          "standard",
+          "strict"
+        ]
+      },
+      "action_dispatch": {
+        "status": "none"
+      },
+      "test_refs": [
+        "tests/measure-trail.js",
+        "tests/test-capability-catalog.js",
+        "tests/test-g3-acceptance.js",
+        "tests/test-invoke-capability.js",
+        "tests/test-invoke-outlet-crash.js",
+        "tests/test-invoke-safety.js",
+        "tests/test-invoke-stdio.js",
+        "tests/test-r1-retention-protection.js",
+        "tests/test-s5-catalog.js",
+        "tests/test-tool-registry.js"
+      ],
+      "unresolved": [
+        "effects",
+        "preconditions",
+        "limits",
+        "outputs"
+      ]
+    },
+    {
+      "name": "write_symbols",
+      "dir": "tool-write-symbols",
+      "version": "1.0.0",
+      "protocol_version": "1.0",
+      "tags": [
+        "batch",
+        "primitive",
+        "write"
+      ],
+      "dependencies": [],
+      "manifest_sha256": "sha256:0e42b2a57fdca30296d340a64bdd5e5eafa971aab80f80da179c0d012edb1b14",
+      "schema_sha256": "sha256:7a00f242ab754c39e9b4bd3dec919465901493d33c5b755b6af417d80991e376",
+      "handler": "./handler.js",
+      "handler_sha256": "sha256:b418a58a773e18bb81a7b74cb46faeac8575172ac60281edcc910001815d36e9",
+      "params": {
+        "required": [
+          "workspace_dir",
+          "writes"
+        ],
+        "properties": [
+          "allow_unsafe_no_base",
+          "policy",
+          "safety",
+          "workspace_dir",
+          "writes"
+        ]
+      },
+      "enums": {
+        "safety.profile": [
+          "fast",
+          "standard",
+          "strict"
+        ],
+        "writes[].boundary": [
+          "full",
+          "body"
+        ],
+        "writes[].edit_mode": [
+          "replace_symbol",
+          "patch",
+          "insert_after_symbol"
+        ]
+      },
+      "action_dispatch": {
+        "status": "none"
+      },
+      "test_refs": [
+        "tests/test-g3-acceptance.js",
+        "tests/test-s5-catalog.js"
+      ],
+      "unresolved": [
+        "effects",
+        "preconditions",
+        "limits",
+        "outputs"
+      ]
+    }
+  ]
+}

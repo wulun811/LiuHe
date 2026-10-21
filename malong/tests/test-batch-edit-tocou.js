@@ -90,6 +90,8 @@ function journalCount() {
 {
   const abs = join(ws, 'src', 'c.js')
   writeFileSync(abs, 'ccc\n')
+  // 测试提速：等待者锁超时默认 35s；本用例只验证“占用 → FILE_LOCKED”，缩短到 600ms
+  process.env.MALONG_TEST_LOCK_TIMEOUT_MS = '600'
   const { acquireLock } = await import(pathToFileURL(join(__dirname, '..', 'write-runtime.js')).href)
   const lock = await acquireLock(abs)
   assert(typeof lock.release === 'function' && !lock.locked, '④ 锁获取成功（第一持有者）')

@@ -3,7 +3,7 @@
 // generateFocused/缓存/未索引路径
 import { join, dirname, basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { mkdirSync, rmSync } from 'node:fs'
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import { createDb } from '../db-adapter.js'
 import * as repoMap from '../repo-map.js'
@@ -47,6 +47,13 @@ for (const [fid, rows] of [
 }
 db.close()
 
+// ── 0.5.25：文档文件夹具（.md 不进符号索引，但地图要看得见）──
+mkdirSync(join(WS, 'DOCS'), { recursive: true })
+writeFileSync(join(WS, 'DOCS', '交付说明.md'), '# 交付说明\n\n交付物就是文档。\n')
+writeFileSync(join(WS, 'DOCS', 'notes.txt'), 'plain notes\n')
+mkdirSync(join(WS, 'src'), { recursive: true })
+writeFileSync(join(WS, 'src', 'README.md'), '# src\n')
+
 // ── mock core ──
 const registered = {}
 const core = {
@@ -77,6 +84,16 @@ assert(r1.map.startsWith(basename(WS) + '/') || r1.map.includes(basename(WS) + '
 // r59: 纯缩进渲染——树线字符全部移除（省 token，2000 预算下多放信息）；层级靠缩进 + dir 的 / 后缀
 assert(!r1.map.includes('├──') && !r1.map.includes('└──') && !r1.map.includes('│'), '地图无树线字符（纯缩进渲染）')
 assert(r1.map.includes('\n  fn login:1') || r1.map.includes('fn login:1'), '符号行保留类型/名字/行号', )
+
+// ── 0.5.25：.md 等文档文件进地图（「交付物就是文档」的仓不再整目录空）──
+assert(r1.map.includes('DOCS/'), '地图含 DOCS/ 目录')
+assert(r1.map.includes('交付说明.md'), '地图含中文名 .md 文档')
+assert(r1.map.includes('notes.txt'), '地图含 .txt 文档')
+assert(r1.map.includes('README.md'), '地图含 src/README.md')
+assert(r1.map.includes('(doc)'), '文档节点带 (doc) 标记')
+assert(r1.files === 3, 'files 仍是索引里的代码文件数（文档不计入）')
+assert(r1.doc_files === 3, `doc_files 单独透出（得 ${r1.doc_files}）`)
+assert(r1.files_total === 6, `files_total = 代码 + 文档（得 ${r1.files_total}）`)
 
 // ── getSummary 缓存 ──
 const s1 = svc.getSummary()
@@ -179,6 +196,26 @@ assert(String(po.suggestion).includes('total_pages=3'), '越界提示含 total_p
 // focused 分页同样生效
 const fp = await svc.generateFocused(WS3, { pageSize: 2, page: 2 })
 assert(fp.page === 2 && fp.total_pages === 3 && fp.skeleton.length === 6, 'focused 分页 + 骨架同样生效')
+
+// ── H01（0.5.14 复审修复）：首屏优先生产入口——tests/fixtures 等目录默认排到末尾（focused/prefix 不改序）──
+{
+  const WS4 = join(WS, 'h01-ws')
+  mkdirSync(WS4, { recursive: true })
+  const db4 = await createDb(join(WS4, 'code-index.db'))
+  db4.exec(`CREATE TABLE files (id INTEGER PRIMARY KEY AUTOINCREMENT, path TEXT UNIQUE NOT NULL, repo TEXT NOT NULL DEFAULT '');
+CREATE TABLE symbols (id INTEGER PRIMARY KEY AUTOINCREMENT, file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE, name TEXT NOT NULL, type TEXT NOT NULL CHECK(type IN ('function','class','variable','method','export','import','interface','type')), signature TEXT DEFAULT '', start_line INTEGER NOT NULL, end_line INTEGER NOT NULL DEFAULT 0, parent_id INTEGER REFERENCES symbols(id) ON DELETE SET NULL);`)
+  const insF4 = db4.prepare('INSERT INTO files (path) VALUES (?)')
+  const insS4 = db4.prepare('INSERT INTO symbols (file_id, name, type, start_line) VALUES (?, ?, ?, ?)')
+  const idFx = insF4.run('fixtures/old-case.js').lastInsertRowid // 先插入夹具（原序在前）→ 首屏排序必须把它挪到末尾
+  insS4.run(idFx, 'fixtureFn', 'function', 1)
+  const idPr = insF4.run('prod.js').lastInsertRowid
+  insS4.run(idPr, 'prodFn', 'function', 1)
+  db4.close()
+  const h01 = await svc.generate(WS4, { pageSize: 10 })
+  assert(h01.skeleton?.length === 2, `H01: 两条目骨架（实际 ${h01.skeleton?.length}）`)
+  const h01names = (h01.skeleton || []).map((s) => String(s.name).replace(/\/$/, ''))
+  assert(h01names[0] === 'prod.js' && h01names[1] === 'fixtures', 'H01: 首屏生产入口在前、测试/夹具目录排末尾（原序为 fixtures 在前；得 ' + JSON.stringify(h01names) + '）')
+}
 
 // ── 未索引 workspace ──
 const EMPTY = join(WS, 'empty-dir')

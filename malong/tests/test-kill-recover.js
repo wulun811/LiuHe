@@ -1,6 +1,6 @@
 // kill -9 恢复测试（简化版）
 import { createConnection } from 'node:net'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readlinkSync } from 'node:fs'
 import { execSync, spawn } from 'node:child_process'
 import { join } from 'node:path'
 import os from 'node:os'
@@ -13,14 +13,15 @@ const UID = IS_WIN ? 0 : (process.getuid?.() ?? 0)
 const SOCKET = `/tmp/malong-parse-${UID}.sock`
 const PID_FILE = `/tmp/malong-parse-${UID}.pid`
 
-// R22-㉓（ubuntu/mac CI 实测）：setsid malong-parse 依赖 PATH——CI 只构建 target/debug 未装 PATH → 新进程没起来。
-// 候选链：env 覆盖 → 仓库 debug（CI 构建）→ release → ~/.local/bin → 本地 tmp 习惯路径（同 test-variable-refs 模式）。
+// 候选链：优先「线上 daemon 当前正在用的二进制」（/proc/<pid>/exe，见 main）→ env → ~/.local/bin → release → repo debug。
+// 旧次序把 repo debug 放第二：全链会拿 debug 构建顶掉线上 release daemon 并留在线上
+// （实测：线上 health 变成 "predates identity fields"，解析服务降级到无 identity 的旧构建）。
 const BIN_NAME = IS_WIN ? 'malong-parse.exe' : 'malong-parse'
 const BIN_CANDIDATES = [
   process.env.MALONG_PARSE_BIN,
-  join(__dirname, '..', '..', 'malong-parse', 'target', 'debug', BIN_NAME),
-  join(__dirname, '..', '..', 'malong-parse', 'target', 'release', BIN_NAME),
   join(os.homedir(), '.local', 'bin', BIN_NAME),
+  join(__dirname, '..', '..', 'malong-parse', 'target', 'release', BIN_NAME),
+  join(__dirname, '..', '..', 'malong-parse', 'target', 'debug', BIN_NAME),
   join(os.tmpdir(), 'opencode', 's3-bin', BIN_NAME),
 ].filter(Boolean)
 const BIN = BIN_CANDIDATES.find(p => existsSync(p))
@@ -48,13 +49,20 @@ async function main() {
   console.log('kill -9 恢复测试\n')
 
   if (process.platform === 'win32') {
-    console.log('  ⚠  Windows：进程生命周期语义（kill/setsid/pid-file）为 Unix 专用，跳过')
+    console.log('  ⚠ NOT_RUN: Windows 进程生命周期语义（kill/setsid/pid-file）为 Unix 专用，整文件跳过')
     process.exit(0)
   }
 
   // 读取当前 PID
   const pidBefore = parseInt(readFileSync(PID_FILE, 'utf-8').trim())
   console.log(`  当前 PID: ${pidBefore}`)
+
+  // 重启用「线上 daemon 实际在跑的那个二进制」——测试不应把它换成另一个构建（尤其不能降级到 debug）
+  let restartBin = BIN
+  try {
+    const live = readlinkSync(`/proc/${pidBefore}/exe`)
+    if (live && existsSync(live)) restartBin = live
+  } catch {}
 
   // kill -9
   console.log('  kill -9 ...')
@@ -70,9 +78,9 @@ async function main() {
   }
 
   // 手动重启进程——用候选链绝对路径，不依赖 PATH（setsid 仅 Linux 有，macOS 无 → 用 spawn detached 跨平台）
-  console.log(`  重启进程 (${BIN}) ...`)
+  console.log(`  重启进程 (${restartBin}) ...`)
   const t0 = performance.now()
-  const child = spawn(BIN, [], { stdio: 'ignore', detached: true })
+  const child = spawn(restartBin, [], { stdio: 'ignore', detached: true })
   child.unref()
   
   // 等待 socket 出现且真连接成功（stale socket 文件残留不算——R22-㉓ CI 实测假绿）

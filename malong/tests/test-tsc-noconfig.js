@@ -139,6 +139,14 @@ function mkws(name, { tsconfigs = [], withTs = true, mode = 'ok', withBin = true
   }
 }
 
+// Real Windows npm stderr from G3: this is absence of a compiler, not a TS error.
+{
+  const stderr = 'npm error npx canceled due to missing packages and no YES option: ["tsc@2.0.4"]'
+  assert(tscMod.isNpxTscUnavailable({ exitCode: 1, stderr }), 'npm missing-package cancellation is unavailable')
+  assert(!tscMod.isNpxTscUnavailable({ exitCode: 0, stderr }), 'successful fallback is not unavailable')
+  assert(!tscMod.isNpxTscUnavailable({ exitCode: 1, stdout: 'src/a.ts(1,1): error TS2322: Type mismatch', stderr }), 'real TS diagnostic wins over missing-package text')
+  assert(tscMod.isNpxTscUnavailable({ exitCode: 0, stdout: 'This is not the tsc command you are looking for' }), 'legacy wrong-package banner remains unavailable')
+}
 try { rmSync(ROOT, { recursive: true, force: true }) } catch {}
 console.log(`== test-tsc-noconfig: ${pass} passed, ${fail} failed ==`)
 process.exit(fail > 0 ? 1 : 0)

@@ -5,7 +5,7 @@
 import * as parseClient from './parse-client.js'
 
 export const name = 'malong-lang-parser'
-export const version = '0.4.8'
+export const version = '0.5.27'
 
 let _core
 
@@ -23,6 +23,9 @@ export async function init(core) {
     getMode() { return 'rust-service' },
     isRustService() { return true },
     getConfigMode() { return parseClient.describeConfig?.() || 'uds' },
+
+    // 7-C：运行身份（health 用）——daemon 自报告 + 本 MCP 可解析二进制对比
+    getIdentity() { return parseClient.describeIdentity?.() || null },
 
     async extractAllAsync(source, ext, filePath, workspaceRoot) {
       return await parseClient.extractAll(source, ext, filePath, workspaceRoot)

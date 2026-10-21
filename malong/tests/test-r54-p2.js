@@ -77,8 +77,8 @@ console.log('\u2500\u2500 verify-pipeline test \u65e0\u811a\u672c skipped \u2500
   const testStage = (r.stages || []).find(s => s.stage === 'test') || r.test || r
   const skipped = testStage?.skipped === true || r.skipped === true || (r.results && r.results.test && r.results.test.skipped)
   assert(skipped || r.error, `\u65e0 test \u811a\u672c\u5e94 skipped\u800c\u975e\u5047 passed\uff08\u5f97 ${JSON.stringify(testStage || r).slice(0, 120)}\uff09`)
-  // \u4e09\u8f6e\u4fee\u590d\u70b9\uff1askipped \u4e0d\u518d\u62d6 fail\u2014\u2014\u9876\u5c42 status \u5fc5\u987b pass\uff08\u65e7 passed===true \u5bf9 null \u7b49\u4ef7\u5f97 fail\uff09
-  assert(!r.error && r.status === 'pass', `\u65e0 test \u811a\u672c\u65f6\u9876\u5c42 status=pass\uff08\u5f97 ${r.status} ${JSON.stringify(r.results).slice(0, 120)}\uff09`)
+  // R2（0.5.14）：skipped 不拖 fail，但也不得报「通过」——全未执行 = not_run（旧实现 pass 是假绿）
+  assert(!r.error && r.status === 'not_run' && r.verification?.status === 'not_run', `\u65e0 test \u811a\u672c\u65f6\u9876\u5c42 status=not_run\uff08\u5f97 ${r.status}\uff09`)
   try { rmSync(ws, { recursive: true, force: true }) } catch {}
 }
 

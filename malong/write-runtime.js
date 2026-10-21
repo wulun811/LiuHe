@@ -2,9 +2,9 @@
 // 附录 C 冲突状态机 + 附录 D write pipeline（锁/journal/原子写/写后同步重抽）
 // 单符号 replace_symbol / 亚符号 patch / 非代码降级（附录 E）
 
-import { join, basename, extname } from 'node:path'
+import { join, basename, extname, dirname } from 'node:path'
 import {
-  readFileSync, writeFileSync, existsSync, mkdirSync, renameSync,
+  readFileSync, writeFileSync, existsSync, mkdirSync,
   openSync, closeSync, writeSync, unlinkSync, statSync, readdirSync, appendFileSync, utimesSync,
 } from 'node:fs'
 import { randomBytes } from 'node:crypto'
@@ -14,30 +14,61 @@ import { guardRealPath } from './path-guard.js'
 import { extractSignatureLine, langOf } from './symbol-anchors.js'
 import { checkFileStaleness } from './staleness.js'
 import { countOccurrences, makeSimpleDiff, applyReplace, applyBodyEdit, applyInsertAfter, checkBracketBalance } from './write-edit.js'
-import { createJournal, updateJournalState, auditLog, recoverJournals, recoverTransactions, pruneJournals, JOURNAL_ROOT, createBatchMarker, updateBatchMarker, finishBatchMarker } from './write-journal.js'
+import { createJournal, updateJournalState, auditLog, recoverJournals, recoverTransactions, pruneJournals, JOURNAL_ROOT, JOURNAL_RETENTION_HOURS, createBatchMarker, updateBatchMarker, finishBatchMarker } from './write-journal.js'
 import { registerWriter } from './writer-registry.js'
+import { replaceFilePreservingMetadataSync } from './windows-file-replace.js'
 
 const LOCK_TIMEOUT_MS = 35000 // r9(F3)：心跳续租使合法持锁可达 30s+——旧 2s 等待超时在长持有下高频 FILE_LOCKED（锁内 validateSyntax 可 30s）；等待者应给足健康长持有时间
-const STALE_LOCK_MS = 30000 // 7：10s 太短——锁内 await validateSyntax 异步解析可能 >10s，第二进程盗锁 → 双写覆盖
+// WP06：受控故障场景注入（仅测试 env，仿 KILL_AFTER_WRITE 先例）——同步冻结→盗锁窗口用缩短 STALE 实证，不在生产路径等待 30s+
+const STALE_LOCK_MS = Number(process.env.MALONG_TEST_STALE_LOCK_MS) || 30000 // 7：10s 太短——锁内 await validateSyntax 异步解析可能 >10s，第二进程盗锁 → 双写覆盖
+const HEARTBEAT_MS = Number(process.env.MALONG_TEST_HEARTBEAT_MS) || 15000
 const MAX_LIVE_READ = 1024 * 1024
+
+// 测试提速旋钮（仅测试 env，默认值不变）：运行时读取，避免 ESM 静态导入把 env 固化在模块加载时。
+// 生产不设置这些变量 → 行为与旧版一致。
+const lockTimeoutMs = () => {
+  const n = Number(process.env.MALONG_TEST_LOCK_TIMEOUT_MS)
+  return Number.isFinite(n) && n > 0 ? n : LOCK_TIMEOUT_MS
+}
+const heartbeatMs = () => {
+  const n = Number(process.env.MALONG_TEST_HEARTBEAT_MS)
+  return Number.isFinite(n) && n > 0 ? n : HEARTBEAT_MS
+}
 
 export function traceId() {
   return `trc_${Date.now()}_${randomBytes(3).toString('hex')}`
 }
 
-// syntax pass 是权威：合法语法 ⇒ 代码括号必平衡——bracket stripper 不识别正则字面量
-// （含引号字符类如 ['"`] 还会连带破坏字符串剥离），此时 bracket fail 必为误报；
-// 降级防 strict 模式阻断合法写入 / 误导 LLM 以为编辑坏了。syntax 非 pass（fail/skip）时 bracket 是唯一或佐证信号，保留原判。
+// P0 修复（2026-10-12 狗粮发现）：旧实现以 syntax pass 为权威把 bracket fail 降级为 pass——动机是
+// stripper 不识别正则字面量的假阳性；但 daemon has_errors 对 EOF 未闭合括号（JS/TS 删 }/删 ] 到文件尾）
+// 漏报（实测 daemon v0.3.37 返回 has_errors=false），降级把真失败一并吞掉 → 坏文件静默落盘
+//（node --check exit 1 而写路径 Preview OK）。现剥离器已补正则识别（write-edit.js，假阳性动机消失），
+// 保守语义：不一致时保留 bracket fail（阻断），仅标注 syntax_disagreement 供诊断；
+// 确需放行用 safety.block_on_validation_error=false 显式覆盖。
 export function reconcileBracketWithSyntax(validation) {
   if (validation?.syntax?.status === 'pass' && validation?.bracket?.status === 'fail') {
-    validation.bracket = { status: 'pass', false_positive_downgraded: 'syntax-pass is authoritative; bracket stripper misses regex literals', raw: validation.bracket.errors }
+    validation.bracket.syntax_disagreement = true
   }
   return validation
 }
 
+// Q3：验证拦截策略——显式 flag 优先；默认 standard 只拦硬错误（syntax/bracket fail，
+// 不拦 skip/unavailable，避免误伤非 JS/Python 文本）；strict 含 skip；fast 不拦。
+export function shouldBlockValidation(safety, validation) {
+  if (!validation) return false
+  const explicit = safety?.block_on_validation_error
+  if (explicit === false) return false
+  const hardFail = validation.syntax?.status === 'fail' || validation.bracket?.status === 'fail'
+  if (explicit === true) return hardFail || validation.syntax?.status === 'skip'
+  const profile = safety?.profile || 'standard'
+  if (profile === 'fast') return false
+  if (profile === 'strict') return hardFail || validation.syntax?.status === 'skip'
+  return hardFail
+}
+
 // ---------- 锁（附录 D：OS advisory 优先，fallback lockfile + pid；2s 超时） ----------
 
-export async function acquireLock(absPath, timeoutMs = LOCK_TIMEOUT_MS) {
+export async function acquireLock(absPath, timeoutMs = lockTimeoutMs()) {
   const lockPath = `${absPath}.mlock`
   const start = Date.now()
   for (;;) {
@@ -61,7 +92,7 @@ export async function acquireLock(absPath, timeoutMs = LOCK_TIMEOUT_MS) {
             utimesSync(lockPath, now, now)
           }
         } catch {}
-      }, 15000)
+      }, heartbeatMs())
       // r9(F2 注)：心跳是 JS 定时器，锁区内同步长操作（>1GB 文件 sha256/慢盘 writeFileSync）会冻结事件循环
       // 导致心跳无法触发、锁被误判陈旧盗走——本地盘场景 <1s 不受影响；慢盘/超大文件需 await 化后才算完整覆盖
       if (heartbeat.unref) heartbeat.unref()
@@ -99,6 +130,15 @@ export async function acquireLock(absPath, timeoutMs = LOCK_TIMEOUT_MS) {
 // r8(B5)：唯一 tmp 名——植入的 `<file>.tmp` symlink 会被 writeFileSync 穿写到外部；随机后缀永不同名
 function _uniqueTmp(absPath, tag) {
   return `${absPath}.${tag}-${randomBytes(4).toString('hex')}`
+}
+
+// N3（0.5.14 Windows 复核，Linux 侧复验）：tmp+rename 不得重置权限位——
+// 旧实现 writeFileSync(tmp) 用 umask 默认（644/664），编辑 755 可执行脚本后丢 +x（实测 755→664）。
+// 目标已存在时继承其 mode；新建文件仍走默认（不擅自给可执行位）。
+function _writeTmpPreservingMode(tmpPath, content, absPath) {
+  let mode = null
+  try { mode = statSync(absPath).mode & 0o777 } catch { mode = null }
+  writeFileSync(tmpPath, content, mode != null ? { mode } : undefined)
 }
 
 // ---------- crash recovery（附录 D：启动扫 journal，未完成 txn 按 state 回滚） ----------
@@ -152,7 +192,7 @@ const CONFLICT_POLICY = {
 // ---------- 校验（附录：sandbox + 语法，尽力而为） ----------
 
 
-async function validateSyntax(langParser, source, ext) {
+export async function validateSyntax(langParser, source, ext) {
   if (!langParser?.hasErrorsAsync) return { status: 'skip', reason: 'langParser unavailable' }
   try {
     // 注意：不传 filePath —— 校验的是内存中的 newContent，不是磁盘文件
@@ -169,11 +209,28 @@ async function validateSyntax(langParser, source, ext) {
   }
 }
 
+// dogfood-050（P2 修复）：校验失败必带「装配结果」自证——旧实现只回 "syntax errors detected"，
+// caller 无法区分「内容真坏了」与「传输/装配问题」（实测 \n 被字面化时需 override 才看到 diff）。
+// 另附 hint：incoming 内容无真实换行但含字面 \n/\t 转义 → 典型 caller 参数转义问题。
+const VALIDATION_EXCERPT_MAX = 600
+function buildValidationFailure(code, message, validation, newContent, incoming) {
+  const error = { code, message, validation }
+  try {
+    const text = String(newContent || '')
+    error.assembled_excerpt = text.length > VALIDATION_EXCERPT_MAX ? text.slice(0, VALIDATION_EXCERPT_MAX) + '\n…[truncated]' : text
+    const inc = typeof incoming === 'string' ? incoming : ''
+    if (inc && !inc.includes('\n') && (inc.includes('\\n') || inc.includes('\\t'))) {
+      error.hint = 'incoming content has no real newlines but contains literal escape sequences (\\n/\\t) — likely caller-side parameter escaping; re-send with actual newline characters.'
+    }
+  } catch {}
+  return error
+}
+
 // ---------- 主编排 ----------
 
 // r35-fix: Windows rename 偶发 EPERM/EBUSY（杀软扫描/句柄短暂占用）→ 短暂重试后再放弃
-// r36：导出 + 注入 renameFn（默认 renameSync，生产零变化）以便单测重试分支
-export async function renameRetry(from, to, renameFn = renameSync) {
+// 可注入 renameFn 验证重试；Windows 默认保留目标 ACL，其他平台仍为 renameSync。
+export async function renameRetry(from, to, renameFn = replaceFilePreservingMetadataSync) {
   for (let i = 0; ; i++) {
     try { renameFn(from, to); return } catch (e) {
       if (i >= 3 || !['EPERM', 'EBUSY', 'EACCES'].includes(e.code)) throw e
@@ -213,8 +270,21 @@ export async function writeSymbol(args, context) {
   }
 
   const absPath = join(workspaceDir, filePath)
-  if (!existsSync(absPath)) {
-    return { success: false, error: { code: 'FILE_NOT_FOUND', message: `File not found: ${filePath}`, suggestion: 'write_symbol only edits existing files; use create capability for new files.' }, trace_id }
+  // Q2：create:true = 新建文件（不存在才建；content 为全文；dry-run 可预览；undo=删除）
+  const createMode = args?.create === true
+  if (createMode) {
+    if (existsSync(absPath)) {
+      return { success: false, error: { code: 'FILE_EXISTS', message: `File already exists: ${filePath}`, suggestion: 'Drop create:true and edit it (read it first for base_version).' }, trace_id }
+    }
+    if (args?.patch || args?.base_version) {
+      return { success: false, error: { code: 'invalid_input', message: 'create:true requires full content; do not pass patch/base_version' }, trace_id }
+    }
+    if (typeof args?.content !== 'string') {
+      return { success: false, error: { code: 'missing_parameter', message: 'content is required for create:true' }, trace_id }
+    }
+    mkdirSync(dirname(absPath), { recursive: true })
+  } else if (!existsSync(absPath)) {
+    return { success: false, error: { code: 'FILE_NOT_FOUND', message: `File not found: ${filePath}`, suggestion: 'Pass create:true to create a new file, or use git_worktree/code_worktree for transactional multi-file creation.' }, trace_id }
   }
 
   // crash recovery 先行（r9：recoverJournals 内批次恢复已 async——取锁回滚）
@@ -236,7 +306,7 @@ export async function writeSymbol(args, context) {
   const profile = safety.profile || 'standard'
   const force = !!args?.allow_unsafe_no_base || !!safety.allow_unsafe_no_base
 
-  if (editMode !== 'patch' && !locator?.name && !locator?.symbol_id) {
+  if (!createMode && editMode !== 'patch' && !locator?.name && !locator?.symbol_id) {
     return { success: false, error: { code: 'missing_parameter', message: 'replace_symbol requires locator.name or locator.symbol_id; for non-code files use edit_mode=patch.' }, trace_id }
   }
   if (editMode !== 'patch' && typeof args.content !== 'string') {
@@ -247,7 +317,7 @@ export async function writeSymbol(args, context) {
   const t0 = Date.now()
 
   // 0) staleness 检查先行（附录 D：外部改动先重索引，否则 range 漂移会误报冲突）
-  if (codeIndexService) {
+  if (codeIndexService && !createMode) {
     const staleness = await checkFileStaleness(codeIndexService, workspaceDir, filePath)
     pipelineStep(pipeline, 'index_status_check', staleness?.auto_indexed ? 'ok' : staleness ? 'warn' : 'ok', {
       detail: staleness?.auto_indexed ? 'auto_reindexed' : staleness?.warning || 'fresh',
@@ -262,14 +332,16 @@ export async function writeSymbol(args, context) {
   pipelineStep(pipeline, 'lock', 'ok')
 
   const baseVersion = args?.base_version
-  if (!baseVersion && !force) {
+  // WP08R-3 A2：dry-run 预览免 base（预览不落盘——允许先看 diff/校验，再决定是否读文件；apply 仍强制，下方闸门只对 dryRun=false 生效）
+  if (!baseVersion && !force && !createMode && !dryRun) {
     lock.release()
     return {
       success: false,
       error: {
         code: 'VERSION_CONFLICT',
         conflict_type: 'NO_BASE',
-        message: 'base_version is required (read_symbol first). Use allow_unsafe_no_base only when you intentionally bypass.',
+        message: 'base_version is required for the first write of each file: read the FILE first with code_read (a symbol read does not establish a file base).',
+        suggestion: 'Call code_read with locator {file_path} (whole file, no budget needed), then retry the same write with its read_ref.',
         next_action: { tool: 'read_symbol', params: { locator: { file_path: filePath } } },
       },
       trace_id,
@@ -297,13 +369,13 @@ export async function writeSymbol(args, context) {
   let patchNewStringOmitted = false
   try {
     // 2) 锁内 resolve locator → 符号 / 降级模式
-    if (locator.symbol_id && codeIndexService) {
+    if (!createMode && locator.symbol_id && codeIndexService) {
       symbol = codeIndexService.getSymbolByStableId(locator.symbol_id)
       if (symbol && symbol.file_path !== filePath) symbol = null
       if (!symbol) {
         return { success: false, error: { code: 'SYMBOL_NOT_FOUND', message: `No symbol with stable_id ${locator.symbol_id} in ${filePath}` }, trace_id }
       }
-    } else if (locator.name && codeIndexService) {
+    } else if (!createMode && locator.name && codeIndexService) {
       symbolRows = codeIndexService.findSymbolsInFile(filePath, locator.name, locator.kind)
       if (symbolRows.length > 1) {
         return {
@@ -329,7 +401,7 @@ export async function writeSymbol(args, context) {
     pipelineStep(pipeline, 'resolve_locator', symbol ? 'ok' : 'ok', { via: symbol ? 'symbol' : 'degraded_patch' })
 
     // 3) 锁内 live 读当前文件 → current version
-    try { content = readFileSync(absPath, 'utf-8') } catch (e) {
+    try { content = createMode ? '' : readFileSync(absPath, 'utf-8') } catch (e) {
       return { success: false, error: { code: 'READ_FAILED', message: e.message }, trace_id }
     }
     const curFileHash = sha256(content)
@@ -342,7 +414,7 @@ export async function writeSymbol(args, context) {
       curSigHash = sha256(sigLine || '')
     }
     current = {
-      file: { hash: `sha256:${curFileHash}`, size: content.length },
+      file: { hash: `sha256:${curFileHash}`, size: Buffer.byteLength(content, 'utf-8') },
       symbol: symbol ? { body_hash: `sha256:${curBodyHash}`, signature_hash: `sha256:${curSigHash}` } : null,
     }
 
@@ -389,14 +461,19 @@ export async function writeSymbol(args, context) {
     let alreadyApplied = false
     const scopeContent = symbol && range ? lines.slice(range[0] - 1, range[1]).join('\n') : content
 
-    if (editMode === 'patch') {
+    if (createMode) {
+      // Q2：新建=整文件内容；diff 相对空文件
+      newLines = args.content.split('\n')
+      diff = makeSimpleDiff([], newLines)
+      pipelineStep(pipeline, 'create', 'ok', { bytes: args.content.length })
+    } else if (editMode === 'patch') {
       const patch = args.patch || {}
       const oldString = patch.old_string
       const newString = patch.new_string ?? ''
       // R22-⑦（并发拷打）：patch 缺 new_string = 删除 old_string——显式空串是合法删除，缺省（undefined）多为误用，挂 warning 不阻断
       patchNewStringOmitted = patch.new_string === undefined
       if (typeof oldString !== 'string' || oldString === '') {
-        return { success: false, error: { code: 'missing_parameter', message: 'patch.old_string is required' }, trace_id }
+        return { success: false, error: { code: 'missing_parameter', message: 'patch.old_string is required — patch must be an object {old_string, new_string}; got ' + (args.patch === undefined ? 'undefined' : typeof args.patch) }, trace_id }
       }
       const occurrences = countOccurrences(scopeContent, oldString)
       if (occurrences === 0) {
@@ -488,9 +565,12 @@ export async function writeSymbol(args, context) {
     newContent = newLines.join('\n')
 
     // 6) 校验（sandbox 基础 + 语法，dry_run 也校验）
-    const bracket = checkBracketBalance(newContent)
+    // R22 修复 #3（2026-10-12）：括号校验仅对代码文件；非代码（json/md/txt…）与 edit_transaction 语义一致地 skip——
+    // 旧实现无条件检查，合法 JSON（含 https:// 字符串）被剥离器误伤 → 误拒写（真阳性：package-lock 批改被 VALIDATION_FAILED 拦）
+    const isCodeFile = !!langOf(filePath)
+    const bracket = isCodeFile ? checkBracketBalance(newContent) : null
     validation = {
-      bracket: bracket.ok ? { status: 'pass' } : { status: 'fail', errors: [bracket.detail] },
+      bracket: isCodeFile ? (bracket.ok ? { status: 'pass' } : { status: 'fail', errors: [bracket.detail] }) : { status: 'skip', reason: 'non-code file' },
     }
     if (langOf(filePath)) {
       const syn = await validateSyntax(langParser, newContent, extname(filePath))
@@ -500,8 +580,8 @@ export async function writeSymbol(args, context) {
     }
     reconcileBracketWithSyntax(validation)
     pipelineStep(pipeline, 'validate', validation.syntax.status === 'pass' && validation.bracket.status === 'pass' ? 'ok' : 'warn', { syntax: validation.syntax.status, bracket: validation.bracket.status })
-    if (safety.block_on_validation_error && (validation.syntax.status === 'fail' || validation.syntax.status === 'skip' || validation.bracket.status === 'fail')) {
-      return { success: false, error: { code: 'VALIDATION_FAILED', message: 'validation failed and block_on_validation_error is set', validation }, trace_id }
+    if (shouldBlockValidation(safety, validation)) {
+      return { success: false, error: buildValidationFailure('VALIDATION_FAILED', 'validation failed: syntax/bracket errors detected; refusing write. Pass safety.block_on_validation_error=false to override.', validation, newContent, args?.content ?? args?.patch?.new_string), trace_id }
     }
 
     if (dryRun) {
@@ -526,6 +606,7 @@ export async function writeSymbol(args, context) {
     //    残留 staged 会被下次 recoverJournals 当崩溃事务回滚，覆盖后来的合法写入）
     journal = createJournal(workspaceDir, filePath, absPath, content, {
       editMode, boundary, state: 'staged', base_file_hash: base?.file?.hash || null,
+      ...(createMode ? { created: true } : {}),
     })
     updateJournalState(journal.dir, { state: 'staged', new_hash: sha256(newContent) })
 
@@ -533,7 +614,8 @@ export async function writeSymbol(args, context) {
     const tmpPath = _uniqueTmp(absPath, 'tmp')
     try {
       // 7（F7）：旧 writeFileSync 在 try 外——磁盘满/权限错误裸异常逃逸，tmp 半写残留，错误契约破坏
-      writeFileSync(tmpPath, newContent)
+      // N3：继承原文件 mode（可执行脚本编辑后不得丢 +x）
+      _writeTmpPreservingMode(tmpPath, newContent, absPath)
       await renameRetry(tmpPath, absPath)
     } catch (e) {
       try { unlinkSync(tmpPath) } catch {}
@@ -543,26 +625,48 @@ export async function writeSymbol(args, context) {
     }
     pipelineStep(pipeline, 'atomic_write', 'ok')
     updateJournalState(journal.dir, { state: 'committed', committed_at: new Date().toISOString() })
+    // WP04/AC27「应用后读取实际hash」：tmp+rename 后独立回读实测。与内存内容不一致时
+    // 如实降级（success=false + READBACK_MISMATCH，journal 置 indeterminate），不冒充写入
+    // 内容可信；request_id 重试的 reconcile 会按 intended hash 核对真实文件后终态收口。
+    // MALONG_TEST_READBACK_MISMATCH=1 仅测试环境注入回读不一致（同 KILL_AFTER_WRITE 先例）。
+    let readBackContent = null
+    try { readBackContent = readFileSync(absPath, 'utf-8') } catch {}
+    if (process.env.MALONG_TEST_READBACK_MISMATCH === '1' || readBackContent == null || readBackContent !== newContent) {
+      updateJournalState(journal.dir, { state: 'indeterminate', reason: 'readback_mismatch' })
+      lock.release()
+      return { success: false, error: { code: 'READBACK_MISMATCH', message: 'post-write read-back does not match intended content; state indeterminate', txn_id: journal.txnId }, trace_id }
+    }
+    pipelineStep(pipeline, 'readback', 'ok')
     // Y002-S1：写后登记写者（collision_guard classify 识别 write_runtime）
     registerWriter(workspaceDir, filePath, 'write_runtime')
 
     // 组装 new_version（锁内，行号用 apply 后的真实值）
     newVersion = {
-      file: { hash: `sha256:${sha256(newContent)}`, size: newContent.length },
+      file: { hash: `sha256:${sha256(newContent)}`, size: Buffer.byteLength(newContent, 'utf-8') },
       symbol: null,
     }
     if (symbol && range && newBodyLineCount != null) {
       const newLinesArr = newContent.split('\n')
-      // 9（F2）：body_hash/range 遵循索引约定（symbol-anchors：slice(start_line-1,end_line) 含签名行的全符号）。
-      // 旧实现 boundary=body 时 symStart=range[0]+1 → body_hash 只算 body（不含签名），与 read_symbol /
-      // 预写 curBodyHash 的 full 约定不一致 → 同符号链式写（拿 new_version 当下一轮 base）误判 SYMBOL_CHANGED。
-      const isBodyOnly = editMode === 'replace_symbol' && boundary === 'body'
-      const fullEnd = isBodyOnly ? range[0] + newBodyLineCount : range[0] + Math.max(0, newBodyLineCount - 1)
-      const newRange = [range[0], fullEnd]
-      newVersion.symbol = {
-        symbol_id: symbol.stable_id || null,
-        range: newRange,
-        body_hash: `sha256:${sha256(newLinesArr.slice(range[0] - 1, fullEnd).join('\n'))}`,
+      if (editMode === 'insert_after_symbol') {
+        // live 审查 K4：插入不改变原符号——body_hash/range 取写前索引值（旧按替换公式算，
+        // 内容行数与符号行数不一致时 range/哈希错位；写后重抽成功会校正，但索引不可用时错误版本误导链式写）
+        newVersion.symbol = {
+          symbol_id: symbol.stable_id || null,
+          range: [symbol.start_line, symbol.end_line],
+          body_hash: `sha256:${curBodyHash}`,
+        }
+      } else {
+        // 9（F2）：body_hash/range 遵循索引约定（symbol-anchors：slice(start_line-1,end_line) 含签名行的全符号）。
+        // 旧实现 boundary=body 时 symStart=range[0]+1 → body_hash 只算 body（不含签名），与 read_symbol /
+        // 预写 curBodyHash 的 full 约定不一致 → 同符号链式写（拿 new_version 当下一轮 base）误判 SYMBOL_CHANGED。
+        const isBodyOnly = editMode === 'replace_symbol' && boundary === 'body'
+        const fullEnd = isBodyOnly ? range[0] + newBodyLineCount : range[0] + Math.max(0, newBodyLineCount - 1)
+        const newRange = [range[0], fullEnd]
+        newVersion.symbol = {
+          symbol_id: symbol.stable_id || null,
+          range: newRange,
+          body_hash: `sha256:${sha256(newLinesArr.slice(range[0] - 1, fullEnd).join('\n'))}`,
+        }
       }
     }
 
@@ -588,7 +692,9 @@ export async function writeSymbol(args, context) {
       undo: {
         token: journal.txnId,
         txn_id: journal.txnId,
-        expires_at: null,
+        expires_at: new Date(Date.now() + JOURNAL_RETENTION_HOURS * 3600 * 1000).toISOString(),
+        retention_hours: JOURNAL_RETENTION_HOURS,
+        via: 'edit_transaction(action=undo_commit)',
         reverse: { file: filePath, backup: `${JOURNAL_ROOT}/journal/${journal.txnId}/backup/${basename(filePath)}` },
       },
       pipeline,
@@ -737,6 +843,8 @@ export async function writeSymbols(args, context) {
 
   const items = []
   const written = []   // 已写文件：{ absPath, filePath, backup, journalDir }
+  const intendedFiles = {} // 每文件预期写后哈希（dry-run 也产出）——供 code_batch 崩溃核对（W3）
+  const validationByFile = {} // Q3：每文件 validation（dry-run 也产出）——供 code_batch 预览诚实报告
   let failed = null
   const fileFailures = [] // r54(P1): best_effort 收集每文件失败后继续，不再首失败即停
   let allDiffs = []
@@ -763,13 +871,26 @@ export async function writeSymbols(args, context) {
   for (const fp of groupFiles) {
     if (failed && allOrNothing) break
     const absPath = absPathOf(fp)
-    if (!existsSync(absPath)) {
-      const err = { file: fp, error: { code: 'FILE_NOT_FOUND', message: `File not found: ${fp}` } }
+    const groupItemsPre = groups.get(fp)
+    const isCreateGroup = groupItemsPre.some(w => w?.create === true)
+    let createErr = null
+    if (isCreateGroup) {
+      const ci = groupItemsPre.find(w => w?.create === true)
+      if (groupItemsPre.length !== 1) createErr = { code: 'invalid_input', message: 'create:true requires exactly one write item for the file' }
+      else if (existsSync(absPath)) createErr = { code: 'FILE_EXISTS', message: `File already exists: ${fp}` }
+      else if (ci?.patch || ci?.base_version) createErr = { code: 'invalid_input', message: 'create:true requires full content; do not pass patch/base_version' }
+      else if (typeof ci?.content !== 'string') createErr = { code: 'missing_parameter', message: 'content is required for create:true' }
+      if (!createErr) mkdirSync(dirname(absPath), { recursive: true })
+    } else if (!existsSync(absPath)) {
+      createErr = { code: 'FILE_NOT_FOUND', message: `File not found: ${fp}`, suggestion: 'Pass create:true to create a new file, or use git_worktree/code_worktree.' }
+    }
+    if (createErr) {
+      const err = { file: fp, error: createErr }
       if (allOrNothing) { failed = err; break }
-      fileFailures.push(err); continue // r54(P1): best_effort 记录后继续
+      fileFailures.push(err); continue
     }
     // staleness 预热（锁外；批量内 resolve 需要新 range）
-    if (codeIndexService) {
+    if (codeIndexService && !isCreateGroup) {
       try { await checkFileStaleness(codeIndexService, workspaceDir, fp) } catch {}
     }
 
@@ -781,16 +902,21 @@ export async function writeSymbols(args, context) {
     }
     try {
       let content = ''
-      try { content = readFileSync(absPath, 'utf-8') } catch (e) {
-        const err = { file: fp, error: { code: 'READ_FAILED', message: e.message } }
-        if (allOrNothing) { failed = err; break }
-        fileFailures.push(err); continue // r54(P1): best_effort 记录后继续
+      if (isCreateGroup) {
+        content = '' // Q2：新建写前内容为空，journal backup 为空串
+      } else {
+        try { content = readFileSync(absPath, 'utf-8') } catch (e) {
+          const err = { file: fp, error: { code: 'READ_FAILED', message: e.message } }
+          if (allOrNothing) { failed = err; break }
+          fileFailures.push(err); continue // r54(P1): best_effort 记录后继续
+        }
       }
       let lines = content.split('\n')
       const appliedEdits = [] // {endLine(原文件坐标), delta}——偏移只对位于先前编辑点之后的符号生效
       let firstReal = true
       const groupItems = groups.get(fp)
       const groupResults = []
+      const groupTargets = new Set() // live 审查 H1：同批同符号重复编辑检测
 
       for (let idx = 0; idx < groupItems.length; idx++) {
         const w = groupItems[idx]
@@ -798,19 +924,23 @@ export async function writeSymbols(args, context) {
         const boundary = w?.boundary || 'full'
         const preserveDecorators = w?.preserve_decorators !== false
 
+        // live 狗粮：item_index 对用户必须指向输入下标（groups 已按路径排序，组内 idx 会误导）
+        const inputIndex = writes.indexOf(w) >= 0 ? writes.indexOf(w) : idx
         // resolve（索引 range + 组内行偏移修正，§16.1：不复用入参 range）
         let symbol = null
-        if (editMode === 'patch') {
+        if (isCreateGroup) {
+          // Q2：新建无符号可解析——直接落到下方 apply 的 create 分支
+        } else if (editMode === 'patch') {
           // patch 模式：可无符号（文件级 patch 或符号内 patch）
           if (w?.locator?.symbol_id || w?.locator?.name) {
             const rs = resolveBatchSymbol(codeIndexService, fp, w.locator)
-            if (rs.error) { failed = { file: fp, itemIndex: idx, error: rs.error }; break }
+            if (rs.error) { failed = { file: fp, itemIndex: inputIndex, error: rs.error }; break }
             symbol = rs
           }
         } else {
-          if (!w?.locator) { failed = { file: fp, itemIndex: idx, error: { code: 'missing_parameter', message: 'replace_symbol requires locator' } }; break }
+          if (!w?.locator) { failed = { file: fp, itemIndex: inputIndex, error: { code: 'missing_parameter', message: 'replace_symbol requires locator' } }; break }
           const rs = resolveBatchSymbol(codeIndexService, fp, w.locator)
-          if (rs.error) { failed = { file: fp, itemIndex: idx, error: rs.error }; break }
+          if (rs.error) { failed = { file: fp, itemIndex: inputIndex, error: rs.error }; break }
           symbol = rs
         }
         // 7（F1）：旧实现全局 offset 累加——批内后项目标在先前编辑点之前时位置错移 → 负 range 静默丢行/重复。
@@ -830,7 +960,7 @@ export async function writeSymbols(args, context) {
         const curBodyHash = symbol && range ? `sha256:${sha256(lines.slice(range[0] - 1, range[1]).join('\n'))}` : null
         const curSigHash = symbol && range ? `sha256:${sha256(extractSignatureLine(lines, { ...symbol, start_line: symbol.start_line + offset }) || '')}` : null
         const current = {
-          file: { hash: `sha256:${sha256(lines.join('\n'))}`, size: lines.join('\n').length },
+          file: { hash: `sha256:${sha256(lines.join('\n'))}`, size: Buffer.byteLength(lines.join('\n'), 'utf-8') },
           symbol: symbol ? { body_hash: curBodyHash, signature_hash: curSigHash } : null,
         }
 
@@ -853,10 +983,21 @@ export async function writeSymbols(args, context) {
           }
         }
 
+        // live 审查 H1：同批重复编辑同一符号——批内 offset 只修正“位于先前编辑之后”的符号，
+        // 同符号第二项沿用陈旧 range → 静默覆盖/删邻行；明确拒绝，提示拆批（用户拍板方案）
+        if (symbol) {
+          const tkey = symbol.stable_id || ('L' + symbol.start_line + '-' + symbol.end_line)
+          if (groupTargets.has(tkey)) {
+            failed = { file: fp, itemIndex: inputIndex, error: { code: 'DUPLICATE_SYMBOL_EDIT', message: 'symbol ' + tkey + ' is edited more than once in the same batch', suggestion: 'Read the FILE once (file-level read_ref) so each write resolves its own symbol, then retry the batch in ONE call.' } }
+            break
+          }
+          groupTargets.add(tkey)
+        }
+
         // 冲突判定：组内首个真实写项做 file-level（文件基线）；后续项仅符号级（文件已在批内变更）
         const itemBase = w?.base_version
-        if (firstReal && !itemBase && !force) {
-          failed = { file: fp, itemIndex: idx, error: { code: 'VERSION_CONFLICT', conflict_type: 'NO_BASE', message: 'base_version is required for the first write of each file (read_symbol first). Use allow_unsafe_no_base only when you intentionally bypass.', next_action: { tool: 'read_symbol', params: { locator: { file_path: fp } } } } }
+        if (firstReal && !itemBase && !force && !isCreateGroup && !dryRun) {
+          failed = { file: fp, itemIndex: inputIndex, error: { code: 'VERSION_CONFLICT', conflict_type: 'NO_BASE', message: 'base_version is required for the first write of each file: read the FILE first with code_read (a symbol read does not establish a file base).', suggestion: 'Call code_read with locator {file_path} (whole file, no budget needed), then resubmit the SAME writes with that read_ref.', next_action: { tool: 'read_symbol', params: { locator: { file_path: fp } } } } }
           break
         }
         if (firstReal && itemBase) {
@@ -864,27 +1005,29 @@ export async function writeSymbols(args, context) {
           pipelineStep(pipeline, 'version_check', conflict.type === 'CLEAN' ? 'ok' : 'warn', { conflict: conflict.type, file: fp })
           const policy_ = CONFLICT_POLICY[conflict.type] || 'reject'
           if (policy_ === 'reject') {
-            failed = { file: fp, itemIndex: idx, error: { code: 'VERSION_CONFLICT', conflict_type: conflict.type, message: `base_version mismatch: ${conflict.type}`, suggestion: 'Re-read the file and regenerate the batch.', next_action: { tool: 'read_symbol', params: { locator: { file_path: fp } } } } }
+            failed = { file: fp, itemIndex: inputIndex, error: { code: 'VERSION_CONFLICT', conflict_type: conflict.type, message: `base_version mismatch: ${conflict.type} (read the FILE once — symbol reads do not establish a file base)`, suggestion: 'Read the FILE (file_path) once, then resubmit the same writes with that read_ref.', next_action: { tool: 'read_symbol', params: { locator: { file_path: fp } } } } }
             break
           }
         } else if (!firstReal && itemBase?.symbol) {
           // 后续项：符号级判定（file hash 已在批内变化，无比较意义）
           const baseSymId = itemBase.symbol.symbol_id
           if (baseSymId && symbol && baseSymId === symbol.stable_id && curBodyHash && itemBase.symbol.body_hash !== curBodyHash) {
-            failed = { file: fp, itemIndex: idx, error: { code: 'VERSION_CONFLICT', conflict_type: 'SYMBOL_CHANGED', message: `base_version mismatch: SYMBOL_CHANGED for ${symbol.stable_id}`, suggestion: 'Re-read the symbol and regenerate content.' } }
+            failed = { file: fp, itemIndex: inputIndex, error: { code: 'VERSION_CONFLICT', conflict_type: 'SYMBOL_CHANGED', message: `base_version mismatch: SYMBOL_CHANGED for ${symbol.stable_id}`, suggestion: 'Re-read the symbol and regenerate content.' } }
             break
           }
           // r8(F13)：base_version 的符号与目标符号不一致（跨符号/陈旧 base）——符号级无意义，
           // 降级为「批内当前内容 vs base 文件 hash」比较（对齐单发路径 L298-304 语义），不一致即拒
           if (baseSymId && symbol && baseSymId !== symbol.stable_id && itemBase.file?.hash && itemBase.file.hash !== `sha256:${sha256(lines.join('\n'))}`) {
-            failed = { file: fp, itemIndex: idx, error: { code: 'VERSION_CONFLICT', conflict_type: 'FILE_CHANGED', message: `base_version symbol (${baseSymId}) does not match target (${symbol.stable_id}) and file changed since base`, suggestion: 'Re-read the file and regenerate the batch.' } }
+            failed = { file: fp, itemIndex: inputIndex, error: { code: 'VERSION_CONFLICT', conflict_type: 'FILE_CHANGED', message: `base_version symbol (${baseSymId}) does not match target (${symbol.stable_id}) and file changed since base`, suggestion: 'Re-read the file and regenerate the batch.' } }
             break
           }
         }
 
-        // apply
-        const itemResult = applyBatchItem(lines, range, w, symbol, editMode, boundary, preserveDecorators)
-        if (itemResult.error) { failed = { file: fp, itemIndex: idx, error: itemResult.error }; break }
+        // apply（Q2：新建 = 整文件内容，跳过编辑模式）
+        const itemResult = isCreateGroup
+          ? { lines: w.content.split('\n'), status: 'created', diff: makeSimpleDiff([], w.content.split('\n')) }
+          : applyBatchItem(lines, range, w, symbol, editMode, boundary, preserveDecorators)
+        if (itemResult.error) { failed = { file: fp, itemIndex: inputIndex, error: itemResult.error }; break }
         firstReal = false
         lines = itemResult.lines
         if (itemResult.delta) appliedEdits.push({ endLine: symbol ? symbol.end_line : null, delta: itemResult.delta })
@@ -898,31 +1041,37 @@ export async function writeSymbols(args, context) {
 
       // 全组验证（一次）
       const newContent = lines.join('\n')
-      const bracket = checkBracketBalance(newContent)
-      const validation = { bracket: bracket.ok ? { status: 'pass' } : { status: 'fail', errors: [bracket.detail] } }
+      // R22 修复 #3（2026-10-12）：同单品路径——括号校验仅对代码文件，非代码 skip（edit_transaction 语义一致）
+      const isCodeFile = !!langOf(fp)
+      const bracket = isCodeFile ? checkBracketBalance(newContent) : null
+      const validation = { bracket: isCodeFile ? (bracket.ok ? { status: 'pass' } : { status: 'fail', errors: [bracket.detail] }) : { status: 'skip', reason: 'non-code file' } }
       if (langOf(fp)) {
         validation.syntax = await validateSyntax(langParser, newContent, extname(fp))
       } else {
         validation.syntax = { status: 'skip', reason: 'non-code file' }
       }
       reconcileBracketWithSyntax(validation)
+      validationByFile[fp] = validation
       pipelineStep(pipeline, 'validate', validation.syntax.status === 'pass' && validation.bracket.status === 'pass' ? 'ok' : 'warn', { syntax: validation.syntax.status, bracket: validation.bracket.status, file: fp })
-      if (safety.block_on_validation_error && (validation.syntax.status === 'fail' || validation.syntax.status === 'skip' || validation.bracket.status === 'fail')) {
-        failed = { file: fp, error: { code: 'VALIDATION_FAILED', message: `validation failed for ${fp}`, validation }, groupResults }
+      if (shouldBlockValidation(safety, validation)) {
+        const lastW = groupItems[groupItems.length - 1]
+        failed = { file: fp, error: buildValidationFailure('VALIDATION_FAILED', `validation failed for ${fp}: syntax/bracket errors detected; refusing write. Pass safety.block_on_validation_error=false to override.`, validation, newContent, lastW?.content ?? lastW?.patch?.new_string), groupResults }
         break
       }
 
+      intendedFiles[fp] = `sha256:${sha256(newContent)}`
       if (dryRun) continue
 
       // journal + 一次原子写（组 = 文件）
-      const journal = createJournal(workspaceDir, fp, absPath, content, { editMode: 'write_symbols', state: 'staged', base_file_hash: groupItems[0]?.base_version?.file?.hash || null })
+      const journal = createJournal(workspaceDir, fp, absPath, content, { editMode: 'write_symbols', state: 'staged', base_file_hash: groupItems[0]?.base_version?.file?.hash || null, ...(isCreateGroup ? { created: true } : {}), ...(batchId ? { batch_id: batchId } : {}) })
       batchTxnIds.push(journal.txnId)
       if (batchId) updateBatchMarker(workspaceDir, batchId, { txnIds: batchTxnIds })
       updateJournalState(journal.dir, { state: 'staged', new_hash: sha256(newContent) })
       const tmpPath = _uniqueTmp(absPath, 'tmp')
       try {
         // 7（F7）：writeFileSync 在 try 外——异常逃逸跳过 failed 分支与回滚；r8(B5)：唯一 tmp 防 symlink 穿透
-        writeFileSync(tmpPath, newContent)
+        // N3：继承原文件 mode（批量写同样保留权限位）
+        _writeTmpPreservingMode(tmpPath, newContent, absPath)
         await renameRetry(tmpPath, absPath)
       } catch (e) {
         try { unlinkSync(tmpPath) } catch {}
@@ -934,8 +1083,18 @@ export async function writeSymbols(args, context) {
         fileFailures.push(failed); failed = null; continue
       }
       updateJournalState(journal.dir, { state: 'committed', committed_at: new Date().toISOString() })
+      // WP04：回读实测（同 writeSymbol）——不一致按写失败处理，触发 all_or_nothing 补偿回滚；
+      // MALONG_TEST_READBACK_MISMATCH=1 仅测试环境注入回读不一致
+      let readBackContent = null
+      try { readBackContent = readFileSync(absPath, 'utf-8') } catch {}
+      if (process.env.MALONG_TEST_READBACK_MISMATCH === '1' || readBackContent == null || readBackContent !== newContent) {
+        updateJournalState(journal.dir, { state: 'indeterminate', reason: 'readback_mismatch' })
+        failed = { file: fp, error: { code: 'READBACK_MISMATCH', message: 'post-write read-back does not match intended content; state indeterminate', txn_id: journal.txnId } }
+        if (allOrNothing) break
+        fileFailures.push(failed); failed = null; continue
+      }
       // r8(E2)：记录写后内容哈希——回滚时比对，防盖掉并行写者的合法改动
-      written.push({ absPath, filePath: fp, journalDir: journal.dir, txnId: journal.txnId, groupResults, newHash: sha256(newContent) })
+      written.push({ absPath, filePath: fp, journalDir: journal.dir, txnId: journal.txnId, groupResults, newHash: sha256(newContent), ...(isCreateGroup ? { created: true } : {}) })
       pipelineStep(pipeline, 'atomic_write', 'ok', { file: fp })
       // Y002-S1：批量写后登记写者（collision_guard classify 识别 write_runtime）
       registerWriter(workspaceDir, fp, 'write_runtime')
@@ -965,11 +1124,28 @@ export async function writeSymbols(args, context) {
           auditLog(workspaceDir, { event: 'rollback_skipped', file: wf.filePath, reason: 'lock busy' })
           continue
         }
+        if (wf.created) {
+          // Q2：新建文件回滚 = 删除（写空内容会留垃圾文件）；内容被外部改过则跳过保守不动
+          try {
+            const cur = readFileSync(wf.absPath, 'utf-8')
+            if (wf.newHash && sha256(cur) === wf.newHash) {
+              unlinkSync(wf.absPath)
+              updateJournalState(wf.journalDir, { state: 'rolled_back', rolled_back_at: new Date().toISOString() })
+              rolledBack.push(wf.filePath)
+              auditLog(workspaceDir, { event: 'batch_rollback', file: wf.filePath, action: 'created_file_removed', reason: failed.error?.code })
+            } else {
+              pipelineStep(pipeline, 'rollback', 'warn', { reason: `SKIPPED (file changed since creation): ${wf.filePath}`, file: wf.filePath })
+            }
+          } finally {
+            rl.release()
+          }
+          continue
+        }
         try {
           const cur = readFileSync(wf.absPath, 'utf-8')
           if (wf.newHash && sha256(cur) === wf.newHash) {
             const rbTmp = _uniqueTmp(wf.absPath, 'rollback')
-            writeFileSync(rbTmp, readFileSync(backup))
+            _writeTmpPreservingMode(rbTmp, readFileSync(backup), wf.absPath)
             await renameRetry(rbTmp, wf.absPath)
             updateJournalState(wf.journalDir, { state: 'rolled_back', rolled_back_at: new Date().toISOString() })
             rolledBack.push(wf.filePath)
@@ -1014,11 +1190,18 @@ export async function writeSymbols(args, context) {
           try { updateJournalState(wf.journalDir, { index_pending: true, index_pending_reason: e.message }) } catch {}
         }
       } else if (codeIndexService) {
-        const row = codeIndexService.getFileByPath(wf.filePath)
-        if (row) {
-          // r11(L6)：改用公共方法（旧实现直取 _db 私有字段）
-          codeIndexService.updateContentHash(wf.filePath, sha256(readFileSync(wf.absPath, 'utf-8')))
-          perFile[wf.filePath] = { status: 'ok', note: 'non-code' }
+        try {
+          const row = codeIndexService.getFileByPath(wf.filePath)
+          if (row) {
+            // r11(L6)：改用公共方法（旧实现直取 _db 私有字段）
+            codeIndexService.updateContentHash(wf.filePath, sha256(readFileSync(wf.absPath, 'utf-8')))
+            perFile[wf.filePath] = { status: 'ok', note: 'non-code' }
+          }
+        } catch (e) {
+          // live 审查修复：此分支无 catch——提交后抛出会越过 finishBatchMarker（锁/marker 泄漏 + 误报 failed）
+          perFile[wf.filePath] = { status: 'failed', reason: e.message }
+          try { codeIndexService.markIndexDirty?.(wf.filePath, 'write_pending_reindex') } catch {}
+          try { updateJournalState(wf.journalDir, { index_pending: true, index_pending_reason: e.message }) } catch {}
         }
       }
     }
@@ -1027,12 +1210,23 @@ export async function writeSymbols(args, context) {
   }
 
   // r54(P1): best_effort 部分失败汇总——有文件写成即算成功，全失败才整体失败
-  const partialFailures = fileFailures.length > 0 ? fileFailures.map(f => ({ file: f.file, ...f.error })) : undefined
-  const success = !failed && (fileFailures.length === 0 || written.length > 0)
+  // live 审查修复：partial_failures 补 item_index（此前只有 all_or_nothing 顶层错误带输入下标）
+  const partialFailures = fileFailures.length > 0
+    ? fileFailures.map(f => ({ file: f.file, ...(f.itemIndex != null ? { item_index: f.itemIndex } : {}), ...f.error }))
+    : undefined
+  // live 审查修复：dry-run 不产生 written——预览应完整报告“哪些能写/哪些冲突”，不得误报 ALL_FILES_FAILED
+  const success = !failed && (dryRun || fileFailures.length === 0 || written.length > 0)
   const undo = written.length > 0 ? {
     token: written[0].txnId,
     txn_id: written[0].txnId,
-    expires_at: null,
+    expires_at: new Date(Date.now() + JOURNAL_RETENTION_HOURS * 3600 * 1000).toISOString(),
+    retention_hours: JOURNAL_RETENTION_HOURS,
+    via: 'edit_transaction(action=undo_commit)',
+    // 16-B（专家复验 §5）：批次每文件一个 journal 共享 batch_id——任一 token 的 undo = 整批撤销
+    // （先全阻断预检，不部分恢复）；scope=per_file 仅出现在批次标记降级的异常路径（给出逐文件 token）。
+    scope: written.length > 1 ? (batchId ? 'batch' : 'per_file') : 'single',
+    ...(batchId ? { batch_id: batchId } : {}),
+    ...(written.length > 1 && !batchId ? { entries: written.map(wf => ({ file: wf.filePath, txn_id: wf.txnId })), note: 'Batch marker unavailable (degraded non-lock error): undo each entry txn_id separately.' } : {}),
     reverse: written.map(wf => ({ file: wf.filePath, backup: `${JOURNAL_ROOT}/journal/${wf.txnId}/backup/${basename(wf.filePath)}` })),
   } : null
 
@@ -1048,15 +1242,18 @@ export async function writeSymbols(args, context) {
     partial_failures: partialFailures,
     items,
     diff: allDiffs,
+    intended_files: Object.keys(intendedFiles).length ? intendedFiles : undefined,
     undo,
     reindex,
+    ...(Object.keys(validationByFile).length ? { validation: validationByFile } : {}),
     // Y002-S2：写路径闭环（write_symbols 走 write-journal，同上）
     ...(success && !dryRun ? { next_step: 'workflow: test_bridge(action="run") → debug_runner on failure; if edits went through edit_transaction, also diff_facts(since="last_txn")' } : {}),
     pipeline,
     trace_id,
     duration_ms: Date.now() - t0,
+    // 第二轮审查修复：dry-run 下 success 为预览成功（即使 0 个文件可写），ALL_FILES_FAILED 只在真实失败时出现
     error: failed ? { ...failed.error, file: failed.file, itemIndex: failed.itemIndex }
-      : (fileFailures.length > 0 && written.length === 0) ? { code: 'ALL_FILES_FAILED', message: `${fileFailures.length} file(s) failed in best_effort mode`, failures: partialFailures }
+      : (!success && fileFailures.length > 0) ? { code: 'ALL_FILES_FAILED', message: `${fileFailures.length} file(s) failed in best_effort mode`, failures: partialFailures }
       : undefined,
   }
 }
@@ -1072,7 +1269,7 @@ function applyBatchItem(lines, range, w, symbol, editMode, boundary, preserveDec
     const oldString = w?.patch?.old_string
     const newString = w?.patch?.new_string ?? ''
     if (typeof oldString !== 'string' || oldString === '') {
-      return { error: { code: 'missing_parameter', message: 'patch.old_string is required' } }
+      return { error: { code: 'missing_parameter', message: 'patch.old_string is required — each write item needs patch {old_string, new_string}; got ' + (w?.patch === undefined ? 'undefined' : typeof w.patch) } }
     }
     const occurrences = countOccurrences(scopeContent, oldString)
     if (occurrences === 0) {
@@ -1095,7 +1292,7 @@ function applyBatchItem(lines, range, w, symbol, editMode, boundary, preserveDec
     const patched = lines.join('\n').replace(oldString, () => newString)
     const newLines = patched.split('\n')
     // R22-⑦（并发拷打）：批量路径同款防御——缺省 new_string 挂 warning（显式空串 = 合法删除不提示）
-    if (w?.patch?.new_string === undefined) return { lines: newLines, status: 'patched', warning: 'patch.new_string omitted — old_string will be removed (explicit empty string if deletion is intended)' }
+    if (w?.patch?.new_string === undefined) return { lines: newLines, delta: newLines.length - lines.length, diff: makeSimpleDiff(lines, newLines), status: 'patched', warning: 'patch.new_string omitted — old_string will be removed (explicit empty string if deletion is intended)' }
     // 9（F1）：文件级 patch 也要回 delta——旧实现无 delta → 不入 appliedEdits → 批内后续符号项
     // offset 计算（line ~674 的 endLine==null 全量偏移分支）拿不到这笔 → range 错位静默改错行。
     return { lines: newLines, delta: newLines.length - lines.length, diff: makeSimpleDiff(lines, newLines), status: 'ok' }

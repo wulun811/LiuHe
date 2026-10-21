@@ -18,12 +18,16 @@ function assert(cond, msg) {
 }
 
 const WS = join(tmpdir(), 'opencode', 'r16-ws')
+const WS2 = join(tmpdir(), 'opencode', 'r16-ws2')
 const DATA = join(tmpdir(), 'opencode', 'r16-data')
+const DATA2 = join(tmpdir(), 'opencode', 'r16-data-ws2')
 const SOCK = join(tmpdir(), 'opencode', 'r16-code-index.sock')
 
 try { rmSync(WS, { recursive: true, force: true }) } catch {}
+try { rmSync(WS2, { recursive: true, force: true }) } catch {}
 try { rmSync(DATA, { recursive: true, force: true }) } catch {}
-for (const d of [WS, DATA]) mkdirSync(d, { recursive: true })
+try { rmSync(DATA2, { recursive: true, force: true }) } catch {}
+for (const d of [WS, WS2, DATA, DATA2]) mkdirSync(d, { recursive: true })
 
 writeFileSync(`${WS}/lib.js`, `function process(data, attempt) {\n  return { ok: true }\n}\nmodule.exports = { process }\n`)
 writeFileSync(`${WS}/app.js`, `const { process: libProcess } = require('./lib.js');\nfunction handle(data) { return libProcess(data, 1) }\nmodule.exports = { handle }\n`)
@@ -46,7 +50,7 @@ const core = {
   services,
   getService: (n) => services[n],
   registerService: (n, svc) => { services[n] = svc },
-  getWorkspaceDir: () => DATA,
+  getWorkspaceDir: (ws) => String(ws).includes('r16-ws2') ? DATA2 : DATA,
   log: () => {},
   emit: () => {},
   get: (key, def) => key === 'codeIndex.udsPath' ? SOCK : (key === 'codeIndex.udsToken' ? '' : def),
@@ -61,6 +65,7 @@ const refs = await imp(join(MALONG_DIR, 'tools', 'tool-references', 'handler.js'
 const impact = await imp(join(MALONG_DIR, 'tools', 'tool-impact-analysis', 'handler.js'))
 const depGraph = await imp(join(MALONG_DIR, 'tools', 'tool-dep-graph', 'handler.js'))
 const inspect = await imp(join(MALONG_DIR, 'tools', 'tool-inspect', 'handler.js'))
+const readSym = await imp(join(MALONG_DIR, 'tools', 'tool-read-symbol', 'handler.js'))
 const findTests = await imp(join(MALONG_DIR, 'tools', 'tool-find-tests', 'handler.js'))
 const rename = await imp(join(MALONG_DIR, 'tools', 'tool-rename-symbol', 'handler.js'))
 const callChain = await imp(join(MALONG_DIR, 'tools', 'tool-call-chain', 'handler.js'))
@@ -173,6 +178,26 @@ assert(refOk.results.length > 0 && !refOk.error, `references 无 file 全局搜�
     const r = await mod.handle({ workspace_dir: 123, symbol: 'x', file: 'a.js', locator: { file_path: 'a.js' } }, ctx)
     assert(r.error === 'missing_parameter', `R22-⑰ ${name} ws=123 结构化错误（得 ${r.error || '无错误'}）`)
   }
+}
+
+// ── dogfood-050 r3：跨工作区身份——resolveFileArg/inspect/find_tests 不得用上一个 ws 拼路径 ──
+{
+  writeFileSync(join(WS2, 'other.js'), 'function other() { return 1 }\nmodule.exports = { other }\n')
+  await svc.initWorkspace(WS2)
+  await svc.indexBatch([join(WS2, 'other.js')], WS2)
+  // 此刻 _currentWorkspace=WS2；请求 WS 的解析必须仍按 WS
+  const rw = svc.resolveFileArg('lib.js', WS)
+  assert(rw.ok && rw.path === 'lib.js', 'r3-a 显式 ws 解析不漂移（得 ' + (rw.ok ? rw.path : rw.error.code) + '）')
+  const insCross = await inspect.handle({ workspace_dir: WS, file: 'lib.js', symbol: 'process' }, ctx)
+  assert(!insCross.error && (insCross.outline?.functions || []).some(f => f.name === 'process'), 'r3-b inspect 跨 ws 身份正确（得 ' + (insCross.error || 'ok') + '）')
+  const ftCross = await findTests.handle({ workspace_dir: WS, file: 'lib.js' }, ctx)
+  assert(!ftCross.error && ftCross.source_file === 'lib.js', 'r3-c find_tests 跨 ws 身份正确（得 ' + (ftCross.error || 'ok') + '）')
+  // r3-d：read_symbol 早期 symbol_id 分支（不带 file_path）必须入场就绪本请求工作区
+  // （先重新热身 WS2——前序用例已把 _currentWorkspace 带回 WS，不复现原始条件）
+  await svc.initWorkspace(WS2)
+  const rsCross = await readSym.handle({ workspace_dir: WS, locator: { symbol_id: 'js:lib.js::process#function' } }, ctx)
+  assert(!rsCross.error && rsCross.symbol?.name === 'process', 'r3-d read_symbol symbol_id 分支跨 ws 身份正确（得 ' + (rsCross.error || 'ok') + '）')
+  await svc.initWorkspace(WS)
 }
 
 console.log(`\n== test-dogfood-r16: ${pass} passed, ${fail} failed ==`)

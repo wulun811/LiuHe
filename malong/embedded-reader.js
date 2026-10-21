@@ -169,7 +169,7 @@ export class EmbeddedReader {
       } : { symbol_id: null, text },
       budget: { requested: budget, truncated },
       version: {
-        file: { hash: `sha256:${createHash('sha256').update(content).digest('hex')}`, size: content.length },
+        file: { hash: `sha256:${createHash('sha256').update(content).digest('hex')}`, size: Buffer.byteLength(content, 'utf-8') },
         symbol: symbol ? { body_hash: `sha256:${createHash('sha256').update(text).digest('hex')}` } : null,
       },
       index_status: status,

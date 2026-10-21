@@ -138,11 +138,11 @@ assert(r1.index_status?.state === 'fresh' || r1.index_status?.state === 'dirty' 
 assert(Array.isArray(r1.pipeline) && r1.pipeline.length >= 2, 'P2 pipeline 返回')
 assert(!!r1.trace_id, 'P2 trace_id 返回')
 assert(r1.budget?.truncated === true || r1.symbol?.text.length <= 400 + 20, 'P2 budget 截断生效（400 字符内）')
-// R22-⑨：budget_hint=0 曾被 `|| 1200` 吞为默认——0 = 不截断（全文预算 100000）
+// R22-⑨：budget_hint=0 曾被 `|| 1200` 吞为默认——0 = 不截断（effective=100000；LH-011 起 requested 保留原值、增 effective/floor）
 const r0 = await readHandler({ workspace_dir: WS, locator: { file_path: 'src/auth.py', symbol_id: loginSyms[0].stable_id }, budget_hint: 0 }, ctx)
-assert(r0.budget?.requested === 100000 && r0.budget?.truncated === false, `P2 budget_hint=0 → 全文预算 100000 不截断（得 requested=${r0.budget?.requested} truncated=${r0.budget?.truncated}）`)
+assert(r0.budget?.requested === 0 && r0.budget?.effective === 100000 && r0.budget?.truncated === false, `P2 budget_hint=0 → requested=0/effective=100000 不截断（得 requested=${r0.budget?.requested} effective=${r0.budget?.effective} truncated=${r0.budget?.truncated}）`)
 const r1200 = await readHandler({ workspace_dir: WS, locator: { file_path: 'src/auth.py', symbol_id: loginSyms[0].stable_id } }, ctx)
-assert(r1200.budget?.requested === 1200, `P2 不传 budget_hint → 默认 1200（得 ${r1200.budget?.requested}）`)
+assert(r1200.budget?.requested === 1200 && r1200.budget?.effective === 1200, `P2 不传 budget_hint → 默认 1200（得 ${r1200.budget?.requested}/${r1200.budget?.effective}）`)
 assert(r1.outline === null, 'P2 core 模式默认不带 outline（省 token）')
 const r1Rich = await readHandler({ workspace_dir: WS, locator: { file_path: 'src/auth.py', symbol_id: loginSyms[0].stable_id }, mode: 'rich', budget_hint: 400 }, ctx)
 assert(r1Rich.outline?.items?.length > 0, 'P2 rich 模式带 outline 摘要')
@@ -382,6 +382,36 @@ const wBad = await writeSymbol({
   safety: { block_on_validation_error: true },
 }, wctx)
 assert(wBad.success === false && wBad.error?.code === 'VALIDATION_FAILED', `P3 block_on_validation_error 拒写（得 ${JSON.stringify(wBad.error || wBad.validation || wBad.safety_report?.validation)}）`)
+// dogfood-050（P2 修复）：校验失败必须带装配片段自证（旧实现只有 "syntax errors detected"，无法区分内容/传输问题）
+assert(typeof wBad.error?.assembled_excerpt === 'string' && wBad.error.assembled_excerpt.includes('login'), `P3 校验失败带装配片段（得 ${JSON.stringify(wBad.error?.assembled_excerpt)?.slice(0, 80)}）`)
+assert(!wBad.error?.hint, 'P3 真实换行内容不误报转义 hint')
+
+// 3.13b Q3：默认拦截策略——standard 拦 fail / skip 不拦 / 显式开关 / fast / strict
+const { shouldBlockValidation } = await imp(join(MALONG_DIR, 'write-runtime.js'))
+assert(shouldBlockValidation({}, { syntax: { status: 'fail' }, bracket: { status: 'pass' } }) === true, 'Q3 默认 standard 拦 fail')
+assert(shouldBlockValidation({}, { syntax: { status: 'skip' }, bracket: { status: 'pass' } }) === false, 'Q3 默认 skip 不拦（避免误伤非 JS/Python）')
+assert(shouldBlockValidation({ block_on_validation_error: false }, { syntax: { status: 'fail' }, bracket: { status: 'fail' } }) === false, 'Q3 显式 false 放行')
+assert(shouldBlockValidation({ block_on_validation_error: true }, { syntax: { status: 'skip' }, bracket: { status: 'pass' } }) === true, 'Q3 显式 true 含 skip')
+assert(shouldBlockValidation({ profile: 'strict' }, { syntax: { status: 'skip' }, bracket: { status: 'pass' } }) === true, 'Q3 strict 含 skip')
+assert(shouldBlockValidation({ profile: 'fast' }, { syntax: { status: 'fail' }, bracket: { status: 'fail' } }) === false, 'Q3 fast 不拦')
+const wBadDefault = await writeSymbol({
+  workspace_dir: WS,
+  locator: { file_path: 'src/auth.py', symbol_id: login0.stable_id },
+  base_version: { file: rBad.version.file, symbol: rBad.version.symbol },
+  content: 'def login(self, username, password):\n  this is not python :::\n',
+}, wctx)
+const beforeQ3 = readFileSync(`${WS}/src/auth.py`, 'utf-8')
+assert(wBadDefault.success === false && wBadDefault.error?.code === 'VALIDATION_FAILED', `Q3 默认（无 safety）坏语法也拒写（得 ${JSON.stringify(wBadDefault.error?.code || wBadDefault.success)}）`)
+assert(readFileSync(`${WS}/src/auth.py`, 'utf-8') === beforeQ3, 'Q3 拒写后文件未被破坏')
+// dogfood-050（P2 修复）：字面 \n 转义（无真实换行）→ hint 提示 caller 转义问题
+const wEsc = await writeSymbol({
+  workspace_dir: WS,
+  locator: { file_path: 'src/auth.py', symbol_id: login0.stable_id },
+  base_version: { file: rBad.version.file, symbol: rBad.version.symbol },
+  content: 'def login(self, username, password):\\n  this is not python :::\\n',
+}, wctx)
+assert(wEsc.success === false && wEsc.error?.code === 'VALIDATION_FAILED', `P3 字面转义内容仍被拦（得 ${JSON.stringify(wEsc.error?.code || wEsc.success)}）`)
+assert(typeof wEsc.error?.hint === 'string' && wEsc.error.hint.includes('real newlines'), `P3 字面 \\n 触发转义 hint（得 ${JSON.stringify(wEsc.error?.hint)}）`)
 
 // 3.14 锁：假锁文件 → acquireLock 超时返回 locked（FILE_LOCKED 语义）
 const wrMod = await imp(join(MALONG_DIR, 'write-runtime.js'))
@@ -402,10 +432,15 @@ const { sha256 } = await imp(join(MALONG_DIR, 'hash-utils.js'))
 const recWS = `${WS}/rec`
 try { rmSync(recWS, { recursive: true, force: true }) } catch {}
 mkdirSync(join(recWS, '.malong', 'journal'), { recursive: true })
+// 14-C：恢复语义要求写者已死（pid 存活 = 在途事务不处理）——模拟崩溃用已退出子进程的 pid
+const { spawnSync } = await import('node:child_process')
+const deadPid = spawnSync(process.execPath, ['-e', '']).pid
+function deadWriter(dir) { writeFileSync(join(dir, 'pid'), String(deadPid)) }
 // 场景 A：当前 == 写前（dryRun 残留/崩溃在 rename 前）→ abandoned，文件不动
 writeFileSync(`${recWS}/a.txt`, 'v1')
 const ja = createJournal(recWS, 'a.txt', `${recWS}/a.txt`, 'v1', { editMode: 'patch', state: 'staged' })
 updateJournalState(ja.dir, { state: 'staged', new_hash: sha256('v2') })
+deadWriter(ja.dir)
 let rec = await recoverJournals(recWS)
 assert(rec.some(r => r.txn_id === ja.txnId && r.action === 'abandoned'), `P3 recovery: staged+当前==写前 → abandoned（得 ${JSON.stringify(rec)}）`)
 assert(readFileSync(`${recWS}/a.txt`, 'utf-8') === 'v1', 'P3 recovery: abandoned 不覆盖文件')
@@ -413,6 +448,7 @@ assert(readFileSync(`${recWS}/a.txt`, 'utf-8') === 'v1', 'P3 recovery: abandoned
 writeFileSync(`${recWS}/b.txt`, 'v2')
 const jb = createJournal(recWS, 'b.txt', `${recWS}/b.txt`, 'v1', { editMode: 'patch', state: 'staged' })
 updateJournalState(jb.dir, { state: 'staged', new_hash: sha256('v2') })
+deadWriter(jb.dir)
 rec = await recoverJournals(recWS)
 assert(rec.some(r => r.txn_id === jb.txnId && r.action === 'committed'), `P3 recovery: staged+当前==写后 → committed（得 ${JSON.stringify(rec)}）`)
 assert(readFileSync(`${recWS}/b.txt`, 'utf-8') === 'v2', 'P3 recovery: committed 不覆盖新内容')
@@ -420,6 +456,7 @@ assert(readFileSync(`${recWS}/b.txt`, 'utf-8') === 'v2', 'P3 recovery: committed
 writeFileSync(`${recWS}/c.txt`, 'EXTERNAL')
 const jc = createJournal(recWS, 'c.txt', `${recWS}/c.txt`, 'v1', { editMode: 'patch', state: 'staged' })
 updateJournalState(jc.dir, { state: 'staged', new_hash: sha256('v2') })
+deadWriter(jc.dir)
 rec = await recoverJournals(recWS)
 assert(rec.some(r => r.txn_id === jc.txnId && r.action === 'kept_external_change'), `P3 recovery: staged+外部修改 → kept_external_change（得 ${JSON.stringify(rec)}）`)
 assert(readFileSync(`${recWS}/c.txt`, 'utf-8') === 'EXTERNAL', 'P3 recovery: 外部修改不被回滚覆盖')
@@ -436,18 +473,27 @@ assert(checkBracketBalance('/* block ) */ x = 1').ok === true, 'P3 块注释含 
 assert(checkBracketBalance('function f() { return 1 }').ok === true, 'P3 正常代码仍 pass')
 assert(checkBracketBalance('function f( { return 1 }').ok === false, 'P3 真不平衡仍报')
 
-// 3.18 bracket 误报降级（全工具冒烟 r12.5 发现）：stripper 不识别正则字面量——含引号字符类如 ['"`]
-// 连带破坏字符串剥离，合法文件（node --check 过）也报 unbalanced。syntax pass 是权威 ⇒ 降级防 strict 阻断/误导。
+// R22 修复 #3b（2026-10-12）：合法 JSON 含 URL 不误报（旧实现先跑 // 注释 regex，吞引号级联误判）
+assert(checkBracketBalance('{"resolved":"https://u","integrity":"sha512-abc","version":"1.0.0"}').ok === true, 'R22 #3b 合法 JSON 含 URL 不误报')
+assert(checkBracketBalance('const u = "https://x/y"; f(1)').ok === true, 'R22 #3b JS 字符串内 // 不误报')
+assert(checkBracketBalance('const u = "https://x/y"; f(1').ok === false, 'R22 #3b 修正后真不平衡仍报')
+
+// 3.18 正则字面量识别 + bracket/syntax 不一致仲裁（P0 修复 2026-10-12：旧降级在 daemon EOF 漏报时吞真失败）
 const { reconcileBracketWithSyntax } = await imp(join(MALONG_DIR, 'write-runtime.js'))
-assert(checkBracketBalance("function f(x) { return /['\"]/ }\nconst b = /['\"]/").ok === false, 'P3 已知局限：含引号字符类的正则使 raw bracket 误报（锁定现状，靠 reconcile 兜底）')
-const v1 = reconcileBracketWithSyntax({ syntax: { status: 'pass' }, bracket: { status: 'fail', errors: ['unbalanced: expected ) but got }'] } })
-assert(v1.bracket.status === 'pass' && v1.bracket.false_positive_downgraded, 'P3 syntax pass + bracket fail → 降级为 pass（syntax 是权威）')
+assert(checkBracketBalance("function f(x) { return /['\"]/ }\nconst b = /['\"]/").ok === true, 'P0 含引号字符类的正则不再误报（stripper 识别正则）')
+assert(checkBracketBalance('const re = /[/]/; f(1)').ok === true, 'P0 字符类内斜杠不提前闭合')
+assert(checkBracketBalance('const x = a / b; f(1)').ok === true, 'P0 除法不误判为正则')
+assert(checkBracketBalance('function mul(a, b) {\n  return a * b;\n\nmodule.exports = { add, sub, mul };\n').ok === false, 'P0 EOF 未闭合 { 必须报（daemon 漏报类）')
+const v1 = reconcileBracketWithSyntax({ syntax: { status: 'pass' }, bracket: { status: 'fail', errors: ['unclosed: {'] } })
+assert(v1.bracket.status === 'fail' && v1.bracket.syntax_disagreement === true, 'P0 syntax pass + bracket fail → 保留 fail 并标注 disagreement（不降级）')
+assert(shouldBlockValidation({}, v1) === true, 'P0 不一致时 standard 档阻断（防坏文件落盘）')
+assert(shouldBlockValidation({ block_on_validation_error: false }, v1) === false, 'P0 显式 override 可放行')
 const v2 = reconcileBracketWithSyntax({ syntax: { status: 'skip', reason: 'non-code file' }, bracket: { status: 'fail', errors: ['x'] } })
 assert(v2.bracket.status === 'fail', 'P3 syntax skip（非代码）→ bracket 是唯一信号，保留 fail')
 const v3 = reconcileBracketWithSyntax({ syntax: { status: 'fail' }, bracket: { status: 'fail', errors: ['x'] } })
 assert(v3.bracket.status === 'fail', 'P3 syntax fail → bracket 保留 fail（佐证）')
 const v4 = reconcileBracketWithSyntax({ syntax: { status: 'pass' }, bracket: { status: 'pass' } })
-assert(v4.bracket.status === 'pass' && !v4.bracket.false_positive_downgraded, 'P3 双 pass 不动')
+assert(v4.bracket.status === 'pass' && !v4.bracket.syntax_disagreement, 'P3 双 pass 不动')
 
 // ══════════════ 汇总 ══════════════
 console.log(`\n${pass} passed, ${fail} failed`)

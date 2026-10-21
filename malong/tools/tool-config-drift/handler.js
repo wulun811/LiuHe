@@ -88,7 +88,7 @@ function extractRefs(content, file) {
 function parseEnvFiles(workspaceDir) {
   const vars = new Set()
   const files = []
-  for (const name of ['.env', '.env.example', '.env.local', '.env.development', '.env.production']) {
+  for (const name of ['.env', '.env.example', '.env.local', '.env.development', '.env.production', '.env.production.example']) {
     const path = join(workspaceDir, name)
     if (!existsSync(path)) continue
     files.push(name)

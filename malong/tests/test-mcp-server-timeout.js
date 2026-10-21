@@ -36,7 +36,7 @@ try { rmSync(STATE_DIR, { recursive: true, force: true }) } catch {}
 const child = spawn(process.execPath, [join(MALONG, 'mcp-server.js'), '--workspace', WS], {
   stdio: ['pipe', 'pipe', 'pipe'],
   cwd: WS,
-  env: { ...process.env, MALONG_STATE_DIR: STATE_DIR, MALONG_REQUEST_TIMEOUT_MS: '300' },
+  env: { ...process.env, MALONG_STATE_DIR: STATE_DIR, MALONG_REQUEST_TIMEOUT_MS: '300', MALONG_INTERFACE: 'classic' },
 })
 
 let buffer = ''

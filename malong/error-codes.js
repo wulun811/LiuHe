@@ -1,4 +1,4 @@
-import { resolve, sep } from 'node:path'
+import { resolve, relative, sep } from 'node:path'
 
 export const ErrorCodes = {
   FILE_NOT_FOUND: 'FILE_NOT_FOUND',
@@ -13,6 +13,11 @@ export const ErrorCodes = {
   TIMEOUT: 'TIMEOUT',
   NO_MATCH: 'NO_MATCH',
   FILE_TOO_LARGE: 'FILE_TOO_LARGE',
+  BACKUP_FAILED: 'BACKUP_FAILED',
+  STALE_CONTENT: 'STALE_CONTENT',
+  CHUNK_SEQ_GAP: 'CHUNK_SEQ_GAP',
+  CHUNK_INCOMPLETE: 'CHUNK_INCOMPLETE',
+  INTERNAL: 'INTERNAL',
 }
 
 export function makeError(code, message, extra = {}) {
@@ -31,6 +36,39 @@ const DENY_PATTERNS = [
   { pattern: /(^|[\/\\])\.malong([\/\\]|$)/, name: '.malong' }, // R17-5：与 .ai-transactions 对称
 ]
 
+// 15-A（专家 621f6f8 Windows 验收 §4.1）：设备保留名与尾点/尾空格——段级拒绝。
+// Windows 语义：CON/NUL/COM1… 任一段（含带扩展名如 CON.txt）都是设备名；段尾点/空格会被文件系统静默裁剪。
+// 平台门：仅 win32 生效（Linux 的 aux.rs 类合法文件不受影响）；测试可用 MALONG_TEST_FORCE_WIN_PATH_CHECKS=1 强制。
+const WINDOWS_RESERVED_BASENAMES = new Set([
+  'con', 'prn', 'aux', 'nul',
+  ...Array.from({ length: 9 }, (_, i) => `com${i + 1}`),
+  ...Array.from({ length: 9 }, (_, i) => `lpt${i + 1}`),
+])
+
+export function windowsPathChecksEnabled() {
+  return process.platform === 'win32' || process.env.MALONG_TEST_FORCE_WIN_PATH_CHECKS === '1'
+}
+
+// 纯函数：返回 null，或 { segment, kind }；kind = reserved_name | trailing_dot_or_space
+export function findWindowsUnsafeSegment(filePath) {
+  for (const seg of String(filePath).split(/[\/\\]+/)) {
+    if (!seg || seg === '.' || /^[a-zA-Z]:$/.test(seg)) continue
+    if (/[. ]$/.test(seg)) return { segment: seg, kind: 'trailing_dot_or_space' }
+    if (WINDOWS_RESERVED_BASENAMES.has(seg.split('.')[0].toLowerCase())) {
+      return { segment: seg, kind: 'reserved_name' }
+    }
+  }
+  return null
+}
+
+function windowsUnsafeBlocked(bad, filePath) {
+  return {
+    blocked: true,
+    reason: 'windows_invalid_path',
+    detail: `windows-unsafe path segment 「${bad.segment}」 (${bad.kind}): device reserved names and trailing dot/space are not portable: ${filePath}`,
+  }
+}
+
 export function validateFilePath(filePath, workspaceDir) {
   if (!filePath || typeof filePath !== 'string') {
     return { blocked: true, reason: 'invalid_path', detail: 'file path is empty or not a string' }
@@ -45,6 +83,10 @@ export function validateFilePath(filePath, workspaceDir) {
       const resolved = resolve(filePath)
       const wsResolved = resolve(workspaceDir)
       if (resolved === wsResolved || resolved.startsWith(wsResolved + sep)) {
+        if (windowsPathChecksEnabled()) {
+          const bad = findWindowsUnsafeSegment(relative(wsResolved, resolved))
+          if (bad) return windowsUnsafeBlocked(bad, filePath)
+        }
         return { ok: true }
       }
       return { blocked: true, reason: 'path_traversal', detail: `absolute path outside workspace: ${filePath}` }
@@ -62,6 +104,10 @@ export function validateFilePath(filePath, workspaceDir) {
     if (pattern.test(filePath)) {
       return { blocked: true, reason: 'protected_path', detail: `file path contains protected segment "${name}": ${filePath}` }
     }
+  }
+  if (windowsPathChecksEnabled()) {
+    const bad = findWindowsUnsafeSegment(filePath)
+    if (bad) return windowsUnsafeBlocked(bad, filePath)
   }
   return { ok: true }
 }

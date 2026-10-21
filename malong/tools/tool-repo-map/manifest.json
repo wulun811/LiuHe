@@ -11,7 +11,19 @@
       },
       "dir": {
         "type": "string",
-        "description": "Subdirectory to map (default: workspace_dir)"
+        "description": "Subdirectory to map (default: workspace_dir). Escapes workspace_dir are rejected."
+      },
+      "page": {
+        "type": "integer",
+        "description": "Skeleton page number (default 1; clamped; out-of-range reports total_pages)."
+      },
+      "page_size": {
+        "type": "integer",
+        "description": "Entries per page / skeleton size hint (default 40; participates in page packing)."
+      },
+      "prefix": {
+        "type": "string",
+        "description": "Filter top-level entries by name prefix (a-z, #, or a-c range)."
       },
       "focused": {
         "type": "boolean",

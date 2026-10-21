@@ -27,3 +27,19 @@ malong/docs/
 
 # npm 平台子包二进制（CI 发布时生成）
 npm-platform/*/bin/
+
+# 实验凭证（禁止入库）
+.env
+*.env
+.env.withheld-*
+
+# 内部计划/验收材料只留开发仓（发布仓只发布产品与用户可见文档）
+/plan-0.5.0/
+
+# malong 运行时事务日志（非源码）
+malong/.ai-transactions/
+.ai-transactions/
+
+# Local usage reports and investigation evidence (not program source)
+/reports/
+malong/bin/*.exe

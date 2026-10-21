@@ -41,7 +41,7 @@ export async function handle(args, context) {
 
   // 16：file 参数共用守卫——无效文件先归因（否则 getSymbolsAtLine 静默空 → symbol 解析失败误导）
   if (codeIndexService?.resolveFileArg) {
-    const resolved = codeIndexService.resolveFileArg(file)
+    const resolved = codeIndexService.resolveFileArg(file, workspaceDir)
     if (!resolved.ok) return { error: resolved.error.code, message: resolved.error.message, suggestion: resolved.error.suggestion }
     file = resolved.path
   }
@@ -51,6 +51,10 @@ export async function handle(args, context) {
   const depth = Number.isNaN(depthRaw) ? 2 : Math.max(0, Math.min(depthRaw, 10))
   const maxCallers = parseInt(args?.max_callers) || 20
   const maxCallees = parseInt(args?.max_callees) || 20
+  // 第二轮审查：非原始 symbol 不得进入 SQLite bind（{} 裸抛 Too few parameter values）
+  if (args?.symbol != null && !['string', 'number'].includes(typeof args.symbol)) {
+    return { error: 'invalid_input', message: `symbol must be a string (got ${typeof args.symbol})` }
+  }
 
   const misuseWarning = detectMisuse(args)
 
@@ -95,7 +99,8 @@ export async function handle(args, context) {
     truncated_callees: impact.truncated_callees || (impact.callees || []).length > maxCallees,
     test_references: formatTestRefs(impact),
     recently_modified: checkRecentModifications(workspaceDir, impact),
-    next_step: `For full blast radius + risk level + test references, use impact_analysis(symbol="${impact.target_symbol || symbol}")`,
+    // H05（0.5.14）：建议动作给完整可执行参数（file + symbol）
+    next_step: 'For full blast radius + risk level + test references: code_query(mode="impact", workspace_dir="' + workspaceDir + '", file="' + file + '", symbol="' + (impact.target_symbol || symbol || '') + '")',
     metadata: {
       parse_time_ms: Date.now() - startTime,
       cache_hit: !!impact._fromCache,

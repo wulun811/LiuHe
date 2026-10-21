@@ -30,11 +30,14 @@ Every change must keep the suites green, and **new behavior must come with new a
 This runs, self-contained:
 
 - `cargo test` (Rust extraction correctness)
-- `npm test` (130+ assertions: primitives / embedded / mvp-batch)
+- `npm test` (166 JS test files, full chain 0 failures — primitives / embedded / mvp-batch / write-runtime / edit-transaction / dogfood r12–r30 / contract suites)
 - dogfood suites (`test-dogfood-r14.js`, `test-dogfood-r30.js` — real daemon, end-to-end)
 - git cleanliness check
 
 It reuses a running daemon if healthy, otherwise starts a debug-build one and cleans up.
+
+Faster iterations: `npm run test:fast` (core subset), `npm run test:file -- tests/xxx.js`
+(single file), `npm run test:timed` (per-file timing + top10).
 
 ## Commit conventions
 

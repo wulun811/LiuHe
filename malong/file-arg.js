@@ -5,16 +5,13 @@
 
 import { join, isAbsolute } from 'node:path'
 import { existsSync, statSync } from 'node:fs'
+import { parseMalongignore, isIgnored } from './file-collector.js'
+import { toWorkspaceRel } from './tools/entry-shared.js'
 
-// 归一化：剥 workspace 前缀 / 前导 ./ / 尾斜杠，绝对路径 → 相对（DB 存相对路径）
+// LH-005：混合分隔符/盘符归一——旧实现 startsWith(workspaceDir) 在 win 反斜杠/大小写差异下
+// 剥前缀失败（绝对路径残留 → DB miss）；统一走 toWorkspaceRel（POSIX 形式 + 相对化）。
 export function normalizeFilePath(file, workspaceDir) {
-  let norm = String(file).trim()
-  if (!norm) return ''
-  if (workspaceDir && norm.startsWith(workspaceDir)) {
-    norm = norm.slice(workspaceDir.length)
-  }
-  norm = norm.replace(/^[\\/]+/, '').replace(/^\.\//, '').replace(/[\\/]+$/, '')
-  return norm
+  return toWorkspaceRel(file, workspaceDir) || ''
 }
 
 // 返回 { ok: true, path, fileId } 或 { ok: false, error: { code, message, suggestion } }
@@ -49,7 +46,16 @@ export function resolveFileArg({ db, workspaceDir, file }) {
   }
   const abs = workspaceDir ? join(workspaceDir, path) : path
   if (existsSync(abs)) {
-    return { ok: false, error: { code: 'FILE_NOT_INDEXED', message: `File exists but is not indexed yet: ${path}`, suggestion: `Call reindex(workspace_dir=...) to index it (query tools auto-index on demand via ensureFreshFile; this error means the file was excluded or indexing failed)` } }
+    // R2：被 .malongignore 排除的文件 reindex 也永远不会索引——旧建议（Call reindex）白费一轮；
+    // 指明 target 显式指名可覆盖 ignore（findCandidates 的 target 目录递归即此设计）。
+    let suggestion = `Call reindex(workspace_dir=...) to index it (query tools auto-index on demand via ensureFreshFile; this error means the file was excluded or indexing failed)`
+    try {
+      const rules = workspaceDir ? parseMalongignore(join(workspaceDir, '.malongignore')) : []
+      if (rules.length && isIgnored(path, rules, false)) {
+        suggestion = `File is excluded by .malongignore, so reindex will NOT index it. Pass an explicit target (e.g. code_task with target={file:"${path}"}) — target-directed scan covers ignored files — or adjust .malongignore.`
+      }
+    } catch {}
+    return { ok: false, error: { code: 'FILE_NOT_INDEXED', message: `File exists but is not indexed yet: ${path}`, suggestion } }
   }
   return { ok: false, error: { code: 'FILE_NOT_FOUND', message: `No such file: ${path}`, suggestion: 'Check the path is relative to workspace_dir, or use glob to find the file' } }
 }

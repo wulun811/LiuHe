@@ -103,6 +103,16 @@ assert(r2.dead_code.some(d => d.symbol === 'itertools' && d.type === 'unused_imp
 const r3 = await handle({ workspace_dir: WS, scope: 'dirA' }, ctx)
 assert(r3.dead_code.some(d => d.name === 'deadInA' && d.type === 'unused_function'), 'scope 子目录死函数不被全仓 LIMIT50 截断')
 
+// 12-D：单文件 scope 的跨文件 import 判定——被 scope 外文件 import 的文件不报 orphan_file；
+// 文件内死函数照报（旧实现：import 目标只扫 scope 内 + detectDeadCode 收目录式前缀 'x.js/' → 双漏）
+writeFileSync(join(WS, 'lone.js'), 'export function deadExport() { return 1 }\nexport function usedExport() { return 2 }\n')
+writeFileSync(join(WS, 'consumer2.js'), "import { usedExport } from './lone.js'\nconsole.log(usedExport())\n")
+await svc.indexProject(WS, { timeout: 60000 })
+const r4 = await handle({ workspace_dir: WS, scope: 'lone.js', include_files: true }, ctx)
+assert(r4.dead_code.some(d => d.name === 'deadExport' && d.type === 'unused_function'), '单文件 scope：文件内死函数照报（detectDeadCode 前缀修复）')
+assert(!r4.dead_code.some(d => d.type === 'orphan_file' && d.file === 'lone.js'), '单文件 scope：被 scope 外 import 的文件不报 orphan_file')
+assert(!r4.dead_code.some(d => d.name === 'usedExport'), '单文件 scope：被跨文件使用的导出不报')
+
 // ③ 函数作为值传递形态（赋值 RHS / kwarg）refs 不记录 → isValueReferenced 豁免
 const { isValueReferenced } = await import(pathToFileURL(join(__dirname, '..', 'code-index.js')).href)
 writeFileSync(join(WS, 'valref.py'), [
@@ -120,6 +130,19 @@ assert(isValueReferenced('kwarg_only', join(WS, 'valref.py')), 'kwarg 值引用�
 writeFileSync(join(WS, 'cmp.py'), 'if a == maybe_fn:\n    pass\n')
 assert(!isValueReferenced('maybe_fn', join(WS, 'cmp.py')), '== 比较形态不豁免')
 assert(!isValueReferenced('nopeFn', join(WS, 'cmp.py')), '无赋值引用不豁免')
+
+// ⑧ dogfood-050：CJS require 未用绑定（旧实现只提 ESM import，unusedFs 漏报）
+{
+  writeFileSync(join(WS, 'src/cjs_app.js'), [
+    "const unusedFs = require('fs')",
+    "const path = require('path')",
+    "module.exports = function f(p) { return path.join(p, 'x') }",
+    "",
+  ].join('\n'))
+  const r4 = await handle({ workspace_dir: WS, scope: 'src/cjs_app.js' }, ctx)
+  assert(r4.dead_code.some(d => d.symbol === 'unusedFs' && d.type === 'unused_import'), `⑧ CJS 未用 require 报 unused_import（得 ${JSON.stringify(r4.dead_code.map(d => d.type + ':' + d.symbol))}）`)
+  assert(!r4.dead_code.some(d => d.symbol === 'path' && d.type === 'unused_import'), '⑧ 在用 require 不误报')
+}
 
 console.log(`\n== test-dead-code-sweeper: ${pass} passed, ${fail} failed ==`)
 process.exit(fail > 0 ? 1 : 0)

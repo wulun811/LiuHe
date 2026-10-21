@@ -123,11 +123,12 @@ pub fn extract_all(tree: &Tree, source: &str) -> super::ExtractResult {
             }
             "variable_declarator" => {
                 if let Some(name_node) = node.child_by_field_name("name") {
+                    // LH-003：declarator 全范围（含多行初始化器），不再只取名字节点行
                     symbols.push(Symbol {
                         name: source[name_node.byte_range()].to_string(),
                         kind: "variable".to_string(),
-                        start_line: name_node.start_position().row as u32 + 1,
-                        end_line: name_node.end_position().row as u32 + 1,
+                        start_line: node.start_position().row as u32 + 1,
+                        end_line: node.end_position().row as u32 + 1,
                         impl_for: None,
                     });
                 }
@@ -252,11 +253,12 @@ pub fn extract_symbols(tree: &Tree, source: &str) -> (Vec<Symbol>, Vec<Import>) 
             }
             "variable_declarator" => {
                 if let Some(name_node) = node.child_by_field_name("name") {
+                    // LH-003：declarator 全范围（含多行初始化器），不再只取名字节点行
                     symbols.push(Symbol {
                         name: source[name_node.byte_range()].to_string(),
                         kind: "variable".to_string(),
-                        start_line: name_node.start_position().row as u32 + 1,
-                        end_line: name_node.end_position().row as u32 + 1,
+                        start_line: node.start_position().row as u32 + 1,
+                        end_line: node.end_position().row as u32 + 1,
                         impl_for: None,
                     });
                 }
@@ -442,6 +444,24 @@ enum Status { OK, FAIL }
         let mods: Vec<&str> = result.refs.iter().filter(|r| r.kind == "import").map(|r| r.module.as_deref().unwrap_or("")).collect();
         assert!(mods.contains(&"java.util.List"), "import List: {:?}", mods);
         assert!(mods.contains(&"java.io.IOException"), "import IOException: {:?}", mods);
+    }
+
+    #[test]
+    fn variable_declarator_covers_multiline_initializer() {
+        let src = r#"
+class A {
+    int single = 1;
+    String multi = "a"
+        + "b"
+        + "c";
+    void m() {}
+}
+"#;
+        let tree = parse_java(src);
+        let result = extract_all(&tree, src);
+        let range = |name: &str| result.symbols.iter().find(|s| s.name == name).map(|s| (s.start_line, s.end_line));
+        assert_eq!(range("single"), Some((3, 3)), "single-line declarator");
+        assert_eq!(range("multi"), Some((4, 6)), "multi-line initializer");
     }
 
 }

@@ -361,3 +361,26 @@ pub fn extract_references(tree: &Tree, source: &str) -> Vec<Reference> {
     walk(tree.root_node(), source, 0, &mut refs);
     refs
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse_python(src: &str) -> Tree {
+        let mut parser = tree_sitter::Parser::new();
+        let lang: tree_sitter::Language = tree_sitter_python::LANGUAGE.into();
+        parser.set_language(&lang).unwrap();
+        parser.parse(src, None).unwrap()
+    }
+
+    #[test]
+    fn assignment_covers_multiline_value() {
+        // LH-003 确认：Python 用 assignment 整节点，多行值本就不截断（回归锁）
+        let src = "CONFIG = {\n    \"a\": 1,\n    \"b\": 2,\n}\nRESULT = compute(\n    1,\n    2,\n)\n";
+        let tree = parse_python(src);
+        let result = extract_all(&tree, src);
+        let range = |name: &str| result.symbols.iter().find(|s| s.name == name).map(|s| (s.start_line, s.end_line));
+        assert_eq!(range("CONFIG"), Some((1, 4)), "dict assignment range");
+        assert_eq!(range("RESULT"), Some((5, 8)), "call assignment range");
+    }
+}

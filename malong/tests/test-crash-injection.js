@@ -257,5 +257,33 @@ console.log('\n── ⑨ atomicWrite fsync + prune sanity ──')
   assert(p.pruned === 0 && p.skipped_throttle === false, 'prune 无目录 no-op')
 }
 
+// ── ⑪ 14-C 恢复安全性：在途事务存活判定（pid 证据，AC20/AC21 真双进程修复的失败路径）──
+console.log('\n── ⑪ in-flight writer kept (14-C) ──')
+{
+  const ws = join(TMP, 'in-flight')
+  mkdirSync(ws, { recursive: true })
+  writeFileSync(join(ws, 't.js'), 'let t = 1;')
+  // 本进程是写者：createJournal 已落 pid → recover 必须不处理（旧实现当孤儿删 / 标 abandoned）
+  const j = createJournal(ws, 't.js', join(ws, 't.js'), 'let t = 1;', { editMode: 'patch' })
+  const r1 = await recoverJournals(ws)
+  assert(r1.some(x => x.txn_id === j.txnId && x.action === 'in_flight_kept'), '活写者事务 kept（得 ' + JSON.stringify(r1.map(x => x.action)) + '）')
+  const st1 = JSON.parse(readFileSync(join(j.dir, 'state.json'), 'utf-8'))
+  assert(st1.state === 'created' && existsSync(j.dir), '活事务未被改写（state 仍 created、目录保留）')
+  // 写者已退出（pid 指向已退出子进程）→ 恢复按原语义处理（清理能力不退化）
+  const dead = spawnSync(process.execPath, ['-e', ''])
+  writeFileSync(join(j.dir, 'pid'), String(dead.pid ?? 999999))
+  const r2 = await recoverJournals(ws)
+  assert(r2.some(x => x.txn_id === j.txnId && x.action === 'abandoned'), 'dead pid → abandoned（得 ' + JSON.stringify(r2.map(x => x.action)) + '）')
+  // 无 state 的孤儿（createJournal 中途）：活 pid → kept；死 pid → orphan_removed
+  const dir2 = join(ws, JOURNAL_ROOT, 'journal', 'txn_live_orphan')
+  mkdirSync(dir2, { recursive: true })
+  writeFileSync(join(dir2, 'pid'), String(process.pid))
+  const r3 = await recoverJournals(ws)
+  assert(r3.some(x => x.txn_id === 'txn_live_orphan' && x.action === 'in_flight_kept'), '无 state 活孤儿 kept（得 ' + JSON.stringify(r3.map(x => x.action)) + '）')
+  writeFileSync(join(dir2, 'pid'), '999999')
+  const r4 = await recoverJournals(ws)
+  assert(r4.some(x => x.txn_id === 'txn_live_orphan' && x.action === 'orphan_removed'), '死 pid 无 state → orphan_removed（得 ' + JSON.stringify(r4.map(x => x.action)) + '）')
+}
+
 console.log(`\n== test-crash-injection: ${pass} passed, ${fail} failed ==`)
 process.exit(fail > 0 ? 1 : 0)

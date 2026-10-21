@@ -3,7 +3,7 @@
 //       dryRun 只报不删（无副作用） / 节流跳过 + force 绕过 / maxAgeHours 可配置 / 空目录 no-op
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { mkdirSync, writeFileSync, rmSync, existsSync, utimesSync } from 'node:fs'
+import { mkdirSync, writeFileSync, rmSync, existsSync, utimesSync, readFileSync } from 'node:fs'
 import os from 'node:os'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -11,7 +11,7 @@ let pass = 0, fail = 0
 function assert(cond, msg) {
   if (cond) { pass++ } else { fail++; console.error('  FAIL:', msg) }
 }
-const { pruneJournals } = await import(pathToFileURL(join(__dirname, '..', 'write-journal.js')).href)
+const { pruneJournals, recoverJournals } = await import(pathToFileURL(join(__dirname, '..', 'write-journal.js')).href)
 
 const TMP = join(os.tmpdir(), 'opencode', 'journal-prune-test')
 try { rmSync(TMP, { recursive: true, force: true }) } catch {}
@@ -67,6 +67,31 @@ function jroot(ws) { return join(ws, '.malong', 'journal') }
   assert(!existsSync(join(jroot(ws), 'txn_rolled')), '③ 带时间戳 rolled_back 被删')
 }
 
+// ── ③c live 审查：recover 不得把 failed 改判 needs_review（否则永不被 prune，谎报待审）──
+{
+  const ws = join(TMP, 'ws3c'); mkdirSync(ws, { recursive: true })
+  const dir = mkJournal(ws, 'txn_failed_real', { state: 'failed', reason: 'disk full' })
+  writeFileSync(join(dir, 'manifest.json'), JSON.stringify({ txn_id: 'txn_failed_real', file: 'x.txt' }))
+  writeFileSync(join(dir, 'backup', 'x.txt'), 'orig')
+  await recoverJournals(ws)
+  const st = JSON.parse(readFileSync(join(dir, 'state.json'), 'utf-8'))
+  assert(st.state === 'failed', `③c recover 不改判 failed（得 ${st.state}）`)
+}
+
+// ── ③d 第二轮审查：回滚失败（内容状态未知）→ needs_review（prune 保护），不再写可被清掉的 failed ──
+{
+  const ws = join(TMP, 'ws3d'); mkdirSync(ws, { recursive: true })
+  const dir = mkJournal(ws, 'txn_rbfail', { state: 'staged' })
+  writeFileSync(join(dir, 'manifest.json'), '{invalid json')
+  await recoverJournals(ws)
+  const st = JSON.parse(readFileSync(join(dir, 'state.json'), 'utf-8'))
+  assert(st.state === 'needs_review' && !!st.needs_review_at, `③d 回滚失败 → needs_review（得 ${st.state}）`)
+  const oldDate = new Date(Date.now() - 48 * 3600 * 1000)
+  utimesSync(dir, oldDate, oldDate)
+  pruneJournals(ws, { force: true })
+  assert(existsSync(dir), '③d 回滚失败事务不被 prune（备份保留待人工核对）')
+}
+
 // ── ④ dryRun 只报不删（且无副作用：不写 marker） ──
 {
   const ws = join(TMP, 'ws4'); mkdirSync(ws, { recursive: true })
@@ -109,6 +134,17 @@ function jroot(ws) { return join(ws, '.malong', 'journal') }
   assert(r1.pruned === 0 && r1.skipped_throttle === false, '⑦ 无 journal 目录 no-op')
   const r2 = pruneJournals(join(TMP, 'no-such-ws-xyz'), { force: true })
   assert(r2.pruned === 0, '⑦ workspace 不存在 no-op 不抛')
+}
+
+// A second process can recover between mkdir and the first pid-file write.
+{
+  const ws = join(TMP, 'ws-publication')
+  const id = `txn_1234_abcdef01_p${process.pid}`
+  const dir = join(jroot(ws), id)
+  mkdirSync(join(dir, 'backup'), { recursive: true })
+  const recovered = await recoverJournals(ws)
+  assert(existsSync(dir), 'journal publication gap: live writer directory is preserved without pid file')
+  assert(recovered.some(r => r.txn_id === id && r.action === 'in_flight_kept'), 'journal publication gap is classified in flight')
 }
 
 try { rmSync(TMP, { recursive: true, force: true }) } catch {}

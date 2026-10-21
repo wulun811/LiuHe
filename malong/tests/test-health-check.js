@@ -2,7 +2,7 @@
 // 覆盖：readUsageStats 解析/聚合/success_rate 口径（error 不计成功）、runHealthCheck 检查项
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs'
+import { mkdirSync, writeFileSync, rmSync, existsSync, utimesSync, symlinkSync, unlinkSync } from 'node:fs'
 import os from 'node:os'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -13,6 +13,96 @@ function assert(cond, msg) {
 const hc = await import(pathToFileURL(join(__dirname, '..', 'health-check.js')).href)
 
 const TMP = join(os.tmpdir(), 'opencode', 'health-check-test')
+// ── 7-C（2026-10-07 专家复测 P1-B）：解析器/服务器运行身份核验 ──
+{
+  mkdirSync(TMP, { recursive: true })
+  const semX = { getStatus: () => ({ current: 0, max: 3, queue: [] }) }
+  const activeX = new Map()
+  const svcBase = { getMode: () => 'rust-service', isRustService: () => true }
+
+  // ① 有身份且一致 → PASS + 结构化 parser_identity
+  const same = '/opt/malong/malong-parse'
+  const ident = { endpoint: 'tcp=127.0.0.1:31001', connected: true, resolved_bin: same, resolved_bin_size: 100, resolved_bin_sha256: 'a'.repeat(64), daemon: { version: '0.5.0', pid: 42, uptime: 9, exe_path: same, exe_size: 100, exe_mtime_ms: 1, build_commit: 'abc1234' } }
+  const r1 = await hc.runHealthCheck({ stateDir: TMP, workspacesDir: join(TMP, 'ws'), semaphore: semX, activeRequests: activeX, log: () => {}, parseService: { ...svcBase, getIdentity: async () => ident } })
+  const p1 = r1.checks.find(c => c.name === 'Parse Service')
+  assert(p1 && p1.status === 'PASS' && /daemon v0\.5\.0 pid=42/.test(p1.detail), '7-C 身份行 PASS 含 daemon 版本/pid（得 ' + p1?.status + ' | ' + p1?.detail + '）')
+  assert(r1.parser_identity && r1.parser_identity.daemon?.exe_path === same && r1.parser_identity.drift?.detected === false, '7-C 结构化 parser_identity（得 ' + JSON.stringify(r1.parser_identity?.drift) + '）')
+
+  // ② daemon 与可解析二进制不一致 → WARN drift（升级未生效可直接看见）
+  const ident2 = { ...ident, daemon: { ...ident.daemon, exe_path: 'N:/old/malong-parse.exe' } }
+  const r2 = await hc.runHealthCheck({ stateDir: TMP, workspacesDir: join(TMP, 'ws'), semaphore: semX, activeRequests: activeX, log: () => {}, parseService: { ...svcBase, getIdentity: async () => ident2 } })
+  const p2 = r2.checks.find(c => c.name === 'Parse Service')
+  assert(p2 && p2.status === 'WARN' && /differs/.test(p2.detail), '7-C drift → WARN（得 ' + p2?.status + ' | ' + p2?.detail + '）')
+  assert(r2.parser_identity?.drift?.detected === true, '7-C drift 结构化标记')
+
+  // ③ 旧 daemon（无 exe 字段）→ PASS + predates 提示（优雅降级）
+  const ident3 = { ...ident, daemon: { version: '0.3.0', pid: 7, uptime: 1 } }
+  const r3 = await hc.runHealthCheck({ stateDir: TMP, workspacesDir: join(TMP, 'ws'), semaphore: semX, activeRequests: activeX, log: () => {}, parseService: { ...svcBase, getIdentity: async () => ident3 } })
+  const p3 = r3.checks.find(c => c.name === 'Parse Service')
+  assert(p3 && p3.status === 'PASS' && /predates identity/.test(p3.detail), '7-C 旧 daemon 优雅降级（得 ' + p3?.detail + '）')
+
+  // ⑤ 修复（2026-10-18）：符号链接/别名安装不得误报 DRIFT（daemon 自报 realpath，resolved_bin 是链接路径）
+  {
+    const realDir = join(TMP, 'real-bin')
+    const linkDir = join(TMP, 'link-bin')
+    mkdirSync(realDir, { recursive: true })
+    writeFileSync(join(realDir, 'malong-parse'), 'bin')
+    let linkOk = true
+    try {
+      try { rmSync(linkDir, { recursive: true, force: true }) } catch {}
+      mkdirSync(linkDir, { recursive: true })
+      try { unlinkSync(join(linkDir, 'malong-parse')) } catch {}
+      symlinkSync(join(realDir, 'malong-parse'), join(linkDir, 'malong-parse'))
+    } catch { linkOk = false }
+    if (!linkOk) {
+      console.log('  [NOT_RUN] 7-C 符号链接安装身份核验（本平台不允许创建符号链接）')
+    } else {
+      const ident5 = { ...ident, resolved_bin: join(linkDir, 'malong-parse'), resolved_bin_size: 3, daemon: { ...ident.daemon, exe_path: join(realDir, 'malong-parse'), exe_size: 3 } }
+      const r5 = await hc.runHealthCheck({ stateDir: TMP, workspacesDir: join(TMP, 'ws'), semaphore: semX, activeRequests: activeX, log: () => {}, parseService: { ...svcBase, getIdentity: async () => ident5 } })
+      const p5 = r5.checks.find(c => c.name === 'Parse Service')
+      assert(p5 && p5.status === 'PASS' && r5.parser_identity?.drift?.detected === false, '7-C 符号链接安装不误报 DRIFT（得 ' + p5?.status + ' | ' + p5?.detail + '）')
+      // 真正不同的二进制仍必须报 DRIFT（realpath 不放松判据）
+      const ident6 = { ...ident5, daemon: { ...ident5.daemon, exe_path: join(realDir, 'other-parse') } }
+      const r6 = await hc.runHealthCheck({ stateDir: TMP, workspacesDir: join(TMP, 'ws'), semaphore: semX, activeRequests: activeX, log: () => {}, parseService: { ...svcBase, getIdentity: async () => ident6 } })
+      const p6 = r6.checks.find(c => c.name === 'Parse Service')
+      assert(p6 && p6.status === 'WARN' && /differs/.test(p6.detail), '7-C realpath 后仍能识别真实漂移（得 ' + p6?.status + ' | ' + p6?.detail + '）')
+    }
+  }
+
+  // ④ 无 getIdentity（旧 service）→ 不崩，回退 config
+  const r4 = await hc.runHealthCheck({ stateDir: TMP, workspacesDir: join(TMP, 'ws'), semaphore: semX, activeRequests: activeX, log: () => {}, parseService: { ...svcBase, getConfigMode: () => 'uds=/tmp/x.sock' } })
+  const p4 = r4.checks.find(c => c.name === 'Parse Service')
+  assert(p4 && p4.status === 'PASS' && /uds=\/tmp\/x\.sock/.test(p4.detail), '7-C 旧 service 回退 config（得 ' + p4?.detail + '）')
+
+  // ⑤ Server Identity（buildInfo）
+  const r5 = await hc.runHealthCheck({ stateDir: TMP, workspacesDir: join(TMP, 'ws'), semaphore: semX, activeRequests: activeX, log: () => {}, buildInfo: { version: '0.5.0', commit: 'deadbee', pid: 123, node: 'v22.0.0' } })
+  const s5 = r5.checks.find(c => c.name === 'Server Identity')
+  assert(s5 && s5.status === 'PASS' && /v0\.5\.0/.test(s5.detail) && /commit=deadbee/.test(s5.detail), '7-C Server Identity 行（得 ' + s5?.detail + '）')
+
+  // ⑥ parse-client.describeIdentity 形状（未连接也可用）
+  const pc = await import(pathToFileURL(join(__dirname, '..', 'parse-client.js')).href)
+  const di = typeof pc.describeIdentity === 'function' ? await pc.describeIdentity() : null
+  assert(di && typeof di.endpoint === 'string' && typeof di.connected === 'boolean' && 'resolved_bin' in di && 'daemon' in di, '7-C describeIdentity 形状（得 ' + JSON.stringify({ endpoint: di?.endpoint, connected: di?.connected }) + '）')
+}
+
+// ── 7-D（2026-10-07 专家复测 LH-002）：迁移状态行（incomplete → WARN + 重试指引；complete/无 → PASS）──
+{
+  mkdirSync(TMP, { recursive: true })
+  const semY = { getStatus: () => ({ current: 0, max: 3, queue: [] }) }
+  writeFileSync(join(TMP, 'state-migration.json'), JSON.stringify({ schema: 1, status: 'incomplete', attempts: 3, failed: [{ entry: '*', error: 'signal SIGABRT' }], legacy_dir: '/old', next_dir: TMP }))
+  const rA = await hc.runHealthCheck({ stateDir: TMP, workspacesDir: join(TMP, 'ws'), semaphore: semY, activeRequests: new Map(), log: () => {} })
+  const mA = rA.checks.find(c => c.name === 'State Migration')
+  assert(mA && mA.status === 'WARN' && /retry/i.test(mA.detail), '7-D incomplete → WARN + 重试指引（得 ' + mA?.status + ' | ' + mA?.detail + '）')
+  writeFileSync(join(TMP, 'state-migration.json'), JSON.stringify({ schema: 1, status: 'complete', attempts: 1, moved: ['workspaces'], failed: [] }))
+  const rB = await hc.runHealthCheck({ stateDir: TMP, workspacesDir: join(TMP, 'ws'), semaphore: semY, activeRequests: new Map(), log: () => {} })
+  const mB = rB.checks.find(c => c.name === 'State Migration')
+  assert(mB && mB.status === 'PASS' && /complete/.test(mB.detail), '7-D complete → PASS（得 ' + mB?.detail + '）')
+  rmSync(join(TMP, 'state-migration.json'), { force: true })
+  const rC = await hc.runHealthCheck({ stateDir: TMP, workspacesDir: join(TMP, 'ws'), semaphore: semY, activeRequests: new Map(), log: () => {} })
+  const mC = rC.checks.find(c => c.name === 'State Migration')
+  assert(mC && mC.status === 'PASS', '7-D 无 marker → PASS（得 ' + mC?.detail + '）')
+}
+
 try { rmSync(TMP, { recursive: true, force: true }) } catch {}
 mkdirSync(join(TMP, '.config', 'malong'), { recursive: true })
 
@@ -174,8 +264,6 @@ mkdirSync(join(TMP, '.config', 'malong'), { recursive: true })
 }
 
 try { rmSync(TMP, { recursive: true, force: true }) } catch {}
-console.log(`== test-health-check: ${pass} passed, ${fail} failed ==`)
-if (fail > 0) process.exit(1)
 
 // ── R22-㉑ Y004 门禁：health action=matrix 查工具边界判据 ──
 // docs/ 仅工作区维护（OSS 清理后不入库），CI checkout 无 Y004 矩阵 →
@@ -185,7 +273,7 @@ if (fail > 0) process.exit(1)
   const ctx = { runHealthCheck: () => ({ status: 'ok', checks: [] }), stateDir: TMP }
   const r = await handle({ action: 'matrix', tool: 'read_symbol' }, ctx)
   if (r.error === 'matrix_unavailable') {
-    console.log(`  SKIP Y004 全量断言（matrix_unavailable: ${r.message}）`)
+    console.log(`  ⚠ NOT_RUN: Y004 矩阵断言 7 条（matrix_unavailable: ${r.message}）`)
   } else {
     assert(r.registered === true, `matrix 命中已登记工具 read_symbol（得 ${JSON.stringify(r)}）`)
     assert(typeof r.coverage === 'string' && r.coverage.includes('test-'), `coverage 列含测试引用（得 ${r.coverage}）`)
@@ -228,4 +316,53 @@ if (fail > 0) process.exit(1)
   }
 }
 
+// ── D：health cleanup 必须顺带清理超龄终态 entry-tasks（此前 pruneTasks 无调用方 → 永不自动清）──
+{
+  const entryStore = await import(pathToFileURL(join(__dirname, '..', 'tools', 'entry-store.js')).href)
+  const healthMod = await import(pathToFileURL(join(__dirname, '..', 'tools', 'tool-health', 'handler.js')).href)
+  process.env.MALONG_STATE_DIR = join(TMP, 'state-health')
+  const WS2 = join(TMP, 'ws-entry'); mkdirSync(WS2, { recursive: true })
+  const doneTask = { task_id: 'task_old', revision: 1, lifecycle: 'completed', node: 'done', materials: [], workspace_dir: WS2 }
+  entryStore.putTask(WS2, doneTask, { type: 'task_created', task: doneTask })
+  const snap = join(process.env.MALONG_STATE_DIR, 'entry-tasks', entryStore.wsHash(WS2), 'task_old.json')
+  const old = Date.now() / 1000 - 3600 * 73 // 73h（cutoff 72h）：防止 utimes 与 prune 同毫秒导致边界毛刺
+  utimesSync(snap, old, old)
+  // 失败路径（live 复验修正）：jobs 写在 host-config getStateDir()，而非传入的 context.stateDir（此处 TMP 为诱饵）——
+  // 旧接线 pruneJobs(context.stateDir) 对诱饵目录找不到 jobs/，静默 pruned:0，超龄终态 job 永不清理
+  const jobDir = join(process.env.MALONG_STATE_DIR, 'jobs', 'deadbeef0000')
+  mkdirSync(jobDir, { recursive: true })
+  const oldJob = join(jobDir, 'job_old_terminal.json')
+  writeFileSync(oldJob, JSON.stringify({ job_id: 'job_old_terminal', state: 'failed', created: '2026-01-01T00:00:00.000Z', finished: '2026-01-01T00:00:01.000Z' }))
+  const r = await healthMod.handle({ action: 'cleanup', dry_run: false, max_age_days: 3 }, {
+    runHealthCheck: hc.runHealthCheck, stateDir: TMP, workspacesDir: join(TMP, 'ws'), codeIndexService: {},
+  })
+  assert(r?.entry_tasks?.pruned >= 1, `cleanup 顺带清理 entry-tasks（得 ${JSON.stringify(r?.entry_tasks)}）`)
+  assert(!existsSync(snap), '超龄终态任务快照已删除')
+  assert(r?.jobs_pruned?.pruned >= 1, `cleanup prune 的是 getStateDir() 下的 jobs（得 ${JSON.stringify(r?.jobs_pruned)}）`)
+  assert(!existsSync(oldJob), '超龄终态 job 记录已删除（context.stateDir 为诱饵也不影响）')
+  delete process.env.MALONG_STATE_DIR
+}
+
+// ── S3：库列表 >10 条 → 截断 top-10 + omitted 计数 ──
+{
+  const WSROOT = join(TMP, 'many-ws')
+  for (let i = 0; i < 12; i++) {
+    const d = join(WSROOT, 'w' + String(i).padStart(2, '0'))
+    mkdirSync(d, { recursive: true })
+    writeFileSync(join(d, 'code-index.db'), '')
+  }
+  const r = await hc.runHealthCheck({
+    stateDir: TMP,
+    workspacesDir: WSROOT,
+    semaphore: { getStatus: () => ({ current: 0, max: 3, queue: [] }) },
+    activeRequests: new Map(),
+    log: () => {},
+  })
+  const dbCheck = r.checks.find(c => c.name === 'Workspace databases')
+  assert(dbCheck?.databases?.length === 10 && dbCheck.databases_omitted === 2, `S3 库列表截断 top-10（得 ${dbCheck?.databases?.length}/${dbCheck?.databases_omitted}）`)
+}
+
 try { rmSync(TMP, { recursive: true, force: true }) } catch {}
+
+console.log(`== test-health-check: ${pass} passed, ${fail} failed ==`)
+if (fail > 0) process.exit(1)

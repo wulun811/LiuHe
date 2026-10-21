@@ -5,21 +5,21 @@
 **English** | [简体中文](README.zh-CN.md) | [Docs](https://wulun811.github.io/LiuHe) | [GitHub](https://github.com/wulun811/LiuHe)
 
 [![wulun811/LiuHe MCP server](https://glama.ai/mcp/servers/wulun811/LiuHe/badges/score.svg)](https://glama.ai/mcp/servers/wulun811/LiuHe)
-![tests](https://img.shields.io/badge/tests-2240%20assertions%20passed-brightgreen)
-![tools](https://img.shields.io/badge/tools-44%20MCP-blue)
+![tests](https://img.shields.io/badge/tests-166%20files%20%C2%B7%200%20failed-brightgreen)
+![tools](https://img.shields.io/badge/tools-44%20classic%20%2F%2013%20graph%20%2F%2018%20diagnostic-blue)
 ![languages](https://img.shields.io/badge/parsers-10%20languages-brightgreen)
 ![read](https://img.shields.io/badge/read%20P95-1ms-brightgreen)
 ![write](https://img.shields.io/badge/write%20P95-7ms-blue)
 ![memory](https://img.shields.io/badge/512MB%20limit-RSS%20134MB-brightgreen)
 ![concurrency](https://img.shields.io/badge/128%20concurrent%20requests-zero%20OOM-brightgreen)
 ![throughput](https://img.shields.io/badge/throughput-588%20calls%2Fs-blue)
-![token](https://img.shields.io/badge/token%20savings-65%25-brightgreen)
+![token](https://img.shields.io/badge/token%20est%20(fixed--path)-65%25-blue)
 ![license](https://img.shields.io/badge/license-MIT-blue)
-![version](https://img.shields.io/badge/version-0.4.7-blue)
-![commits](https://img.shields.io/badge/commits-249-blue)
+![version](https://img.shields.io/badge/version-0.5.27-blue)
+![commits](https://img.shields.io/github/commit-count/wulun811/LiuHe)
 
 **Malong LiuHe** is a toolkit built for LLMs rather than humans. It ships two components:
-- **`malong/`** — an MCP toolset (44 tools): symbol read/write, indexing, impact analysis, reference tracing, call graphs, dead-code detection, code review, security scanning, atomic batch editing, test orchestration, pipeline verification — served to the LLM over MCP (JSON-RPC over stdio).
+- **`malong/`** — an MCP toolset whose **default tier is the Six-He line** (13 tools: `code_task → code_read → code_patch / code_batch → code_check → code_control`, with task state, evidence and structured `next_action` hand-back built in); the classic full catalog (44) and the diagnostic tier (18) are one env away — `MALONG_INTERFACE=classic` / `MALONG_INTERFACE=diagnostic`. The catalog spans symbol read/write, indexing, impact analysis, reference tracing, call graphs, dead-code detection, code review, security scanning, atomic batch editing, test orchestration, pipeline verification, plus capability discovery (`code_query` mode=capabilities/capability) and the ADR-018 full-call outlet (`invoke_capability`) — served to the LLM over MCP (JSON-RPC over stdio). Since 0.5.24 the Six-He line is the default; classic remains the full catalog.
 - **`malong-parse/`** — a Rust parsing service: a tree-sitter-based multi-language symbol extraction engine (JavaScript/TypeScript/TSX/Python/Go/Rust/C/C++/Java/Bash), talking to the toolset over a Unix socket, with an LRU tree cache and batched parallel extraction.
 
 ## Core Idea
@@ -42,9 +42,10 @@ Traditional tools (git, sed, IDE) assume a user with hands, eyes, and memory. An
 | Memory | **RSS 134MB / 26%** | under a real docker `--memory=512m` cgroup limit |
 | Concurrency | **128 concurrent / 256 in-flight requests, zero OOM** | 32-way mixed read+write on one hot file, no tearing, DB `integrity_check` PASS |
 | Throughput | **~588 calls/s** | single-threaded ceiling — 60–600× real LLM demand |
-| Token savings | **↓65.3%** | same task 7673 → 2662 est. (primitives) |
-| Call reduction | **↓50.0%** | 6 calls (legacy) → 3 calls (primitives) |
-| Tool-description compression | **44 tools ≈ 1.33k tokens** | tiered: core kept, low-freq ≤70 chars, verbose ≤230; detail flows via next_step hints |
+| Token estimate (fixed-path) | **↓65.3%** | scripted `measure-trail.js`: 6-step legacy chain → 3-call primitives, 7673 → 2662 chars/4 est. **Fixed editor path only — not a host-vs-malong nor an agentic-conversation result.** |
+| Call reduction (fixed-path) | **↓50.0%** | 6 calls (legacy chain) → 3 calls (primitives); same scripted path |
+| Tool-description compression | **44 classic tools ≈ 1.33k tokens** | tiered: core kept, low-freq ≤70 chars, verbose ≤230; detail flows via next_step hints |
+| Default-tier catalog tax (per turn) | **13 tools = 16.5 KB ≈ 4.86k tokens** | descriptions 2.0 KB (≈0.60k) + inputSchema 14.5 KB (≈4.26k) — the schema is 88% of it; to shrink the catalog, cut the parameter surface, not the prose |
 | Index throughput | **538 files / 7s** | scoped reindex, measured |
 | dry_run fidelity | **47/47** | golden-hash comparison across 3 languages, 100% |
 | Concurrent writes to same symbol | **16/16** | exactly one winner + one conflict, zero silent overwrites |
@@ -65,21 +66,24 @@ Traditional tools (git, sed, IDE) assume a user with hands, eyes, and memory. An
 
 | Category | Tools |
 |----------|-------|
+| **Six-He line** (graph + stateful — recommended daily entry) | `code_task` (resolve + plan) → `code_read` (materials + `read_ref`) → `code_patch` / `code_batch` / `code_maintain` (journaled writes) → `code_check` (evidence) → `code_control` (status / resume / expand / reopen / job); plus `code_status`, `code_audit`, `code_worktree`, `edit_transaction` — 11 tools, env-gated |
 | **I/O primitives** | `read_symbol` (symbol read + version), `write_symbol` / `write_symbols` (safe write: conflict state machine + atomic write + undo) |
 | **Index & search** | `reindex`, `symbol_search`, `code_search` (keyword + regex intent patterns — NOT semantic search), `repo_map` (98ms file map; skeleton pagination: `page`/`page_size`/`prefix` — truncated output always carries the full top-level skeleton with page numbers)
 | **Analysis** | `impact_analysis` (blast radius + risk), `call_chain`, `references`, `dep_graph`, `inspect` (outline + refs + call chain in one), `trace_symbol` (constant tracing + hardcoded copies) |
-| **Editing** | `edit_batch`, `edit_transaction` (atomic txn + rollback + cross-session lock), `edit_collision_guard` (write conflict detection), `edit_sandbox` (pre-write validation), `diff_facts` (symbol changes + test sync), `rename_symbol` (atomic cross-file rename), `git_worktree` (isolated branch + verify + merge) |
+| **Editing** | `edit_batch`, `edit_transaction` (atomic txn + rollback + cross-session lock + dry-run preview + create), `edit_collision_guard` (write conflict detection), `sandbox_validate` (pre-write validation), `diff_facts` (symbol changes + test sync), `rename_symbol` (atomic cross-file rename), `git_worktree` (isolated branch + verify + merge) |
 | **Quality gates** | `code_review`, `security_review` (regex security patterns), `code_quality` (5-dim probe), `style_sniffer`, `guard_patterns`, `naming_consistency`, `exception_guard`, `config_drift`, `dependency_gatekeeper`, `fix_imports`, `sweep_dead_code`, `mock_sync` — all pure regex/AST, zero LLM calls, deterministic |
 | **Engineering** | `test_bridge` (run/suggest/discover), `find_tests`, `verify_pipeline` (lint/test/typecheck stages), `debug_runner` (error analysis), `patch_parser` (SEARCH/REPLACE), `tsc_check`, `spec_gen`, `active_todos` |
 | **System** | `health`, `gc`, `feedback` |
+
+> **Long test suites must run in the background.** The MCP request has a hard 120s ceiling and a foreground stage is capped at 110s, so a suite that takes minutes is reported as `failed` — that is a request-budget truncation, **not** a code defect. Run it as a background job instead: `code_check` with `run: true, async: true` (600s cap), then poll with `code_control(action="job")`.
 
 ## Architecture
 
 ```
 ┌─────────────────────────┐     ┌──────────────────────────────┐
 │  LLM Client (MCP)       │     │  malong-parse (Rust daemon)  │
-│  malong/ 44 tools       │◄───►│  tree-sitter, 10 languages   │
-│  SQLite index (per ws)  │     │  LRU tree cache 50MB / batch │
+│  malong/ 13 six-he      │◄───►│  tree-sitter, 10 languages   │
+│  (+44/18 gated)         │     │  LRU tree cache 50MB / batch │
 │  Unix socket client     │     │  catch_unwind crash recovery │
 └─────────────────────────┘     └──────────────────────────────┘
 ```
@@ -91,7 +95,7 @@ Traditional tools (git, sed, IDE) assume a user with hands, eyes, and memory. An
 
 ## Self-Hosting (Dogfooding)
 
-30+ rounds of "Malong reviews Malong": the toolset audits and fixes its **own** code, with dozens of real bugs fixed and locked by tests — including directory-scope filtering gaps, false dead-code reports for registration patterns, lost constant read-sites, and SQL parameterization cleanup. Every round grew the assertion count (now 2240 across 87 JS test files, full chain 0 failures). Latest round: fixed a Windows-only path-form mismatch in batch indexing — the file collector emits forward-slash paths while `join(repo, r.path)` produces backslashes on win32, so every `statMap` lookup missed (all `files.size = 0`, outline `tokens_estimate` stuck at 0, `content_hash` surviving only via a CWD-dependent fallback) — locked by a new collector→indexBatch chain test, measured on Windows 2026-09-04.
+30+ rounds of "Malong reviews Malong": the toolset audits and fixes its **own** code, with dozens of real bugs fixed and locked by tests — including directory-scope filtering gaps, false dead-code reports for registration patterns, lost constant read-sites, and SQL parameterization cleanup. Every round grew the suite (now 166 JS test files, full chain 0 failures). Latest round (r5): cross-file reference resolution is now import-aware — member calls such as `path.join` no longer bind to same-named local symbols (216 false bindings in this repo alone), cross-language (Python↔JS) links are blocked by a language-family filter, and aliases resolve through the import graph (ESM specifier scanning added on the JS side) — locked by `test-crossfile-resolve` (14 assertions, red→green); the DSH bridge also now pins `MALONG_STATE_DIR` when spawning the server, locked by `test-dsh-bridge`.
 
 ## Scan Boundaries (limits acknowledged; committed within)
 
@@ -118,18 +122,21 @@ cd ../malong && npm ci
 # 3) Register the MCP server (works with any MCP client, e.g. opencode / Claude Desktop)
 #    opencode (project-root opencode.json; Windows paths use double backslashes, Linux/macOS forward slashes):
 #    {
-#      "mcp": {
-#        "malong": {
-#          "type": "local",
-#          "command": ["node", "--max-old-space-size=512", "N:\\repo\\liuhe\\malong\\mcp-server.js", "--workspace", "N:\\repo\\liuhe"],
-#          "enabled": true
+#      "mcp": {                                    # opencode V2 native: servers grouping (V1 used direct mcp.<name>)
+#        "servers": {
+#          "malong": {
+#            "type": "local",
+#            "command": ["node", "--max-old-space-size=512", "N:\\repo\\liuhe\\malong\\mcp-server.js", "--workspace", "N:\\repo\\liuhe"],
+#            # default since 0.5.24 = Six-He line (13 tools); this block is optional now — delete it for the classic 44 catalog
+#            "environment": { "MALONG_INTERFACE": "graph", "MALONG_ENTRY_STATE": "1" }
+#          }
 #        }
 #      }
 #    }
 #    Claude Desktop (verified on Windows: %APPDATA%\Claude\claude_desktop_config.json):
 #    {
 #      "mcpServers": {
-#        "malong": { "command": "node", "args": ["/path/to/malong/mcp-server.js"] }
+#        "malong": { "command": "node", "args": ["/path/to/malong/mcp-server.js"], "env": { "MALONG_INTERFACE": "graph", "MALONG_ENTRY_STATE": "1" } }
 #      }
 #    }
 
@@ -142,8 +149,9 @@ cd ../malong && npm ci
 #        pkill -f "dsh web"; dsh web --port 3456 --host 0.0.0.0 --trusted-host <LAN IP>
 #      Option B (script, points at a checkout of this repo):
 #        bash malong/dsh/install-dsh.sh         # idempotent; edits ~/.dsh/profiles/web/cordis.patch.yml with backup
-#    The bridge registers all 44 tools as malong__* and auto-fills workspace_dir from the
+#    The bridge exposes the Six-He line (13 tools: code_task/code_read/code_patch/...) as malong__* and auto-fills workspace_dir from the
 #    current conversation's workspace (no per-call path needed; explicit paths still win).
+#    Need the classic full catalog (44) or the diagnostic tier (18)? export MALONG_INTERFACE=classic|diagnostic on the dsh host.
 #    Full guide incl. index rules: malong/dsh/DSH-INTEGRATION.md
 #    Troubleshooting: if EVERY malong__* call hangs until timeout, the bridge's
 #    mcp-server subprocess is gone. The bridge now auto-restarts it (exponential
@@ -166,7 +174,7 @@ git clone <repo-url> liuhe && cd liuhe/malong
 
 # 1) Parse daemon — prebuilt binary from releases/ (no cargo needed):
 mkdir -p ~/.local/bin
-tar -xzf ../releases/malong-liuhe-0.4.7-linux-x86_64.tar.gz
+tar -xzf ../releases/malong-liuhe-0.5.27-linux-x86_64.tar.gz
 cp malong-parse/target/release/malong-parse ~/.local/bin
 malong-parse &                                   # start the daemon (socket: /tmp/malong-parse-$UID.sock)
 
@@ -176,10 +184,10 @@ node --max-old-space-size=4096 mcp-server.js --workspace /path/to/project
 
 # 3) Self-check (30s, optional):
 node tests/test-db-adapter.js   # 22 assertions: sql.js backend + persistence
-node tests/test-mcp-server.js   # 25 assertions: MCP stdio + daemon round-trip
+node tests/test-mcp-server.js   # 37 assertions: MCP stdio + daemon round-trip
 ```
 
-> **Windows users:** use `releases/malong-liuhe-0.4.7-windows-x86_64.tar.gz` (contains `malong-parse.exe`), extract and put it on PATH; the MCP server auto-starts the daemon, so step 1's `malong-parse &` is not required. The `mkdir -p`/`tar -xzf` above are Unix syntax — on Windows use any extractor (`tar -xzf` works on Win10+).
+> **Windows users:** use `malong-liuhe-0.5.27-windows-x86_64.tar.gz` from GitHub Releases (contains `malong-parse.exe`), extract and put it on PATH; the MCP server auto-starts the daemon, so step 1's `malong-parse &` is not required. The `mkdir -p`/`tar -xzf` above are Unix syntax — on Windows use any extractor (`tar -xzf` works on Win10+).
 
 > Note: if the daemon is not running, parse-dependent tools (symbol extraction
 > etc.) degrade; the SQLite-backed tools (repo-map / code-index / health-check)
@@ -219,7 +227,7 @@ Prebuilt binaries for Linux x86_64 are committed under
 ```bash
 cd malong
 npm ci
-npm test          # 2240 assertions (daemon must be running)
+npm test          # 166 test files (daemon must be running)
 ```
 
 ### Start the MCP server
@@ -229,16 +237,18 @@ cd malong
 node --max-old-space-size=512 mcp-server.js --workspace /path/to/project
 ```
 
-Register the MCP server with any MCP-capable LLM client and the tools become available. For **opencode**, register in the project root `opencode.json`:
+Register the MCP server with any MCP-capable LLM client and the tools become available. For **opencode**, register in the project root `opencode.json` (the `environment` block is **optional since 0.5.24** — the default tier already is the Six-He line, 13 tools; set `MALONG_INTERFACE=classic` for the classic 44-tool catalog):
 
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
   "mcp": {
-    "malong": {
-      "type": "local",
-      "command": ["node", "--max-old-space-size=512", "malong/mcp-server.js", "--workspace", "."],
-      "enabled": true
+    "servers": {
+      "malong": {
+        "type": "local",
+        "command": ["node", "--max-old-space-size=512", "malong/mcp-server.js", "--workspace", "."],
+        "environment": { "MALONG_INTERFACE": "graph", "MALONG_ENTRY_STATE": "1" }
+      }
     }
   }
 }
@@ -246,18 +256,24 @@ Register the MCP server with any MCP-capable LLM client and the tools become ava
 
 > Windows note: relative paths in `--workspace` and `malong/mcp-server.js` resolve against the directory where opencode is launched; pass absolute paths (escape backslashes as `\\` in JSON) if you start it elsewhere. The daemon is auto-started by the MCP server — no need to launch `malong-parse.exe` manually.
 
+For opencode V2 details — config shape, tool visibility (`codemode`), and troubleshooting — see [`malong/opencode/OPENCODE-V2.md`](malong/opencode/OPENCODE-V2.md).
+
 ### Configuration (environment variables)
 
 All optional — sensible defaults apply when unset.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `MALONG_STATE_DIR` | `~/.config/malong` | Where usage / feedback / edit-stats files are written. Override to redirect state (tests, sandboxed hosts). Reads fall back to the legacy `~/.config/opencode/` so pre-0.3.37 data is not lost. |
+| `MALONG_STATE_DIR` | `~/.config/malong` | Root of MCP state since 0.5.0: workspace indexes (`workspaces/<hash>/code-index.db`) plus usage / feedback / edit-stats. Legacy per-repo `data/malong-mcp` (seeded via `--workspace`) is migrated on first launch in an isolated child process (copy→verify→delete; fail-soft, source kept on failure); pre-0.3.37 `~/.config/opencode/` reads still fall back. |
+| `MALONG_SKIP_STATE_MIGRATION` | unset | Set to `1` to skip legacy-state migration at startup (emergency escape; old directory left untouched). |
 | `MALONG_SOCKET` | `/tmp/malong-parse-$(id -u).sock` | Unix socket path to the parse daemon (Linux / macOS). |
 | `MALONG_PORT` | `31001` | TCP port for the parse daemon (Windows). |
 | `MALONG_PARSE_BIN` | npm platform pkg / `~/.local/bin` | Binary used when the client auto-starts the daemon. Resolution order: this env → `@jieai/malong-parse-<os>-<arch>` npm platform package (installed as an optional dependency of `@jieai/dsh-malong-bridge`) → `~/.local/bin/malong-parse` → `malong-parse/target/release` (dev tree). |
 | `MALONG_PARSE_MODE` | rust-service | Parse transport. Only `rust-service` is supported (`builtin` / `shadow` are rejected). |
 | `MALONG_WS_GC_DAYS` | `14` | Days a workspace index cache may sit untouched before `health cleanup` prunes it; `0` disables. |
+| `MALONG_INTERFACE` | `graph` | Tool tier. Default (unset) = the **Six-He line** (13 tools: `code_task`/`code_read`/`code_status`/`code_query` + 8 stateful entries + `edit_transaction`). `classic` = the full 44-tool catalog; `diagnostic` = 18 (Six-He line + 5 analyzers). |
+| `MALONG_ENTRY_STATE` | on | The state layer (S1–S5 task state machine + ADR-018 `invoke_capability`) is allowed by default; set `0` for the read-only 5-tool tier. |
+| `MALONG_PYTHON` | unset | Explicit interpreter for Python test runs (`test_bridge` / `verify_pipeline`); overrides the auto-detected project venv (`.venv`/`venv`/`env` next to the project root). |
 
 ### Suppressing security false positives
 
@@ -367,15 +383,17 @@ export OPENCODE_ZEN_API_KEY="your-api-key"   # never commit this
 codex exec "index the workspace with reindex, then find createDb with symbol_search"
 ```
 
-Tools are exposed as `liuhe.<tool>` (e.g. `liuhe.health`, `liuhe.symbol_search`,
-`liuhe.repo_map`). Run `reindex` once per workspace first so symbol search has an
+Tools are exposed by the `malong-mcp` server; the prefix follows the name you
+register it under — opencode `malong_<tool>` (e.g. `malong_health`,
+`malong_symbol_search`), Claude Code `mcp__liuhe__<tool>`, the DSH bridge
+`malong__<tool>`. Run `reindex` once per workspace first so symbol search has an
 index to query.
 
 ## Testing
 
-- Rust: `cargo test` (92 assertions: per-language extraction + protocol framing/decoding + cache LFU + server dispatch/priority queue + batch_extract + deep-nesting guards + hello handshake)
-- JS: 86 test files, 2231 assertions. `npm test` runs the full chain (primitives / embedded / mvp-batch / tool-registry / repo-map / handler-smoke / patch-parser / file-collector / code-search / health-check / db-adapter dual-backend / write-runtime / host-config / mcp-server / security-review-rules / journal-prune / gatekeeper-golden / debug-runner / edit-collision-guard / fix-imports / symbol-search / naming-consistency / call-chain / edit-transaction-ext / batch-edit-write / verify-pipeline / dep-graph-project / code-quality / tsc-spec / batch-edit-tocou / workflow-closure / variable-refs / output-budget / read-symbols-batch / feedback-list / test-bridge-run / mock-syncer-truncation / r54-p0 / r54-p1 / r54-p2 / r8 / r9 / crash-injection / r10 / dogfood-r12); `test-dogfood-r14…r30` (end-to-end against a real daemon) run separately
-- Total: 2231 assertions across 86 JS test files (plus cargo tests)
+- Rust: `cargo test` (97 assertions: per-language extraction + protocol framing/decoding + cache LFU + server dispatch/priority queue + batch_extract + deep-nesting guards + hello handshake)
+- JS: 166 test files (authoritative list: `scripts.test` in `package.json`; includes primitives / tool-registry / manifest-quality / write-runtime / edit-transaction-ext / verify-pipeline, the dogfood r12–r30 end-to-end series, plus G0/G1 capability-contract / capability-catalog / invoke-capability / invoke-stdio suites)
+- Total: 166 JS test files, full chain 0 failures (plus cargo test: 97 assertions)
 - One-shot: `./scripts/ci.sh` (self-contained: cargo test + npm test + dogfood; reuses or auto-starts the daemon)
 
 ## License

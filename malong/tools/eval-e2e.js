@@ -13,18 +13,12 @@ const MALONG = join(__dirname, '..')
 const RESULTS_PATH = join(__dirname, '..', '..', 'docs', 'Y-优化', 'eval-e2e-results.json')
 
 const imp = (p) => import(pathToFileURL(p).href)
-const pc = await imp(join(MALONG, 'parse-client.js'))
-await pc.init({ log: () => {} })
-await pc.connect()
 
+// 12-D：直接用生产 lang-parser 工厂（旧手搬 adapter 漏传 workspaceRoot → 子目录 parse 报
+// WORKSPACE_ROOT_REQUIRED，索引静默缺文件）
 const { default: codeIndex } = await imp(join(MALONG, 'code-index.js'))
-const langParser = {
-  extractAllAsync: (s, e, f) => pc.extractAll(s, e, f),
-  extractReferencesAsync: (s, e) => pc.extractReferences(s, e),
-  hasErrorsAsync: (s, e, f) => pc.hasErrors(s, e, f),
-  batchExtractAsync: (f) => pc.batchExtract(f),
-}
-const services = { langParser }
+const lp = await imp(join(MALONG, 'lang-parser.js'))
+const services = {}
 
 const WS = join(tmpdir(), 'opencode', 'eval-e2e-ws')
 const DATA = join(tmpdir(), 'opencode', 'eval-e2e-data')
@@ -42,9 +36,11 @@ const core = {
   emit: () => {},
   get: (key, def) => key === 'codeIndex.udsPath' ? SOCK : def,
 }
+await lp.init(core)
 await codeIndex.init(core)
 const svc = services.codeIndex
-const ctx = { codeIndexService: svc, getWorkspaceDir: () => DATA }
+// 12-D：langParserService 供 edit_transaction 语法校验（缺失时 syntax=skip，bracket 正则字面量误报会阻断写入）
+const ctx = { codeIndexService: svc, getWorkspaceDir: () => DATA, langParserService: services.langParser }
 
 // 任务：复制真实源文件到临时 workspace（真实项目素材）
 function setupFixture() {
@@ -116,7 +112,9 @@ await runTask('edit_transaction_workflow', async ({ files, steps }) => {
   steps.push('begin')
   // 构造真实编辑：找一段必然存在的代码
   const marker = before.split('\n').find(l => l.includes('export function') || l.includes('export async function'))
-  const oldStr = marker.split('(')[0]
+  // 12-D：整行替换（旧实现取函数名前半段再行内插注释 → 名字与 '(' 间插注释非法，
+  // 批10-1 语法验证拦截后 e2=edit_failed）
+  const oldStr = marker
   const e2 = await et.handle({ workspace_dir: WS, action: 'edit', txn_id: b.txnId, file: target, edits: [{ old_string: oldStr, new_string: oldStr + ' /* e2e */' }] }, ctx)
   steps.push('edit')
   const d = await df.handle({ workspace_dir: WS, since: `txn:${b.txnId}` }, ctx)
@@ -141,7 +139,9 @@ await runTask('trace_symbol_value_refs', async ({ files, steps }) => {
   steps.push('trace_symbol')
   const r = await trace.handle({ workspace_dir: WS, symbol: 'MAX_EVAL_RETRIES', file: 'constants.js', include_literals: true }, ctx)
   const refs = Array.isArray(r.direct_references) ? r.direct_references : []
-  const crossFileRef = refs.filter(x => (x.file || '').includes('consumer.js')).length >= 2
+  // 12-D：解析器把 import 引用记在模块路径上（target='./constants.js'），符号级引用只有使用点——
+  // 旧断言 >=2（期望 import 行也归入符号）与当前 Rust 解析器模型不符；跨文件使用点 >=1 即验证追踪生效
+  const crossFileRef = refs.filter(x => (x.file || '').includes('consumer.js')).length >= 1
   return { firstPass: crossFileRef, steps, value: r.value, refs: refs.length, hc: r.hardcoded_copies?.length || 0 }
 })
 
@@ -174,4 +174,5 @@ console.log(`== eval-e2e: ${firstPass}/${tasks.length} first-pass success, ${ok}
 for (const t of tasks) {
   console.log(`  ${t.success ? '✅' : '❌'} ${t.task}: ${t.first_pass ? 'first_pass' : t.error || 'FAIL'} (${t.tool_calls} calls, ${t.duration_ms}ms)`)
 }
+try { await lp.stop() } catch {}
 process.exit(0)

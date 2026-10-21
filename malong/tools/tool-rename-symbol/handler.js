@@ -219,7 +219,7 @@ export async function handle(args, context) {
 
   // 16：file 参数共用守卫——定义文件无效（目录/不存在）时提前返回，不再静默 definition=null
   if (codeIndexService?.resolveFileArg) {
-    const resolved = codeIndexService.resolveFileArg(file)
+    const resolved = codeIndexService.resolveFileArg(file, workspaceDir)
     if (!resolved.ok) return { error: resolved.error.code, message: resolved.error.message, suggestion: resolved.error.suggestion }
     file = resolved.path
   }
@@ -320,12 +320,22 @@ export async function handle(args, context) {
     return { symbol, new_name: newName, files_changed: 0, total_edits: 0, message: 'No word-boundary matches found (all matches may be in strings/comments)' }
   }
 
+  // dogfood-050（P2 修复）：冲突检测改用「精确同名」——旧实现用 searchSymbols(newName) 的子串匹配，
+  // rename formatNumber→formatNum 会因 formatNum 是 formatNumber 的子串而误报；真冲突（sub→mul）
+  // 的报错位置取 ORDER BY 首行（可能落在 tests 解构处而非定义）。
+  // 分级：同文件（定义文件或本次将编辑的文件）= 阻塞（会产生重复声明）；仅跨文件同名 = 警告。
   let conflictWarning = null
+  let conflictBlocking = false
   if (codeIndexService) {
     try {
-      const existing = await codeIndexService.searchSymbols(newName)
-      if (existing && existing.length > 0) {
-        conflictWarning = `"${newName}" already exists as ${existing[0].type} in ${existing[0].file}`
+      const matches = await codeIndexService.searchSymbols(newName, { limit: 50 })
+      const exact = (matches || []).filter(s => s.name === newName)
+      if (exact.length > 0) {
+        const editedFiles = new Set(editsPerFile.map(e => e.file))
+        const sameFile = exact.find(s => s.file === definition?.file || editedFiles.has(s.file))
+        const pick = sameFile || exact[0]
+        conflictWarning = `"${newName}" already exists as ${pick.type} in ${pick.file}`
+        conflictBlocking = !!sameFile
       }
     } catch {}
   }
@@ -347,6 +357,7 @@ export async function handle(args, context) {
     edits_per_file: editsPerFile,
     definition,
     conflict_warning: conflictWarning,
+    conflict_blocking: conflictBlocking,
     ...(semanticTruncated ? { warning: 'Semantic reference set truncated at 10000 — text scan may cover more; rename could be incomplete.' } : {}),
     // R22-④：文本扫描截断警告（与语义截断同字段，可叠加）
     ...(textTruncated ? { warning: (semanticTruncated ? 'Semantic reference set truncated at 10000; ' : '') + `Text scan truncated (300 files / 100 results cap) — deep or late-alphabet files may be missed. Run reindex(workspace_dir=...) and retry for a complete rename.` } : {}),
@@ -354,6 +365,17 @@ export async function handle(args, context) {
     next_step: dryRun
       ? `Apply: rename_symbol(..., dry_run=false). Then verify: test_bridge(action="run")`
       : `Verify: test_bridge(action="run"). Check mocks: mock_sync(file="${file}", function="${symbol}")`,
+  }
+
+  // dogfood-050（P2 修复）：真阻塞冲突在写盘前拒绝（旧实现只警告，会拆出 { add, mul, mul } 之类重复声明）
+  if (!dryRun && conflictBlocking) {
+    return {
+      ...result,
+      status: 'rejected',
+      error: 'RENAME_CONFLICT',
+      message: conflictWarning,
+      suggestion: 'Choose a different new_name, or rename the existing symbol first (this would create duplicate declarations).',
+    }
   }
 
   if (!dryRun) {

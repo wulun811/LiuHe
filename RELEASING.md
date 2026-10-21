@@ -1,8 +1,7 @@
 # RELEASING — npm 发布操作手册（给 CI 维护团队）
 
 LiuHe 的 npm 发布链：打 `v*` 标签 → 4 平台 runner 构建 → 发 npm 平台包 → 发 npm 主包。
-主包 `@jieai/dsh-malong-bridge` 已在 npmjs 发布（linux-x64 平台包 + 主包，0.4.5-post5）。
-darwin-x64 / darwin-arm64 / win32-x64 三个平台包待本流水线首次跑通后自动发布。
+主包 `@jieai/dsh-malong-bridge` 已在 npmjs 发布至 0.4.8（4 平台包 + 主包齐备）。0.5.27 待发布：打 `v0.5.27` tag 触发本流水线全自动发布（4 平台包 + 主包 + GitHub Release tarball）。
 
 ## 1. 前置配置（一次性）
 
@@ -19,9 +18,9 @@ darwin-x64 / darwin-arm64 / win32-x64 三个平台包待本流水线首次跑通
 #    malong/package.json  ← 权威版本号（CI 从这里读取）
 #    malong/dsh/bundle/package.json 的 version 与 optionalDependencies（CI 会自动 sed 对齐，手动改也可，以 malong/package.json 为准）
 #    dev 侧 CHANGELOG / docs
-# 2. 全链测试门禁：cd malong && npm test（54 文件，0 失败）
+# 2. 全链测试门禁：cd malong && npm test（166 个测试文件，全链 0 失败）
 # 3. 打标签推送
-git tag v0.4.5-post6 && git push origin v0.4.5-post6
+git tag v0.5.27 && git push origin v0.5.27
 ```
 
 release.yml 自动执行：
@@ -54,7 +53,7 @@ npm view @jieai/malong-parse-<os>-<arch>@<ver> --registry https://registry.npmjs
 # 真实安装冒烟（任意一台目标平台机器）：
 dsh plugin --profile web add @jieai/dsh-malong-bridge
 pkill -f "[d]sh web"; dsh web --port 3456 --host 0.0.0.0
-# 日志应含：registered 44 tools + health 检查 parse bin=node_modules/@jieai/malong-parse-<os>-<arch>/bin/malong-parse connected=yes
+# 日志应含：registered 13 tools（默认六合线 graph+state；宿主显式 MALONG_INTERFACE=classic 时为 44、diagnostic 为 18）+ health 检查 parse bin=node_modules/@jieai/malong-parse-<os>-<arch>/bin/malong-parse connected=yes
 ```
 
 ## 6. 生态侧（非阻塞）

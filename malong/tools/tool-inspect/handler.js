@@ -29,9 +29,15 @@ export async function handle(args, context) {
     return { error: 'missing_parameter', message: 'symbol and file are required' }
   }
 
+  // dogfood-050 r3：initWorkspace 前移——resolveFileArg 需要本请求工作区的句柄/绑定；
+  // 旧序在冷进程或工作区切换后用上一个工作区拼路径 → 假 FILE_NOT_FOUND
+  // R22-⑪：initWorkspace 异常不再静默吞——透出 init_warning（报告 INFO：旧 catch{} 无日志无提示）
+  let initWarn = null
+  try { await codeIndexService.initWorkspace(workspaceDir) } catch (e) { initWarn = `initWorkspace failed: ${e.message}` }
+
   // 16：file 参数共用守卫——无效（目录/不存在）时返回结构化错误，不再静默空
   if (codeIndexService?.resolveFileArg) {
-    const resolved = codeIndexService.resolveFileArg(file)
+    const resolved = codeIndexService.resolveFileArg(file, workspaceDir)
     if (!resolved.ok) return { error: resolved.error.code, message: resolved.error.message, suggestion: resolved.error.suggestion }
     file = resolved.path
   }
@@ -44,9 +50,6 @@ export async function handle(args, context) {
     return { error: 'invalid_input', message: 'at least one section required (include_outline, include_refs, or include_chain)' }
   }
 
-  // R22-⑪：initWorkspace 异常不再静默吞——透出 init_warning（报告 INFO：旧 catch{} 无日志无提示）
-  let initWarn = null
-  try { await codeIndexService.initWorkspace(workspaceDir) } catch (e) { initWarn = `initWorkspace failed: ${e.message}` }
   const t0 = Date.now()
 
   // Y002-S2：inspect 保鲜——getSymbols 内部 ensureFreshFile 统一承担（R19-②）

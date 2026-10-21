@@ -1,11 +1,11 @@
 // write-journal.js — undo journal + 审计 + crash recovery（附录 D）
 // 从 write-runtime.js 拆分（P4 批量后运行时已近千行）
 // r9：与 write-runtime 的循环 import 仅运行期使用 acquireLock（ESM live binding，模块求值期不互相访问）
-import { join, basename, resolve, sep } from 'node:path'
-import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, appendFileSync, rmSync, statSync, realpathSync, openSync, closeSync } from 'node:fs'
+import { join, basename, resolve, sep, isAbsolute, relative } from 'node:path'
+import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, appendFileSync, rmSync, statSync, realpathSync, openSync, closeSync, unlinkSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import { sha256 } from './hash-utils.js'
-import { guardRealPath, atomicWrite } from './path-guard.js'
+import { guardRealPath, atomicWrite, isSafeTxnId } from './path-guard.js'
 import { acquireLock } from './write-runtime.js'
 
 export const JOURNAL_ROOT = '.malong'
@@ -15,20 +15,42 @@ const AUDIT_LOG = 'audit.log'
 const PRUNE_MARKER = '.last_prune'
 const PRUNE_INTERVAL_MS = 60 * 60 * 1000          // 节流：每 workspace 最多 1 小时实扫一次（多进程共享同一 marker）
 const DEFAULT_MAX_AGE_HOURS = 24                  // 默认保留 1 天（journal 很小，undo 能力值钱，偏保守）
+export const JOURNAL_RETENTION_HOURS = DEFAULT_MAX_AGE_HOURS // Q1：用户级 undo 保留窗口（与 prune TTL 同源，勿分叉）
 const PRUNE_PROTECTED_STATES = ['created', 'staged', 'needs_review']  // 在途/崩溃恢复候选/待人工核对，永不自动删
 
 export function createJournal(workspaceDir, filePath, absPath, originalContent, state) {
-  const txnId = `txn_${Date.now()}_${randomBytes(4).toString('hex')}`
+  // Encode ownership before mkdir publishes the directory to other processes.
+  const txnId = `txn_${Date.now()}_${randomBytes(4).toString('hex')}_p${process.pid}`
   const dir = join(workspaceDir, JOURNAL_ROOT, 'journal', txnId)
   mkdirSync(join(dir, 'backup'), { recursive: true })
+  // 14-C AC20/AC21（真双进程实测）：先落 pid 证据再写任何事务文件——他进程恢复凭此判活，
+  // 不把在途 createJournal（manifest/state 未写完窗口）当孤儿删（旧实现 rmSync 整目录 →
+  // 写者 manifest rename ENOENT 假故障 write_failed）
+  try { writeFileSync(join(dir, 'pid'), String(process.pid)) } catch {}
   // r10(D)：backup 是恢复资产——原子写 + fsync（半截 backup 会让哈希三方判定恢复出错误内容）
   atomicWrite(join(dir, 'backup', basename(filePath)), originalContent, { fsync: true })
   // r9(F6)：manifest/state 原子写——直写崩溃会留不可解析 JSON，recoverJournals 对解析失败静默 continue → 事务被跳过
+  // W3（2026-10-05 live）：manifest.file 统一存 workspace-relative——edit_batch 协议侧会传绝对路径，
+  // 而 undo/recover 全部按 join(workspaceDir, manifest.file) + guardRealPath(workspaceDir, …) 消费，
+  // 绝对路径会让「写后可 undo」在 undo_commit 时报 PATH_BLOCKED（live 实测）。
+  const relFile = isAbsolute(filePath) ? relative(workspaceDir, filePath) : filePath
   atomicWrite(join(dir, 'manifest.json'), JSON.stringify({
-    txn_id: txnId, file: filePath, edit_mode: state.editMode, created_at: new Date().toISOString(),
+    txn_id: txnId, file: relFile, edit_mode: state.editMode, created_at: new Date().toISOString(),
   }, null, 2), { fsync: true })
   atomicWrite(join(dir, 'state.json'), JSON.stringify({ txn_id: txnId, state: 'created', ...state }, null, 2), { fsync: true })
   return { txnId, dir }
+}
+
+// 14-C：事务目录写者存活判定（恢复安全性）——pid 存活 → 在途事务，恢复不得处理
+// （含 Windows：ESRCH=已死；EPERM=存活但无权限；新目录在 pid 文件尚未写好时用目录名判活，旧格式不变）
+function journalWriterAlive(dir) {
+  let pid
+  try { pid = Number(readFileSync(join(dir, 'pid'), 'utf-8').trim()) } catch {}
+  if (!Number.isInteger(pid) || pid <= 0) {
+    pid = Number(/^txn_\d+_[a-f0-9]{8}_p(\d+)$/.exec(basename(dir))?.[1])
+  }
+  if (!Number.isInteger(pid) || pid <= 0) return false
+  try { process.kill(pid, 0); return true } catch (e) { return e?.code === 'EPERM' }
 }
 
 export function updateJournalState(dir, state) {
@@ -66,12 +88,31 @@ function _acquireBatchLock(workspaceDir) {
   const dir = _batchesDir(workspaceDir)
   mkdirSync(dir, { recursive: true })
   const lockPath = _batchLockPath(workspaceDir)
+  let fd = null
   try {
-    const fd = openSync(lockPath, 'wx')
+    fd = openSync(lockPath, 'wx')
+  } catch (e) {
+    // 第二轮审查修复（P0）：EEXIST = 他人持锁——绝不删活锁（旧实现无条件 rmSync 窃锁，
+    // 后续任意写入的 recoverBatches 会回滚持锁批次的已写文件）。仅当持有者已死/锁陈旧
+    // （_isBatchLockAlive 判定并清理）才重试一次。
+    if (e && e.code === 'EEXIST' && !_isBatchLockAlive(workspaceDir)) {
+      try { fd = openSync(lockPath, 'wx') } catch { return false }
+    } else {
+      return false
+    }
+  }
+  try {
     writeFileSync(fd, JSON.stringify({ pid: process.pid, ts: Date.now() }))
-    closeSync(fd)
     return true
-  } catch { return false }
+  } catch {
+    // open 成功但写入失败：只清自己刚建的锁
+    try { closeSync(fd) } catch {}
+    fd = null
+    try { rmSync(lockPath, { force: true }) } catch {}
+    return false
+  } finally {
+    if (fd !== null) { try { closeSync(fd) } catch {} }
+  }
 }
 
 function _releaseBatchLock(workspaceDir) {
@@ -81,8 +122,19 @@ function _releaseBatchLock(workspaceDir) {
 function _isBatchLockAlive(workspaceDir) {
   const lockPath = _batchLockPath(workspaceDir)
   if (!existsSync(lockPath)) return false
+  // live 审查修复：优先按 pid 判活（长批次无心跳也不会被误杀）；mtime 仅作 pid 不可读时的保守兜底
   try {
-    // R22-⑯：锁文件 mtime > 30s → 崩溃残留（同一进程内批量写不会超 30s），清理后允许恢复
+    const info = JSON.parse(readFileSync(lockPath, 'utf-8'))
+    if (info && Number.isInteger(info.pid) && info.pid > 0) {
+      if (info.pid === process.pid) return true
+      try { process.kill(info.pid, 0); return true }
+      catch (e) { if (e && e.code === 'EPERM') return true /* 进程存在但无权限 → 视为存活 */ }
+      _releaseBatchLock(workspaceDir)
+      return false
+    }
+  } catch {}
+  try {
+    // R22-⑯：锁文件 mtime > 30s → 崩溃残留（pid 不可读时兜底），清理后允许恢复
     if (Date.now() - statSync(lockPath).mtimeMs > 30000) {
       _releaseBatchLock(workspaceDir)
       return false
@@ -113,6 +165,11 @@ export function updateBatchMarker(workspaceDir, batchId, patch) {
     const path = _batchPath(workspaceDir, batchId)
     const cur = JSON.parse(readFileSync(path, 'utf-8'))
     atomicWrite(path, JSON.stringify({ ...cur, ...patch }, null, 2), { fsync: true })
+    // live 审查修复：批次进行中续租锁（pid 判活是主防线，mtime 心跳作兜底）
+    try {
+      const lockPath = _batchLockPath(workspaceDir)
+      if (existsSync(lockPath)) writeFileSync(lockPath, JSON.stringify({ pid: process.pid, ts: Date.now() }))
+    } catch {}
   } catch (e) {
     // r9(F7)：静默吞失败 = 崩溃后该批次部分提交不被回滚（marker 缺 txnId）——记审计不静默
     try { auditLog(workspaceDir, { event: 'batch_marker_update_failed', batch_id: batchId, reason: e.message }) } catch {}
@@ -141,6 +198,12 @@ export async function recoverJournals(workspaceDir, options = {}) {
       // 旧实现静默 continue：孤儿目录永不回收（prune 读 state 失败同样 continue）→ .malong 无限增长。
       // 删前复核：若目标文件已存在且内容 ≠ backup，说明 edit 可能已发生 → 保守保留 + 审计（不丢回滚能力）。
       if (!existsSync(statePath)) {
+        // 14-C：写者存活 → 在途事务（createJournal 未完成不代表从未执行——可能是别的进程正在写）
+        if (journalWriterAlive(dir)) {
+          recovered.push({ txn_id: txnDir, file: null, action: 'in_flight_kept', reason: 'writer process alive' })
+          try { auditLog(workspaceDir, { event: 'in_flight_txn_kept', txn_id: txnDir }) } catch {}
+          continue
+        }
         let safe = true
         try {
           const manifest = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf-8'))
@@ -162,7 +225,7 @@ export async function recoverJournals(workspaceDir, options = {}) {
       try { auditLog(workspaceDir, { event: 'unparseable_txn_state', txn_id: txnDir }) } catch {}
       continue
     }
-    if (state.state === 'committed' || state.state === 'rolled_back' || state.state === 'abandoned' || state.state === 'needs_review') {
+    if (state.state === 'committed' || state.state === 'rolled_back' || state.state === 'abandoned' || state.state === 'needs_review' || state.state === 'failed') {
       // R18：索引补抽——写后重抽失败点已记 index_pending（journal 持久化），启动恢复时立即补抽，
       // 不依赖下次显式 reindex（markIndexDirty 后 mtime 未变，读侧 ensureFreshFile 不会触发）。
       // 成功 → 清标记；失败 → 保留 index_pending（下次恢复再试）+ recovered 记录。
@@ -184,6 +247,11 @@ export async function recoverJournals(workspaceDir, options = {}) {
       const manifest = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf-8'))
       const absPath = join(workspaceDir, manifest.file)
       const backup = join(dir, 'backup', basename(manifest.file))
+      // 14-C：写者仍存活 → 在途事务（created/staged 由写者自行推进；恢复不得替它标 abandoned/committed）
+      if (journalWriterAlive(dir)) {
+        recovered.push({ txn_id: txnDir, file: manifest.file, action: 'in_flight_kept', reason: 'writer process alive' })
+        continue
+      }
       if ((state.state === 'staged' || state.state === 'created') && existsSync(backup) && existsSync(absPath)) {
         // 哈希三方判定（防覆盖后来的合法写入）：
         // 当前 == 写前 → 事务从未落地（dryRun 残留/崩溃在 rename 前）→ 不覆盖，标 abandoned
@@ -209,13 +277,17 @@ export async function recoverJournals(workspaceDir, options = {}) {
       }
       // 审查修复（M3）：created 且 backup/目标缺失 → 事务从未执行 → abandoned（无资产可恢复，非谎报回滚）；
       // staged 缺失 → needs_review 待审（可能已执行但资产丢失，保守保留）
-      const m3State = state.state === 'created' ? 'abandoned' : 'needs_review'
-      const m3Reason = state.state === 'created' ? 'created txn never executed (backup/target missing)' : 'staged txn without recoverable backup/target'
+      // Q2：created:true 的写链事务从未执行（目标文件缺失）→ abandoned；staged 缺失 → needs_review 待审
+      const neverExecuted = state.state === 'created' || state.created === true
+      const m3State = neverExecuted ? 'abandoned' : 'needs_review'
+      const m3Reason = neverExecuted ? 'created txn never executed (backup/target missing)' : 'staged txn without recoverable backup/target'
       atomicWrite(join(dir, 'state.json'), JSON.stringify({ ...state, state: m3State, reason: m3Reason, needs_review_at: new Date().toISOString() }), { fsync: true })
       recovered.push({ txn_id: txnDir, file: manifest.file, action: m3State, reason: m3Reason })
     } catch (e) {
-      atomicWrite(join(dir, 'state.json'), JSON.stringify({ ...state, state: 'failed', reason: e.message }), { fsync: true })
-      recovered.push({ txn_id: txnDir, file: null, action: 'rollback_failed', reason: e.message })
+      // 第二轮审查修复（G2 副作用）：回滚失败 = 内容状态未知、备份仍可能是唯一回滚依据——
+      // 必须进 needs_review（受 prune 保护、待人工核对），不能写 failed（终态白名单 → 24h 后被清、毁掉备份）
+      atomicWrite(join(dir, 'state.json'), JSON.stringify({ ...state, state: 'needs_review', reason: e.message, needs_review_at: new Date().toISOString() }), { fsync: true })
+      recovered.push({ txn_id: txnDir, file: null, action: 'rollback_failed_needs_review', reason: e.message })
     }
   }
   await recoverBatches(workspaceDir, recovered)
@@ -431,13 +503,23 @@ async function recoverBatches(workspaceDir, recovered) {
             const absPath = join(workspaceDir, manifest.file)
             const state = JSON.parse(readFileSync(join(txnDir, 'state.json'), 'utf-8'))
             let didRollback = false
-            if (existsSync(backup) && existsSync(absPath) && state.new_hash && sha256(readFileSync(absPath)) === state.new_hash) {
+            if (state.created === true && existsSync(absPath) && state.new_hash && sha256(readFileSync(absPath)) === state.new_hash) {
+              // Q2：新建文件的部分批回滚 = 删除（backup 是空串，写回会留垃圾文件）
+              const rl = await acquireLock(absPath, 30000)
+              if (!rl.locked) {
+                try {
+                  if (sha256(readFileSync(absPath)) === state.new_hash) { unlinkSync(absPath); didRollback = true }
+                } finally {
+                  rl.release()
+                }
+              }
+            } else if (existsSync(backup) && existsSync(absPath) && state.new_hash && sha256(readFileSync(absPath)) === state.new_hash) {
               // r9(F5)：恢复写原子化 + 取 .mlock（防恢复与并发写者交错覆盖 / 恢复期间再崩溃留半截）
               const rl = await acquireLock(absPath, 30000)
               if (!rl.locked) {
                 try {
                   if (sha256(readFileSync(absPath)) === state.new_hash) {
-                    atomicWrite(absPath, readFileSync(backup), { fsync: true })
+                    atomicWrite(absPath, readFileSync(backup), { fsync: true, preservePermissions: true })
                     recovered.push({ txn_id: txnId, file: manifest.file, action: 'batch_partial_rollback' })
                     didRollback = true
                   }
@@ -504,4 +586,201 @@ export function pruneJournals(workspaceDir, opts = {}) {
     if (deleted.length < 20) deleted.push(txnDir)
   }
   return { pruned, kept, skipped_throttle: false, dry_run: dryRun, max_age_hours: maxAgeHours, deleted_sample: deleted }
+}
+
+// ── 16-B：批量 undo（专家复验 §5）——同批 journal 共享 batch_id ──
+// restoreJournal 命中带 batch_id 的事务时扩展为整批：先对全部成员只读预检，
+// 任一成员阻断（外部改动/非终态/备份缺失/路径守卫）→ 整批拒绝，不部分恢复；
+// 通过后按写序逆序逐文件恢复（逐文件加锁）；已写前态/已撤销成员幂等跳标。
+function _batchMemberJournals(workspaceDir, batchId) {
+  const root = join(workspaceDir, JOURNAL_ROOT, 'journal')
+  const members = []
+  let entries = []
+  try { entries = readdirSync(root, { withFileTypes: true }) } catch { return members }
+  for (const d of entries) {
+    if (!d.isDirectory()) continue
+    const dir = join(root, d.name)
+    let st = null, manifest = null
+    try { st = JSON.parse(readFileSync(join(dir, 'state.json'), 'utf-8')) } catch { continue }
+    if (st.batch_id !== batchId) continue
+    try { manifest = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf-8')) } catch { continue }
+    if (typeof manifest?.file === 'string' && isAbsolute(manifest.file)) manifest.file = relative(workspaceDir, manifest.file)
+    members.push({ txnId: d.name, dir, state: st, manifest })
+  }
+  members.sort((a, b) => String(a.manifest.created_at || '').localeCompare(String(b.manifest.created_at || '')))
+  return members
+}
+
+async function restoreBatchJournals(workspaceDir, txnId, selfState, selfManifest) {
+  const batchId = selfState.batch_id
+  const members = _batchMemberJournals(workspaceDir, batchId)
+  if (!members.some(m => m.txnId === txnId)) {
+    members.push({ txnId, dir: join(workspaceDir, JOURNAL_ROOT, 'journal', txnId), state: selfState, manifest: selfManifest })
+    members.sort((a, b) => String(a.manifest.created_at || '').localeCompare(String(b.manifest.created_at || '')))
+  }
+  const blocked = []
+  const plan = []
+  for (const m of members) {
+    const st = m.state
+    if (st.state === 'undone') { plan.push({ ...m, action: 'already' }); continue }
+    if (st.state !== 'committed' && st.state !== 'committed_recovered') { blocked.push({ txn_id: m.txnId, file: m.manifest.file, code: 'NOT_COMMITTED' }); continue }
+    const guard = guardRealPath(workspaceDir, m.manifest.file)
+    if (guard.blocked) { blocked.push({ txn_id: m.txnId, file: m.manifest.file, code: 'PATH_BLOCKED' }); continue }
+    const absPath = join(workspaceDir, m.manifest.file)
+    const backupPath = join(m.dir, 'backup', basename(m.manifest.file))
+    if (!existsSync(backupPath)) { blocked.push({ txn_id: m.txnId, file: m.manifest.file, code: 'JOURNAL_NOT_FOUND' }); continue }
+    if (st.created === true) {
+      if (!existsSync(absPath)) { plan.push({ ...m, action: 'already' }); continue }
+      const curHash = sha256(readFileSync(absPath))
+      if (st.new_hash && curHash !== st.new_hash) { blocked.push({ txn_id: m.txnId, file: m.manifest.file, code: 'EXTERNAL_CHANGE' }); continue }
+      plan.push({ ...m, action: 'delete', absPath })
+    } else {
+      if (!existsSync(absPath)) { blocked.push({ txn_id: m.txnId, file: m.manifest.file, code: 'TARGET_MISSING' }); continue }
+      const curHash = sha256(readFileSync(absPath))
+      const oldHash = sha256(readFileSync(backupPath))
+      if (curHash === oldHash) { plan.push({ ...m, action: 'already' }); continue }
+      if (st.new_hash && curHash !== st.new_hash) { blocked.push({ txn_id: m.txnId, file: m.manifest.file, code: 'EXTERNAL_CHANGE' }); continue }
+      plan.push({ ...m, action: 'restore', absPath, backupPath })
+    }
+  }
+  if (blocked.length > 0) {
+    return {
+      ok: false, code: 'BATCH_BLOCKED',
+      message: 'Batch undo blocked: ' + blocked.length + ' of ' + members.length + ' file(s) cannot be safely restored; nothing was restored.',
+      txn_id: txnId, batch: { batch_id: batchId, total: members.length, blocked },
+      suggestion: 'Batch undo is all-or-nothing: resolve the listed files first (e.g. restore/redo them), then retry the same undo token. Individual member txn_id tokens also refuse while blocked - there is no partial-undo path.',
+    }
+  }
+  const files = []
+  const failures = []
+  let restored = 0, deleted = 0, already = 0
+  const markUndone = (m) => updateJournalState(m.dir, { state: 'undone', undone_at: new Date().toISOString() })
+  for (const p of [...plan].reverse()) {
+    if (p.action === 'already') { markUndone(p); already++; continue }
+    const lock = await acquireLock(p.absPath, 30000)
+    if (lock.locked) { failures.push({ txn_id: p.txnId, file: p.manifest.file, code: 'FILE_LOCKED' }); continue }
+    try {
+      if (p.action === 'delete') {
+        rmSync(p.absPath, { force: true })
+        markUndone(p)
+        try { auditLog(workspaceDir, { event: 'journal_undo', txn_id: p.txnId, file: p.manifest.file, action: 'created_file_removed' }) } catch {}
+        deleted++; files.push(p.manifest.file)
+      } else {
+        atomicWrite(p.absPath, readFileSync(p.backupPath), { fsync: true, preservePermissions: true })
+        markUndone(p)
+        try { auditLog(workspaceDir, { event: 'journal_undo', txn_id: p.txnId, file: p.manifest.file, action: 'restored' }) } catch {}
+        restored++; files.push(p.manifest.file)
+      }
+    } catch (e) {
+      failures.push({ txn_id: p.txnId, file: p.manifest.file, code: 'UNDO_FAILED', message: e?.message || String(e) })
+    } finally {
+      lock.release()
+    }
+  }
+  const filesRestored = restored + deleted
+  return {
+    ok: true,
+    status: failures.length > 0 ? 'undone_partial' : (filesRestored > 0 ? 'undone' : 'already_undone'),
+    txn_id: txnId, files_restored: filesRestored, files,
+    ...(deleted > 0 ? { deleted: true } : {}),
+    batch: { batch_id: batchId, total: members.length, restored: filesRestored, already },
+    ...(failures.length > 0 ? { retryable: true, failures } : {}),
+  }
+}
+
+// ── Q1 用户级撤销：消费 write-journal 的 backup 恢复写前内容 ──
+// 与 recoverJournals（崩溃恢复，自动回滚）不同：这是显式 undo，只接受已 committed/committed_recovered
+// 的事务（含编辑型与创建型 created:true）；当前文件必须仍等于 new_hash（或已等于 backup，视为已恢复）；
+// created:true 的撤销 = 删除新建文件（仅当内容仍为 new_hash，防误删外部修改）。
+// 返回 { ok, status, files_restored, files } 或 { ok:false, code, message, suggestion }；不抛异常。
+export async function restoreJournal(workspaceDir, txnId) {
+  if (!isSafeTxnId(txnId)) {
+    return { ok: false, code: 'TXN_NOT_FOUND', message: 'Transaction not found: ' + txnId, txn_id: txnId }
+  }
+  const dir = join(workspaceDir, JOURNAL_ROOT, 'journal', txnId)
+  if (!existsSync(dir)) {
+    return {
+      ok: false, code: 'JOURNAL_NOT_FOUND', message: 'Undo journal not found: ' + txnId, txn_id: txnId,
+      suggestion: 'Journals are retained ' + JOURNAL_RETENTION_HOURS + 'h after commit; if it expired or was already undone, recover via git/manual backup.',
+    }
+  }
+  let state = null, manifest = null
+  try {
+    state = JSON.parse(readFileSync(join(dir, 'state.json'), 'utf-8'))
+    manifest = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf-8'))
+  } catch (e) {
+    return { ok: false, code: 'JOURNAL_UNREADABLE', message: 'Journal unreadable: ' + e.message, txn_id: txnId }
+  }
+  // W3：兼容修复前写入的绝对路径 manifest（24h 保留窗口内的旧 journal）——归一到 workspace-relative
+  if (typeof manifest?.file === 'string' && isAbsolute(manifest.file)) {
+    manifest.file = relative(workspaceDir, manifest.file)
+  }
+  // 16-B：同批共享 batch_id——任一成员 token 的显式 undo = 整批撤销（见 restoreBatchJournals）
+  if (typeof state.batch_id === 'string' && state.batch_id) {
+    return await restoreBatchJournals(workspaceDir, txnId, state, manifest)
+  }
+  if (state.state === 'undone') {
+    return { ok: true, status: 'already_undone', txn_id: txnId, files_restored: 0, files: [] }
+  }
+  if (state.state !== 'committed' && state.state !== 'committed_recovered') {
+    return { ok: false, code: 'NOT_COMMITTED', message: 'Cannot undo txn in state=' + state.state, txn_id: txnId, suggestion: 'Only committed write transactions can be undone.' }
+  }
+  const guard = guardRealPath(workspaceDir, manifest.file)
+  if (guard.blocked) {
+    return { ok: false, code: 'PATH_BLOCKED', message: guard.detail, txn_id: txnId }
+  }
+  const absPath = join(workspaceDir, manifest.file)
+  const backupDir = resolve(join(dir, 'backup'))
+  const backupPath = resolve(join(backupDir, basename(manifest.file)))
+  if (backupPath !== backupDir && !backupPath.startsWith(backupDir + sep)) {
+    return { ok: false, code: 'BACKUP_ESCAPE', message: 'Journal backup path escapes backup dir', txn_id: txnId }
+  }
+  try {
+    const realB = realpathSync(backupPath)
+    const realRoot = realpathSync(backupDir)
+    if (realB !== realRoot && !realB.startsWith(realRoot + sep)) {
+      return { ok: false, code: 'BACKUP_ESCAPE', message: 'Journal backup symlink escapes backup dir', txn_id: txnId }
+    }
+  } catch {
+    return { ok: false, code: 'JOURNAL_NOT_FOUND', message: 'Journal backup missing: ' + txnId, txn_id: txnId }
+  }
+  const markUndone = () => updateJournalState(dir, { state: 'undone', undone_at: new Date().toISOString() })
+  const lock = await acquireLock(absPath, 30000)
+  if (lock.locked) {
+    return { ok: false, code: 'FILE_LOCKED', message: 'File is locked by another writer: ' + manifest.file, txn_id: txnId, suggestion: 'Retry after a moment.' }
+  }
+  try {
+    if (state.created === true) {
+      if (!existsSync(absPath)) {
+        markUndone()
+        return { ok: true, status: 'undone', txn_id: txnId, files_restored: 0, files: [], note: 'created file already absent' }
+      }
+      const curHash = sha256(readFileSync(absPath))
+      if (state.new_hash && curHash !== state.new_hash) {
+        return { ok: false, code: 'EXTERNAL_CHANGE', message: 'File changed after creation; refusing to delete: ' + manifest.file, txn_id: txnId, suggestion: 'Resolve the external change manually.' }
+      }
+      rmSync(absPath, { force: true })
+      markUndone()
+      try { auditLog(workspaceDir, { event: 'journal_undo', txn_id: txnId, file: manifest.file, action: 'created_file_removed' }) } catch {}
+      return { ok: true, status: 'undone', txn_id: txnId, files_restored: 1, files: [manifest.file], deleted: true }
+    }
+    if (!existsSync(absPath)) {
+      return { ok: false, code: 'TARGET_MISSING', message: 'Target file missing: ' + manifest.file, txn_id: txnId }
+    }
+    const curHash = sha256(readFileSync(absPath))
+    const oldHash = sha256(readFileSync(backupPath))
+    if (curHash === oldHash) {
+      markUndone()
+      return { ok: true, status: 'already_restored', txn_id: txnId, files_restored: 0, files: [] }
+    }
+    if (state.new_hash && curHash !== state.new_hash) {
+      return { ok: false, code: 'EXTERNAL_CHANGE', message: 'File modified after the write; refusing to overwrite: ' + manifest.file, txn_id: txnId, suggestion: 'Resolve the external change manually; backup retained under .malong/journal/' + txnId + '/backup.' }
+    }
+    atomicWrite(absPath, readFileSync(backupPath), { fsync: true, preservePermissions: true })
+    markUndone()
+    try { auditLog(workspaceDir, { event: 'journal_undo', txn_id: txnId, file: manifest.file, action: 'restored' }) } catch {}
+    return { ok: true, status: 'undone', txn_id: txnId, files_restored: 1, files: [manifest.file] }
+  } finally {
+    lock.release()
+  }
 }

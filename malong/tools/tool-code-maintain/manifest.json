@@ -1,0 +1,25 @@
+{
+  "name": "code_maintain",
+  "version": "0.1.0",
+  "interface": "graph",
+  "requires_state": true,
+  "description": "Propose import fixes; apply journaled. plan = default (preview); dead code never auto-removed.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "workspace_dir": { "type": "string", "description": "Project root (abs)." },
+      "task_id": { "type": "string", "description": "Task id." },
+      "action": { "type": "string", "enum": ["plan", "apply"], "description": "plan default; apply writes." },
+      "files": { "type": "array", "items": { "type": "string" }, "description": "Scope; default task materials." },
+      "proposals": { "type": "array", "items": { "type": "string" }, "description": "Fingerprints (default all safe)." },
+      "max_per_file": { "type": "integer", "description": "Default 20." },
+      "max_candidates": { "type": "integer", "description": "fix_imports candidates per file (default 10, 1-100)." },
+      "dry_run": { "type": "boolean", "description": "true = preview." },
+      "request_id": { "type": "string", "description": "Idempotency key." },
+      "expected_state_revision": { "type": "integer", "description": "Optimistic guard." }
+    },
+    "required": ["workspace_dir", "task_id"]
+  },
+  "handler": "./handler.js",
+  "protocol_version": "1.0"
+}

@@ -14,10 +14,17 @@ const SAFE_FILE = join(WS_DIR, 'test.js')
 
 let passed = 0
 let failed = 0
+let notRun = 0
 
 function assert(label, ok, detail) {
   if (ok) { passed++; console.log(`  ✓ ${label}`) }
   else { failed++; console.log(`  ✗ ${label}: ${detail || ''}`) }
+}
+
+// 第三轮 Windows 复验：缺权限/缺服务的用例不是通过——显式 not_run 记账（旧 assert(true,'skipped') 属假绿）
+function markNotRun(label, detail, n = 1) {
+  notRun += n
+  console.log(`  ⚠ NOT_RUN: ${label}${detail ? ' (' + detail + ')' : ''}`)
 }
 
 function rawRequest(method, params, timeoutMs = 5000) {
@@ -55,8 +62,8 @@ async function main() {
 
   if (!IS_WIN && !existsSync(SOCKET)) {
     console.log('  ⚠  malong-parse 未运行，跳过测试\n')
-    assert('路径穿越', true, 'skipped')
-    assert('符号链接穿越', true, 'skipped')
+    markNotRun('路径穿越', 'malong-parse 未运行')
+    markNotRun('符号链接穿越', 'malong-parse 未运行')
     printResult()
     return
   }
@@ -76,6 +83,7 @@ async function main() {
   // Test 3: symlink traversal
   try {
     if (existsSync(EVIL_LINK)) unlinkSync(EVIL_LINK)
+    if (process.env.MALONG_TEST_FORCE_NO_SYMLINK) { const e = Object.assign(new Error('forced: no symlink privilege'), { code: 'EPERM' }); throw e }
     const target = process.platform === 'win32' ? join(TMP, 'outside-target.txt') : '/etc/passwd'
     if (process.platform === 'win32') writeFileSync(target, 'secret')
     symlinkSync(target, EVIL_LINK)
@@ -84,7 +92,7 @@ async function main() {
   } catch (e) {
     if (e.code === 'EPERM' || e.code === 'EACCES' || e.code === 'UNKNOWN') {
       console.log('  ⚠  无 symlink 权限，跳过链接用例')
-      assert('符号链接穿越', true, 'skipped (no symlink privilege)')
+      markNotRun('符号链接穿越', `no symlink privilege: ${e.code}`)
     } else {
       assert('符号链接穿越', false, e.message)
     }
@@ -110,7 +118,7 @@ function cleanup() {
 
 function printResult() {
   console.log(`\n═══════════════════════════════════════`)
-  console.log(`安全测试: ${passed} passed, ${failed} failed`)
+  console.log(`安全测试: ${passed} passed, ${failed} failed, ${notRun} not_run`)
   process.exit(failed > 0 ? 1 : 0)
 }
 

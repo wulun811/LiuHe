@@ -70,7 +70,7 @@
                 <a href="docs.html" class="nav-link hover:text-white transition-colors">文档</a>
             </div>
             <div class="flex items-center gap-3">
-                <span class="tag-pill px-3 py-1 rounded-full text-xs font-mono">v0.4.7</span>
+                <span class="tag-pill px-3 py-1 rounded-full text-xs font-mono">v0.5.27</span>
                 <a href="index.html" class="text-ink-400 hover:text-white transition-colors text-sm">EN</a>
                 <a href="https://github.com/wulun811/LiuHe" target="_blank" class="text-ink-400 hover:text-white transition-colors">
                     <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
@@ -112,7 +112,7 @@
         <div class="relative z-10 max-w-5xl mx-auto px-6 text-center">
             <div class="mb-8 inline-flex items-center gap-2 px-4 py-2 rounded-full border border-dragon-500/20 bg-dragon-500/5">
                 <span class="w-2 h-2 rounded-full bg-verdant-400 animate-pulse"></span>
-                <span class="text-dragon-300 text-sm font-mono">2013 断言全绿 · 44 MCP 工具 · 10 语言支持</span>
+                <span class="text-dragon-300 text-sm font-mono">166 个测试文件全绿 · 44/13/18 MCP 工具 · 10 语言支持</span>
             </div>
             
             <h1 class="font-serif-cn text-5xl md:text-7xl font-black mb-6 leading-tight">
@@ -178,7 +178,7 @@
                 </div>
                 <h2 class="font-serif-cn text-4xl md:text-5xl font-bold text-white mt-4 mb-6">每个工具都告诉你下一步该去哪里</h2>
                 <p class="text-xl text-ink-400 max-w-3xl mb-12">
-                    44 个工具构成一张路由网络——每个结果都携带 <span class="font-mono text-ink-200">next_step</span>：
+                    44 个经典工具（graph 13 / diagnostic 18）构成一张路由网络——每个结果都携带 <span class="font-mono text-ink-200">next_step</span>：
                     成功该去哪里、出错该去哪里。六层结构、六条回路线。
                 </p>
             </div>
@@ -210,7 +210,7 @@ flowchart TB
                 </pre>
             </div>
             <div class="mt-8 section-reveal">
-                <a href="docs.html#routing" class="text-dragon-300 hover:text-dragon-200 text-sm underline underline-offset-4">完整 44 工具路由图见文档 →</a>
+                <a href="docs.html#routing" class="text-dragon-300 hover:text-dragon-200 text-sm underline underline-offset-4">完整工具路由图（44/13/18 三档）见文档 →</a>
             </div>
         </div>
     </section>
@@ -387,6 +387,11 @@ flowchart TB
                                 <td class="py-4 px-4 text-ink-500">原语化同任务 7673 → 2662 est</td>
                             </tr>
                             <tr class="comparison-row border-b border-white/5">
+                                <td class="py-4 px-4">默认档目录税</td>
+                                <td class="py-4 px-4 text-right font-mono text-dragon-300">16.5 KB ≈ 4.86k tok/轮</td>
+                                <td class="py-4 px-4 text-ink-500">13 工具 — 描述 0.60k + schema 4.26k</td>
+                            </tr>
+                            <tr class="comparison-row border-b border-white/5">
                                 <td class="py-4 px-4">调用次数</td>
                                 <td class="py-4 px-4 text-right font-mono text-verdant-300">↓50.0%</td>
                                 <td class="py-4 px-4 text-ink-500">旧六步 6 次 → 新原语 3 次</td>
@@ -453,7 +458,7 @@ flowchart TB
                                 </div>
                                 <div>
                                     <h4 class="text-white font-bold mb-1">Node.js 编排层</h4>
-                                    <p class="text-ink-400 text-sm">MCP 协议、44 工具编排、错误恢复、Semaphore 调度</p>
+                                    <p class="text-ink-400 text-sm">MCP 协议、44/13/18 工具编排、错误恢复、Semaphore 调度</p>
                                 </div>
                             </div>
 
@@ -595,7 +600,7 @@ flowchart TB
                     <div class="w-12 h-px bg-dragon-500"></div>
                     <span class="text-dragon-400 text-sm font-mono uppercase tracking-wider">Toolbox</span>
                 </div>
-                <h2 class="font-serif-cn text-4xl md:text-5xl font-bold text-white mb-6">44 个 MCP 工具</h2>
+                <h2 class="font-serif-cn text-4xl md:text-5xl font-bold text-white mb-6">44 个 MCP 工具（graph 13 / diagnostic 18）</h2>
                 <p class="text-xl text-ink-400 max-w-2xl">
                     从符号读写到质量门禁，覆盖代码操作全链路。全部纯正则/AST，零 LLM 调用。
                 </p>
@@ -665,7 +670,7 @@ flowchart TB
                     </div>
                     <div class="space-y-2">
                         <div class="font-mono text-xs text-dragon-300">edit_batch · edit_transaction</div>
-                        <div class="font-mono text-xs text-dragon-300">edit_sandbox · rename_symbol</div>
+                        <div class="font-mono text-xs text-dragon-300">sandbox_validate · rename_symbol</div>
                         <div class="text-xs text-ink-500">原子事务 + rollback + 跨文件重命名</div>
                     </div>
                 </div>
@@ -873,16 +878,16 @@ flowchart TB
                     <h3 class="text-lg font-bold text-white mb-6">测试矩阵</h3>
                     <div class="grid grid-cols-2 gap-4 mb-6">
                         <div class="p-4 rounded-xl bg-white/[0.02] text-center">
-                            <div class="text-3xl font-bold text-white font-mono test-counter" data-target="2013">0</div>
-                            <div class="text-xs text-ink-500 mt-1">JS 断言总数</div>
+                            <div class="text-3xl font-bold text-white font-mono test-counter" data-target="166">0</div>
+                            <div class="text-xs text-ink-500 mt-1">JS 测试文件数</div>
                         </div>
                         <div class="p-4 rounded-xl bg-white/[0.02] text-center">
-                            <div class="text-3xl font-bold text-white font-mono">81</div>
-                            <div class="text-xs text-ink-500 mt-1">测试文件</div>
-                        </div>
-                        <div class="p-4 rounded-xl bg-white/[0.02] text-center">
-                            <div class="text-3xl font-bold text-white font-mono">92</div>
+                            <div class="text-3xl font-bold text-white font-mono">97</div>
                             <div class="text-xs text-ink-500 mt-1">Rust 断言</div>
+                        </div>
+                        <div class="p-4 rounded-xl bg-white/[0.02] text-center">
+                            <div class="text-3xl font-bold text-white font-mono">44</div>
+                            <div class="text-xs text-ink-500 mt-1">经典工具</div>
                         </div>
                         <div class="p-4 rounded-xl bg-verdant-500/5 border border-verdant-500/10 text-center">
                             <div class="text-3xl font-bold text-verdant-300 font-mono">0</div>
@@ -893,7 +898,7 @@ flowchart TB
                         <svg class="w-4 h-4 text-verdant-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
                         </svg>
-                        <span>2026-08-13 全链实测通过（v0.4.7）</span>
+                        <span>2026-10-21 全链实测通过（v0.5.27）</span>
                     </div>
                 </div>
 
@@ -1059,7 +1064,7 @@ flowchart TB
 <span class="text-dragon-300">node</span> mcp-server.js --workspace /path/to/project
 
 <span class="text-ink-500"># 3) 自检（30 秒）</span>
-<span class="text-dragon-300">node</span> tests/test-mcp-server.js  <span class="text-ink-500"># 25 断言</span></pre>
+<span class="text-dragon-300">node</span> tests/test-mcp-server.js  <span class="text-ink-500"># 35 断言</span></pre>
                 </div>
             </div>
 
@@ -1123,7 +1128,7 @@ flowchart TB
                         <div class="code-block rounded-lg p-4 text-xs text-ink-300">
 <pre><span class="text-dragon-300">dsh plugin</span> --profile web add @jieai/dsh-malong-bridge</pre>
                         </div>
-                        <p class="text-ink-500 text-xs mt-3 leading-relaxed">一条命令：44 个工具自动注册为 <code class="text-dragon-300 font-mono">malong__*</code>，会话工作区自动注入。npm 包：<code class="text-dragon-300 font-mono">@jieai/dsh-malong-bridge</code></p>
+                        <p class="text-ink-500 text-xs mt-3 leading-relaxed">一条命令：44 个经典工具自动注册为 <code class="text-dragon-300 font-mono">malong__*</code>，会话工作区自动注入。npm 包：<code class="text-dragon-300 font-mono">@jieai/dsh-malong-bridge</code></p>
                     </div>
                 </div>
             </div>
@@ -1139,7 +1144,7 @@ flowchart TB
                         <span class="text-white font-bold text-sm font-mono">LH</span>
                     </div>
                     <span class="font-serif-cn font-bold text-white">码龙·六合工具</span>
-                    <span class="text-ink-600 text-sm">v0.4.7</span>
+                    <span class="text-ink-600 text-sm">v0.5.27</span>
                 </div>
                 <div class="flex items-center gap-6 text-sm text-ink-500">
                     <a href="https://github.com/wulun811/LiuHe" target="_blank" class="hover:text-white transition-colors">GitHub</a>

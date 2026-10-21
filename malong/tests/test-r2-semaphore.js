@@ -33,6 +33,9 @@ const THROW_DIR = join(__dirname, '..', 'tools', 'tool-r2-throw')
   throw new Error('R2 probe intentional throw')
 }
 `)
+  // 清理保证：探针目录在真实 tools/ 里，中途失败/被 kill 会残留 → 后续 classic 计数变 45（已踩过）。
+  // 退出钩子兼底，正常路径末尾也会删一次。
+  process.on('exit', () => { try { rmSync(THROW_DIR, { recursive: true, force: true }) } catch {} })
 }
 const WS = join(os.tmpdir(), 'opencode', 'r2-sem-ws')
 const STATE = join(os.tmpdir(), 'opencode', 'r2-sem-state')
@@ -40,7 +43,8 @@ rmSync(WS, { recursive: true, force: true }); mkdirSync(WS, { recursive: true })
 try { rmSync(STATE, { recursive: true, force: true }) } catch {}
 
 const child = spawn(process.execPath, [join(__dirname, '..', 'mcp-server.js'), '--workspace', WS], {
-  stdio: ['pipe', 'pipe', 'pipe'], cwd: WS, env: { ...process.env, MALONG_STATE_DIR: STATE },
+  // 0.5.24（breaking）：默认档 = 六和线 13；探针工具与 health 均为 classic 形态 → 显式 classic
+  stdio: ['pipe', 'pipe', 'pipe'], cwd: WS, env: { ...process.env, MALONG_STATE_DIR: STATE, MALONG_INTERFACE: 'classic' },
 })
 child.stderr.on('data', () => {})
 let buffer = ''

@@ -52,7 +52,12 @@ function parseStackTraces(output) {
     } else if ((m = line.match(goRe))) {
       traces.push({ lang: 'go', func: m[1], file: m[2], line: parseInt(m[3]) })
     } else if ((m = line.match(rsRe))) {
-      traces.push({ lang: 'rs', func: '', file: m[1], line: parseInt(m[2]), col: parseInt(m[3]) })
+      // dogfood-050 r3：无括号帧（at file:line:col）此前一律标 rs——Node 内建帧
+      // （node:internal/main/run_main_module:36:49）被误标 rs。按文件形态归 JS/TS；其余保持 rs
+      // 狗粮r2 修复：V8 合成帧 [eval]/[eval]-wrapper/[stdin]/<anonymous> 也是 JS，不能落入 rs
+      const f = m[1]
+      const isJs = f.startsWith('node:') || f.startsWith('[') || f.startsWith('<') || /\.(?:[cm]?jsx?|tsx?)$/.test(f)
+      traces.push({ lang: isJs ? 'js' : 'rs', func: '', file: f, line: parseInt(m[2]), col: parseInt(m[3]) })
     }
   }
   return traces

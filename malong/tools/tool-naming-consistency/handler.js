@@ -104,6 +104,7 @@ function checkSemantic(symbol, verbPrefs) {
 export async function handle(args, context) {
   const workspaceDir = args?.workspace_dir
   if (!workspaceDir) return makeError(ErrorCodes.INVALID_INPUT, 'workspace_dir is required')
+  if (typeof workspaceDir !== 'string') return makeError(ErrorCodes.INVALID_INPUT, `workspace_dir must be a string (got ${typeof workspaceDir})`)
 
   const file = args?.file
   if (!file) return makeError(ErrorCodes.INVALID_INPUT, 'file is required')
@@ -113,6 +114,7 @@ export async function handle(args, context) {
 
   const newSymbols = args?.new_symbols
   if (!Array.isArray(newSymbols)) return makeError(ErrorCodes.INVALID_INPUT, 'new_symbols must be an array of strings')
+  if (newSymbols.some(s => typeof s !== 'string' || !s)) return makeError(ErrorCodes.INVALID_INPUT, 'new_symbols must be an array of non-empty strings')
 
   const ext = extname(file)
   const lang = args?.lang || EXT_TO_LANG[ext]

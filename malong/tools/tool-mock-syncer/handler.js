@@ -172,11 +172,17 @@ export async function handle(args, context) {
   if (!workspaceDir) {
     return { error: 'missing_parameter', message: 'workspace_dir is required' }
   }
+  if (typeof workspaceDir !== 'string') {
+    return { error: 'invalid_input', message: `workspace_dir must be a string (got ${typeof workspaceDir})` }
+  }
 
   const file = args?.file
   const functionName = args?.function
   if (!file || !functionName) {
     return { error: 'missing_parameter', message: 'file and function are required' }
+  }
+  if (typeof file !== 'string' || typeof functionName !== 'string') {
+    return { error: 'invalid_input', message: 'file and function must be strings' }
   }
 
   // r54(P0-3): file 无路径守卫——`../` 可读 workspace 外文件泄露签名。加 validateFilePath。

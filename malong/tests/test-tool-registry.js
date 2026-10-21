@@ -14,6 +14,10 @@ function assert(cond, msg) {
 }
 
 const TMP = join(os.tmpdir(), 'opencode', 'tool-registry-test')
+// 0.5.24（breaking）：默认档 = 六和线（graph）；本文件的夹具工具是 classic 形态（manifest 无
+// interface 字段），故夹具段显式切 classic；真实 tools 目录段再切回默认档验证 13。
+const prevIface0 = process.env.MALONG_INTERFACE
+process.env.MALONG_INTERFACE = 'classic'
 try { rmSync(TMP, { recursive: true, force: true }) } catch {}
 mkdirSync(join(TMP, 'tools'), { recursive: true })
 
@@ -132,13 +136,27 @@ try { await reg.callTool('ghost', {}, {}) } catch (e) { notFound = /not found/i.
 assert(notFound, '调用不存在工具抛 Tool not found')
 
 // ── 真实 tools 目录完整性（注册防线）──
+// 0.5.24（breaking）：默认档 = 六和线 13；classic 全量 44 需显式 MALONG_INTERFACE=classic
+delete process.env.MALONG_INTERFACE
 const realReg = new ToolRegistry(join(__dirname, '..', 'tools'), { log: () => {} })
 const realLoaded = await realReg.loadAll()
-assert(realLoaded === 44, `真实 tools 目录加载 44 个工具（B13 增 6，实际 ${realLoaded}）`)
+assert(realLoaded === 13, `真实 tools 目录默认加载六和线 13 个工具（实际 ${realLoaded}）`)
 const realNames = realReg.getToolNames()
-for (const expect of ['read_symbol', 'write_symbol', 'edit_batch', 'edit_transaction', 'repo_map', 'sweep_dead_code', 'test_bridge', 'impact_analysis', 'call_chain', 'trace_symbol']) {
-  assert(realNames.includes(expect), `真实工具表含 ${expect}`)
+for (const expect of ['code_task', 'code_read', 'code_query', 'code_patch', 'code_check', 'edit_transaction', 'invoke_capability']) {
+  assert(realNames.includes(expect), `默认工具表含 ${expect}`)
 }
+assert(!realNames.includes('read_symbol') && !realNames.includes('write_symbol'), '默认档不含 classic 直调工具')
+const prevIface = process.env.MALONG_INTERFACE
+process.env.MALONG_INTERFACE = 'classic'
+const classicReg = new ToolRegistry(join(__dirname, '..', 'tools'), { log: () => {} })
+const classicLoaded = await classicReg.loadAll()
+assert(classicLoaded === 44, `classic 档加载 44 个工具（实际 ${classicLoaded}）`)
+const classicNames = classicReg.getToolNames()
+for (const expect of ['read_symbol', 'write_symbol', 'edit_batch', 'edit_transaction', 'repo_map', 'sweep_dead_code', 'test_bridge', 'impact_analysis', 'call_chain', 'trace_symbol']) {
+  assert(classicNames.includes(expect), `classic 工具表含 ${expect}`)
+}
+if (prevIface === undefined) delete process.env.MALONG_INTERFACE; else process.env.MALONG_INTERFACE = prevIface
+if (prevIface0 === undefined) delete process.env.MALONG_INTERFACE; else process.env.MALONG_INTERFACE = prevIface0
 
 // ── extractMetrics 指标提取 ──
 const mReadOutline = extractMetrics('read_outline', { lines: 100, tokens_estimate: 50 })
@@ -164,7 +182,8 @@ assert(extractMetrics('health', { error: 'x' }) === undefined, 'error 结果不�
   const after = await reg.callTool('good_tool', { x: 1 }, {})
   assert(after.note && String(after.note).includes('restart MCP'), `R13: mtime 变化贴 note（${String(after.note).slice(0, 50)}）`)
   assert(after.from === 'dupe', 'R13: note 附加不覆盖原结果')
-  { const noErr = await reg.callTool('good_tool', { x: 1 }, {}); assert(noErr.note && noErr.from === 'dupe', 'R13: 二次调用仍检测到（ESM 缓存未热加载）') }
+  { const again = await reg.callTool('good_tool', { x: 1 }, {}); assert(again.note === undefined && again.from === 'dupe', 'R13: note 只贴一次（dogfood-050 P3 去噪）') }
+  { const past2 = new Date(Date.now() - 120000); utimesSync(handlerFile, past2, past2); const third = await reg.callTool('good_tool', { x: 1 }, {}); assert(third.note && String(third.note).includes('restart MCP'), 'R13: 再次 mtime 变化 → 重新贴一次') }
 }
 
 try { rmSync(TMP, { recursive: true, force: true }) } catch {}

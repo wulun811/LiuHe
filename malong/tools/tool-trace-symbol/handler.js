@@ -48,7 +48,10 @@ export async function handle(args, context) {
   const maxResults = Math.max(1, parseInt(args?.max_results, 10) || 30)
 
   if (!symbol) return { error: 'missing_parameter', message: 'symbol is required', suggestion: 'Provide a symbol name to trace (e.g. "MAX_RETRY_COUNT")' }
+  // 第二轮审查：非字符串参数不得逃逸（旧 detectMisuse/escapeRegex 对 number/object 裸抛 .includes）
+  if (typeof symbol !== 'string') return { error: 'invalid_input', message: `symbol must be a string (got ${typeof symbol})` }
   if (!file) return { error: 'missing_parameter', message: 'file is required', suggestion: 'Provide a file path relative to workspace_dir where the symbol is defined' }
+  if (typeof file !== 'string') return { error: 'invalid_input', message: `file must be a string (got ${typeof file})` }
 
   const pathCheck = validateFilePath(file)
   if (pathCheck.blocked) {
@@ -204,7 +207,9 @@ function extractSymbolValue(absPath, symbol) {
     const content = readFileSync(absPath, 'utf-8')
     const lines = content.split('\n')
 
-    const assignmentRegex = new RegExp(`^(?:\\s*\\w+\\s+)?${escapeRegex(symbol)}\\s*(?::\\s*\\w+)?\\s*=\\s*(.+)`)
+    // 12-D：多前缀词（export const / public static / static readonly）——旧正则只吃一个前缀词，
+    // `export const X = 3` 恒不匹配 → value 恒 null（eval-e2e 任务4 暴露）
+    const assignmentRegex = new RegExp(`^(?:\\s*[\\w$]+\\s+)*${escapeRegex(symbol)}\\s*(?::\\s*[\\w$]+)?\\s*=\\s*(.+)`)
     for (let i = 0; i < lines.length; i++) {
       const match = lines[i].match(assignmentRegex)
       if (match) {

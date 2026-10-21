@@ -1,8 +1,12 @@
 # @jieai/dsh-malong-bridge
 
-Official DSH (DeepSeek Harness) plugin for LiuHe / malong. One command puts all 44
-`malong__*` MCP tools into dsh web, and **malong's workspace automatically follows
-the current conversation's workspace** — no need to pass a path manually.
+Official DSH (DeepSeek Harness) plugin for LiuHe / malong. One command puts the
+**Six-He line** (13 `malong__*` MCP tools) into dsh web, and **malong's workspace
+automatically follows the current conversation's workspace** — no need to pass a path
+manually.
+(Since 0.5.22 the bridge defaults to `graph` + state layer = 13 tools — the recommended
+daily entry. The classic full catalog (44) and the diagnostic tier (18) are still one
+env away: export `MALONG_INTERFACE=classic|diagnostic` on the dsh host.)
 
 ```bash
 dsh plugin --profile web add @jieai/dsh-malong-bridge
@@ -10,9 +14,15 @@ pkill -f "dsh web"
 dsh web --port 3456 --host 0.0.0.0
 ```
 
-Works out of the box: the bridge locates the bundled `server/mcp-server.js`
-(complete toolset backend; the only native dependency, better-sqlite3, ships
-cross-platform precompiled binaries), so no extra deployment is needed.
+Works out of the box for the MCP server itself: the bridge locates the bundled
+`server/mcp-server.js` (complete toolset backend; better-sqlite3 ships
+cross-platform precompiled binaries, with a vendored sql.js WASM fallback).
+
+**Parser prerequisite (one-time per machine)**: the Rust parsing service
+`malong-parse` is NOT bundled in this tarball. Install it yourself or point
+`MALONG_PARSE_BIN` at a binary (see Platform support below). If it cannot be
+resolved, tool calls that need parsing fail with an explicit resolution error
+listing the searched locations.
 
 > **pnpm 10 warns `Ignored build scripts: better-sqlite3`**: that is pnpm's
 > default security policy (blocks dependency postinstall scripts). Run
@@ -63,12 +73,31 @@ DSH Agent → malong__read_symbol(...) (no workspace_dir)
   `MALONG_STATE_DIR`, unrelated to any project directory.
 - **Zero intrusion**: does not touch dsh's node_modules; dsh upgrades are safe.
 
-> **Platform support (automatic)**: `malong-parse` (the Rust parsing service)
-> ships as esbuild-style platform subpackages — the main package declares
-> `@jieai/malong-parse-linux-x64` / `-darwin-x64` / `-darwin-arm64` /
-> `-win32-x64` in `optionalDependencies`, and npm/pnpm pulls only the binary for
-> the current os/cpu at install time. Other platforms / custom binaries can be
-> provided via the `MALONG_PARSE_BIN` env var.
+> **Platform support**: `malong-parse` (the Rust parsing service) is NOT bundled
+> with this tarball. It is resolved at runtime by `parse-bin.js`, in this order:
+> `MALONG_PARSE_BIN` / `MALONG_PARSE_BIN_ALT` env → an installed
+> `@jieai/malong-parse-<platform>-<arch>` package (only if you installed one;
+> this bundle no longer declares such optionalDependencies) → the bundled
+> `server/bin/malong-parse` (legacy layout; absent in this tarball) →
+> `~/.local/bin/malong-parse` → a sibling `../malong-parse/target/{release,debug}`
+> dev build.
+>
+> Point it explicitly when installing by hand, e.g.
+> `MALONG_PARSE_BIN=/opt/malong-parse/malong-parse` (Linux) or
+> `MALONG_PARSE_BIN=C:\tools\malong-parse\malong-parse.exe` (Windows).
+>
+> **0.5.13 note**: this bundle no longer declares `optionalDependencies` for the
+> platform packages. They were pinned to `0.5.9`, a version that was never
+> published (npm tops out at `0.4.8`), so they could never install and only
+> produced a silent `catch {}` miss on every resolution. Install the binary
+> yourself (`~/.local/bin/malong-parse`) or point `MALONG_PARSE_BIN` at one.
+
+On Windows, replacing an existing source file uses the inbox Windows PowerShell
+and .NET `File.Replace` with a hidden process to preserve the target's ACL.
+Edits, undo and rollback use this path; new files inherit their directory's
+permissions. If Windows PowerShell is blocked or replacement is denied, the
+write fails explicitly instead of falling back to a rename that resets the ACL.
+This adds Windows-only process startup overhead to existing-file writes.
 
 ## Differences vs. the official dsh-mcp-client
 

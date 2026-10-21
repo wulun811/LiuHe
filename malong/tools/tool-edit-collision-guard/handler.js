@@ -101,6 +101,9 @@ export async function handle(args, context) {
   if (!workspaceDir) {
     return makeError(ErrorCodes.INVALID_INPUT, 'workspace_dir is required')
   }
+  if (typeof workspaceDir !== 'string') {
+    return makeError(ErrorCodes.INVALID_INPUT, `workspace_dir must be a string (got ${typeof workspaceDir})`)
+  }
 
   const file = args?.file
   if (!file) {

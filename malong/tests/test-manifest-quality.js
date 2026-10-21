@@ -17,7 +17,7 @@ function assert(cond, msg) {
 const tools = readdirSync(TOOLS_DIR)
   .filter((t) => existsSync(join(TOOLS_DIR, t, 'manifest.json')))
   .sort()
-assert(tools.length === 44, `44 个工具 manifest 齐全（实际 ${tools.length}）`)
+assert(tools.length === 56, `56 个工具 manifest 齐全（44 常驻 + 4 graph 只读 + 8 graph stateful（含 ADR-018 invoke_capability），实际 ${tools.length}）`)
 
 // 输出格式信号（低分工具描述必须命中其一，证明写了"输出长什么样"）
 const OUTPUT_SIGNALS = ['scores', 'spec', 'JSON', 'json', '{status', 'structured', 'returns', 'output', '->', 'text']
@@ -60,6 +60,11 @@ for (const t of tools) {
 assert(missingParamDescs.length === 0, `参数描述覆盖率 100%（缺: ${missingParamDescs.join(', ') || '无'}）`)
 assert(overlong.length === 0, `无 description 超 ${MAX_DESC} 字符（超: ${overlong.join(', ') || '无'}）`)
 assert(lowOver.length === 0, `低分四工具描述 ≤${MAX_LOW}（超: ${lowOver.join(', ') || '无'}）`)
+// dogfood-050 P3：create 文档误导——必须写明 locator.file_path（旧只写 content）
+const cbDesc = JSON.parse(readFileSync(join(TOOLS_DIR, 'tool-code-batch', 'manifest.json'), 'utf-8')).description || ''
+const cpDesc = JSON.parse(readFileSync(join(TOOLS_DIR, 'tool-code-patch', 'manifest.json'), 'utf-8')).description || ''
+assert(cbDesc.includes('locator.file_path'), 'code_batch 描述含 locator.file_path（create 文档修正）')
+assert(cpDesc.includes('locator.file_path'), 'code_patch 描述含 locator.file_path（嵌套说明修正）')
 assert(noOutputSignal.length === 0, `低分四工具描述均含输出信号（缺: ${noOutputSignal.join(', ') || '无'}）`)
 
 console.log(`\n=== test-manifest-quality: ${pass} passed, ${fail} failed ===`)

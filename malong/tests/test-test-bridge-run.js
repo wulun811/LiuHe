@@ -28,6 +28,7 @@ writeFileSync(join(WS, 'test_demo.py'), [
 ].join('\n'))
 
 const { handle } = await import(pathToFileURL(join(__dirname, '..', 'tools', 'tool-test-bridge', 'handler.js')).href)
+const { parsePytest } = await import(pathToFileURL(join(__dirname, '..', 'tools', 'tool-test-bridge', 'parsers.js')).href)
 
 // ① run pytest：pass/fail 计数正确（异步 execFile 通路）
 {
@@ -76,9 +77,64 @@ const { handle } = await import(pathToFileURL(join(__dirname, '..', 'tools', 'to
   assert(rFile.error === 'invalid_input', `④e 恶意 file 穿越拦截（得 ${rFile.error}）`)
   const rFileOk = await handle({ action: 'run', workspace_dir: nd, framework: 'node', file: 'node_test.js', timeout: 60 }, {})
   assert(rFileOk.exit_code === 0, `④f file 参数作为默认 scope 生效（得 ${rFileOk.exit_code}）`)
+  // dogfood-050 P3：exit 0 但无测试总数 → 不得宣称 All tests pass
+  writeFileSync(join(nd, 'plain.js'), 'console.log("hello")\n')
+  const rPlain = await handle({ action: 'run', workspace_dir: nd, framework: 'node', scope: 'plain.js', timeout: 60 }, {})
+  assert(rPlain.exit_code === 0 && rPlain.no_totals_parsed === true, `④g total=0 → no_totals_parsed 标记（得 ${rPlain.exit_code}/${rPlain.no_totals_parsed}）`)
+  assert(!/All tests pass/.test(String(rPlain.next_step || '')), `④g total=0 不宣称全通过（得 ${rPlain.next_step}）`)
 }
 
 try { rmSync(WS, { recursive: true, force: true }) } catch {}
+
+// ④h dogfood-050 修复：node --test TAP 失败富化——旧实现 framework=node 无解析器，
+// results/failures 空、原始 TAP 塞 run_error 且 1000 字符截断（最需失败分析时丢失）
+{
+  const nd = join(os.tmpdir(), 'opencode', 'b13-tb-tap-ws')
+  try { rmSync(nd, { recursive: true, force: true }) } catch {}
+  mkdirSync(join(nd, 'tests'), { recursive: true })
+  writeFileSync(join(nd, 'tests', 'mix.test.js'), [
+    "const test = require('node:test')",
+    "const assert = require('node:assert')",
+    "test('passes ok', () => { assert.equal(1 + 1, 2) })",
+    "test('fails here', () => { assert.equal(3, 4) })",
+  ].join('\n') + '\n')
+  const r = await handle({ action: 'run', workspace_dir: nd, framework: 'node', scope: 'tests/mix.test.js', timeout: 60 }, {})
+  assert(r.exit_code !== 0, `④h TAP 失败 exit_code 非 0（得 ${r.exit_code}）`)
+  assert(r.run_error === undefined, `④h 解析成功不占用 run_error（得 ${String(r.run_error).slice(0, 40)}）`)
+  assert(r.summary?.total === 2 && r.summary?.passed === 1 && r.summary?.failed === 1, `④h TAP summary 1/1/2（得 ${JSON.stringify(r.summary)}）`)
+  assert(r.failures?.length === 1 && r.failures[0].test === 'fails here', `④h failures 定位失败用例（得 ${JSON.stringify(r.failures?.map(f => f.test))}）`)
+  assert(r.failures?.[0]?.error_type === 'AssertionError', `④h error_type=AssertionError（得 ${r.failures?.[0]?.error_type}）`)
+  assert(/3|expected/.test(String(r.failures?.[0]?.error)), `④h error 含断言细节（得 ${r.failures?.[0]?.error}）`)
+  assert(String(r.failures?.[0]?.file || '').endsWith('mix.test.js'), `④h file 定位（得 ${r.failures?.[0]?.file}）`)
+  assert(r.failures?.[0]?.test_snippet, `④h test_snippet 富化（得 ${String(r.failures?.[0]?.test_snippet).slice(0, 40)}）`)
+  // 全绿对照
+  writeFileSync(join(nd, 'tests', 'all.test.js'), [
+    "const test = require('node:test')",
+    "const assert = require('node:assert')",
+    "test('g1', () => { assert.equal(1, 1) })",
+    "test('g2', () => { assert.equal(2, 2) })",
+  ].join('\n') + '\n')
+  const rg = await handle({ action: 'run', workspace_dir: nd, framework: 'node', scope: 'tests/all.test.js', timeout: 60 }, {})
+  assert(rg.exit_code === 0 && rg.summary?.passed === 2 && rg.summary?.failed === 0, `④h TAP 全绿 2/0（得 ${rg.exit_code}/${JSON.stringify(rg.summary)}）`)
+  assert(rg.failures?.length === 0, `④h 全绿无 failures（得 ${rg.failures?.length}）`)
+  try { rmSync(nd, { recursive: true, force: true }) } catch {}
+}
+
+// ④i dogfood-050 修复：package.json `node --test` 自动识别（旧实现 unknown_framework，建议也不给 verify_pipeline）
+{
+  const nd2 = join(os.tmpdir(), 'opencode', 'b13-tb-detect-ws')
+  try { rmSync(nd2, { recursive: true, force: true }) } catch {}
+  mkdirSync(join(nd2, 'tests'), { recursive: true })
+  writeFileSync(join(nd2, 'package.json'), JSON.stringify({ name: 'tb-detect', scripts: { test: 'node --test' } }))
+  writeFileSync(join(nd2, 'tests', 'one.test.js'), "const test = require('node:test')\ntest('x', () => {})\n")
+  const rNoScope = await handle({ action: 'run', workspace_dir: nd2, timeout: 60 }, {})
+  assert(rNoScope.error === 'unsupported_framework' && String(rNoScope.message).includes('verify_pipeline') && String(rNoScope.message).includes('running. For framework=node'), `④i node --test 项目无 scope → unsupported+hint（含断句）（得 ${rNoScope.error}/${String(rNoScope.message).slice(0, 80)}）`)
+  const rAuto = await handle({ action: 'run', workspace_dir: nd2, scope: 'tests/one.test.js', timeout: 60 }, {})
+  assert(rAuto.framework === 'node' && rAuto.exit_code === 0, `④i 自动识别 node 框架并跑绿（得 ${rAuto.framework}/${rAuto.exit_code}）`)
+  // dogfood-050 r3：通过用例 file 回填 scope（旧实现逐用例 file:""，失败项才有文件名）
+  assert((rAuto.results || []).length > 0 && (rAuto.results || []).every(x => x.file === 'tests/one.test.js'), `④j 通过用例 file 回填 scope（得 ${JSON.stringify((rAuto.results || []).map(x => x.file))}）`)
+  try { rmSync(nd2, { recursive: true, force: true }) } catch {}
+}
 
 // ⑤ r10d：discover 三层覆盖——tests/ 目录但命名不合约定的测试文件经文本兜底扫出
 {
@@ -130,6 +186,26 @@ try { rmSync(WS, { recursive: true, force: true }) } catch {}
   assert(r.tests.some(t => t.file === 'tests/test-spawn-guard.js'), `⑦ 命中 tests/test-spawn-guard.js（${JSON.stringify(r.tests)}）`)
   assert(r.search_methods.includes('import_graph/text_fallback'), `⑦ search_methods 含 import 层（${JSON.stringify(r.search_methods)}）`)
   try { rmSync(dws, { recursive: true, force: true }) } catch {}
+}
+
+// ── ⑧ pytest verbose traceback 归属：下一个测试头必须终止扫描，
+//      不得把后续 FAILURES 帧归到前一个失败上（反馈 2026-08-07 的回归锁） ──
+{
+  const out = [
+    'tests/test_a.py::test_fail FAILED',
+    'tests/test_a.py::test_error FAILED',
+    '=================================== FAILURES ===================================',
+    '_____________________________ test_error _____________________________',
+    'def test_error():',
+    '>       assert 1 == 2',
+    'E       AssertionError: assert 1 == 2',
+    'tests/test_a.py:9: AssertionError',
+  ].join('\n')
+  const r = parsePytest(out)
+  assert(r.failures.length === 2, `⑧ 两个失败都被解析（得 ${r.failures.length}）`)
+  assert(r.failures[0].test === 'test_fail' && r.failures[0].error_type === '', `⑧ test_fail 不被后续帧污染（得 ${r.failures[0].test}/${r.failures[0].error_type}）`)
+  assert(r.failures[0].traceback === 'tests/test_a.py::test_error FAILED', `⑧ test_fail traceback 止于下一测试头（得 ${JSON.stringify(r.failures[0].traceback)}）`)
+  assert(r.failures[1].test === 'test_error' && r.failures[1].error_type === 'AssertionError' && r.failures[1].error === 'assert 1 == 2', `⑧ test_error 归因正确（得 ${r.failures[1].test}/${r.failures[1].error_type}/${r.failures[1].error}）`)
 }
 
 console.log(`== test-test-bridge-run: ${pass} passed, ${fail} failed ==`)

@@ -1,4 +1,7 @@
 import { readUsageStats, cleanupStaleWorkspaces } from '../../health-check.js'
+import { pruneAllTaskNamespaces } from '../entry-store.js'
+import { pruneJobs } from '../../workflow/jobs.js'
+import { getStateDir } from '../../host-config.js'
 import { appendFileSync, readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -42,7 +45,7 @@ export async function handle(args, context) {
         next_step: 'Check this row before changing the tool (stop if listed); after changing, add failure-path tests + update this row. Regression: run the test-xxx.js files listed in the coverage column.',
       }
     } catch (e) {
-      return { error: 'matrix_unavailable', message: `Cannot read Y004 matrix: ${e.message}`, suggestion: 'Ensure malong/docs/Y004-工具排查矩阵.md exists' }
+      return { error: 'matrix_unavailable', message: `Cannot read Y004 matrix: ${e.message}`, suggestion: 'The Y004 boundary-coverage matrix is an internal workspace document and is not shipped with the open-source release; health action=matrix only works in a workspace that provides it' }
     }
   }
 
@@ -119,10 +122,29 @@ export async function handle(args, context) {
       if (h && !protect.includes(h)) protect.push(h)
     }
     const result = cleanupStaleWorkspaces(context.workspacesDir, { maxAgeDays, dryRun, protect })
+    // D（债务③）：顺带清扫超龄终态 entry-tasks——此前 pruneTasks 无调用方，任务快照永不自动清
+    try {
+      result.entry_tasks = pruneAllTaskNamespaces({ maxAgeHours: maxAgeDays * 24, dryRun })
+    } catch (e) {
+      result.entry_tasks = { error: e.message }
+    }
+    // 第二轮审查：终态 job 记录也要清（旧实现永不清理，listJobs 全扫累积文件）
+    // 第二轮修复（e0c6669）+ U（2026-10-05）：jobs 与 context.stateDir 已统一为
+    // getStateDir()；此处仍显式用 getStateDir()，防未来 context.stateDir 语义再漂移
+    try {
+      result.jobs_pruned = pruneJobs(getStateDir(), { maxAgeDays: 7, dryRun })
+    } catch (e) {
+      result.jobs_pruned = { error: e.message }
+    }
     result.next_step = dryRun
       ? 'Dry run only — re-run with dry_run=false to actually prune stale workspace caches.'
       : 'Deleted caches are rebuildable: next access to a pruned workspace reindexes automatically.'
     return result
+  }
+
+  // 第二轮审查：未知 action 不再静默降级为 check（与 code_* 家族对齐）
+  if (action !== 'check') {
+    return { error: 'invalid_input', message: `Unknown action: ${action}`, valid_actions: ['check', 'matrix', 'restart', 'cleanup'], suggestion: 'Use action="check" (default) or one of the valid actions.' }
   }
 
   // 默认：健康检查

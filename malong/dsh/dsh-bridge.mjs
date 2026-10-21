@@ -13,14 +13,52 @@
 import { spawn } from "node:child_process"
 import { createInterface } from "node:readline"
 import { dirname, join } from "node:path"
-import { mkdirSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync } from "node:fs"
+import { fileURLToPath } from "node:url"
 import os from "node:os"
+
+// 0.5.13：版本号不再硬编码（旧实现写死 "0.5.9"，每次发版都忘改 → 日志/握手版本与实际包永久漂移）。
+// 优先读包内 package.json（一体包用），否则回退到 server/../package.json，最后兜底 "unknown"。
+function bridgeVersion() {
+  const pkgUrl = new URL("./package.json", import.meta.url)
+  try {
+    return JSON.parse(readFileSync(pkgUrl, "utf-8")).version || "unknown"
+  } catch {
+    try {
+      return JSON.parse(readFileSync(new URL("./../package.json", import.meta.url), "utf-8")).version || "unknown"
+    } catch {
+      return "unknown"
+    }
+  }
+}
+
+// 0.5.13：serverPath 缺省时的回退从 reprep.sh 的字符串补丁上移到源码——
+// 两种布局各自命中：一体包 <root>/server/mcp-server.js；源码树 ../mcp-server.js。
+// 这让 reprep.sh 只负责复制，不再做脆弱的位置断言（旧断言在 import 行变动时就失效）。
+function defaultServerPath() {
+  for (const rel of ["./server/mcp-server.js", "../mcp-server.js"]) {
+    try {
+      const p = fileURLToPath(new URL(rel, import.meta.url))
+      if (existsSync(p)) return p
+    } catch {}
+  }
+  return null
+}
 
 export const name = "malong-dsh-bridge"
 
 export const inject = ["tools"]
 
 const SERVER_NAME = "malong"
+
+// 0.5.22：DSH 默认只暴露「六合线」（graph + 状态层 = 13 个工具）——README 推荐的日常入口。
+// 旧默认是 classic 全量 44 个：DSH 会话的工具清单被灌满，模型在 44 个里挑错工具。
+// 宿主显式设置 MALONG_INTERFACE / MALONG_ENTRY_STATE 时以宿主为准
+// （classic = 44 全量；diagnostic = 18（加 5 个分析器））。
+const DEFAULT_INTERFACE = "graph"
+const DEFAULT_ENTRY_STATE = "1"
+const effectiveInterface = process.env.MALONG_INTERFACE || DEFAULT_INTERFACE
+const effectiveEntryState = process.env.MALONG_ENTRY_STATE || DEFAULT_ENTRY_STATE
 
 function publicToolName(rawName) {
   return `${SERVER_NAME}__${rawName}`
@@ -73,13 +111,13 @@ function extractText(content, rawName) {
 
 async function apply(ctx, config) {
   const cfg = config && typeof config === "object" ? config : {}
-  const serverPath = cfg.serverPath
+  const serverPath = cfg.serverPath ?? defaultServerPath()
   if (typeof serverPath !== "string" || serverPath.length === 0) {
-    throw new Error("malong-dsh-bridge: missing config.serverPath (absolute path to mcp-server.js)")
+    throw new Error("malong-dsh-bridge: missing config.serverPath (absolute path to mcp-server.js; bundled layout falls back to <pkg>/server/mcp-server.js)")
   }
   const stateDir = typeof cfg.stateDir === "string" && cfg.stateDir !== "" ? cfg.stateDir : join(os.homedir(), ".local", "state", "malong-dsh")
   const timeoutMs = typeof cfg.toolCallTimeoutMs === "number" && cfg.toolCallTimeoutMs > 0 ? cfg.toolCallTimeoutMs : 300000
-  const BRIDGE_VERSION = "0.4.7"
+  const BRIDGE_VERSION = bridgeVersion()
   const logger = (msg) => process.stderr.write(`[malong-dsh-bridge] ${msg}\n`)
 
   mkdirSync(stateDir, { recursive: true })
@@ -113,9 +151,18 @@ async function apply(ctx, config) {
 
   const connect = async () => {
     if (disposed || child) return null
+    // dogfood-050 r5：U 状态目录统一适配——新 mcp-server 只认 MALONG_STATE_DIR（getStateDir()，
+    // 默认 ~/.config/malong），--workspace 仅作旧状态迁移源（baseDir/data/malong-mcp）。
+    // 旧桥接只传 --workspace：升级到 0.5.0 代码后 DSH 状态会落进宿主共享目录与 opencode 混用。
     const c = spawn(process.execPath, [serverPath, "--workspace", stateDir, "--max-old-space-size=512"], {
       cwd: dirname(serverPath),
       stdio: ["pipe", "pipe", "pipe"],
+      env: {
+        ...process.env,
+        MALONG_STATE_DIR: stateDir,
+        MALONG_INTERFACE: effectiveInterface,
+        MALONG_ENTRY_STATE: effectiveEntryState,
+      },
     })
     child = c
     c.stderr.on("data", (chunk) => {
@@ -271,7 +318,7 @@ async function apply(ctx, config) {
     })
     registered++
   }
-  logger(`registered ${registered} tools (serverName=${SERVER_NAME}, stateDir=${stateDir})`)
+  logger(`registered ${registered} tools (serverName=${SERVER_NAME}, interface=${effectiveInterface}, entryState=${effectiveEntryState}, stateDir=${stateDir})`)
 
   ctx.on("dispose", () => {
     disposed = true

@@ -217,6 +217,7 @@ await shadowCompare('src/golden.js', 'set',
       return false;
     }
     return true;
+  }
 `, 'body')
 
 // ══════════════ golden：Go ══════════════
@@ -248,6 +249,7 @@ await shadowCompare('src/golden.go', 'Start',
 		return errReserved
 	}
 	return nil
+}
 `, 'body')
 
 // ══════════════ 影子比对一致率 ══════════════

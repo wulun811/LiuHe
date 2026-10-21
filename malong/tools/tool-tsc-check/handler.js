@@ -73,6 +73,15 @@ function findTscBin(dir) {
   return null
 }
 
+// npm 10+ can refuse npx --no-install before the compiler starts. A compiler
+// diagnostic still wins if a wrapper prints both kinds of output.
+export function isNpxTscUnavailable(result) {
+  const output = String(result?.stdout || '') + '\n' + String(result?.stderr || '')
+  if (/\b(?:error|warning)\s+TS\d+\b/i.test(output)) return false
+  return /This is not the tsc command you are looking for/i.test(output)
+    || (result?.exitCode !== 0 && /npx canceled due to missing packages/i.test(output))
+}
+
 export async function handle(args, context) {
   const { getWorkspaceDir } = context
   const workspaceDir = args?.workspace_dir
@@ -150,9 +159,9 @@ export async function handle(args, context) {
 
   // r46: npx 包缺失时 exit 0 + 误导 banner（"This is not the tsc command you are looking for"）→
   // 此前被判 pass 假阳性。识别 banner 显式返回 tsc_not_found。
-  const npxMissing = /This is not the tsc command you are looking for/i.test(r.stdout + r.stderr)
+  const npxMissing = isNpxTscUnavailable(r)
   if (!tscBin && npxMissing) {
-    return makeError('tsc_not_found', 'tsc not found in workspace or via npx (npx missing-package banner detected)', hasTypeScriptSources(targetDir)
+    return makeError('tsc_not_found', 'tsc not found in workspace or via npx (npx missing-package response detected)', hasTypeScriptSources(targetDir)
       ? 'Install typescript in the project (npm i -D typescript) or globally.'
       : 'No TypeScript sources (tsconfig.json or .ts/.tsx/.mts/.cts) found — nothing to check here; skip this tool or install typescript if you plan to add TS.')
   }

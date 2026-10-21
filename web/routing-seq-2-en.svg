@@ -63,7 +63,7 @@
 <g>
       <rect x="472" y="108" width="152" height="46" rx="7" fill="#15151a" stroke="#3a3f4b" stroke-width="1.2"/>
       <text x="548" y="127" font-size="10" font-weight="700" fill="#e8b86e" text-anchor="middle">T24 mck</text>
-      <text x="548" y="144" font-size="10.5" fill="#e7e7e7" text-anchor="middle">mock_syncer</text>
+      <text x="548" y="144" font-size="10.5" fill="#e7e7e7" text-anchor="middle">mock_sync</text>
     </g>
 <line x1="724" y1="154" x2="724" y2="1002" stroke="#2b3039" stroke-width="1" stroke-dasharray="3 5"/>
 <g>

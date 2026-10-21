@@ -3,6 +3,7 @@ import { mkdtempSync, writeFileSync, existsSync, rmSync, mkdirSync, realpathSync
 import { join, dirname, resolve, sep, relative, isAbsolute } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
+import { spawnWithGroup } from '../../spawn-guard.js'
 
 // r8(F8)：同仓库 git 事务串行化门闩（每 repo 一条 promise 链）
 const _repoLocks = new Map()
@@ -79,12 +80,14 @@ function git(args, cwd, timeout) {
   })
 }
 
-function runShell(cmd, cwd, timeout) {
-  return new Promise((resolve) => {
-    execFile('bash', ['-c', cmd], { cwd, timeout, maxBuffer: 4 * 1024 * 1024 }, (err, stdout, stderr) => {
-      resolve({ exitCode: err ? (typeof err.code === 'number' ? err.code : 1) : 0, stdout: (stdout || '').toString().slice(0, 4000), stderr: (stderr || '').toString().slice(0, 4000) })
-    })
-  })
+async function runShell(cmd, cwd, timeout) {
+  try {
+    const win = process.platform === 'win32'
+    const result = await spawnWithGroup(win ? 'cmd.exe' : 'bash', win ? ['/d', '/s', '/c', `"${cmd}"`] : ['-c', cmd], { cwd, timeout, windowsVerbatimArguments: win })
+    return { exitCode: result.killed ? 1 : (result.code ?? 1), stdout: result.stdout.slice(-4000), stderr: result.stderr.slice(-4000) }
+  } catch (e) {
+    return { exitCode: 1, stdout: '', stderr: e.message }
+  }
 }
 
 export async function handle(args, context) {
@@ -160,6 +163,16 @@ async function _runTransaction(repoDir, changes, args) {
   try {
     originalBranch = await git(['rev-parse', '--abbrev-ref', 'HEAD'], repoDir, timeout)
   } catch (e) {
+    // R4：空仓库（unborn HEAD）rev-parse 裸错且无引导——先探测 HEAD 是否存在再给结构化错误
+    let hasHead = true
+    try { await git(['rev-parse', '--verify', 'HEAD'], repoDir, timeout) } catch { hasHead = false }
+    if (!hasHead) {
+      return {
+        error: 'no_commits',
+        message: 'Repository has no commits yet; worktree transactions need a base commit',
+        suggestion: 'Create an initial commit first: git add -A && git commit -m init (or git commit --allow-empty -m init), then retry.',
+      }
+    }
     return { error: 'git_failed', message: e.message }
   }
   // r23-fix: detached HEAD 时 --abbrev-ref 返回 'HEAD'，merge --ff-only 目标歧义 → 拒绝并提示
@@ -189,11 +202,19 @@ async function _runTransaction(repoDir, changes, args) {
       }
     }
 
+    let verifyReport = null
     if (args?.verify_cmd) {
       const verResult = await runShell(args.verify_cmd, worktreePath, timeout)
       if (verResult.exitCode !== 0) {
-        throw new Error(`verification failed (exit ${verResult.exitCode}): ${verResult.stderr || verResult.stdout}`)
+        // dogfood-050（P2 修复）：verify 失败必须带可诊断输出（exit code + stdout/stderr tail）——
+        // S5 code_worktree 委派路径旧实现只透出 transaction_rolled_back，排查需手动重跑。
+        const err = new Error(`verification failed (exit ${verResult.exitCode}): ${verResult.stderr || verResult.stdout}`)
+        err.code = 'VERIFY_FAILED'
+        err.verify = { exit_code: verResult.exitCode, stdout_tail: verResult.stdout, stderr_tail: verResult.stderr }
+        throw err
       }
+      // P3 修复（2026-10-12 狗粮）：verify 成功也要回报——旧成功路径不提 verify_cmd 结论（传了 npm test 不知道过没过）
+      verifyReport = { command: args.verify_cmd, exit_code: 0 }
     }
 
     // r54(P1): 只 add 声明的 change 路径——git add -A 会把 verify_cmd 产物(node_modules/build/coverage)一并提交
@@ -213,6 +234,7 @@ async function _runTransaction(repoDir, changes, args) {
       branch: branchName,
       files: changes.length,
       commit,
+      ...(verifyReport ? { verify: verifyReport } : {}),
       // r23-fix2: LLM 误提交后需要明确撤销路径
       next_step: `Committed on the base branch. Undo with: git revert ${commit.slice(0, 12)} (keeps history) or git reset --hard HEAD~1 (removes commit). Review before pushing.`,
     }
@@ -228,6 +250,7 @@ async function _runTransaction(repoDir, changes, args) {
         message: e.message,
         branch: branchName,
         commit,
+        ...(e.verify ? { verify: e.verify } : {}),
         detail: `Commit ${commit.slice(0, 12)} was created but a later step failed. Branch "${branchName}" preserved (do NOT delete it). Recover with: git merge ${branchName}  (or git cherry-pick ${commit.slice(0, 12)}).`,
       }
     }
@@ -237,6 +260,7 @@ async function _runTransaction(repoDir, changes, args) {
       success: false,
       error: 'transaction_rolled_back',
       message: e.message,
+      ...(e.verify ? { verify: e.verify } : {}),
       detail: 'Worktree cleaned up, branch deleted, checked out back to original branch. No changes remain.',
     }
   }

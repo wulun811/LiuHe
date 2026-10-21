@@ -14,6 +14,9 @@ function assert(c, m) { if (c) { pass++ } else { fail++; console.error('  FAIL:'
 
 const ROOT = join(tmpdir(), 'opencode', 'ws-gc-test')
 const WS = join(ROOT, 'workspaces')
+// live 复验修正：本文件 ⑨ 会经由 tool-health cleanup→pruneJobs(getStateDir()) 清扫 jobs——
+// 必须沙箱 MALONG_STATE_DIR（host-config getStateDir 动态读取），否则会扫到真实 ~/.config/malong/jobs（测试污染 + ⑨ 假失败）
+process.env.MALONG_STATE_DIR = ROOT
 try { rmSync(ROOT, { recursive: true, force: true }) } catch {}
 
 const DAY = 86400000
@@ -82,6 +85,38 @@ assert(!wide.deleted.some(d => d.workspace === 'stale0000000'), '⑤ 阈值 45d 
   })
   assert(existsSync(join(WS, touchWs)), `⑦ touched hash 保护的 60 天老库被豁免（R16 同源保护，得 ${r.status}）`)
   rmSync(join(WS, touchWs), { recursive: true, force: true })
+}
+
+// ⑧ 第二轮审查：目录内 metadata.json mtime 新鲜（跨进程访问心跳）→ 即使 db 与内容旧也不删
+{
+  const dir = join(WS, 'heartbeat123')
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'metadata.json'), JSON.stringify({ last_accessed: new Date(now - 30 * DAY).toISOString() }))
+  writeFileSync(join(dir, 'code-index.db'), 'x'.repeat(1024))
+  const oldT = (now - 30 * DAY) / 1000
+  utimesSync(join(dir, 'code-index.db'), oldT, oldT)
+  utimesSync(join(dir, 'metadata.json'), now / 1000, now / 1000)
+  cleanupStaleWorkspaces(WS, { maxAgeDays: 14, dryRun: false })
+  assert(existsSync(dir), '⑧ metadata 心跳新鲜 → 保护（即使 db 与 last_accessed 旧）')
+  rmSync(dir, { recursive: true, force: true })
+}
+
+// ⑨ 第二轮审查：cleanup 顺带清终态过龄 job（running 永不清）
+{
+  const { handle } = await imp(join(__dirname, '..', 'tools', 'tool-health', 'handler.js'))
+  const jobsDir = join(ROOT, 'jobs', 'wsx')
+  mkdirSync(jobsDir, { recursive: true })
+  const oldIso = new Date(now - 10 * DAY).toISOString()
+  writeFileSync(join(jobsDir, 'job_done_old.json'), JSON.stringify({ job_id: 'job_done_old', state: 'succeeded', created: oldIso, finished: oldIso }))
+  writeFileSync(join(jobsDir, 'job_run_old.json'), JSON.stringify({ job_id: 'job_run_old', state: 'running', pid: 999999, created: oldIso, started: oldIso, heartbeat: oldIso }))
+  const r = await handle({ action: 'cleanup', max_age_days: 14, dry_run: false }, {
+    runHealthCheck: async () => ({ status: 'ok', checks: [] }),
+    codeIndexService: {},
+    workspacesDir: WS,
+    stateDir: ROOT,
+  })
+  assert(r.jobs_pruned?.pruned >= 1 && !existsSync(join(jobsDir, 'job_done_old.json')), `⑨ 终态过龄 job 被清（得 ${JSON.stringify(r.jobs_pruned)}）`)
+  assert(existsSync(join(jobsDir, 'job_run_old.json')), '⑨ running job 不清')
 }
 
 try { rmSync(ROOT, { recursive: true, force: true }) } catch {}

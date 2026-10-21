@@ -1,9 +1,10 @@
 // r9：统一路径守卫——从 transaction-store / read-symbol 提取共享，供全部读写路径复用
 // 原则：字符串校验挡不住 symlink，realpath 解析后比对前缀；敏感名单对真目标重验（链接名可绕过）
 import { join, dirname, sep } from 'node:path'
-import { realpathSync, writeFileSync, renameSync, openSync, fsyncSync, closeSync, existsSync, statSync } from 'node:fs'
+import { realpathSync, writeFileSync, renameSync, openSync, fsyncSync, closeSync, existsSync, statSync, unlinkSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { validateFilePath } from './error-codes.js'
+import { replaceFilePreservingMetadataSync } from './windows-file-replace.js'
 
 // r8(B1)：realpath 越界守卫——{ blocked:false } 或 { blocked:true, detail, reason }
 // 目标路径不存在时回退校验 dirname（新建文件场景）；workspace 根为 symlink 时两侧都 resolve，不误拒
@@ -93,8 +94,13 @@ export function atomicWrite(absPath, content, opts = {}) {
   // atomicWrite 是 journal/manifest 等崩溃恢复资产的核心写路径，无重试时一次 EPERM 整链中断
   // （实测 test-rename-defline 崩于此）——内联同步重试（对齐 L4 begin / renameRetry 语义）
   for (let i = 0; ; i++) {
-    try { renameSync(tmp, absPath); break } catch (e) {
-      if (i >= 3 || !['EPERM', 'EBUSY', 'EACCES'].includes(e.code)) throw e
+    try {
+      if (opts.preservePermissions === true) replaceFilePreservingMetadataSync(tmp, absPath)
+      else renameSync(tmp, absPath)
+      break
+    } catch (e) {
+      // 第二轮审查：终败必须清理 tmp（旧实现重试耗尽后直接抛，.txn-* 临时文件永久残留在用户仓库）
+      if (i >= 3 || !['EPERM', 'EBUSY', 'EACCES'].includes(e.code)) { try { unlinkSync(tmp) } catch {}; throw e }
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 150)
     }
   }

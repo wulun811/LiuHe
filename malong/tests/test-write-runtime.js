@@ -97,6 +97,148 @@ mkdirSync(TMP, { recursive: true })
   assert(r3.success === true && !r3.items?.[0]?.warning && !readFileSync(join(wsDir, 'f.js'), 'utf-8').includes('const b = 3'), '显式空串（合法删除）不挂 warning 且删除生效')
 }
 
+// ── live 审查 G4：文件级删除 patch 后，同文件后续符号项必须计入删除 delta（旧实现 offset 丢账错位）──
+{
+  const wsMod = await import(pathToFileURL(join(__dirname, '..', 'tools', 'tool-write-symbols', 'handler.js')).href)
+  const wsDir = join(TMP, 'delta-del')
+  mkdirSync(wsDir, { recursive: true })
+  writeFileSync(join(wsDir, 'd.js'), [
+    'const del = 1',
+    'function keep() {',
+    '  return 1',
+    '}',
+    'function target() {',
+    '  return 2',
+    '}',
+  ].join('\n') + '\n')
+  const idx = {
+    initWorkspace: async () => {},
+    findSymbolsInFile: (file, name) => name === 'target'
+      ? [{ name: 'target', type: 'function', start_line: 5, end_line: 7, stable_id: 'js:d.js::target#function', signature: 'function target() {' }]
+      : [],
+    getSymbolByStableId: () => null,
+    updateContentHash: () => {},
+    markIndexDirty: () => {},
+    getFileByPath: () => null,
+    indexFile: async () => ({ symbols: 2 }),
+  }
+  const r = await wsMod.handle({
+    workspace_dir: wsDir,
+    writes: [
+      { file_path: 'd.js', edit_mode: 'patch', patch: { old_string: 'const del = 1\n' } },
+      { file_path: 'd.js', edit_mode: 'replace_symbol', locator: { name: 'target' }, content: 'function target() {\n  return 3\n}' },
+    ],
+    allow_unsafe_no_base: true,
+  }, { getWorkspaceDir: (w) => w, codeIndexService: idx })
+  const out = readFileSync(join(wsDir, 'd.js'), 'utf-8')
+  assert(r.success === true, `G4 批量成功（得 ${JSON.stringify(r.error || r.success)}）`)
+  assert(out.includes('return 3') && out.includes('function keep()') && out.includes('return 1'), 'G4 删除后同文件符号项定位正确')
+  assert((out.match(/function target\(\)/g) || []).length === 1, `G4 target 签名不重复（旧 offset 丢账会重签名；得 ${JSON.stringify(out)}）`)
+  assert(!out.includes('return 2'), 'G4 旧 body 已被替换')
+}
+
+// ── live 审查 H1：同批重复编辑同一符号 → DUPLICATE_SYMBOL_EDIT（拒绝而非静默错位）──
+{
+  const wsMod = await import(pathToFileURL(join(__dirname, '..', 'tools', 'tool-write-symbols', 'handler.js')).href)
+  const wsDir = join(TMP, 'dup-sym')
+  mkdirSync(wsDir, { recursive: true })
+  writeFileSync(join(wsDir, 'e.js'), 'function target() {\n  return 1\n}\n')
+  const idx = {
+    initWorkspace: async () => {},
+    findSymbolsInFile: (file, name) => name === 'target' ? [{ name: 'target', type: 'function', start_line: 1, end_line: 3, stable_id: 'js:e.js::target#function', signature: 'function target() {' }] : [],
+    getSymbolByStableId: () => null,
+    updateContentHash: () => {},
+    markIndexDirty: () => {},
+    getFileByPath: () => null,
+    indexFile: async () => ({ symbols: 1 }),
+  }
+  const r = await wsMod.handle({
+    workspace_dir: wsDir,
+    writes: [
+      { file_path: 'e.js', edit_mode: 'replace_symbol', locator: { name: 'target' }, content: 'function target() {\n  return 2\n}' },
+      { file_path: 'e.js', edit_mode: 'replace_symbol', locator: { name: 'target' }, content: 'function target() {\n  return 3\n}' },
+    ],
+    allow_unsafe_no_base: true,
+  }, { getWorkspaceDir: (w) => w, codeIndexService: idx })
+  const code = r?.error?.code || r?.error
+  assert(r.success === false && code === 'DUPLICATE_SYMBOL_EDIT', `同符号重复编辑被拒（得 success=${r.success} error=${JSON.stringify(r.error)}）`)
+  assert(r.error?.itemIndex === 1 || r.error?.item_index === 1, `拒绝时给出输入下标 1（得 ${r.error?.itemIndex ?? r.error?.item_index}）`)
+  assert(/file-level read_ref/.test(r.error?.suggestion || ''), `DUPLICATE 建议改为 file 级 read_ref 重试（不再诱导逐处拆分；得 ${r.error?.suggestion}）`)
+}
+
+// ── live 审查 K4：insert_after_symbol 的 new_version 必须描述原符号（旧按替换公式算，行数不一致时错位）──
+{
+  const wsMod = await import(pathToFileURL(join(__dirname, '..', 'tools', 'tool-write-symbol', 'handler.js')).href)
+  const wsDir = join(TMP, 'ins-after')
+  mkdirSync(wsDir, { recursive: true })
+  writeFileSync(join(wsDir, 'g.js'), 'function anchor() {\n  return 1\n}\n')
+  const idx = {
+    initWorkspace: async () => {},
+    findSymbolsInFile: (file, name) => name === 'anchor' ? [{ name: 'anchor', type: 'function', start_line: 1, end_line: 3, stable_id: 'js:g.js::anchor#function', signature: 'function anchor() {' }] : [],
+    getSymbolByStableId: () => null,
+    updateContentHash: () => {},
+    markIndexDirty: () => {},
+    getFileByPath: () => null,
+    indexFile: async () => ({ symbols: 2 }),
+  }
+  const r = await wsMod.handle({
+    workspace_dir: wsDir,
+    edit_mode: 'insert_after_symbol',
+    locator: { name: 'anchor', file_path: 'g.js' },
+    content: 'export const added = 1',
+    allow_unsafe_no_base: true,
+  }, { getWorkspaceDir: (w) => w, codeIndexService: idx })
+  const nv = r.new_version?.symbol
+  assert(r.success === true && nv && nv.range[0] === 1 && nv.range[1] === 3, `K4: insert_after 的 new_version 描述原符号 range [1,3]（得 ${JSON.stringify(nv?.range)}）`)
+  assert(readFileSync(join(wsDir, 'g.js'), 'utf-8').includes('export const added = 1'), 'K4: 插入内容已落盘')
+}
+
+// ── 第二轮审查 O3：atomicWrite 终败不留 .txn-* 临时文件（旧实现重试耗尽直接抛，残留用户仓库）──
+{
+  const { atomicWrite } = await import(pathToFileURL(join(__dirname, '..', 'path-guard.js')).href)
+  const { readdirSync } = await import('node:fs')
+  const dir = join(TMP, 'atomic-fail')
+  mkdirSync(join(dir, 'target-as-dir'), { recursive: true })
+  let threw = false
+  try { atomicWrite(join(dir, 'target-as-dir'), 'x') } catch { threw = true }
+  assert(threw, 'O3: rename 到目录 → 抛错（前置）')
+  const leftovers = readdirSync(dir).filter(f => f.includes('.txn-'))
+  assert(leftovers.length === 0, `O3: 终败无 .txn-* 残留（得 ${JSON.stringify(leftovers)}）`)
+}
+
+// ── 版本 size 必须为 UTF-8 字节（旧 String.length=码元，与读侧 statSync 字节不一致；DSH 狗粮 2026-10-13） ──
+{
+  const wsDir = join(TMP, 'size-bytes')
+  mkdirSync(wsDir, { recursive: true })
+  writeFileSync(join(wsDir, 'z.js'), '// 中文注释：字节≠码元\nconst val = 1\n')
+  const idx = {
+    initWorkspace: async () => {},
+    findSymbolsInFile: () => [],
+    getSymbolByStableId: () => null,
+    updateContentHash: () => {},
+    markIndexDirty: () => {},
+    getFileByPath: () => null,
+    indexFile: async () => ({ symbols: 0 }),
+  }
+  const ctx2 = { getWorkspaceDir: (w) => w, codeIndexService: idx }
+  const okR = await wr.writeSymbol({
+    workspace_dir: wsDir, edit_mode: 'patch', locator: { file_path: 'z.js' },
+    patch: { old_string: 'const val = 1', new_string: 'const val = 2' },
+    allow_unsafe_no_base: true,
+  }, ctx2)
+  const finalContent = readFileSync(join(wsDir, 'z.js'), 'utf-8')
+  const bytes = Buffer.byteLength(finalContent, 'utf-8')
+  assert(okR.success === true, `size: 写成功（得 ${JSON.stringify(okR.error)}）`)
+  assert(okR.new_version?.file?.size === bytes, `size: new_version.file.size = UTF-8 字节 ${bytes}（得 ${okR.new_version?.file?.size}）`)
+  assert(bytes !== finalContent.length, `size 前置：本例字节≠码元（bytes=${bytes} units=${finalContent.length}）`)
+  const conflictR = await wr.writeSymbol({
+    workspace_dir: wsDir, edit_mode: 'patch', locator: { file_path: 'z.js' },
+    patch: { old_string: 'const val = 2', new_string: 'const val = 3' },
+    base_version: { file: { hash: 'sha256:' + '0'.repeat(64) } },
+  }, ctx2)
+  assert(conflictR.success === false && conflictR.current_version?.file?.size === bytes, `size: 冲突 current_version.file.size = UTF-8 字节 ${bytes}（得 ${conflictR.current_version?.file?.size}）`)
+}
+
 try { rmSync(TMP, { recursive: true, force: true }) } catch {}
 console.log(`== test-write-runtime: ${pass} passed, ${fail} failed ==`)
 if (fail > 0) process.exit(1)

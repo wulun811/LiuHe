@@ -225,8 +225,8 @@ assert(readFileSync(`${WS}/src/auth.py`, 'utf-8') === before9, `文件未被写�
 
 // ── 场景 10：MCP 重启后 _db 为 null → indexFile 懒初始化（reindex 静默失败回归） ──
 console.log('── 场景 10: _db 为 null 懒初始化 ──')
-// 模拟 MCP 重启（init 后未调 initWorkspace 的状态）
-codeIndex._db = null
+// 模拟 MCP 重启（init 后未调 initWorkspace 的状态；T2：清句柄表）
+codeIndex._handles.clear()
 codeIndex._currentWorkspace = null
 const r10 = await svc.indexFile(`${WS}/src/auth.py`, WS)
 assert(r10 !== null, `_db 为 null 时 indexFile 不再抛错（懒初始化触发，得 ${JSON.stringify(r10)}）`)

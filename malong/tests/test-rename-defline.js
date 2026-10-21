@@ -121,5 +121,33 @@ console.log('\n── 正则/除法前导判定矩阵（三轮→四轮）──
   }
 }
 
+// ── dogfood-050（P2）：冲突检测精确同名 + 同文件阻塞 ──
+console.log('\n── 冲突检测：前缀同名不误报 / 同文件同名阻塞 ──')
+{
+  const ctxR = { codeIndexService: svc, getWorkspaceDir: () => DATA }
+  // ① 前缀同名（formatNum 是 formatNumber 的子串）不误报
+  const wsA = mkdtempSync(join(tmpdir(), 'ren-cfA-'))
+  writeFileSync(join(wsA, 'a.js'), 'function formatNumber(x) { return x }\n')
+  await svc.initWorkspace(wsA)
+  await svc.indexBatch([join(wsA, 'a.js')], wsA)
+  const rA = await rename.handle({ workspace_dir: wsA, file: 'a.js', symbol: 'formatNumber', new_name: 'formatNum', dry_run: true }, ctxR)
+  assert(!rA.conflict_warning, `① 前缀同名不误报（得 ${rA.conflict_warning}）`)
+  assert(rA.conflict_blocking === false, `① 非阻塞（得 ${rA.conflict_blocking}）`)
+
+  // ② 同文件真冲突：sub→mul（mul 已在同文件）→ dry-run 标阻塞；apply 拒绝且文件不变
+  const wsB = mkdtempSync(join(tmpdir(), 'ren-cfB-'))
+  writeFileSync(join(wsB, 'b.js'), 'function sub(a, b) { return a - b }\nfunction mul(a, b) { return a * b }\nsub(1, 2)\n')
+  await svc.initWorkspace(wsB)
+  await svc.indexBatch([join(wsB, 'b.js')], wsB)
+  const rB = await rename.handle({ workspace_dir: wsB, file: 'b.js', symbol: 'sub', new_name: 'mul', dry_run: true }, ctxR)
+  assert(rB.conflict_blocking === true, `② dry-run 标阻塞（得 ${JSON.stringify({ w: rB.conflict_warning, b: rB.conflict_blocking })}）`)
+  assert(/already exists/.test(rB.conflict_warning || ''), `② 冲突描述存在（得 ${rB.conflict_warning}）`)
+  const beforeB = readFileSync(join(wsB, 'b.js'), 'utf-8')
+  const rB2 = await rename.handle({ workspace_dir: wsB, file: 'b.js', symbol: 'sub', new_name: 'mul', dry_run: false }, ctxR)
+  assert(rB2.error === 'RENAME_CONFLICT' && rB2.status === 'rejected', `② apply 拒绝（得 ${rB2.error}）`)
+  assert(readFileSync(join(wsB, 'b.js'), 'utf-8') === beforeB, '② 拒绝后文件未被改动')
+  try { rmSync(wsA, { recursive: true, force: true }); rmSync(wsB, { recursive: true, force: true }) } catch {}
+}
+
 console.log(`\n== test-rename-defline: ${pass} passed, ${fail} failed ==`)
 process.exit(fail > 0 ? 1 : 0)

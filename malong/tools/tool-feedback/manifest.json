@@ -5,13 +5,18 @@
   "inputSchema": {
     "type": "object",
     "properties": {
+      "action": {
+        "type": "string",
+        "enum": ["record", "list"],
+        "description": "record (default) submits feedback; list reads aggregated feedback (new + legacy state paths)"
+      },
       "tool": {
         "type": "string",
-        "description": "Tool name that triggered the feedback"
+        "description": "Tool name that triggered the feedback (required when recording)"
       },
       "issue": {
         "type": "string",
-        "description": "What went wrong or could be improved"
+        "description": "What went wrong or could be improved (required when recording)"
       },
       "note": {
         "type": "string",
@@ -20,12 +25,12 @@
       "error_code": {
         "type": "string",
         "description": "Error code encountered, if any"
+      },
+      "limit": {
+        "type": "number",
+        "description": "For action=list: max recent entries to return (1-500, default 50)"
       }
-    },
-    "required": [
-      "tool",
-      "issue"
-    ]
+    }
   },
   "handler": "./handler.js",
   "protocol_version": "1.0",

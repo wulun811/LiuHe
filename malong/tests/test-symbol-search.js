@@ -53,7 +53,8 @@ function makeCtx(searchImpl) {
   const empty = await handle({ workspace_dir: ws, query: 'nonexist' }, makeCtx(async () => []))
   assert(empty.count === 0 && empty.suggestion && empty.suggestion.includes('reindex'), '④ 空结果带 reindex 建议')
   const hit = await handle({ workspace_dir: ws, query: 'foo' }, makeCtx(async () => [{ name: 'fetchUser', type: 'function' }]))
-  assert(hit.count === 1 && hit.next_step && hit.next_step.includes('impact_analysis'), '④ 有结果 next_step 指向 impact_analysis')
+  // H05（0.5.14）：建议动作升级为 code_query(mode="impact") 完整参数（file/symbol/workspace_dir）
+  assert(hit.count === 1 && hit.next_step && hit.next_step.includes('mode="impact"') && hit.next_step.includes('file=') && hit.next_step.includes('symbol='), '④ 有结果 next_step 指向可执行 impact 查询（得 ' + String(hit.next_step).slice(0, 140) + '）')
 }
 
 // ── ⑤ 参数与错误路径 ──
@@ -69,6 +70,15 @@ function makeCtx(searchImpl) {
 }
 
 try { rmSync(ws, { recursive: true, force: true }) } catch {}
+
+// R2：零命中 + .malongignore → 建议含排除提示（非拼写问题）
+{
+  mkdirSync(ws, { recursive: true })
+  writeFileSync(join(ws, 'code-index.db'), '')
+  writeFileSync(join(ws, '.malongignore'), 'liuhe/\n')
+  const r = await handle({ workspace_dir: ws, query: 'pruneJobs' }, makeCtx(async () => []))
+  assert(r.count === 0 && /malongignore/.test(r.suggestion || '') && /target/.test(r.suggestion || ''), `R2 零命中提示 .malongignore（得 ${r.suggestion}）`)
+}
 
 console.log(`== test-symbol-search: ${pass} passed, ${fail} failed ==`)
 if (fail > 0) process.exit(1)

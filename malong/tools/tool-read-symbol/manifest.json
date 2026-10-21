@@ -95,7 +95,7 @@
       },
       "budget_hint": {
         "type": "integer",
-        "description": "Max body chars to return; must truncate, not hint (default 1200)"
+        "description": "Max body chars to return (default 1200; floor 200, hard cap 100000; 0 = full). The effective applied value is returned as budget.effective."
       },
       "source": {
         "type": "string",

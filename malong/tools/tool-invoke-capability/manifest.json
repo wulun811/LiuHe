@@ -1,0 +1,19 @@
+{
+  "name": "invoke_capability",
+  "version": "0.1.0",
+  "interface": "graph",
+  "requires_state": true,
+  "description": "Fallback outlet (ADR-018, state-gated): call ONE classic tool by exact name (list: code_query mode=capabilities). args = that tool's own arguments; top-level workspace_dir/task_id override nested ones; delegates once, result preserved. Side effects: terminal guard + task ledger; request_id consumed (replay/conflict). Success != verified.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "workspace_dir": { "type": "string", "description": "Root (abs); top-level boundary." },
+      "name": { "type": "string", "description": "Exact original tool name (see code_query mode=capabilities)." },
+      "args": { "type": "object", "description": "Original tool arguments per its schema; nested workspace_dir/task_id are ignored." },
+      "task_id": { "type": "string", "description": "Optional task to associate (must belong to workspace_dir)." },
+      "request_id": { "type": "string", "description": "Optional idempotency key consumed by the outlet for side-effect calls: same id + same payload → deduplicated replay (no re-execution); different payload → request_conflict." }
+    },
+    "required": ["workspace_dir", "name"]
+  },
+  "handler": "handler.js"
+}

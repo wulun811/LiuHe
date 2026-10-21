@@ -48,6 +48,7 @@ const codeReview = (await imp(join(MALONG, 'tools/tool-code-review/handler.js'))
   assert(!rNoComment.issues.some(i => i.category === 'documentation' && i.message.includes('注释比')), `code_review: 注释率规则已删（得 ${JSON.stringify(rNoComment.issues.map(i => i.message.slice(0, 30)))}）`)
   const rJsSnake = await codeReview({ workspace_dir: WS, source: 'const a = 1\n', file: 'bad_file_name.js' })
   assert(rJsSnake.issues.some(i => i.category === 'naming'), `code_review: JS snake_case 文件名仍报（语言惯例只豁免 Python）`)
+  assert(rJsSnake.summary.warnings === 0 && rJsSnake.summary.total_issues > 0 && /info-level/.test(rJsSnake.next_step || ''), `狗粮r2: code_review info-only 不谎称 no shape-level（得 ${rJsSnake.next_step}）`)
 }
 
 // ── 2. style_sniffer ──
@@ -243,7 +244,8 @@ const debugRunner = (await imp(join(MALONG, 'tools/tool-debug-runner/handler.js'
   writeFileSync(join(fixRepo, 'dirty.txt'), 'x\n')
   const gd = await gitWorktree({ workspace_dir: fixRepo, changes: [{ path: 'b.txt', new_content: 'x\n' }] })
   assert(gd.error === 'dirty_workspace', `git_worktree: dirty 拒绝（得 ${gd.error}）`)
-  execSync('git clean -f -q', { cwd: fixRepo })
+  // Windows 上 git clean 对刚写入的文件偶发静默不删（Defender 短暂持句柄）→ 确定性删除
+  rmSync(join(fixRepo, 'dirty.txt'), { force: true })
   execSync('git checkout -q --detach HEAD', { cwd: fixRepo })
   const gdd = await gitWorktree({ workspace_dir: fixRepo, changes: [{ path: 'd.txt', new_content: 'x\n' }] })
   assert(gdd.error === 'detached_head', `git_worktree: detached 拒绝（得 ${gdd.error}）`)

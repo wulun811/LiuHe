@@ -98,5 +98,17 @@ print(d.startswith('--- a/f.txt\\n+++ b/f.txt\\n@@'))
   try { rmSync(WS, { recursive: true, force: true }) } catch {}
 }
 
+// ── #7 根目录裸 test.js 反查（P1 修复 2026-10-12）──
+{
+  const WS = join(tmpdir(), 'opencode', 'r12-ft-root')
+  rmSync(WS, { recursive: true, force: true }); mkdirSync(join(WS, 'src'), { recursive: true })
+  writeFileSync(join(WS, 'src', 'util.js'), `export function add(a, b) { return a + b }\n`)
+  writeFileSync(join(WS, 'test.js'), `const { add } = require('./src/util')\nconsole.log(add(1, 2))\n`)
+  const { handle } = await imp(join(MALONG, 'tools/tool-find-tests/handler.js'))
+  const r = await handle({ workspace_dir: WS, file: 'src/util.js' }, {})
+  assert(r.by_import.some(t => t.path === 'test.js'), `#7 根目录 test.js 被反查到（得 ${JSON.stringify(r.by_import)}）`)
+  try { rmSync(WS, { recursive: true, force: true }) } catch {}
+}
+
 console.log(`\n=== test-dogfood-r12: ${pass} passed, ${fail} failed ===`)
 process.exit(fail ? 1 : 0)

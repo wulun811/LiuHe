@@ -104,14 +104,20 @@ pub fn extract_all(tree: &Tree, source: &str) -> super::ExtractResult {
                         if let Some(c) = node.child(i) {
                             if c.kind() == "variable_declarator" {
                                 if let Some(name_node) = c.child_by_field_name("name") {
+                                    // LH-003：整声明范围（start=声明首行，end=value/declarator 末行）——
+                                    // 旧实现只取绑定名节点行，多行初始化器读数截断
+                                    let start_line = node.start_position().row as u32 + 1;
+                                    let end_line = c.child_by_field_name("value")
+                                        .map(|v| v.end_position().row as u32 + 1)
+                                        .unwrap_or_else(|| c.end_position().row as u32 + 1);
                                     let mut names = Vec::new();
                                     collect_binding_names(name_node, source, &mut names);
-                                    for (bname, bsl, bel) in names {
+                                    for (bname, _bsl, _bel) in names {
                                         symbols.push(Symbol {
                                             name: bname,
                                             kind: "variable".to_string(),
-                                            start_line: bsl,
-                                            end_line: bel,
+                                            start_line,
+                                            end_line,
                                             impl_for: None,
                                         });
                                     }
@@ -251,14 +257,20 @@ pub fn extract_symbols(tree: &Tree, source: &str) -> (Vec<Symbol>, Vec<Import>) 
                         if let Some(c) = node.child(i) {
                             if c.kind() == "variable_declarator" {
                                 if let Some(name_node) = c.child_by_field_name("name") {
+                                    // LH-003：整声明范围（start=声明首行，end=value/declarator 末行）——
+                                    // 旧实现只取绑定名节点行，多行初始化器读数截断
+                                    let start_line = node.start_position().row as u32 + 1;
+                                    let end_line = c.child_by_field_name("value")
+                                        .map(|v| v.end_position().row as u32 + 1)
+                                        .unwrap_or_else(|| c.end_position().row as u32 + 1);
                                     let mut names = Vec::new();
                                     collect_binding_names(name_node, source, &mut names);
-                                    for (bname, bsl, bel) in names {
+                                    for (bname, _bsl, _bel) in names {
                                         symbols.push(Symbol {
                                             name: bname,
                                             kind: "variable".to_string(),
-                                            start_line: bsl,
-                                            end_line: bel,
+                                            start_line,
+                                            end_line,
                                             impl_for: None,
                                         });
                                     }
@@ -352,14 +364,19 @@ pub fn extract_top_level(tree: &Tree, source: &str) -> Vec<Symbol> {
                     if let Some(c) = node.child(i) {
                         if c.kind() == "variable_declarator" {
                             if let Some(name_node) = c.child_by_field_name("name") {
+                                // LH-003：整声明范围（同 extract_all）
+                                let start_line = node.start_position().row as u32 + 1;
+                                let end_line = c.child_by_field_name("value")
+                                    .map(|v| v.end_position().row as u32 + 1)
+                                    .unwrap_or_else(|| c.end_position().row as u32 + 1);
                                 let mut names = Vec::new();
                                 collect_binding_names(name_node, source, &mut names);
-                                for (bname, bsl, bel) in names {
+                                for (bname, _bsl, _bel) in names {
                                     syms.push(Symbol {
                                         name: bname,
                                         kind: "const".to_string(),
-                                        start_line: bsl,
-                                        end_line: bel,
+                                        start_line,
+                                        end_line,
                                         impl_for: None,
                                     });
                                 }
@@ -761,5 +778,22 @@ function f(err) {
         let src = "import { API_TIMEOUT } from './a.js';\nfunction wait() {\n  return API_TIMEOUT * 2;\n}\n";
         let refs = extract_var(src);
         assert!(refs.iter().any(|(k, n)| k == "use" && n == "API_TIMEOUT"), "import local use missing: {:?}", refs);
+    }
+
+    #[test]
+    fn variable_declaration_covers_multiline_initializer() {
+        // LH-003：多行初始化器必须整声明入范围（旧实现只取绑定名行，读数截断）
+        let src = "const cfg = {\n  a: 1,\n  b: 2,\n};\nlet arr = [\n  1,\n  2,\n];\nconst fnValue = () => {\n  return 1;\n};\nconst a = 1, b = 2;\n";
+        let tree = parse_js(src);
+        let result = extract_all(&tree, src);
+        let range = |name: &str| result.symbols.iter().find(|s| s.name == name).map(|s| (s.start_line, s.end_line));
+        assert_eq!(range("cfg"), Some((1, 4)), "cfg multi-line object");
+        assert_eq!(range("arr"), Some((5, 8)), "arr multi-line array");
+        assert_eq!(range("fnValue"), Some((9, 11)), "arrow function body");
+        assert_eq!(range("a"), Some((12, 12)), "single-line declarator a");
+        assert_eq!(range("b"), Some((12, 12)), "single-line declarator b");
+        let (syms, _) = extract_symbols(&tree, src);
+        let srange = |name: &str| syms.iter().find(|s| s.name == name).map(|s| (s.start_line, s.end_line));
+        assert_eq!(srange("cfg"), Some((1, 4)), "extract_symbols same range");
     }
 }

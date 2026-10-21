@@ -62,6 +62,12 @@ export async function handle(args, context) {
   const ctxMode = args?.context_mode
   opts.contextMode = ['none', 'snippet', 'full'].includes(ctxMode) ? ctxMode : 'snippet'
   const symbols = args?.symbols
+  if (Array.isArray(symbols) && symbols.some(s => s != null && !['string', 'number'].includes(typeof s))) {
+    return { error: 'invalid_input', message: 'symbols must be an array of strings' }
+  }
+  if (args?.symbol != null && !['string', 'number'].includes(typeof args.symbol)) {
+    return { error: 'invalid_input', message: `symbol must be a string (got ${typeof args.symbol})` }
+  }
   if (Array.isArray(symbols) && symbols.length > 0 && !args?.symbol) {
     const results = []
     for (const sym of symbols) {

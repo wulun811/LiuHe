@@ -119,7 +119,10 @@ function extractTestNames(filePath, workspaceDir) {
 // 11#6：索引反查 by_import 不可靠——动态 import 存 target_name="import"（丢模块路径），
 // 静态 import 的 target_name 是模块名也常与文件基名对不上 → 测试文件漏找。
 // 文本兜底：有界扫测试文件，行级匹配 import/require 目标基名（静态/动态/require 全覆盖，无回溯风险）。
-const TEST_PATH_RE = /(?:^|\/)(?:tests?|__tests__)\/|\.test\.|\.spec\.|_test\./
+// P1 修复（2026-10-12 狗粮）：TEST_PATH_RE 补根/任意层裸 test.js（Node 最常见约定之一）与 Python
+// test_*.py 前缀式命名——旧正则只认 tests?/ 目录段或 .test./.spec./_test. 后缀，根 test.js 漏找
+//（真阳性：src/math.js 被根目录 test.js require，by_import 空、报 no tests found）
+const TEST_PATH_RE = /(?:^|\/)(?:tests?|__tests__)\/|\.test\.|\.spec\.|_test\.|(?:^|\/)tests?\.(?:[cm]?[jt]sx?|py)$|(?:^|\/)test_[^/]+\.py$/
 const SKIP_SCAN_DIRS = new Set(['node_modules', '.git', '__pycache__', '.venv', 'venv', 'dist', 'build', 'target', '.ai-cache'])
 
 function findTestImportersByText(workspaceDir, baseName, maxFiles = 800, maxResults = 20) {
@@ -162,6 +165,41 @@ function findTestImportersByText(workspaceDir, baseName, maxFiles = 800, maxResu
   return results
 }
 
+// H08（0.5.14 复审修复）：命名/导入两种方法都漏检时，有界扫描测试路径文件里的「非导入提法」
+//（spawn 路径、字符串、注释等）作为「可能相关」候选——只标来源，不声称覆盖；仍不把零命中说成「测试不存在」。
+function findTestMentionsByText(workspaceDir, baseName, maxFiles = 500, maxResults = 10) {
+  const results = []
+  let scanned = 0
+  const walk = (dir) => {
+    if (scanned >= maxFiles || results.length >= maxResults) return
+    let entries
+    try { entries = readdirSync(dir, { withFileTypes: true }) } catch { return }
+    for (const e of entries) {
+      if (scanned >= maxFiles || results.length >= maxResults) break
+      if (e.name.startsWith('.') || SKIP_SCAN_DIRS.has(e.name)) continue
+      const full = join(dir, e.name)
+      const norm = full.replace(/\\/g, '/')
+      if (e.isDirectory()) { walk(full); continue }
+      if (!e.isFile() || !TEST_PATH_RE.test(norm)) continue
+      scanned++
+      try { if (statSync(full).size > MAX_STAT_FILE_SIZE) continue } catch { continue }
+      try {
+        const lines = readFileSync(full, 'utf-8').split('\n')
+        for (let i = 0; i < lines.length; i++) {
+          if (!lines[i].includes(baseName)) continue
+          const wsNorm = workspaceDir.replace(/\\/g, '/')
+          const wsPrefix = wsNorm.endsWith('/') ? wsNorm : wsNorm + '/'
+          const rel = norm.startsWith(wsPrefix) ? norm.slice(wsPrefix.length) : norm
+          results.push({ path: rel, kind: 'mention', target_name: baseName, line: i + 1, source: 'mention_scan' })
+          break
+        }
+      } catch {}
+    }
+  }
+  walk(workspaceDir)
+  return results
+}
+
 export async function handle(args, context) {
   const { codeIndexService, getWorkspaceDir } = context
   const workspaceDir = args?.workspace_dir
@@ -184,11 +222,14 @@ export async function handle(args, context) {
   // 旧实现直接返回错误且提示 "auto-indexes on demand"（该路径不存在），新建 workspace 上 find_tests 永远失败
   let notIndexed = false
   if (codeIndexService?.resolveFileArg) {
+    // dogfood-050 r3：先 initWorkspace（绑定/句柄就绪）再保鲜+解析——旧序在冷进程里
+    // ensureFreshFile/resolveFileArg 都按上一个工作区取路径，file 明明存在却报 FILE_NOT_FOUND
+    try { await codeIndexService.initWorkspace(workspaceDir) } catch {}
     // R22-⑮：resolveFileArg 前先保鲜（对齐 references R22-④ 模式）——未索引文件自动重抽补齐，避免 FILE_NOT_INDEXED 死胡同；排除文件保鲜无效仍走结构化错误
     if (codeIndexService?.ensureFreshFile) {
       try { await codeIndexService.ensureFreshFile(file) } catch {}
     }
-    const resolved = codeIndexService.resolveFileArg(file)
+    const resolved = codeIndexService.resolveFileArg(file, workspaceDir)
     if (!resolved.ok) {
       if (resolved.error?.code === 'FILE_NOT_INDEXED') {
         notIndexed = true
@@ -259,6 +300,13 @@ export async function handle(args, context) {
     }
   }
 
+  // H08：命名/导入都空时才做提及扫描（有可能相关的测试路径提法就不再说「没找到」）
+  let byMention = []
+  if (byImport.length === 0 && byConvention.filter(c => c.exists).length === 0) {
+    byMention = findTestMentionsByText(workspaceDir, basename(file, extname(file)))
+    if (byMention.length > 0) searchMethods.push('mention_text_fallback')
+  }
+
   let testSymbols = []
   if (symbol) {
     for (const t of byConvention.filter(c => c.exists)) {
@@ -288,10 +336,13 @@ export async function handle(args, context) {
 
   const existingConvention = byConvention.filter(c => c.exists)
   let coverageHint
-  if (existingConvention.length === 0 && byImport.length === 0) {
-    coverageHint = 'no tests found — consider creating tests'
+  if (existingConvention.length === 0 && byImport.length === 0 && byMention.length === 0) {
+    // H08：零命中是「当前方法与范围内没找到候选」，不是「测试不存在」；也不无条件导向新建测试
+    coverageHint = 'no test candidates found by current methods (convention naming + import graph + import text + bounded mention scan of test-path files); this does NOT prove absence — tests may exist outside the scanned scope (dynamic or non-conventional naming)'
+  } else if (existingConvention.length === 0 && byImport.length === 0) {
+    coverageHint = `${byMention.length} possibly-related test file(s) mention the target name (mention scan; see possible_related — verify manually)`
   } else if (byImport.length === 0) {
-    coverageHint = `${existingConvention.length} test file(s) exist by convention but none import target — possibly stale`
+    coverageHint = `${existingConvention.length} test file(s) exist by convention but none import target — possibly stale or dynamically wired`
   } else {
     coverageHint = `${byImport.length} test file(s) actively import target module`
   }
@@ -302,14 +353,17 @@ export async function handle(args, context) {
     nextStep = `Run: test_bridge(action="run", scope="${existingTests[0].path}")`
   } else if (byImport.length > 0) {
     nextStep = `Run: test_bridge(action="run", scope="${byImport[0].path}")`
+  } else if (byMention.length > 0) {
+    nextStep = `Possibly related test(s) by mention scan — inspect first (code_read), then run: test_bridge(action="run", scope="${byMention[0].path}") if confirmed.`
   } else {
-    nextStep = 'No tests found. Consider creating tests.'
+    nextStep = 'No test candidates found within the scanned methods/scope (see coverage_hint). Do not duplicate existing tests blindly — verify manually before creating new ones.'
   }
 
   return {
     source_file: file,
     by_convention: byConvention,
     by_import: byImport,
+    ...(byMention.length ? { possible_related: byMention } : {}),
     test_symbols: testSymbols.length > 0 ? testSymbols : undefined,
     coverage_hint: coverageHint,
     search_methods: searchMethods,

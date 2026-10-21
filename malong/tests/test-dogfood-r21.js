@@ -95,6 +95,16 @@ const barCallee = (useBarImpact.callees || []).find(c => c.function === 'bar')
 assert(barCallee, `getImpactAnalysis(useBar) 含 bar 调用（得 ${JSON.stringify((useBarImpact.callees || []).map(c => c.function))}）`)
 assert(barCallee.ambiguous === false, `app4 import 了 bar → ambiguous=false（得 ${barCallee.ambiguous}, callee_file=${barCallee.callee_file}）`)
 
+// ⑥ dogfood-r5（DSH 反馈 2026-10-13）：分片解析须让出事件循环——防大仓 reindex 的 resolve 段
+// 同步阻塞（实测 ~110s 冻结事件循环）→ parse-client 心跳停发 → daemon 断链 → write EPIPE。
+// 构造「未定义符号」裸调用（永不 resolve，稳定留在 unbound 集），yieldEvery=1 强制每片让出。
+writeFileSync(WS + '/yc.js', 'export function g() { return zzUndef1(1) + zzUndef2(2) + zzUndef3(3) }')
+await svc.indexBatch([WS + '/yc.js'], WS)
+let _yielded = false
+setImmediate(() => { _yielded = true })
+await codeIndex._resolveCrossFileRefs({ yieldEvery: 1 })
+assert(_yielded, '分片解析期间 setImmediate 让出事件循环（yieldEvery=1，防同步长阻塞 → EPIPE）')
+
 db.close()
 await pc.close?.()
 

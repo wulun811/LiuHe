@@ -1,0 +1,30 @@
+{
+  "name": "code_patch",
+  "version": "0.1.0",
+  "interface": "graph",
+  "requires_state": true,
+  "description": "Edit ONE file: patch/replace_symbol. Read first, pass read_ref; or create:true + content + locator.file_path. dry_run default true.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "workspace_dir": { "type": "string", "description": "Project root (abs)." },
+      "task_id": { "type": "string", "description": "Task id." },
+      "read_ref": { "type": "string", "description": "Preferred; supplies base_version." },
+      "locator": { "type": "object", "description": "Anchor {file_path, name}/{symbol_id}." },
+      "edit_mode": { "type": "string", "enum": ["patch", "replace_symbol"], "description": "patch default; replace_symbol: content." },
+      "patch": { "type": "object", "description": "For patch {old_string, new_string}; old_string exact, unique." },
+      "content": { "type": "string", "description": "For replace_symbol." },
+      "dry_run": { "type": "boolean", "description": "true = preview; false = apply." },
+      "create": { "type": "boolean", "description": "New file: content + locator.file_path." },
+      "boundary": { "type": "string", "description": "replace_symbol: full (default, includes signature) or body (body only)." },
+      "preserve_decorators": { "type": "boolean", "description": "replace_symbol: keep decorators (default true)." },
+      "safety": { "type": "object", "description": "Validation gate: {profile: standard|strict|fast, block_on_validation_error: boolean}." },
+      "allow_unsafe_no_base": { "type": "boolean", "description": "Force write without a prior file-level read (default false; gate)." },
+      "expected_state_revision": { "type": "integer", "description": "Optimistic guard." },
+      "request_id": { "type": "string", "description": "Idempotency key." }
+    },
+    "required": ["workspace_dir", "task_id"]
+  },
+  "handler": "./handler.js",
+  "protocol_version": "1.0"
+}

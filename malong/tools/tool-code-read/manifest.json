@@ -1,0 +1,21 @@
+{
+  "name": "code_read",
+  "version": "0.1.0",
+  "interface": "graph",
+  "description": "Read a symbol/file under task (read-only): body, versions, read_refs. budget_hint=0 → full.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "workspace_dir": { "type": "string", "description": "Project root (abs)." },
+      "task_id": { "type": "string", "description": "Task id." },
+      "locator": { "type": "object", "description": "Anchor {symbol_id}/{file_path+name}; line_range = degraded." },
+      "read_ref": { "type": "string", "description": "Re-read by read_ref." },
+      "expected_state_revision": { "type": "integer", "description": "Guard." },
+      "mode": { "type": "string", "enum": ["core", "rich"], "description": "core default; rich adds outline." },
+      "budget_hint": { "type": "integer", "description": "Max chars; 0 = full." }
+    },
+    "required": ["workspace_dir", "task_id"]
+  },
+  "handler": "./handler.js",
+  "protocol_version": "1.0"
+}

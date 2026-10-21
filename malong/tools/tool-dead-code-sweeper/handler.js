@@ -222,6 +222,18 @@ function findUnusedImports(content, ext) {
           }
           continue
         }
+        // dogfood-050 修复：CJS require 绑定旧实现不提取——`const unusedFs = require('fs')` 未用不报；
+        // 解构别名取末段（{readFile: rf} → rf），与 fix_imports 同口径
+        const req = /^\s*(?:const|let|var)\s+(?:\{([^}]+)\}|(\w+))\s*=\s*require\(/.exec(line)
+        if (req) {
+          const names = req[1]
+            ? req[1].split(',').map(s => s.trim().split(/[\s:]+/).pop().trim())
+            : [req[2]]
+          for (const n of names) {
+            if (n) imports.set(n, i + 1)
+          }
+          continue
+        }
       } else if (ext === '.rs') {
         // 8：Rust use 导入（正则版，与 fix_imports 的 parser 版互补）。绑定=路径末段/as 别名；
         // 跳过 pub use（re-export）与 glob（*）；只收干净标识符（嵌套 use list 复杂项跳过 → 保守不误报）
@@ -270,6 +282,9 @@ export async function handle(args, context) {
 
   if (!workspaceDir) {
     return { error: 'missing_parameter', message: 'workspace_dir is required' }
+  }
+  if (typeof workspaceDir !== 'string') {
+    return { error: 'invalid_input', message: `workspace_dir must be a string (got ${typeof workspaceDir})` }
   }
 
   const scope = args?.scope || '.'
@@ -325,7 +340,8 @@ export async function handle(args, context) {
     if (existsSync(dbPath)) {
       try {
         await codeIndexService.initWorkspace(workspaceDir)
-        const dead = await codeIndexService.detectDeadCode?.({ scopePrefix })
+        // 12-D：单文件 scope 用文件路径做 LIKE 前缀——'x.js/' 目录式前缀恒匹配空；'' 会被全仓 LIMIT50 窗口挤出
+        const dead = await codeIndexService.detectDeadCode?.({ scopePrefix: scanFile ? scanFile : scopePrefix })
         if (dead && Array.isArray(dead)) {
           // r12：文本引用兜底懒加载——只在存在死代码候选时扫描（候选少则省一次全仓文件遍历）
           let textRefs = null
@@ -386,7 +402,11 @@ export async function handle(args, context) {
       // 替代旧的符号级 getReferences(basename) —— 后者对动态 import（await import('./x.js')）
       // 与模块路径 import ref 匹配不上，导致 repo-map.js / lang-parser.js / code-index.js
       // 这类「被动态加载的活文件」被误报为孤儿
-      const importTargets = collectImportTargets(files, workspaceDir)
+      // 12-D：import 目标收集必须全仓视角——单文件 scope 时调用方在 scope 外，
+      // 用 scope 内 files 会把被引用的文件误报 orphan_file（eval-e2e 任务5）
+      const projectFiles = []
+      walkSourceFiles(workspaceDir, workspaceDir, projectFiles, 500)
+      const importTargets = collectImportTargets(projectFiles, workspaceDir)
       const imported = new Set()
       for (const f of files) {
         if (isTestFile(f) || isEntryPoint(f)) continue

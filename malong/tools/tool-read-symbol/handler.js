@@ -63,6 +63,9 @@ async function readOne(args, context) {
     if (!codeIndexService) {
       return { error: 'missing_parameter', code: 'missing_parameter', message: 'codeIndexService unavailable for symbol_id resolution; provide locator.file_path instead', trace_id }
     }
+    // dogfood-050 r4：入场就绪本请求工作区——旧实现直接查 stable_id，跨库/冷进程时服务层回退到
+    // 「最后触碰的工作区」查库 → 假 SYMBOL_NOT_FOUND（dispatch 绑定之外的自兜底）
+    try { if (existsSync(workspaceDir)) await codeIndexService.initWorkspace(workspaceDir) } catch {}
     const byId = codeIndexService.getSymbolByStableId(locator.symbol_id)
     if (byId) {
       filePath = byId.file_path
@@ -106,7 +109,10 @@ async function readOne(args, context) {
     requested = parseInt(args.budget_hint)
     if (!Number.isFinite(requested)) requested = 1200
   }
-  const budget = requested === 0 ? 100000 : Math.min(Math.max(requested, 200), 100000)
+  // LH-011：budget_hint 是「提示」不是契约——floor/hard-cap 的 effective 值必须回传，别让调用方猜
+  const budgetFloor = 200
+  const budgetCap = 100000
+  const effectiveBudget = requested === 0 ? budgetCap : Math.min(Math.max(requested, budgetFloor), budgetCap)
   const source = args?.source || 'live'
   const onAmbiguous = args?.on_ambiguous || 'fail'
   const hasRange = Array.isArray(locator?.line_range) && locator.line_range.length === 2
@@ -243,11 +249,14 @@ async function readOne(args, context) {
   const bodyLines = lines.slice(ctxStart - 1, ctxEnd)
   let body = bodyLines.join('\n')
   let truncated = false
-  if (body.length > budget) {
-    body = body.slice(0, budget) + '\n…[truncated]'
+  // 7-B（专家复测 LH-011）：截断标记计入上限——旧实现 200 内容 + 13 标记 = 213 超 effective；
+  // 现 used_estimate（= body.length）恒 ≤ effective，并回传 marker_overhead 供调用方核算
+  const TRUNC_MARKER = '\n…[truncated]'
+  if (body.length > effectiveBudget) {
+    body = body.slice(0, Math.max(0, effectiveBudget - TRUNC_MARKER.length)) + TRUNC_MARKER
     truncated = true
   }
-  pipelineStep(pipeline, 'budget_truncate', truncated ? 'warn' : 'ok', { requested: budget, truncated })
+  pipelineStep(pipeline, 'budget_truncate', truncated ? 'warn' : 'ok', { requested, effective: effectiveBudget, truncated, ...(truncated ? { marker_overhead: TRUNC_MARKER.length } : {}) })
 
   // ---- version 对象（附录 C）----
   const symbolVersion = symbol ? {
@@ -316,13 +325,20 @@ async function readOne(args, context) {
     version,
     outline,
     navigation,
-    budget: { requested: budget, used_estimate: body.length, truncated },
+    budget: {
+      requested, effective: effectiveBudget, floor: budgetFloor, used_estimate: body.length, truncated,
+      // 7-B：effective 为硬上限（used_estimate ≤ effective）；截断时标记开销单列
+      ...(truncated ? { marker_overhead: TRUNC_MARKER.length, note: 'used_estimate includes the truncation marker; it never exceeds effective' } : {}),
+    },
     // r59: 单一权威出口——state（fresh/dirty/stale/unknown）+ auto_indexed；stale 由 state='stale' 表达，删双字段矛盾源
     index_status: { state: version.index.index_state, auto_indexed: staleness?.auto_indexed || false },
     pipeline,
     trace_id,
     duration_ms: Date.now() - t0,
   }
-  result.next_step = 'To modify: impact_analysis(workspace_dir=...) to check blast radius, then edit_batch. After: test_bridge(action="run")'
+  // H05（0.5.14）：建议动作给完整可执行参数（workspace_dir + file + symbol），不再给缺参数的 impact 示例
+  result.next_step = (symbol && symbol.name)
+    ? 'To modify: code_query(mode="impact", workspace_dir="' + workspaceDir + '", file="' + filePath + '", symbol="' + symbol.name + '") to check blast radius, then the anchored write path (code_task → code_read → code_batch). After: test_bridge(action="run")'
+    : 'To modify: the anchored write path (code_task → code_read → code_batch). After: test_bridge(action="run")'
   return attachStalenessWarning(result, staleness)
 }

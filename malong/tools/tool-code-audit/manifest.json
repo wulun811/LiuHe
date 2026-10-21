@@ -1,0 +1,26 @@
+{
+  "name": "code_audit",
+  "version": "0.1.0",
+  "interface": "graph",
+  "requires_state": true,
+  "description": "Read-only analyzers + false-positive ledger (see checks). Zero findings ≠ proof.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "workspace_dir": { "type": "string", "description": "Project root (abs)." },
+      "task_id": { "type": "string", "description": "Task id." },
+      "action": { "type": "string", "enum": ["run", "accept", "ledger"], "description": "run default; accept/ledger." },
+      "checks": { "type": "array", "description": "Default first two.", "items": { "type": "string", "enum": ["code_review", "security_review", "exception_guard", "guard_patterns", "dependency_gatekeeper", "config_drift", "dead_code", "code_quality"] } },
+      "files": { "type": "array", "items": { "type": "string" }, "description": "Scope; default task materials." },
+      "scope": { "type": "string", "description": "Subdir (workspace checks)." },
+      "max_findings": { "type": "integer", "description": "Default 50." },
+      "options": { "type": "object", "description": "Per-check passthrough to the original analyzer: code_review: source/diff/max_issues; security_review: source; guard_patterns: ruleset; dead_code: include_files. Full schema via code_query mode=capability." },
+      "fingerprint": { "type": "string", "description": "accept: from prior run." },
+      "reason": { "type": "string", "description": "accept: why." },
+      "expected_state_revision": { "type": "integer", "description": "Guard." }
+    },
+    "required": ["workspace_dir", "task_id"]
+  },
+  "handler": "./handler.js",
+  "protocol_version": "1.0"
+}

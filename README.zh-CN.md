@@ -5,22 +5,22 @@
 [English](README.md) | **简体中文** | [官方文档](https://wulun811.github.io/LiuHe) | [GitHub](https://github.com/wulun811/LiuHe)
 
 [![wulun811/LiuHe MCP server](https://glama.ai/mcp/servers/wulun811/LiuHe/badges/score.svg)](https://glama.ai/mcp/servers/wulun811/LiuHe)
-![tests](https://img.shields.io/badge/tests-2240%20assertions%20passed-brightgreen)
-![tools](https://img.shields.io/badge/tools-44%20MCP-blue)
+![tests](https://img.shields.io/badge/tests-166%20files%20%C2%B7%200%20failed-brightgreen)
+![tools](https://img.shields.io/badge/tools-44%20classic%20%2F%2011%20graph%20%2F%2016%20diagnostic-blue)
 ![languages](https://img.shields.io/badge/parsers-10%20languages-brightgreen)
 ![read](https://img.shields.io/badge/read%20P95-1ms-brightgreen)
 ![write](https://img.shields.io/badge/write%20P95-7ms-blue)
 ![memory](https://img.shields.io/badge/512MB%20limit-RSS%20134MB-brightgreen)
 ![concurrency](https://img.shields.io/badge/128%20concurrent%20requests-zero%20OOM-brightgreen)
 ![throughput](https://img.shields.io/badge/throughput-588%20calls%2Fs-blue)
-![token](https://img.shields.io/badge/token%20savings-65%25-brightgreen)
+![token](https://img.shields.io/badge/token%20est%20(fixed--path)-65%25-blue)
 ![license](https://img.shields.io/badge/license-MIT-blue)
-![version](https://img.shields.io/badge/version-0.4.7-blue)
-![commits](https://img.shields.io/badge/commits-249-blue)
+![version](https://img.shields.io/badge/version-0.5.27-blue)
+![commits](https://img.shields.io/github/commit-count/wulun811/LiuHe)
 
 **码龙·六合工具** 是一套**为 LLM 而非人类设计**的代码操作工具链，包含两个组件：
 
-- **`malong/`** — MCP 工具集（44 个工具）：符号读写、索引、影响分析、引用追踪、调用图、死代码检测、代码审查、安全扫描、批量编辑事务、测试编排、管线验证等，通过 MCP（JSON-RPC over stdio）服务提供给 LLM。
+- **`malong/`** — MCP 工具集，**默认档即「六合线」**（13 个工具：`code_task → code_read → code_patch / code_batch → code_check → code_control`，内建任务态、证据与结构化 `next_action` 交还）；经典全量（44）与分析器档（18）各只需一行 env——`MALONG_INTERFACE=classic` / `MALONG_INTERFACE=diagnostic`。目录覆盖符号读写、索引、影响分析、引用追踪、调用图、死代码检测、代码审查、安全扫描、批量编辑事务、测试编排、管线验证等，通过 MCP（JSON-RPC over stdio）服务提供给 LLM。自 0.5.24 起默认档即六合线；classic 仍为全量目录。
 - **`malong-parse/`** — Rust 解析服务：基于 tree-sitter 的 10 语言符号提取引擎（JavaScript/TypeScript/TSX/Python/Go/Rust/C/C++/Java/Bash），通过 Unix Socket 与工具集通信，LRU 树缓存 + 批量并行提取。
 
 ## 核心理念
@@ -43,9 +43,10 @@
 | 内存 | **RSS 134MB / 26%** | docker `--memory=512m` 真 cgroup 限制下 |
 | 并发 | **128 并发 / 256 在途请求零 OOM** | 32 路读写混合打同一热点文件零撕裂，DB `integrity_check` PASS |
 | 吞吐 | **~588 call/s** | 单线程封顶，为真实 LLM 需求的 60–600 倍 |
-| token 节省 | **↓65.3%** | 原语化同任务 7673 → 2662 est |
-| 调用次数 | **↓50.0%** | 旧六步 6 次 → 新原语 3 次 |
-| 工具描述压缩 | **44 工具 ≈ 1.33k tokens** | 分级：核心保持 / 低频 ≤70 字符 / 冗长 ≤230 字符；详情走 next_step 衔接提示 |
+| token 估算（固定路径） | **↓65.3%** | 脚本 `measure-trail.js`：旧六步链 6 调用 → 新原语 3 调用，7673 → 2662 chars/4 估算。**仅固定编辑路径，非宿主对照、非 agentic 对话结果。** |
+| 调用次数（固定路径） | **↓50.0%** | 旧六步 6 次 → 新原语 3 次（同一脚本化路径） |
+| 工具描述压缩 | **44 个经典工具 ≈ 1.33k tokens** | 分级：核心保持 / 低频 ≤70 字符 / 冗长 ≤230 字符；详情走 next_step 衔接提示 |
+| 默认档目录税（每轮随上下文重发） | **13 工具 = 16.5 KB ≈ 4.86k tokens** | 描述 2.0 KB（≈0.60k）+ inputSchema 14.5 KB（≈4.26k）——schema 占 88%，要降目录税得砍参数面，不是砍文案 |
 | 索引吞吐 | **538 文件 / 7s** | 缩 scope reindex 实测 |
 | dry_run 一致性 | **47/47** | 三语言 golden hash 对比 100% 一致 |
 | 并发写同符号 | **16/16** | 恰好一胜一冲突，无静默覆盖 |
@@ -66,21 +67,24 @@
 
 | 类别 | 工具 |
 |------|------|
+| **六合线**（graph + stateful——推荐日常入口） | `code_task`（定位 + 规划）→ `code_read`（材料 + `read_ref`）→ `code_patch` / `code_batch` / `code_maintain`（事务化写）→ `code_check`（落证据）→ `code_control`（status / resume / expand / reopen / job）；另含 `code_status`、`code_audit`、`code_worktree`、`edit_transaction`——共 11 个，env 门控开启 |
 | **I/O 原语** | `read_symbol`（符号读 + 版本）、`write_symbol` / `write_symbols`（安全写，冲突状态机 + 原子写 + undo） |
 | **索引与搜索** | `reindex`、`symbol_search`、`code_search`（自然语言意图搜索）、`repo_map`（98ms 级文件地图） |
 | **分析** | `impact_analysis`（影响面 + 风险）、`call_chain`、`references`、`dep_graph`、`inspect`（大纲+引用+调用链三合一）、`trace_symbol`（常量追踪 + 硬编码副本） |
-| **编辑** | `edit_batch`、`edit_transaction`（原子事务 + rollback + 跨会话锁）、`edit_collision_guard`（写冲突检测）、`edit_sandbox`（写前验证）、`diff_facts`（符号变更 + 测试同步）、`rename_symbol`（跨文件原子重命名）、`git_worktree`（隔离分支 + 验证 + 合并） |
+| **编辑** | `edit_batch`、`edit_transaction`（原子事务 + rollback + 跨会话锁 + dry_run 预览 + create）、`edit_collision_guard`（写冲突检测）、`sandbox_validate`（写前验证）、`diff_facts`（符号变更 + 测试同步）、`rename_symbol`（跨文件原子重命名）、`git_worktree`（隔离分支 + 验证 + 合并） |
 | **质量守门** | `code_review`、`security_review`（正则安全模式）、`code_quality`（5 维探针）、`style_sniffer`、`guard_patterns`、`naming_consistency`、`exception_guard`、`config_drift`、`dependency_gatekeeper`、`fix_imports`、`sweep_dead_code`、`mock_sync`——全部纯正则/AST、零 LLM 调用、可复现 |
 | **工程辅助** | `test_bridge`（run/suggest/discover）、`find_tests`、`verify_pipeline`（lint/test/typecheck 阶段）、`debug_runner`（错误分析）、`patch_parser`（SEARCH/REPLACE）、`tsc_check`、`spec_gen`、`active_todos` |
 | **系统** | `health`、`gc`、`feedback` |
+
+> **长测试套件必须走后台。** MCP 请求有 120s 硬上限、前台阶段实际只给 110s —— 跑几分钟的套件会被判 `failed`，但那是**请求预算截断，不是代码缺陷**。改走后台 job：`code_check` 带 `run: true, async: true`（600s 上限），再用 `code_control(action="job")` 轮询。
 
 ## 架构
 
 ```
 ┌─────────────────────────┐     ┌──────────────────────────────┐
 │  LLM 客户端（MCP）       │     │  malong-parse（Rust daemon） │
-│  malong/ 44 个工具       │◄───►│  tree-sitter 10 语言解析      │
-│  SQLite 索引（按 workspace）│     │  LRU 树缓存 50MB / 批量并行   │
+│  malong/ 13 六和线       │◄───►│  tree-sitter 10 语言解析      │
+│  （+44/18 门控）         │     │  LRU 树缓存 50MB / 批量并行   │
 │  Unix Socket 客户端       │     │  catch_unwind 崩溃恢复        │
 └─────────────────────────┘     └──────────────────────────────┘
 ```
@@ -92,7 +96,7 @@
 
 ## 自我进化（self-hosting）
 
-30+ 轮「码龙查码龙」：工具集审查并修复**自身**代码，累计修复数十处真实 bug 且全部带测试锁定——包括目录 scope 过滤失效、注册形态死代码误报、常量追踪读取点丢失、SQL 参数化治理等。测试盲区即 bug 潜伏区，每一轮审查都伴随断言增长（现 87 个 JS 测试文件共 2240 断言）。最新一轮修复 Windows 独有的批量索引路径形态失配——收集器产正斜杠路径 vs win32 join 产反斜杠，statMap 必 miss（全部文件 size=0、tokens_estimate 恒 0、content_hash 靠 CWD 兜底侥幸存活），新增收集器→indexBatch 全链路测试锁定，2026-09-04 Windows 实测。
+30+ 轮「码龙查码龙」：工具集审查并修复**自身**代码，累计修复数十处真实 bug 且全部带测试锁定——包括目录 scope 过滤失效、注册形态死代码误报、常量追踪读取点丢失、SQL 参数化治理等。测试盲区即 bug 潜伏区，每一轮审查都伴随断言增长（现 166 个 JS 测试文件，全链 0 失败）。最新一轮（r5）：跨文件引用解析改为 import 图驱动——`path.join` 类成员调用不再误绑同名本地符号（本仓实测清零 216 条假绑定），跨语言（Python↔JS）链接被语言族过滤阻断，别名经 import 图精确解析（JS 侧新增 ESM specifier 采集）——由 `test-crossfile-resolve`（14 断言，先红后绿）锁定；DSH 桥接 spawn 时注入 `MALONG_STATE_DIR`，由 `test-dsh-bridge` 锁定。
 
 ## 扫描边界（承认局限，边界内承诺必做）
 
@@ -119,18 +123,21 @@ cd ../malong && npm ci
 # 3) 注册 MCP 服务（opencode / Claude Desktop 等任何 MCP 客户端通用）
 #    opencode（项目根 opencode.json；Windows 路径用双反斜杠，Linux/macOS 用正斜杠）：
 #    {
-#      "mcp": {
-#        "malong": {
-#          "type": "local",
-#          "command": ["node", "--max-old-space-size=512", "N:\\repo\\liuhe\\malong\\mcp-server.js", "--workspace", "N:\\repo\\liuhe"],
-#          "enabled": true
+#      "mcp": {                                    # opencode V2 原生：servers 分组（V1 旧版为 mcp.<名> 直挂）
+#        "servers": {
+#          "malong": {
+#            "type": "local",
+#            "command": ["node", "--max-old-space-size=512", "N:\\repo\\liuhe\\malong\\mcp-server.js", "--workspace", "N:\\repo\\liuhe"],
+#            # 0.5.24 起默认即六合线（13 个工具）；这段已可选——只用 classic 44 则删掉本行
+#            "environment": { "MALONG_INTERFACE": "graph", "MALONG_ENTRY_STATE": "1" }
+#          }
 #        }
 #      }
 #    }
 #    Claude Desktop（Windows 实测：%APPDATA%\Claude\claude_desktop_config.json）：
 #    {
 #      "mcpServers": {
-#        "malong": { "command": "node", "args": ["/path/to/malong/mcp-server.js"] }
+#        "malong": { "command": "node", "args": ["/path/to/malong/mcp-server.js"], "env": { "MALONG_INTERFACE": "graph", "MALONG_ENTRY_STATE": "1" } }
 #      }
 #    }
 
@@ -143,7 +150,7 @@ cd ../malong && npm ci
 #        pkill -f "dsh web"; dsh web --port 3456 --host 0.0.0.0 --trusted-host <局域网IP>
 #      方式二（脚本安装，指向本仓库副本）：
 #        bash malong/dsh/install-dsh.sh         # 幂等；自动备份并修改 ~/.dsh/profiles/web/cordis.patch.yml
-#    桥层将 44 个工具注册为 malong__*，并自动用当前对话的工作区填充 workspace_dir
+#    桥层默认只暴露六合线（13 个工具：code_task/code_read/code_patch/...）为 malong__*，并自动用当前对话的工作区填充 workspace_dir
 #    （无需每次指定路径；显式传路径仍优先）。完整指南（含索引规则）：malong/dsh/DSH-INTEGRATION.md
 #    故障排查：若所有 malong__* 调用都卡到超时 = 桥的 mcp-server 子进程已死。
 #    桥现在会自动重拉（指数退避，挂起调用立即失败并提示 restarting）；仍失败则
@@ -162,7 +169,7 @@ git clone <repo-url> liuhe && cd liuhe/malong
 
 # 1) 解析 daemon——用 releases/ 里的预编译二进制（无需 cargo）：
 mkdir -p ~/.local/bin
-tar -xzf ../releases/malong-liuhe-0.4.7-linux-x86_64.tar.gz
+tar -xzf ../releases/malong-liuhe-0.5.27-linux-x86_64.tar.gz
 cp malong-parse/target/release/malong-parse ~/.local/bin
 malong-parse &                                   # 启动 daemon（socket: /tmp/malong-parse-$UID.sock）
 
@@ -172,10 +179,10 @@ node --max-old-space-size=4096 mcp-server.js --workspace /path/to/project
 
 # 3) 自检（可选，30 秒）：
 node tests/test-db-adapter.js   # 22 断言：sql.js 后端 + 持久化
-node tests/test-mcp-server.js   # 25 断言：MCP stdio + daemon 往返
+node tests/test-mcp-server.js   # 37 断言：MCP stdio + daemon 往返
 ```
 
-> **Windows 用户：** 用 `releases/malong-liuhe-0.4.7-windows-x86_64.tar.gz`（内附 `malong-parse.exe`），解压后放到 PATH 即可；MCP 服务启动时会自动拉起 daemon，无需手动执行 `malong-parse &` 这一步。上面的 `mkdir -p`/`tar -xzf` 为 Unix 语法，Windows 用解压工具或 `tar -xzf`（Win10+ 自带）均可。
+> **Windows 用户：** 用 GitHub Releases 的 `malong-liuhe-0.5.27-windows-x86_64.tar.gz`（内附 `malong-parse.exe`），解压后放到 PATH 即可；MCP 服务启动时会自动拉起 daemon，无需手动执行 `malong-parse &` 这一步。上面的 `mkdir -p`/`tar -xzf` 为 Unix 语法，Windows 用解压工具或 `tar -xzf`（Win10+ 自带）均可。
 
 > 注意：daemon 未启动时，依赖解析的工具（符号提取等）会降级；SQLite 系工具（repo-map / code-index / health-check）不受影响。
 
@@ -213,7 +220,7 @@ Linux x86_64 预编译二进制已随仓库提交在
 ```bash
 cd malong
 npm ci
-npm test          # 2240 断言全绿（需要 daemon 在跑）
+npm test          # 166 个测试文件全绿（需要 daemon 在跑）
 ```
 
 ### 启动 MCP 服务
@@ -223,16 +230,18 @@ cd malong
 node --max-old-space-size=512 mcp-server.js --workspace /path/to/project
 ```
 
-将 MCP 服务注册到支持 MCP 的 LLM 客户端，工具自动可用。**opencode** 在项目根 `opencode.json` 里注册：
+将 MCP 服务注册到支持 MCP 的 LLM 客户端，工具自动可用。**opencode** 在项目根 `opencode.json` 里注册（`environment` 块**自 0.5.24 起已可选**——默认档就是六合线 13 个工具；要用 classic 44 设 `MALONG_INTERFACE=classic`）：
 
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
   "mcp": {
-    "malong": {
-      "type": "local",
-      "command": ["node", "--max-old-space-size=512", "malong/mcp-server.js", "--workspace", "."],
-      "enabled": true
+    "servers": {
+      "malong": {
+        "type": "local",
+        "command": ["node", "--max-old-space-size=512", "malong/mcp-server.js", "--workspace", "."],
+        "environment": { "MALONG_INTERFACE": "graph", "MALONG_ENTRY_STATE": "1" }
+      }
     }
   }
 }
@@ -240,18 +249,24 @@ node --max-old-space-size=512 mcp-server.js --workspace /path/to/project
 
 > Windows 提示：命令里 `--workspace` 和 `malong/mcp-server.js` 的相对路径以 opencode 启动目录为基准；如需从其他目录启动，改传绝对路径（`N:\\repo\\liuhe\\malong\\mcp-server.js`，JSON 里反斜杠要双写）。daemon 由 MCP 服务自动拉起，无需手动启动 `malong-parse.exe`。
 
+opencode V2 的配置形状、工具可见性（`codemode`）与排障清单见 [`malong/opencode/OPENCODE-V2.md`](malong/opencode/OPENCODE-V2.md)。
+
 ### 配置（环境变量）
 
 全部可选——不设置时用合理默认值。
 
 | 变量 | 默认 | 用途 |
 | --- | --- | --- |
-| `MALONG_STATE_DIR` | `~/.config/malong` | 用量 / 反馈 / 编辑统计文件的写入目录。覆盖可重定向状态（测试、沙盒宿主）。读取会回退旧目录 `~/.config/opencode/`，0.3.37 之前的数据不丢。 |
+| `MALONG_STATE_DIR` | `~/.config/malong` | 0.5.0 起为 MCP 状态根：工作区索引（`workspaces/<hash>/code-index.db`）+ 用量 / 反馈 / 编辑统计。旧 repo 相对 `data/malong-mcp`（经 `--workspace` 播种）首启迁入——隔离子进程 copy→verify→delete，失败 fail-soft 保留源目录；0.3.37 之前的 `~/.config/opencode/` 读取仍回退。 |
+| `MALONG_SKIP_STATE_MIGRATION` | 未设 | 设为 `1` 跳过启动时旧状态迁移（应急逃生；旧目录原样不动）。 |
 | `MALONG_SOCKET` | `/tmp/malong-parse-$(id -u).sock` | 解析 daemon 的 Unix socket 路径（Linux / macOS）。 |
 | `MALONG_PORT` | `31001` | 解析 daemon 的 TCP 端口（Windows）。 |
 | `MALONG_PARSE_BIN` | npm 平台包 / `~/.local/bin` | 客户端自动拉起 daemon 时用的二进制。解析顺序：本 env → `@jieai/malong-parse-<os>-<arch>` npm 平台包（`@jieai/dsh-malong-bridge` 的 optionalDependencies 按平台自动拉取）→ `~/.local/bin/malong-parse` → `malong-parse/target/release`（开发树）。 |
 | `MALONG_PARSE_MODE` | rust-service | 解析传输方式。仅支持 `rust-service`（`builtin` / `shadow` 会被拒绝）。 |
 | `MALONG_WS_GC_DAYS` | `14` | 工作区索引缓存闲置多少天后由 `health cleanup` 清理；`0` 禁用。 |
+| `MALONG_INTERFACE` | `graph` | 工具档位。默认（未设）= **六合线**（13 个工具：`code_task`/`code_read`/`code_status`/`code_query` + 8 个状态化入口 + `edit_transaction`）；`classic` = 经典全量 44；`diagnostic` = 18（六合线 + 5 个分析器）。 |
+| `MALONG_ENTRY_STATE` | 默认开 | 状态层（S1–S5 任务状态机 + ADR-018 `invoke_capability`）默认放行；设为 `0` 则退回只读 5 工具档。 |
+| `MALONG_PYTHON` | 未设 | Python 测试（`test_bridge` / `verify_pipeline`）的显式解释器；优先于自动探测到的项目 venv（项目根旁的 `.venv`/`venv`/`env`）。 |
 
 ### 抑制 security 误报
 
@@ -356,14 +371,14 @@ export OPENCODE_ZEN_API_KEY="your-api-key"   # 切勿提交到仓库
 codex exec "用 reindex 给工作空间建索引，再用 symbol_search 找 createDb"
 ```
 
-工具以 `liuhe.<工具名>` 暴露（如 `liuhe.health`、`liuhe.symbol_search`、`liuhe.repo_map`）。
+工具由 `malong-mcp` 服务暴露，前缀随注册名而定——opencode 里是 `malong_<工具名>`（如 `malong_health`），Claude Code 是 `mcp__liuhe__<工具名>`，DSH 桥接是 `malong__<工具名>`。
 每个工作区首次使用前先跑一次 `reindex`，符号搜索才有索引可查。
 
 ## 测试
 
-- Rust 侧：`cargo test`（92 断言：各语言提取 + 协议帧编解码 + 缓存 LFU + 服务端 dispatch/优先级队列 + batch_extract + 深嵌套守卫 + 握手认证）
-- JS 侧：87 个测试文件共 2240 断言。`npm test` 跑全链（primitives / embedded / mvp-batch / tool-registry / repo-map / handler-smoke / patch-parser / file-collector / batch-collector-chain / code-search / health-check / db-adapter 双后端 / write-runtime / host-config / mcp-server / security-review-rules / journal-prune / gatekeeper-golden / debug-runner / edit-collision-guard / fix-imports / symbol-search / naming-consistency / call-chain / edit-transaction-ext / batch-edit-write / verify-pipeline / dep-graph-project / code-quality / tsc-spec / batch-edit-tocou / workflow-closure / variable-refs / output-budget / read-symbols-batch / feedback-list / test-bridge-run / mock-syncer-truncation / r54-p0 / r54-p1 / r54-p2 / r8 / r9 / crash-injection / r10 / dogfood-r12）；全链 87 文件含 dogfood-r14…r30（真实 daemon 端到端）
-- 总计：2240 断言（87 文件全链 0 失败；另 cargo test）
+- Rust 侧：`cargo test`（97 断言：各语言提取 + 协议帧编解码 + 缓存 LFU + 服务端 dispatch/优先级队列 + batch_extract + 深嵌套守卫 + 握手认证）
+- JS 侧：166 个测试文件。`npm test` 跑全链（权威清单见 `package.json` 的 `scripts.test`；含 write-runtime / edit-transaction-ext / verify-pipeline 与 dogfood r12–r30 端到端系列）
+- 总计：166 个测试文件（全链 0 失败；另 cargo test 97 断言）
 - 一键验证：`./scripts/ci.sh`（自包含：cargo test + npm test + dogfood，复用或自起 daemon）
 
 ## 许可证

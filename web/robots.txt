@@ -1,3 +1,2 @@
-# Trigger Pages deployment (empty commit no-op marker)
 User-agent: *
 Allow: /

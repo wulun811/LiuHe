@@ -11,6 +11,9 @@ export async function handle(args, context) {
   if (!workspaceDir) {
     return { error: 'missing_parameter', message: 'workspace_dir is required', suggestion: 'Provide the absolute path to the project root directory. Call reindex first if this is a new workspace.' }
   }
+  if (typeof workspaceDir !== 'string') {
+    return { error: 'invalid_input', message: `workspace_dir must be a string (got ${typeof workspaceDir})` }
+  }
 
   const dbPath = join(getWorkspaceDir(workspaceDir), 'code-index.db')
   if (!existsSync(dbPath)) {

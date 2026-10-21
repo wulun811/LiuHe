@@ -1,0 +1,20 @@
+{
+  "name": "code_task",
+  "version": "0.1.1",
+  "interface": "graph",
+  "description": "Start here for any change: goal → candidates, structure, impact. Does not itself edit or check — read once (code_read), edit via code_patch / code_batch (N edits, 1 call), verify code_check.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "workspace_dir": { "type": "string", "description": "Project root (abs)." },
+      "goal": { "type": "string", "description": "Coding goal." },
+      "route": { "type": "string", "enum": ["understand", "change", "diagnose", "review", "maintain", "document", "isolate", "system"], "description": "Inferred when omitted." },
+      "target": { "type": "object", "description": "Anchor {file, symbol, line}.", "properties": { "file": { "type": "string" }, "symbol": { "type": "string" }, "line": { "type": "integer" } } },
+      "search_terms": { "type": "array", "items": { "type": "string" }, "description": "Extra terms (≤8)." },
+      "request_id": { "type": "string", "description": "Correlation id." }
+    },
+    "required": ["workspace_dir", "goal"]
+  },
+  "handler": "./handler.js",
+  "protocol_version": "1.0"
+}

@@ -175,6 +175,18 @@ const f = (n, c) => writeFileSync(join(ws, n), c)
   await handle({ workspace_dir: childWs, action: 'rollback', txn_id: ch.txnId }, ctx)
 }
 
+// ── ⑪b dogfood-050：git 仓内 → 不写 .gitignore，产物目录进 .git/info/exclude ──
+{
+  const repoWs = join(ws, 'gitws')
+  mkdirSync(join(repoWs, '.git', 'info'), { recursive: true })
+  const ch = await handle({ workspace_dir: repoWs, action: 'begin', name: 'gitexclude' }, ctx)
+  assert(ch.status === 'ok', '⑪b git 仓 begin 正常')
+  assert(!existsSync(join(repoWs, '.gitignore')), '⑪b git 仓不创建 .gitignore（旧实现必建）')
+  const ex = readFileSync(join(repoWs, '.git', 'info', 'exclude'), 'utf-8')
+  assert(ex.includes('.ai-transactions/'), `⑪b info/exclude 含产物目录（得 ${ex.slice(0, 80)}）`)
+  await handle({ workspace_dir: repoWs, action: 'rollback', txn_id: ch.txnId }, ctx)
+}
+
 // ⑫ R22-⑳：连续 begin——第二个 begin 的自愈不得误清第一个活跃空事务（旧逻辑当孤儿删 → TXN_NOT_FOUND）
 {
   writeFileSync(join(ws, 'a.txt'), 'aaa')

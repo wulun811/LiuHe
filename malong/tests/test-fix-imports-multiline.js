@@ -201,6 +201,33 @@ async function run(file, content, opts = {}) {
   assert(r.supported !== false, `⑰ .py 正常分析（supported=${r.supported}）`)
 }
 
+// ⑱ dogfood-050：AST 路径 CJS require 未用绑定（parser 只产 ESM refs 的盲区）
+{
+  const cjsSrc = [
+    "const unusedFs = require('fs')",
+    "const path = require('path')",
+    "function f(p) { return path.join(p, 'x') }",
+    "module.exports = f",
+    "",
+  ].join('\n')
+  writeFileSync(join(ws, 'cjs.js'), cjsSrc)
+  const astCtx = {
+    ...ctx,
+    langParserService: {
+      extractAllAsync: async () => ({
+        symbols: [{ name: 'unusedFs', startLine: 1 }, { name: 'path', startLine: 2 }, { name: 'f', startLine: 3 }],
+        refs: [{ type: 'call', name: 'path' }, { type: 'call', name: 'join' }, { type: 'call', name: 'require' }],
+      }),
+    },
+  }
+  const r = await handle({ workspace_dir: ws, file: 'cjs.js' }, astCtx)
+  const uns = r.issues.filter(i => i.type === 'unused_import')
+  assert(uns.length === 1 && uns[0].unused.includes('unusedFs'), `⑱ AST 路径报 CJS 未用 require（得 ${JSON.stringify(uns.map(i => i.unused))}）`)
+  assert(!uns.some(i => i.unused.includes('path')), `⑱ 在用 require 不误报`)
+  const tr = (r.transaction_ready || []).filter(t => /unusedFs/.test(t.old_string))
+  assert(tr.length === 1 && tr[0].new_string === '', `⑱ 可自动删整行（得 ${JSON.stringify(r.transaction_ready)}）`)
+}
+
 for (const d of [ws, data]) rmSync(d, { recursive: true, force: true })
 
 console.log(`== test-fix-imports-multiline: ${pass} passed, ${fail} failed ==`)

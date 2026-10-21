@@ -28,7 +28,7 @@ function formatDuration(seconds) {
 }
 
 async function runIndexing(codeIndexService, filePaths, workspaceDir, totalFiles, opts, log) {
-  const { forceMarked = 0, blocking = false, note = null } = opts
+  const { forceMarked = 0, blocking = false, note = null, prune = true } = opts
   const startTime = Date.now()
   codeIndexService.indexing = true
   codeIndexService.indexProgress = { workspaceDir, total: totalFiles, indexed: 0, startTime }
@@ -36,7 +36,7 @@ async function runIndexing(codeIndexService, filePaths, workspaceDir, totalFiles
 
   if (blocking) {
     try {
-      const result = await codeIndexService.indexBatch(filePaths, workspaceDir, progress)
+      const result = await codeIndexService.indexBatch(filePaths, workspaceDir, progress, { prune })
       codeIndexService.indexing = false
       const durationMs = Date.now() - startTime
       log('info', `[reindex] blocking done: ${totalFiles} files, ${durationMs}ms`)
@@ -73,7 +73,7 @@ async function runIndexing(codeIndexService, filePaths, workspaceDir, totalFiles
 
   setImmediate(async () => {
     try {
-      await codeIndexService.indexBatch(filePaths, workspaceDir, progress)
+      await codeIndexService.indexBatch(filePaths, workspaceDir, progress, { prune })
       codeIndexService.indexing = false
       log('info', `[reindex] done: ${filePaths.length} files, ${Date.now() - startTime}ms`)
     } catch (e) {
@@ -214,6 +214,7 @@ export async function handle(args, context) {
       forceMarked,
       blocking: args?.blocking === true,
       note,
+      prune: !truncated,
     }, log)
   }
 
@@ -228,7 +229,7 @@ export async function handle(args, context) {
       // 免确认语义保留，但必须先跑 mtime 增量判定（indexBatch 自身按 mtime 跳过未变文件）
       const incStart = Date.now()
       try {
-        const result = await codeIndexService.indexBatch(pre.files.map(f => f.path), workspaceDir)
+        const result = await codeIndexService.indexBatch(pre.files.map(f => f.path), workspaceDir, undefined, { prune: !pre.truncated })
         const indexedCount = Array.isArray(result) ? result.length : 0
         if (indexedCount === 0) {
           codeIndexService.indexing = false // 触发 stats 记录

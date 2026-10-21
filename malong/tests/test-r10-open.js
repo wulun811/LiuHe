@@ -77,6 +77,9 @@ async function bootService(WS) {
   locker.pragma('locking_mode = EXCLUSIVE')
   locker.exec('BEGIN IMMEDIATE')
 
+  // 测试提速：默认 3×5s BUSY 等待；本用例只验证“BUSY → 报错不删库”，缩到 100ms × 0 次重试
+  process.env.MALONG_TEST_DB_BUSY_TIMEOUT_MS = '100'
+  process.env.MALONG_TEST_DB_BUSY_RETRIES = '0'
   const svc = await bootService(WS)
   let threw = false
   let errMsg = ''

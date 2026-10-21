@@ -143,7 +143,11 @@ export async function delegateWrite({ absPath, filePath, workspaceDir, originalC
     // r9(P3)：唯一 tmp 名——固定 `${absPath}.tmp` 可被恶意仓库预置同名 symlink → 写穿外部 + rename 把 symlink 本体移到目标位
     const tmpPath = `${absPath}.bte-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`
     try {
-      writeFileSync(tmpPath, finalContent)
+      // N3（0.5.14 Windows 复核，Linux 侧复验）：tmp+rename 不得重置权限位——
+      // 旧实现用 umask 默认写 tmp，编辑 755 可执行脚本后丢 +x（实测 755→664）。存在则继承原 mode。
+      let mode = null
+      try { mode = statSync(absPath).mode & 0o777 } catch { mode = null }
+      writeFileSync(tmpPath, finalContent, mode != null ? { mode } : undefined)
       // R22-⑮：renameRetry 对齐 write-runtime（Windows 杀软 EPERM/EBUSY 偶发）——旧裸 renameSync 一次失败即 ATOMIC_WRITE_FAILED
       await renameRetry(tmpPath, absPath)
     } catch (e) {

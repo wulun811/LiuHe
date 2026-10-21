@@ -65,3 +65,46 @@ export function scanCjsRequires(source) {
   }
   return results
 }
+
+// dogfood-050 r5：ESM import 扫描——Rust 提取器只产模块行（嵌套 specifier 不采集），
+// 这里补本地名→原名映射（挂到模块行 call_expr，格式同 CJS aliasMap），供跨文件解析/别名反查。
+// 复用 stripCommentsAndStrings（字符串/注释跳过的行状态机）；多行 import 用整源代码正则处理，
+// 命中位点若落在字符串区间内则跳过（防字符串里的 import 文本假阳性）。
+export function scanEsmImports(source) {
+  const lines = String(source).split('\n')
+  const block = { inBlock: false }
+  const codeParts = []
+  const stringRanges = []
+  let offset = 0
+  for (const line of lines) {
+    const { code, ranges } = stripCommentsAndStrings(line, block)
+    for (const [s, e] of ranges) stringRanges.push([s + offset, e + offset])
+    codeParts.push(code)
+    offset += code.length + 1
+  }
+  const code = codeParts.join('\n')
+  const results = []
+  const re = /\bimport\s+(?:([\w$]+)\s*,?\s*)?(?:\*\s+as\s+([\w$]+)\s*)?(?:,?\s*\{([\s\S]{0,500}?)\}\s*)?from\s*['"]([^'"]+)['"]|\bimport\s*['"]([^'"]+)['"]/g
+  let m
+  while ((m = re.exec(code)) !== null) {
+    const idx = m.index
+    if (stringRanges.some(([s, e]) => idx >= s && idx < e)) continue
+    const module = m[4] || m[5]
+    if (!module) continue
+    const line = code.slice(0, idx).split('\n').length
+    const aliasMap = {}
+    if (m[1]) aliasMap[m[1]] = 'default'
+    if (m[2]) aliasMap[m[2]] = '*'
+    if (m[3]) {
+      for (const part of m[3].split(',')) {
+        const p = part.trim()
+        if (!p) continue
+        const mm = p.match(/^([\w$]+)\s+as\s+([\w$]+)$/)
+        if (mm) aliasMap[mm[2]] = mm[1]
+        else if (/^[\w$]+$/.test(p)) aliasMap[p] = p
+      }
+    }
+    results.push({ module, line, aliasMap })
+  }
+  return results
+}

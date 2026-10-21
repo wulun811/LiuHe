@@ -125,11 +125,12 @@ pub fn extract_all(tree: &Tree, source: &str) -> super::ExtractResult {
             "let_declaration" => {
                 if let Some(pat) = node.child_by_field_name("pattern") {
                     if pat.kind() == "identifier" {
+                        // LH-003：let 全范围（含多行初始化器），不再只取 pattern 行
                         symbols.push(Symbol {
                             name: source[pat.byte_range()].to_string(),
                             kind: "variable".to_string(),
-                            start_line: pat.start_position().row as u32 + 1,
-                            end_line: pat.end_position().row as u32 + 1,
+                            start_line: node.start_position().row as u32 + 1,
+                            end_line: node.end_position().row as u32 + 1,
                             impl_for: None,
                         });
                     }
@@ -348,11 +349,12 @@ pub fn extract_symbols(tree: &Tree, source: &str) -> (Vec<Symbol>, Vec<Import>) 
             "let_declaration" => {
                 if let Some(pat) = node.child_by_field_name("pattern") {
                     if pat.kind() == "identifier" {
+                        // LH-003：let 全范围（含多行初始化器），不再只取 pattern 行
                         symbols.push(Symbol {
                             name: source[pat.byte_range()].to_string(),
                             kind: "variable".to_string(),
-                            start_line: pat.start_position().row as u32 + 1,
-                            end_line: pat.end_position().row as u32 + 1,
+                            start_line: node.start_position().row as u32 + 1,
+                            end_line: node.end_position().row as u32 + 1,
                             impl_for: None,
                         });
                     }
@@ -632,5 +634,17 @@ fn main() {
         assert_eq!(by_name.get("IoResult").map(|s| s.as_str()), Some("std::io::Result"), "alias binding; imports={:?}", by_name);
         assert_eq!(by_name.get("helper").map(|s| s.as_str()), Some("crate::utils::helper"), "crate path; imports={:?}", by_name);
         assert!(!by_name.contains_key("*"), "glob binding must be skipped; imports={:?}", by_name);
+    }
+
+    #[test]
+    fn let_declaration_covers_multiline_initializer() {
+        let src = "fn main() {\n    let cfg = vec![\n        1,\n        2,\n    ];\n}\n";
+        let tree = parse_rust(src);
+        let result = extract_all(&tree, src);
+        let range = |name: &str| result.symbols.iter().find(|s| s.name == name).map(|s| (s.start_line, s.end_line));
+        assert_eq!(range("cfg"), Some((2, 5)), "multi-line let value");
+        let (syms, _) = extract_symbols(&tree, src);
+        let srange = |name: &str| syms.iter().find(|s| s.name == name).map(|s| (s.start_line, s.end_line));
+        assert_eq!(srange("cfg"), Some((2, 5)), "extract_symbols same range");
     }
 }

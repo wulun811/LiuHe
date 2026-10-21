@@ -1,42 +1,163 @@
 # 六合工具集 版本日志
 
-版本要点速览（详细历史见 git log）。
+本文件只记面向使用者的变更要点；完整开发历史（含内部计划、验收与复核记录）见 `git log` 与开发仓。
 
-## 变更速览
+## 0.5.x
 
-- **[0.4.8]** (2026-09-04): Windows 独有 P0 修复——批量索引 statMap 键形态失配（file-collector 产正斜杠绝对路径，join(repo, r.path) 在 win32 产反斜杠 → Map 查找必 miss：全部文件 size=0、outline tokens_estimate 恒 0、content_hash 依赖「CWD==工作区根」的相对路径兑底侥幸存活；POSIX 天然免疫，Linux 开发机/CI 不可见）。修法：statMap 建键/查找双侧过 toDbRel（与 mtimeMap 同模式）+ readFileSync 固定绝对路径（去 CWD 依赖）。附带两处小修：symbol_search 空结果建议改为提示查询词问题（大小写敏感子串/camelCase 变体/code_search 兑代），不再对 fresh 索引误导 reindex（handler 既有 ensureFreshFile 前置保鲜，reindex 建议既多余又自相矛盾）；read_symbol pipeline 第二步骤 resolve_locator→resolve_range（原与查找步骤同名，trace 读起来像解析了两遍）。新增 test-batch-collector-chain.js（收集器→indexBatch 全链路断言 size>0 且 content_hash 为 sha256，修复前必失败）；npm test 链 86→87 文件 / 2231→2240 断言
+- **[0.5.27]** (2026-10-21): 默认档 13 工具描述重写（更清晰、字节受控）+ README / 网页补「默认档目录税」实测数。
+  - **先量后改**：默认档（graph + state）的目录税实测 = **16,521 B ≈ 4.86k tokens/轮**（`tools/list` 每轮随上下文重发）：**描述 2,030 B（≈0.60k）+ inputSchema 14,491 B（≈4.26k）** —— schema 占 88%。即：要降目录税只能砍参数面，砍描述收益极小（13 条描述加起来也只有 0.6k）。原先公开文档只有 classic 44 档的「工具描述压缩 ≈1.33k tokens」一个口径，默认档的真实数字此前没有对外披露。
+  - **12 条描述重写**（更清晰 + 补关键提示）：`code_task`（讲清「只规划 → 读一次 → 写 → 验」）、`code_check`（补 `async:true` 提示——长套件必须后台跑，这是 0.5.26 用真仓实测撞出来的坑）、`code_query`（去掉与 mode 列表重复的括号枚举，-21 B）、`invoke_capability`（讲清「一次只调一个、不是清单」）、`code_patch`（去掉歧义的「First write per file」）、`code_worktree` / `code_audit` / `code_batch` / `code_maintain` / `code_control` / `code_read` / `code_status`（措辞归一）。
+    - **`edit_transaction` 刻意不改**：它同时属于 classic 44，而 classic 目录是**逐字节 golden 冻结**的（0.5.24 承诺「classic 目录本身逐字节未变」）——改了会破冻结，故让路。这是取舍，不是漏改。
+    - 关键行为词一个没丢（`code_batch`/`code_check`/`budget_hint`/`task_id`/`outline`/`references`/`capabilities`/`validate`/`checks`/`locator.file_path`/`dry_run`/`test/typecheck/lint`/`resume`/`plan`/`read_ref`/`apply`/`rollback`/`edit_batch`/`delegates once`），定点断言（`CURRENT branch`/`reopen`/`does not itself edit or check`/`start here`…）全绿。
+  - **文档订正**：README 双语与网页指标表新增「默认档目录税」一行（16.5 KB ≈ 4.86k tokens/轮：描述 0.60k + schema 4.26k），并点明 schema 占 88%、要降得砍参数面。
+  - **目录预算锁** 16,800 B（13 工具 description + inputSchema 合计）：改写后 16,521 B，余量 279 B（此前只剩 324 B、98.1% 已用；该锁历史上已显式上调 7 次，本次未再上调）。
+  - 验证：全链 164 文件 0 失败（4G 围栏，431.1s）；classic-44 逐字节 golden 不变（43/43）+ 合同测试 347/347 无漂移；真服务端 `tools/list` 复测（13 工具，描述合计 2,030 B）。
+  - **发布仓 Windows 复核补丁（2026-10-21）**：① Python 项目解析补齐 Windows venv 布局（`.venv\Scripts\python.exe` + `Lib\site-packages`）与反斜杠 scope；② `test-verify-pipeline` 的 POSIX 假解释器真跑在 Windows 显式 NOT_RUN（解析逻辑由 `test-python-project` 的 Windows 布局用例覆盖）；③ 修 `test-wp04-receipts` 的 Windows 相对路径断言与 `test-dogfood-r23` 的 `git clean` 偶发静默失败；④ 补回两个漏入链的回归测试（`test-undo-journal` / `test-esm-import-refs`）。README/网页测试口径同步订正（161 → 166；此前数字在 0.5.25/0.5.26 增测后未跟版）。
+  - Windows 实测：全链 **166 文件 0 失败**（Node 22 / Windows 10.0.26200；Rust 解析器用本仓源码重建，debug + release）；`cargo test` 97 通过；真实 Windows venv 解析与命令串执行实测通过。交付包已随复核重建。
+  - 交付包 `jieai-dsh-malong-bridge-0.5.27.tgz`（925,002 B / 190 文件），SHA256 `2b363d352473d87de68d708b0540d7a5e835cf94d612d9e8ac3ce6838ab08d29`（Windows 复核后重建；dev 侧原包 SHA 见开发仓）。
+- **[0.5.26]** (2026-10-20): 修 0.5.25 上手实测暴露的三处缺陷（请求预算截断被误归因 / 文档搜索精度 / 结果配额），并补齐漏改的版本位。
+  - **超时不误归因（code_check）**：MCP 请求级 120s 硬上限，前台阶段实际只给 110s（`verify_pipeline` 的 `cap = isBackground ? 600s : 110s`）。此前有两处漏：① `verify_pipeline` 算出的 `mcp_note`（原文「MCP request has a 120s hard timeout … will definitely time out」）**全仓无人消费** —— code_check 的委派路径只透传 `stage.notice`，这条预警被丢在中间层，调用方只看到「run timed out → counted as failed」；② 超时之后 next_action 一律指回 `code_patch`「Fix or adjust the patch」，**诱导模型去改本来正确的代码**（本仓早已对 skipped/unavailable 做过同口径的 A1 长尾误归因防护，timeout 这一类漏了）。现在：① `mcp_note` 透传进 `evidence.actual.notice`；② 超时证据的 limitations 明说「NOT a code defect — re-run with code_check(async=true)」；③ 超时后的 next_action 改为 `code_check(async=true)`（后台 600s 上限），真失败（非超时）仍指回 code_patch（回归防护）。
+    - **重试建议必须给够预算**：沿用调用方那个「已经不够用」的 timeout，后台再跑一遍照样超时（实测踩过：前台 1500ms 超时 → 重试仍 1500ms）。现在 next_action 固定带 `timeout=600000`（后台上限），并点明真实截断原因（配置的超时 or 请求预算）。
+    - 实测口径（某 Python 项目 pytest 需 270s）：前台调用必被判死并超时，async 后 270s 全过 —— **长套件一律走 `code_check(async=true)` + `code_control(action="job")` 轮询**。
+  - **文档搜索精度（`doc-files.js`）**：0.5.25 的 CJK 3 字滑窗是「只要 query 含中文就对整个 query 串滑窗」，英文被一起切成 `ntr`/`tri`/`ent` 之类碎片去撞无关文档 —— 混排 query（`Claim-centric 科研对象`）下真命中被挤出前 10，榜上全是碎片噪音。现在：① 滑窗**只作用于 CJK 段**（正则切段），英文整词匹配；② 命中取**最长**匹配词（整串 > 整词 > 碎片），碎片不再盖掉整句；③ 结果按**特异度**排序 + **每文件配额**（默认 2 条），一个文件不再独占结果位。
+  - **版本位补齐**：`GRAPH_VERSION` 跟随 package.json（0.5.26）—— 上一轮漏改，被全链实测当场抓住（`test-host-config` 断言 `GRAPH_VERSION === package.json` 版本）。
+  - 测试：新增 `tests/test-mcp-note-budget.js`（18 断言：mcp_note 透传 / 超时改口径 / 重试给够预算 / 真失败仍指 code_patch / background 不打预警）；`tests/test-doc-files.js` 15 → 22 断言（混排 query 无碎片噪音、每文件配额、特异度排序）；新测试文件已并入 `npm test` 链（163 → 164 个文件）。
+  - 文档：README 双语新增「长套件走后台」提示与徽章/下载文件名跟版；`malong/RESPONSE-CONTRACT.md` 补请求预算口径与 FAQ 第 14 条；网页中英（index/docs/download）跟版到 v0.5.26 并各加一条超时 FAQ；RELEASING 发布手册同步。
+  - 验证：全链 164 文件 0 失败（4G 围栏，484.3s）；合同无漂移（本次改的是 graph 档 handler 与共享模块，不在 classic-44 冻结集内）+ 合同测试 347/347；隔离安装 + 真实 MCP 探针 14/14；真仓复验（docs 交付型仓）：混排 query 真命中升首位、碎片噪音归零、每文件配额生效；真实 MCP 服务端复验（默认档 13 工具）：文档搜索混排 query 首个命中即真命中且零碎片、超时后 next_action 指向 code_check(async, timeout=600000) 而非 code_patch。
+  - 交付包 `jieai-dsh-malong-bridge-0.5.26.tgz`（927,878 B / 190 文件），SHA256 `ea4b9f14568555fb6ecba18cd41b5c905b1a3ada3d40f1dbf9a9a36c32e7efc0`。
+- **[0.5.25]** (2026-10-20): 修三处真实工作流缺陷（跨工作区调用 / Python 仓验证 / 文档型仓不可用）+ 文档纳入地图与搜索。
+  - **invoke_capability 的工作区冲突不再静默**：顶层 `workspace_dir` 是任务/工作区边界（嵌套不得覆盖，安全属性不变），但旧实现把嵌套的 `args.workspace_dir` 静默丢弃 —— 模型以为「传了却没生效」，随后 `task_id` 在错工作区里查 → `unknown_task`（实测：传 `args.workspace_dir=…/llmsc`，结果里 `workspace_dir` 变成会话工作区 `…/0llmsc`）。现在：① 成功路径回 `warnings`（`workspace_dir_ignored` + 生效工作区）；② 找不到 task 且该 task 就在被忽略的工作区里 → 精确的 `task_workspace_mismatch`（附「把 workspace_dir 提到顶层」的可执行建议）；③ `unknown_task` 报文带上所查工作区。
+  - **Python 项目/解释器解析器（新 `tools/python-project.js`，test_bridge 与 verify_pipeline 共用）**：解析顺序 = `MALONG_PYTHON` → scope 所在项目根的 venv → 工作区根的 venv → 系统 python（标 `fallback_to_system`）。修两个真坑：① 框架探测只看工作区根 → 会话工作区在项目之上时 `unknown_framework`；现在按 scope 定位项目根（向上找 pyproject.toml/pytest.ini/tox.ini/setup.cfg，且不越过工作区边界），工作区内**恰好一个** Python 项目时自动采用（多个则不猜，只列候选）。② 解释器只查工作区根 → 找不到就落回系统 python3 → 依赖装在项目 venv 里时 `ModuleNotFoundError`（实测：项目包装在 `zmm/.venv` 里，系统 python3 下 import 不到）。另新增：结果透出 `interpreter`（路径/来源/是否 fallback/venv 里有没有 pytest），`ModuleNotFoundError` 的 root_cause_hint 在落回系统 python 时直接点明「可能跑错解释器」。
+  - **code_check / verify_pipeline 支持 Python 仓**：旧实现的 test 阶段只认 `package.json` 的 test 脚本 → Python 仓一律 skipped「No test script in package.json」；而且**自动选阶段时 test 根本不会被选中**（`detected.test` 为 false）。现在：无 npm test 脚本时探测 pytest 项目 → 用项目 venv 解释器跑 `python -m pytest -q`（cwd = 项目根），并把 test 阶段纳入自动选阶段；没有任何测试入口仍如实 skipped（不假绿）。
+  - **.md 等文档文件进地图与搜索（新 `doc-files.js`）**：`.md/.mdx/.rst/.txt` 不进符号索引（Rust 解析服务只吃 10 种代码语言）→「交付物就是文档」的仓 `DOCS/` 在 map 里整个是空的、search 永远 0 命中。现在：① `repo_map` 做一次受限磁盘扫描，把文档文件作为叶子节点补进树（标 `(doc)`，透出 `doc_files` / `files_total`；不进符号索引）；② `code_search` 增加文档字面兜底（`doc_results` 独立字段，不混进符号排序；长中文句退化为 3 字滑窗匹配）。**符号级的 .md 索引（标题成符号、可被 code_search 命中）仍需在 Rust 解析服务里加 markdown 语法 —— 那是 malong-parse 仓的改动，本次未做。**
+  - **pytest 进度字符解析**（配套）：项目 pytest 配置常自带 `addopts="-q"`，叠加命令行 `-q` 变 `-qq` → 汇总行（"N passed"）被隐藏 → 明明跑完却报「0 tests → 不计入通过」（假红）。现在从进度行字符数出通过/失败数（. 通过 / s 跳过 / F E 失败 / x X xfail），退出码 0 且有进度字符即判通过。
+  - 测试：新增 `tests/test-python-project.js`（29 断言）、`tests/test-doc-files.js`（15 断言）；改写 `tests/test-invoke-capability.js`（+5）、`tests/test-verify-pipeline.js`（+9）、`tests/test-repo-map.js`（+7）；两个新测试文件已并入 `npm test` 链（161 → 163 个文件）。
+  - 文档：README 双语的 env 表订正（`MALONG_INTERFACE` 默认已是 graph、`MALONG_ENTRY_STATE` 默认开、修正旧版「3/4 个入口」「11 个工具」等过期数字）并新增 `MALONG_PYTHON` 行；网页 docs 中英 env 表同步新增 `MALONG_PYTHON`。
+  - 验证：全链 163 文件 0 失败（4G 围栏，474.8s）；合同重生成（3 个 handler 哈希变更）+ 合同测试 347/347；隔离安装 + 真实 MCP 探针 14/14；真仓复验（docs 交付型仓）：invoke_capability 回 workspace_dir_ignored 警告、code_check 用项目 venv 跑完 pytest 且判通过、test_bridge 用项目 venv 16/16 通过、repo_map 列出 46 篇 .md、code_search 命中文档内容。
+  - 交付包 `jieai-dsh-malong-bridge-0.5.25.tgz`（925,984 B / 190 文件），SHA256 `c892d0677bd2cced406c402201203d9d6d897fcc93ca8ad076b962a932409a34`。
+- **[0.5.24]** (2026-10-20): **breaking —— 产品默认档翻到「六合线」**（不设 env = graph + 状态层 = 13 个工具）。
+  - 改动点：`workflow/public-catalog.js` 的 `currentInterface()` 兜底由 classic 改为 graph（未设 `MALONG_INTERFACE` → 六和线）；新增 `stateEnabled()`：状态层默认开（`MALONG_ENTRY_STATE=0` 可退回只读 5 工具）。
+  - 影响：不设 env 的第三方 MCP 宿主（Claude Desktop / Cursor 等）工具清单由 44 → 13；classic 直调（read_symbol / write_symbol / reindex / impact_analysis…）会收到显式 -32601 报错并提示改 env → 设 `MALONG_INTERFACE=classic` 即可拿回全量 44；能力不丢——13 里的 `invoke_capability`（ADR-018 白名单出口）仍能调到 classic 44。
+  - 三档拓扑（0.5.24 起）：**默认 = 六和线 13** / `MALONG_INTERFACE=classic` = 全量 44 / `MALONG_INTERFACE=diagnostic` = 分析器档 18 / `MALONG_ENTRY_STATE=0` = 只读 5。classic 目录本身逐字节未变（合同 `classic-44.contract.json` 仍锁 44 项 golden）。
+  - 测试同步（默认档语义变化波及的用例全部改写，并补反向断言）：test-s5-catalog（默认 env → 六和线可见者 / classic env → classic 可见者 / state=0 → 只读）、test-s1-entry（默认 13 / classic 44 / graph+state=0 5）、test-tool-registry（夹具段显式 classic，真实目录段默认 13 + classic 44）、test-mcp-server（干净 cwd 默认 13 + 新增显式 classic 44 的服务级断言）、test-invoke-capability 与 test-invoke-stdio（state 关闭改为显式 `MALONG_ENTRY_STATE=0`）、test-r2-semaphore 与 test-mcp-server-timeout（探针与 classic 工具 → 显式 classic）。
+  - 顺带修复：test-r2-semaphore 的探针工具目录建在真实 tools/ 里，中途失败会残留 → 后续 classic 计数变 45（已加退出钩子兼底清理）。
+  - 文档同步：README 双语（默认档说明 + 架构图 + opencode 注册示例，修正「11 个工具」旧数字）、RESPONSE-CONTRACT 档位表（默认 = 六和线 13 / classic 44 / diagnostic 18，并把指向 dev-only plan 的死链改为仓内合同文件）、网页 docs 中英（env 表默认值 + 工具目录标题）、DSH-INTEGRATION（产品默认档同款）。
+  - 验证：全链 161 文件 0 失败（4G 围栏，444.0s）；合同无漂移 + 合同测试 347/347；隔离安装 + 真实 MCP 探针 14/14。
+  - 交付包 `jieai-dsh-malong-bridge-0.5.24.tgz`（917,751 B / 188 文件），SHA256 `2efc6c6205b4f41d7a9aa4f2797dada593ec6a65d3f84560a5b39789048fbb8c`。
+- **[0.5.23]** (2026-10-20): 发布仓事实与卫生订正（对外可核查性收口）。
+  - 检索基准题库脱敏：`malong/benchmarks/retrieval/{questions,questions-blind,questions-holdout}.json` 的 `repos[*].path` 由本机绝对路径（`/home/<user>/...`）改为相对路径（`liuhe/malong` / `sdc` / `liuhe-web`），公开仓不再泄露维护者用户名与目录结构；**题目数组逐字节未变**（已校验），`oracle-holdout.json` 的 `questions_sha256` 随之重算并加 `refreeze_note` 记录重冻原因（accept 证据本身未动）。
+  - 夹具改名：`malong/tests/fixtures/.env.production` → `.env.production.example`（公开仓不留 `.env*` 真名文件，避免他人 secret 扫描器误报）；`tool-config-drift` 扫描白名单补 `.env.production.example`，`test-p2-adversarial` 增边界断言（白名单漏项 → 该用例会静默失效）。
+  - `malong/parse-client.js` 顶部注释指向的 dev-only 文档路径（公开仓里的死链）改为指向仓内 README 的 Parse daemon 段。
+  - README 提交数徽章（静态 526）→ 改为 shields.io 动态端点 `github/commit-count/wulun811/LiuHe`，不再随推送腐化。
+  - 版本位 0.5.22 → 0.5.23；网页/下载链接/发布手册同步（v0.5.23）。
+  - 验证：全链 161 文件 0 失败（4G 围栏，401.1s）；合同重生成（仅 config-drift handler 哈希变化）+ 合同测试 347/347；隔离安装 + 真实 MCP 探针 14/14。
+  - 交付包 `jieai-dsh-malong-bridge-0.5.23.tgz`（917,488 B / 188 文件），SHA256 `371afdbcd7ee64a87871197f6b2c3d3d7160a3fde46ad15139c896a53fc51ba8`。
+- **[0.5.22]** (2026-10-20): DSH 集成默认只暴露「六合线」（13 个工具），不再灌 classic 全量 44（宿主显式设 `MALONG_INTERFACE` 时仍以宿主为准）。
+  - 改动点：`dsh-bridge.mjs` spawn server 时默认注入 `MALONG_INTERFACE=graph` + `MALONG_ENTRY_STATE=1`；启动日志打出实际档位（`registered 13 tools (… interface=graph, entryState=1 …)`）。
+  - 动机：DSH 会话的工具清单此前被 44 个 classic 工具填满，模型在清单里挑错工具；README 推荐的日常入口本就是六合线（code_task → code_read → code_patch / code_batch → code_check → code_control）。
+  - classic 44 / diagnostic 18 仍可达：dsh 宿主导出 `MALONG_INTERFACE=classic|diagnostic` 即可（未显式设置时一律走默认档）。
+  - 测试：`test-dsh-bridge` 改为两档断言（默认 13 且不含 classic-only 的 reindex / read_symbol；宿主覆盖 classic → 44 且 reindex 可用），7 → 15 断言。
+  - 交付包 `jieai-dsh-malong-bridge-0.5.22.tgz`（917,471 B / 188 文件），SHA256 `6177b4cfa2f97339664c1903c112b8dfb369630bd6c8a77b6af9e240a690ad88`；隔离安装 + 真实 MCP 探针 14/14，全链 161 文件 0 失败。
+- **[0.5.21]** (2026-10-20): 公开文档与网页事实订正 + 响应契约首次随包发布（**产品行为零变化**，P1/P2/P3/P6 语义不动）。
+  - 网页工具名订正：`outline_reader`→`read_outline`、`mock_syncer`→`mock_sync`、`batch_edit`→`edit_batch`、`dead_code_sweeper`→`sweep_dead_code`、`edit_sandbox`→`sandbox_validate`——此前 5 个名字在代码里不存在，照抄调用会 tool not found。
+  - 工具档位订正为 classic 44 / graph 13 / diagnostic 18（此前网页与部分文档写 44/11/16）。
+  - 下载链接与版本标识对齐 v0.5.21：此前指向从未发布的 v0.5.0，四个平台 tar.gz + sha256 链接全部 404。
+  - 测试口径订正：161 个 JS 测试文件 / 97 条 Rust 断言（此前 133 文件 / 3795 断言 / 81 / 92）。
+  - 响应契约随包发布（`malong/RESPONSE-CONTRACT.md`），目录面数字同步为 5–13 / 10–18；`health action=matrix` 的建议文案改为说明该矩阵为内部材料，不再指向公开仓没有的路径。
+  - 补回检索基准题库夹具（4 个冻结题集 JSON）：公开仓测试链 `test-retrieval-bench` 依赖它们。
+  - 交付包 `jieai-dsh-malong-bridge-0.5.21.tgz`（917,122 B / 188 文件），SHA256 `4a8df27d8de805a1cafcc80e4ea738a9e7282082080ec43736b6bd00aaddd3bf`；隔离安装 + 真实 MCP 探针 14/14，全链 161 文件 0 失败。
+- **[0.5.20]** (2026-10-20): 发布仓瘦身 + 两处内部报告输出改道（产品行为零变化，npm 包内容不变）。
+  - 内部计划/报告材料迁至开发仓，开源仓只留产品与用户文档。
+  - G3 验收报告与合同矩阵输出改道到 gitignored 的 `reports/`，干净 clone 下 `--report` / `--matrix` 不再 ENOENT。
+  - 交付包 `jieai-dsh-malong-bridge-0.5.20.tgz`（911,115 B / 187 文件），SHA256 `faa633389d9b6c2a9d6bb0496964f421e94bab454f3e28df7524c15665f93617`；历史版本包 SHA 见 `git log` 与开发仓归档。
+- **[0.5.19]** (2026-10-20): 测试提速，全链 571s → 390s（−32%），产品默认行为不变。
+  - 新增 `npm run test:fast`（18 个核心文件）、`test:file`、`test:timed`；锁等待/心跳/DB 忙等可用 env 开关调整。
+- **[0.5.18]** (2026-10-20): 关闭 Windows 正式包复核提出的 1 项阻断问题 + 1 项体验补齐。
+  - undo 新建文件未删索引却报 synced：撤销后索引真正清理，部分失败如实报 pending。
+  - 同 `request_id` 重放恢复同一基准，首次响应丢失可免重读续写。
+- **[0.5.17]** (2026-10-19): 按 Linux 侧试用报告修 3 项状态机/写路问题。
+  - stale 误报：只对依赖未覆盖的文件做写后哈希兜底，已覆盖文件的漂移交由 stale 证据判定。
+  - 写后自动登记基准并回传 `write_read_refs`，下一次编辑可直接续写。
+  - undo 回执诚实化：按实际索引结果报 synced / partial / not_reported。
+- **[0.5.16]** (2026-10-19): 修复 Windows 复核发现的增量索引偶发 `FOREIGN KEY constraint failed`。
+  - 跨文件引用解析的过期快照目标改为跳过并收敛重试，不再整次失败。
+  - 补 6 条失败路径断言（快照过期 / 并发重抽 / 错误文本 / 外键完整性 / 无悬空引用）。
+- **[0.5.15]** (2026-10-19): 版本点独立，内容 = 0.5.14 复核批四（S1/S2）+ 批五（P2 恢复路由）。
+  - 收口「恢复路由」：未决检查跟随共享投影中真正未收口的范围，不再沿用最近一次无关检查。
+- **[0.5.14 复核批]** (2026-10-18 ~ 10-19): Windows 复核公共余口收口。
+  - 异范围检查成功不再清掉其他未决记录；带 `request_id` 的同范围重验可正常收口。
+  - 取消检查后任务投影为 indeterminate 并给出核对出口，不再误报 done。
+  - 地图分页/下钻带真实扫描目录；输出预算分级降级，超限时仍给出可执行的下一步。
+- **[0.5.14]** (2026-10-18): 完整使用体验与发布前收口（R1–R7 + H01–H08）。
+  - 出口账本按 `request_id` 独立记录：并发不丢账，同 id 幂等、异载荷冲突。
+  - 验证语义四值化（pass / partial / not_run / fail），「全跳过」不再当通过。
+  - 文件目标直达 + 入口预算；git 副作用预告；发布前提与文档一致。
+- **[0.5.13]** (2026-10-18): 复审交叉探针矩阵补测 + 孤儿 claim 永久卡死修复。
+  - 占位后进程崩溃会让 `request_id` 永久卡死：按持有者存活判定并接管孤儿占位。
+- **[0.5.12]** (2026-10-18): 专家复审 M01–M03 修复 + 外方贡献合入。
+  - invoke 取占位后在持票范围内重新查账，消除跨进程重复执行窗口。
+  - Windows shell 内建命令不再误拒；G3 未执行项不再记为通过。
+- **[0.5.11]** (2026-10-18): 专家复审 N01–N04 修复 + 测试生命周期债务。
+  - 参数校验失败不再污染在途状态；无 task 命令不再重复副作用（跨进程互斥占位）。
+  - 建议动作保真（类型/缺参如实标）；脚本分支缺 tsc 不再假 failed。
+- **[0.5.10]** (2026-10-17): 专家审核 R01–R07 修复三批。
+  - 出口终态守卫 + 操作账本；`request_id` 幂等（重复不重放、异载荷冲突）。
+  - G3 验收改真写断言；合同文件固定 LF；typecheck 缺件不假 failed。
+- **[0.5.0]** (2026-10-06): 状态化入口全量落地（S1–S5）。
+  - classic 44 / graph 11 / diagnostic 16 三档目录；任务状态机、证据失效与重放、异步作业、崩溃恢复。
+  - 并发状态层根治（请求级绑定 + 每工作区独立 DB），跨工作区读写零串库；状态目录统一到 `MALONG_STATE_DIR`。
+  - 0.4.8（Windows 独有 P0 批次）并入本版。
 
-- **[0.4.7]** (2026-08-24): 发布前四轮审查（41 项真阳性修复）+ 补丁——① 写路径数据一致性：write-journal M3/M5/M6/M7（created/staged 谎报 abandoned/rolled_back、链式写 base 校正锁外重抽污染、删除无哈希盲覆盖分支、.last_prune 非目录误删）、write-runtime H1/H2（best_effort 写失败静默跳过、batch 回滚谎报）、edit-transaction M1/M2/M4/L4/L5（顶层兜底/workspace_dir 类型守卫/rollback partial 透传/begin rename EPERM 重试/commit rename 失败回写 staged）、batch-edit H4/L7（writer key 归一化、edits 非数组守卫）、repo-map 缓存 workspace 隔离、reindex already_fresh 谎报修复；② 安全面：git-worktree 逐层 symlink 守卫（中间层 symlink + 深层不存在绕过）+ 断链友好拒绝、rename-symbol 正则字面量/除法判定矩阵（8 场景）、exception-guard/trace-symbol/find-tests/mock-syncer 字符串感知状态机；③ MCP 稳定性：mcp-server 超时槽释放（僵尸占满 5 槽泄漏）、health-check readdir 崩点、diff-facts/read-symbol 错误诚实化、verify-pipeline skipped 顶层 status 锁定、tsc-check/test-bridge exitCode 类型错乱；④ cjs-imports 单遍状态机（块注释/模板串假阳性 + URL 连坐假阴性）；⑤ 审查后补丁：malong/package.json 版本回退 0.4.5-post5→0.4.7（CI 权威源错配）、test-edit-transaction-ext Windows 兼容（MoveFileExW 目录覆盖文件）、git-worktree 前缀归一化（macOS /var vs /private/var 门禁）、atomicWrite rename EPERM 重试（Defender 句柄占用整链中断）；npm test 链 83→86 文件 / 2013→2231 断言，全链 0 失败
-- **[0.4.6]** (2026-08-21): 正式版发布——版本号对齐（0.4.5-post9 → 0.4.6）：主包/平台包/运行时常量（lang-parser.js、dsh-bridge.mjs）/README 双语/官网五页（index、download、docs 中英）全量同步；CI 自动发布 npm 平台包 + 主包 + GitHub Release
+### 0.5.0 修正批（2026-10-06 ~ 10-09）
 
-- **[0.4.5.post9]** (2026-08-17): Glama B→A 描述工程——四低分工具（code_quality/spec_gen/diff_facts/tsc_check）描述补行为+输出格式（≤90 字符）；18 个参数缺描述补齐（覆盖率 91%→100%）；新增 test-manifest-quality.js 质量门禁（描述长度/覆盖率/输出信号防回归）；backfill Windows/CI 兼容修复（findTscBin tsc.cmd/spawn-guard winCmd/⑨ 藏 PATH 容错）
+- 批1：取消终态合同 + 结构化 `next_action` + 预算回传
+- 批2：候选排序按 target.file 优先 + 路径归一 + 结构总览失败不静默
+- 批3：全语言多行声明范围（Rust/Java/Go）+ 证据扫描范围指纹
+- 批4：目录合同真白名单（graph 4/11、diagnostic 9/16）+ 对外文档同步
+- 批5：状态目录迁移硬化（跨盘 copy 替代 `fs.cpSync`）
+- 批6：执行类工具子进程剥离宿主门控 env
+- 批7 / 批7-win：路径归一 + 公开合同补 `reopen` + 解析器身份自检 + 迁移闭环；Windows 硬化（跨卷复制、spawn 清理）
+- 批8 / 批8-补：零候选导航引导 + 状态感知下一步；code_check envelope 一致性
+- 批9：紧凑地图 + 浏览入口排序 + 文案字段统一
+- 批10：写前护栏接线 + `new_lines` / `line_span` 局部化协议 + 分块累积
+- 批11：冻结检索基准 + 排序/共现/早停/模糊匹配
+- 批12-A/B/C/D：事务备份恢复修复；候选 `rank_reason` 与噪声降权；盲测集冻结与每工作区独立 DB；盲测再调分
+- 批13-A/B/C/D/E：编辑事务 dry_run 与 create；状态一致性统一；结构化边与交还信号；file_groups 与 oracle 冻结；构建副本不污染候选
+- 批14-A/B/C：expect_sha 合同生效与在途优先；完成交还合同与证据按 scope 取代；同请求并发/写冲突/崩溃恢复真实验收
+- 批15/16/16-C/16-D：Windows 路径保留名与 CRLF 继承；批量 undo 范围；BATCH_BLOCKED 文案；批次标记降级路径
+- 批17/18：spawn-guard 命令名解析与测试可移植、不可执行用例显式记账；Windows 复验两确定点修复
 
-- **[0.4.5.post8]** (2026-08-16): tsc_check 支持无根 tsconfig 项目——自动发现 tsconfig.*.json（--project，优先级 src>client>scanner）或显式 tsconfig 参数，真无配置报 no_tsconfig 而非假 fail；reindex 超阈值已索引工作区免二次确认（force=true 仍确认）；sync 脚本 --dry-run -i 修复
+### 计划包与验收（2026-10-09）
 
-- **[0.4.5.post7]** (2026-08-15): dsh-bridge watchdog——mcp-server 死后自动指数退避重拉 + 挂起调用立即 fail-fast（不再 300s 空挂）；spawn 补 --max-old-space-size=512；dispose 防残留；实测 kill→拉起→恢复 PASS；README 双语补故障排查段
+- WP00–WP07：基线冻结、共享状态投影、检查事实入账、八路线出口、Receipt 贯通写路、检索到证据衔接、并发与崩溃恢复资产收口、宿主合同断言
+- 验收 AC23 关闭：Windows 终验全链通过，接受边界已文档化
 
-- **[0.4.5.post6]** (2026-08-15): npm 全平台发布——linux-x64 与主包已上线 0.4.5-post5，本版 bump 0.4.5-post6 补齐 darwin-x64 / darwin-arm64 / win32-x64 三平台包（GitHub Actions 全自动：打 v* tag → 4 runner 构建 → 平台包先行 → 主包 @jieai/dsh-malong-bridge 版本自动对齐）
+## 0.4.x
 
-- **[0.4.5.post5]** (2026-08-14): DSH 四轮试用修复——read_symbol 索引状态单出口（index_status 删 stale 布尔，state 单一权威）+ references file 过滤空结果同响应附 workspace_preview（cap 20，省一次往返）+ repo_map 纯缩进渲染（去树线字符，2000 token 预算多放 7-15% 信息）+ 5 个 manifest 补 AUTO-FRESH 保鲜声明；全链 54 文件 0 失败；**新增 dsh bundle 一体包**（`malong/dsh/bundle/` + repre.sh，`dsh plugin add @jieai/dsh-malong-bridge` 一行安装，版本对齐 0.4.5-post5）——**平台化**：esbuild 式 4 平台子包（npm-platform/ 模板 + release.yml npm 发布步骤 + parse-bin.js 共享解析），主包 optionalDependencies 按 os/cpu 自动拉取二进制
+- **[0.4.8]** (2026-09-04): 修复 Windows 批量索引 statMap 键形态失配（文件 size 恒 0、outline tokens_estimate 恒 0；POSIX 免疫）。
+  - symbol_search 空结果改为提示查询词问题；read_symbol 定位流程去重。
+- **[0.4.7]** (2026-08-24): 发布前四轮审查 41 项真阳性修复 + 补丁。
+  - 写路径数据一致性（journal / 事务 / batch）、symlink 与正则判定、MCP 超时槽与健康检查、cjs-imports 单遍状态机。
+  - 审查后补丁：版本号修正、跨平台兼容、rename EPERM 重试。
+- **[0.4.6]** (2026-08-21): 正式版发布，版本号统一到 0.4.6（主包 / 平台包 / 运行时常量 / README 双语 / 官网全量同步）；CI 自动发布 npm 平台包、主包与 GitHub Release。
+- **[0.4.5.post9]** (2026-08-17): Glama 描述工程——四个低分工具补行为与输出格式，18 个参数补描述（覆盖率 100%），新增描述质量门禁。
+- **[0.4.5.post8]** (2026-08-16): tsc_check 支持无根 tsconfig 项目（自动发现 `tsconfig.*.json`；真无配置报 `no_tsconfig` 而非假 fail）；reindex 超阈值免二次确认。
+- **[0.4.5.post7]** (2026-08-15): dsh-bridge watchdog——mcp-server 死后指数退避重拉，挂起调用立即 fail-fast。
+- **[0.4.5.post6]** (2026-08-15): npm 全平台发布，补齐 darwin-x64 / darwin-arm64 / win32-x64 平台包。
+- **[0.4.5.post5]** (2026-08-14): DSH 四轮试用修复 + 新增 dsh bundle 一体包（`malong/dsh/bundle/`），一行安装。
+  - 索引状态单一出口；references 空结果不额外往返；repo_map 纯缩进渲染；主包按 os/cpu 自动拉取平台二进制。
+- **[0.4.5.post4]** (2026-08-14): config_drift 无 env 清单不再逐条误报；diff_facts 错误补回滚/提交语境；verify_pipeline 默认超时 30s。
+- **[0.4.5.post3]** (2026-08-14): test_bridge 识别裸 assert 方法链测试；security_review 同规则聚合；read_symbol stale 语义修正；code_search 明确为确定性匹配。
+- **[0.4.5.post2]** (2026-08-14): dep_graph transitiveDeps 同层去重；repo_map 未命中时给明确提示。
+- **[0.4.5.post1]** (2026-08-14): 新增 DSH 适配包（`dsh-bridge.mjs` + `install-dsh.sh` + 接入说明）。
+- **[0.4.5]** (2026-08-11): reindex 二次调用提醒——无变化时返回 `already_fresh`，不再反复建索引。
+- **[0.4.4]** (2026-08-10): i18n 英文化，47 处 LLM 可见中文文案统一英文。
+- **[0.4.3]** (2026-08-09): repo_map 骨架化分页——`page` / `page_size` / `prefix` + 全局骨架，越界夹回末页并提示。
+- **[0.4.2]** (2026-08-08): Windows 发布支持——Rust 测试跨平台化，Windows 实测 0 失败；发布零依赖容器包（linux + windows）。
+- **[0.4.1]** (2026-08-07): R22 深度审查 + 冻结期，30 项修复；三条真实工作流暴露的 2 项 P1 即修即锁。
+- **[0.4.0]** (2026-08-06): R1–R21 全量生产级审查修复轮（缓存投毒 / 信号量泄漏 / 事务恢复 / 写丢失等 21 项）。
+## 0.3.x 及更早
 
-- **[0.4.5.post4]** (2026-08-14): DSH 三轮试用批次 2——config_drift 无 env 清单不再逐条误报（env_manifest_absent + 提示创建 .env.example）+ diff_facts 错误信息补回滚/提交语境 + verify_pipeline 默认超时 120s→30s（全链不再撞 MCP 硬超时）+ manifest 超时警告；全链 81 文件 0 失败
-
-- **[0.4.5.post3]** (2026-08-14): DSH 三轮试用批次 1 修复——test_bridge discover 识别裸 assert 方法链测试（assert.strictEqual 等）+ security_review 同规则聚合（count+locations）+ edit_sandbox 跳块注释/JSDoc + read_symbol stale 语义修正（service ensureFreshFile 恒返回对象导致 fresh 误判 stale，indexFile 失败加 index_stale 标记）+ code_search 预期声明（确定性匹配非语义搜索）；全链 81 文件 0 失败
-
-- **[0.4.5.post2]** (2026-08-14): DSH 二轮试用修复——dep_graph transitiveDeps 同层去重（两个 from 引同一模块不再重复 push）+ repo_map relevantEntities 未命中返回 entities_not_found 提示（不再静默空树）
-
-- **[0.4.5.post1]** (2026-08-14): 新增 DSH 适配包（malong/dsh/：dsh-bridge.mjs 插件 + install-dsh.sh + 接入说明）——自动注入会话工作区、输出结构化、索引规则透明；打包版本主体 0.4.5 不变
-- **[0.4.5]** (2026-08-11): reindex 二次调用提醒——无变化时返回 already_fresh=true + 「索引已是最新无需再建」提示，LLM 不再反复建索引；新增 dev→liuhe 同步脚本（--check/--commit）
-
-- **[0.4.4]** (2026-08-10): i18n 英文化——9 handler + 3 manifest 的 47 处 LLM 可见中文文案统一英文（中英夹杂消除）；debug-runner 成功路径 suggested_action 不再误导；全链断言实测 2015（81 文件 0 失败）+ Rust 92；Y004 矩阵形状债务登记（核心 lib 长函数/重复块列为已知项维持）
-
-- **[0.4.3]** (2026-08-09): repo_map 骨架化分页（r23）——截断不再盲：`page`/`page_size`/`prefix` 三参数（token 预算自适应 + 40 条/页双保险）；返回全局骨架 `skeleton[{name,page,detail}]`，一次调用看到全部顶层条目与页号，翻页后骨架始终保留（导航不断）；越界 page 夹回末页 + `page_out_of_range` + suggestion；focused/全量统一管线；测试 +22 断言（54/54）
-
-- **[0.4.2]** (2026-08-08): Windows 发布支持——Rust 测试跨平台化（UnixStream→tokio duplex、check_existing_instance 补 Windows 空实现）、92 Rust 断言 + 全链 81 测试文件 1874 断言 Windows 实测 0 失败；零依赖容器包 malong-liuhe-0.4.2（linux-x86_64 + windows-x86_64）发布
-
-- **[0.4.1]** (2026-08-07): R22 深度审查 + 冻结期——五轮审核 30 项修复、三条真实工作流 58 断言（多语言/崩溃恢复/双进程并发）暴露 2 项 P1 即修即锁；全链 81 测试文件 1874 断言 0 失败；零依赖容器包 malong-liuhe-0.4.1 发布
-
-- **[0.4.0]** (2026-08-06): R1-R21 全量生产级审查修复轮（缓存投毒/semaphore 泄漏/事务恢复/sql.js 写丢失等 21 项）
 - **[0.3.59]** (2026-08-06): r12.5：全工具冒烟（重启后 44 工具逐个试跑）——2 真 bug 修复 + 1 过时数字清零
 - **[0.3.58]** (2026-08-06): r12.4：边界内自查兑现——裸 spawn/execFile 命令名注入面补上
 - **[0.3.57]** (2026-08-06): r12.3：扫描边界冻结——承认局限，边界内承诺必做

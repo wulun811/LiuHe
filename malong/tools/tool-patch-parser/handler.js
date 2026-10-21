@@ -27,6 +27,9 @@ export async function handle(args, context) {
   if (!workspaceDir) {
     return makeError('missing_parameter', 'workspace_dir is required', 'Provide the absolute path to the project root directory.')
   }
+  if (typeof workspaceDir !== 'string') {
+    return makeError('invalid_input', `workspace_dir must be a string (got ${typeof workspaceDir})`)
+  }
   if (!text || typeof text !== 'string') {
     return makeError('missing_parameter', 'text is required', 'Provide LLM output containing SEARCH/REPLACE blocks.')
   }

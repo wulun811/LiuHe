@@ -110,6 +110,17 @@ const withRule = collectFiles(WS, { ignoreRules: ['src/deep/er/'] })
 assert(!withRule.some(f => f.path.includes('er/nest')), '自定义目录规则生效')
 assert(withRule.some(f => f.path.replace(/\\/g, '/').includes('src/deep/c.js')), '自定义规则不误伤其他')
 
+// R2：FILE_NOT_INDEXED 且被 .malongignore 排除 → 建议指 target 而非 reindex
+{
+  writeFileSync(join(WS, '.malongignore'), 'excluded/\n')
+  mkdirSync(join(WS, 'excluded'), { recursive: true })
+  writeFileSync(join(WS, 'excluded', 'x.js'), 'x\n')
+  const { resolveFileArg } = await import(pathToFileURL(join(__dirname, '..', 'file-arg.js')).href)
+  const r = resolveFileArg({ db: null, workspaceDir: WS, file: 'excluded/x.js' })
+  assert(r.ok === false && r.error.code === 'FILE_NOT_INDEXED', `R2 未索引+被排除 → FILE_NOT_INDEXED（得 ${r.error?.code}）`)
+  assert(/malongignore/.test(r.error.suggestion) && /target/.test(r.error.suggestion), `R2 建议指 target（得 ${r.error.suggestion}）`)
+}
+
 try { rmSync(TMP, { recursive: true, force: true }) } catch {}
 console.log(`== test-file-collector: ${pass} passed, ${fail} failed ==`)
 if (fail > 0) process.exit(1)

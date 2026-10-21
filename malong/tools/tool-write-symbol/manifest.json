@@ -1,7 +1,7 @@
 {
   "name": "write_symbol",
   "version": "1.0.0",
-  "description": "Guarded write path (one symbol) — vs edit_batch: index-aware with version/lock/undo, for symbol-level refactors. Read first (read_symbol) for base_version. For string params containing double quotes/backslashes, keep JSON escaping consistent across the whole string (escape uniformly or prefer full-width quotes), otherwise client-side parameter parsing fails.",
+  "description": "Guarded write path (one symbol): index-aware with version/lock/undo. Read first (read_symbol) for base_version. New file? create:true + content (no base_version; undo deletes it). String params with quotes/backslashes: keep JSON escaping uniform or use full-width quotes.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -9,6 +9,7 @@
         "type": "string",
         "description": "REQUIRED: project root (abs). reindex first if new."
       },
+      "create": { "type": "boolean", "description": "Create a new file (must not exist): requires content, no base_version; undo deletes it." },
       "locator": {
         "type": "object",
         "properties": {

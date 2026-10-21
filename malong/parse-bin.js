@@ -1,10 +1,13 @@
 // 六合工具集 — malong-parse 二进制共享解析（mcp-server / parse-client / code-index 统一入口）
 // 解析链：env(MALONG_PARSE_BIN / MALONG_PARSE_BIN_ALT)
-//       → npm 平台包（@jieai/malong-parse-<platform>-<arch>，主包 optionalDependencies 按 os/cpu 自动拉取）
+//       → npm 平台包（@jieai/malong-parse-<platform>-<arch>，若已安装）
 //       → 包内 server/bin/malong-parse（旧版主包内嵌兼容）
 //       → ~/.local/bin/malong-parse（历史安装）
 //       → dev 源码树 ../malong-parse/target/release|debug（liuhe 仓库内开发）
-// 平台矩阵（npm-platform/）：linux-x64 / darwin-x64 / darwin-arm64 / win32-x64
+// 注（0.5.13）：平台包不再在 DSH bundle 里声明 optionalDependencies——旧版钉的 0.5.9
+// 从未发布过（npm 最高 0.4.8），永远装不上，只会静默走 catch 分支。仓库里也没有
+// npm-platform/ 构建目录。要自动分发需先把平台包真的发出来；当前靠下面分支兜底。
+// 平台枚举：linux-x64 / darwin-x64 / darwin-arm64 / win32-x64。
 import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'

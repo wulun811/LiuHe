@@ -204,27 +204,30 @@ class SqlJsDb {
       get: (...params) => {
         this._checkReload()
         const st = this._db.prepare(sql)
-        st.bind(params)
-        if (!st.step()) { st.free(); return undefined }
-        const row = st.getAsObject()
-        st.free()
-        return row
+        // 第二轮审查：bind/step 抛错时 statement 必须 finally free（旧实现异常路径泄漏 WASM 堆）
+        try {
+          st.bind(params)
+          if (!st.step()) return undefined
+          return st.getAsObject()
+        } finally { try { st.free() } catch {} }
       },
       all: (...params) => {
         this._checkReload()
         const st = this._db.prepare(sql)
-        st.bind(params)
-        const rows = []
-        while (st.step()) rows.push(st.getAsObject())
-        st.free()
-        return rows
+        try {
+          st.bind(params)
+          const rows = []
+          while (st.step()) rows.push(st.getAsObject())
+          return rows
+        } finally { try { st.free() } catch {} }
       },
       run: (...params) => {
         this._checkReload()
         const st = this._db.prepare(sql)
-        st.bind(params)
-        st.step()
-        st.free()
+        try {
+          st.bind(params)
+          st.step()
+        } finally { try { st.free() } catch {} }
         if (isWriteSql(sql)) {
           this._dirty = true
           this._scheduleExport()
@@ -234,11 +237,12 @@ class SqlJsDb {
       iterate: (...params) => {
         this._checkReload()
         const st = this._db.prepare(sql)
-        st.bind(params)
-        const rows = []
-        while (st.step()) rows.push(st.getAsObject())
-        st.free()
-        return rows[Symbol.iterator]()
+        try {
+          st.bind(params)
+          const rows = []
+          while (st.step()) rows.push(st.getAsObject())
+          return rows[Symbol.iterator]()
+        } finally { try { st.free() } catch {} }
       },
     }
   }
@@ -246,21 +250,22 @@ class SqlJsDb {
   get(sql, ...params) {
     this._checkReload()
     const st = this._db.prepare(sql)
-    st.bind(params)
-    if (!st.step()) { st.free(); return undefined }
-    const row = st.getAsObject()
-    st.free()
-    return row
+    try {
+      st.bind(params)
+      if (!st.step()) return undefined
+      return st.getAsObject()
+    } finally { try { st.free() } catch {} }
   }
 
   all(sql, ...params) {
     this._checkReload()
     const st = this._db.prepare(sql)
-    st.bind(params)
-    const rows = []
-    while (st.step()) rows.push(st.getAsObject())
-    st.free()
-    return rows
+    try {
+      st.bind(params)
+      const rows = []
+      while (st.step()) rows.push(st.getAsObject())
+      return rows
+    } finally { try { st.free() } catch {} }
   }
 
   run(sql, ...params) {
@@ -394,7 +399,11 @@ export async function createDb(path, opts = {}) {
     // r9(B5)：SQLite 并发参数——无 busy_timeout 时多工具并发写直接 SQLITE_BUSY 抛错；
     // WAL 允许读写并发（此前 rollback journal 下读会阻塞写、health integrity_check 与写交错）。
     // 注意：WAL 产生 -wal/-shm 伴生文件，health GC 清理 workspace 目录时整体删，无残留
-    try { db.pragma('busy_timeout = 10000') } catch {}
+    // 测试提速旋钮（仅测试 env，默认 10s 不变）：BUSY 场景下 journal_mode=WAL 会按 busy_timeout
+    // 实等；测试只需验证“报错不删库”，不需要真等。运行时读取，避免模块加载时固化。
+    const busyEnv = Number(process.env.MALONG_TEST_DB_BUSY_TIMEOUT_MS)
+    const busyMs = Number.isFinite(busyEnv) && busyEnv > 0 ? busyEnv : 10000
+    try { db.pragma('busy_timeout = ' + busyMs) } catch {}
     try { db.pragma('journal_mode = WAL') } catch {}
     return db
   }

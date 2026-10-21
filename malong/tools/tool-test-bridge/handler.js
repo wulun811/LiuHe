@@ -2,6 +2,8 @@ import { join, extname, basename, resolve, sep } from 'node:path'
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { spawnWithGroup } from '../../spawn-guard.js'
 import { getPythonCmd } from '../../python-cmd.js'
+// 0.5.25：Python 项目/解释器解析（项目根 + venv）——工作区在项目之上时不再落回系统 python3
+import { resolvePythonProject, pythonCommandString } from '../python-project.js'
 import { parseOutput } from './parsers.js'
 // r10d：discover 三层覆盖（约定 + 索引反查 + 文本兜底）——复用 find_tests 的 import 反查/文本扫描，
 // 命名约定不符的测试文件（如 tests/test-dogfood-r12.js import health-check.js）不再漏找
@@ -56,6 +58,9 @@ function detectJsFramework(workspaceDir) {
       if (deps.jest || testScript.includes('jest')) return 'jest'
       if (deps.vitest || testScript.includes('vitest')) return 'vitest'
       if (deps.mocha || testScript.includes('mocha')) return 'mocha'
+      // dogfood-050 修复：package.json 的 `node --test` 旧实现不识别 → unknown_framework，
+      // 用户需连吃两错（unknown→unsupported）才知道要用文件 scope / verify_pipeline
+      if (/node\s+--test/.test(testScript)) return 'node'
     } catch {}
   }
   return null
@@ -76,6 +81,10 @@ function detectFramework(workspaceDir, file) {
       existsSync(join(workspaceDir, 'pyproject.toml')) ||
       existsSync(join(workspaceDir, 'setup.cfg')) ||
       existsSync(join(workspaceDir, 'tox.ini'))) return 'pytest'
+  // 0.5.25：scope 是目录/通配（无扩展名）时，先看 scope 所在项目根的 pytest 标记——
+  // 工作区在项目之上时（会话工作区=仓库根、Python 项目在子目录）旧实现只看工作区根 → unknown_framework。
+  const proj = resolvePythonProject({ workspaceDir, scope: file })
+  if (proj.pytest_project) return 'pytest'
 
   const jsFw = detectJsFramework(workspaceDir)
   if (jsFw) return jsFw
@@ -88,16 +97,16 @@ function detectFramework(workspaceDir, file) {
   return 'unknown'
 }
 
-function findPython(workspaceDir) {
-  for (const p of ['venv/bin/python', '.venv/bin/python', 'env/bin/python', 'venv/bin/python3', '.venv/bin/python3']) {
-    const full = join(workspaceDir, p)
-    if (existsSync(full)) return `"${full}"`
-  }
-  return getPythonCmd()
+// 0.5.25：解释器解析改为「项目优先」——scope 所在项目根的 venv → 工作区根的 venv → 系统 python。
+// 旧实现只看工作区根：会话工作区在项目之上时找不到 .venv → 落回系统 python3 → 依赖装在 venv 里时
+// ModuleNotFoundError（实测：项目包 zmm/.venv 里的 ro 在系统 python3 下 import 不到）。
+function findPython(workspaceDir, scope) {
+  const r = resolvePythonProject({ workspaceDir, scope })
+  return pythonCommandString(r)
 }
 
 function buildCommand(framework, scope, workspaceDir) {
-  const python = findPython(workspaceDir)
+  const python = findPython(workspaceDir, scope)
   switch (framework) {
     case 'pytest': return `${python} -m pytest ${scope} -v --tb=short`
     case 'jest': return `npx jest ${scope} --json --no-coverage 2>&1`
@@ -114,10 +123,17 @@ function buildCommand(framework, scope, workspaceDir) {
   }
 }
 
-function suggestRootCause(failure) {
+function suggestRootCause(failure, pyInfo) {
   const msg = failure.error || ''
   if (/AssertionError|assert/.test(msg)) return 'Assertion failed: actual value does not match expected — check if the function return value changed'
-  if (/ImportError|ModuleNotFoundError|Cannot find module/.test(msg)) return 'Import failed: check if a dependency was added or a module renamed'
+  if (/ImportError|ModuleNotFoundError|Cannot find module/.test(msg)) {
+    const base = 'Import failed: check if a dependency was added or a module renamed'
+    // 0.5.25：解释器兼底系统 python 时，ModuleNotFoundError 十有八九是「跑错解释器」而非「包被删了」
+    if (pyInfo?.fallback_to_system) {
+      return base + ' — the interpreter fell back to the system python (no project venv detected at ' + (pyInfo.project_root || pyInfo.searched?.[0] || 'the workspace root') + '): install the dependency in the project venv, or set MALONG_PYTHON to its interpreter'
+    }
+    return base
+  }
   if (/TypeError|AttributeError|is not a function|has no attribute/.test(msg)) return 'Type/attribute error: check if the function signature changed'
   if (/NameError|is not defined/.test(msg)) return 'Name error: check if a variable or function was renamed'
   if (/ConnectionError|timeout|ECONNREFUSED/.test(msg)) return 'Connection failed: check if the external service is reachable (not a code issue)'
@@ -126,9 +142,9 @@ function suggestRootCause(failure) {
   return 'Review the diff between the code change and the test expectation'
 }
 
-function enrichFailures(failures, workspaceDir) {
+function enrichFailures(failures, workspaceDir, pyInfo) {
   for (const f of failures) {
-    f.root_cause_hint = suggestRootCause(f)
+    f.root_cause_hint = suggestRootCause(f, pyInfo)
 
     if (f.file && f.line) {
       try {
@@ -224,12 +240,18 @@ async function handleRun(args, context) {
   // 旧实现传 args.scope：只传 file 时扩展名锁定被跳过，.js 文件可能被判成 pytest（扩展名优先契约失效）
   const framework = args.framework || detectFramework(workspaceDir, scope)
 
+  // 0.5.25：解释器解析结果（报告用）——「跑了哪个 python、从哪来的、是不是系统兼底」
+  const pyInfo = resolvePythonProject({ workspaceDir, scope })
+
   if (framework === 'unknown') {
     return {
       error: 'unknown_framework',
       message: 'Could not detect test framework',
       checked: ['pytest.ini', 'pyproject.toml', 'setup.cfg', 'package.json', 'go.mod', 'Cargo.toml', 'pom.xml', 'build.gradle'],
-      suggestion: 'Specify framework explicitly: test_bridge(action="run", framework="pytest", ...)',
+      // 0.5.25：把「项目在哪儿」直接告诉调用方（工作区在项目之上时的常见坑）
+      ...(pyInfo.project_candidates?.length ? { python_projects_in_workspace: pyInfo.project_candidates } : {}),
+      suggestion: 'Specify framework explicitly: test_bridge(action="run", framework="pytest", ...), or use verify_pipeline() to run the project test script.'
+        + (pyInfo.project_candidates?.length ? ' (Python projects found in the workspace: ' + pyInfo.project_candidates.join(', ') + ' — pass scope="<project>/" or set workspace_dir to that project root.)' : ''),
     }
   }
 
@@ -239,7 +261,7 @@ async function handleRun(args, context) {
     const hint = framework === 'node'
       ? ' For framework=node provide a test file scope (e.g. scope="tests/app.test.js"), or use verify_pipeline() to run the project test script.'
       : ''
-    return { error: 'unsupported_framework', message: `Framework "${framework}" is not supported for running${hint}` }
+    return { error: 'unsupported_framework', message: `Framework "${framework}" is not supported for running.${hint}` }
   }
 
   let rawOutput = ''
@@ -268,7 +290,11 @@ async function handleRun(args, context) {
   }
 
   const parsed = parseOutput(rawOutput, framework)
-  const failures = enrichFailures(parsed.failures, workspaceDir)
+  // dogfood-050 r3：TAP/node 等解析器逐用例不带 file——scope 非通配单文件时回填，通过用例不再 file:""
+  if (safeScope && safeScope !== '.' && !/[*?[\]{}]/.test(safeScope)) {
+    for (const r of parsed.results) if (!r.file) r.file = safeScope
+  }
+  const failures = enrichFailures(parsed.failures, workspaceDir, pyInfo)
   // 14：run 失败但一个结果都没解析出来时（如 npx 未装、命令不存在），parser 的 raw_hint 或输出尾部
   // 必须透出——否则 agent 只能看到 exit_code=1 + 全空结果，分不清「没装依赖」和「测试挂了」
   const runError = exitCode !== 0 && parsed.results.length === 0
@@ -289,15 +315,31 @@ async function handleRun(args, context) {
   } else if (exitCode !== 0) {
     nextStep = 'Fix failures above, then re-run: test_bridge(action="run"). To diagnose: debug_runner(workspace_dir=..., test=...) or verify_pipeline for the full chain.'
   } else {
-    nextStep = 'All tests pass. Use edit_transaction to commit changes.'
+    // dogfood-050 P3：exit 0 但解析不到任何测试计数时，不得宣称 All tests pass（裸 assert/print 脚本无 totals）
+    const parsedTotal = parsed?.summary?.total ?? 0
+    nextStep = parsedTotal === 0
+      ? 'Command exited 0 but no test totals were parsed (total=0) — the command may not run a recognized test framework (plain assert/print scripts produce no totals). Verify the command actually ran tests.'
+      : 'All tests pass. Use edit_transaction to commit changes.'
   }
 
   return {
     action: 'run',
     framework,
     command,
+    // 0.5.25：解释器透明化——「用哪个 python 跑的」直接写进结果（依赖装在 venv 时排错第一现场）
+    ...(framework === 'pytest' ? {
+      interpreter: {
+        python: pyInfo.python,
+        source: pyInfo.python_source,
+        project_root: pyInfo.project_root,
+        venv_found: pyInfo.venv_found,
+        fallback_to_system: pyInfo.fallback_to_system,
+        ...(pyInfo.python_has_pytest === false ? { has_pytest: false, warning: 'The resolved interpreter has no pytest installed — install it in that venv or point MALONG_PYTHON at an interpreter that has it.' } : {}),
+      },
+    } : {}),
     exit_code: exitCode,
     timed_out: timedOut || undefined,
+    ...(exitCode === 0 && (parsed?.summary?.total ?? 0) === 0 ? { no_totals_parsed: true } : {}),
     run_error: runError,
     results: parsed.results.slice(0, 50),
     truncated: parsed.results.length > 50 || undefined,
@@ -496,6 +538,13 @@ export async function handle(args, context) {
   const workspaceDir = args?.workspace_dir
   if (!workspaceDir) {
     return { error: 'missing_parameter', message: 'workspace_dir is required' }
+  }
+  // 第二轮审查：非字符串参数不得进入 path.join 裸抛（suggest/discover 走 file join）
+  if (typeof workspaceDir !== 'string') {
+    return { error: 'invalid_input', message: `workspace_dir must be a string (got ${typeof workspaceDir})` }
+  }
+  if (args?.file != null && typeof args.file !== 'string') {
+    return { error: 'invalid_input', message: `file must be a string (got ${typeof args.file})` }
   }
 
   const action = args?.action

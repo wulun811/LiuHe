@@ -1,0 +1,70 @@
+{
+  "note": "AC22 独立 oracle 冻结（14-C，2026-10-08）：12 题留出集的 accept 证据（files+symbols）由标注者在仓库源码中独立定位后冻结——标注时未运行本集检索、未参考任何候选输出；先冻结后跑 holdout（run.mjs --oracle 校验 questions_sha256，冻结后改题即拒绝运行）。评分口径：file@k + symbol@k；文件命中不单独计为答案正确（symbol 命中才算支持证据；未命中如实 residual，不重调词表凑分）。",
+  "frozen_at": "2026-10-08",
+  "questions_file": "questions-holdout.json",
+  "questions_sha256": "c90ee57a2110ef509331f0be9533d88669a0e9f2d0513b8d326c3d3945957e8c",
+  "refreeze_note": "2026-10-20 重冻：题库仅做路径脱敏（repos[*].path 由本机绝对路径改为相对路径，题目数组逐字节未变，已校验），questions_sha256 随之重算；accept 证据（entries）本身未动。",
+  "method": "manual repo source reading (grep/read only) before running retrieval; candidate ranking outputs not consulted",
+  "entries": [
+    {
+      "id": "ho-01",
+      "accept": { "files": ["host-config.js", "state-migrate.js"], "symbols": ["migrateLegacyStateDir", "getStateDir", "runMigration"] },
+      "rationale": "迁移标记与失败重试在 host-config.migrateLegacyStateDir（MIGRATION_MARKER=state-migration.json、attempts、自动上限 3、MALONG_RETRY_STATE_MIGRATION 显式放行）；目录搬运机制 runMigration/migrateEntry 在 state-migrate.js；getStateDir 是新配置根入口。"
+    },
+    {
+      "id": "ho-02",
+      "accept": { "files": ["code-index.js"], "symbols": ["startWatcher", "doSyncFileChange"] },
+      "rationale": "防抖策略在 code-index.startWatcher：leading-edge（_watcherTimer 置上后不再随事件重置）+ WATCHER_DEBOUNCE 窗口，持续写入不会饿死同步；窗口到点后由 doSyncFileChange 批量同步（有界并发 8、flush 时热读 .malongignore）。"
+    },
+    {
+      "id": "ho-03",
+      "accept": { "files": ["write-runtime.js", "writer-registry.js"], "symbols": ["classifyConflict", "registerWriter", "getRegisteredWriter"] },
+      "rationale": "冲突分类在 write-runtime.classifyConflict（base/current/符号模式 → FILE_CHANGED/SYMBOL_CHANGED 等，后到者 VERSION_CONFLICT 拒绝）；写者身份由 writer-registry.registerWriter/getRegisteredWriter 登记（collision_guard 据此归因 write_runtime 而非一律 external）。"
+    },
+    {
+      "id": "ho-04",
+      "accept": { "files": ["workflow/output-budget.js"], "symbols": ["windowed", "capped"] },
+      "rationale": "预算截断纯函数在 workflow/output-budget.js：windowed 取累计列表最新 max 条、capped 取首屏前 max 条，返回 {items,truncated,total,omitted} —— omitted 即省略数量；不删数据，靠 code_control(expand) 取全。"
+    },
+    {
+      "id": "ho-05",
+      "accept": { "files": ["path-guard.js", "write-runtime.js"], "symbols": ["guardRealPath", "guardReadPath"] },
+      "rationale": "写路径越界防护在 path-guard.guardRealPath：realpath 解析后与 workspace 真根比对前缀（链接名绕过不可行，敏感名单对真目标重验），write-runtime 在写前调用；读侧对应 guardReadPath。"
+    },
+    {
+      "id": "ho-06",
+      "accept": { "files": ["parse-client.js"], "symbols": ["_preheat", "_probeDaemon"] },
+      "rationale": "版本门槛 MIN_DAEMON_VERSION 在 parse-client._preheat：health 回包 version 低于门槛 → 日志告警（不静默混跑）；健康检查 _probeDaemon 用独立探活连接（绕过熔断、超时对齐 heartbeat）。"
+    },
+    {
+      "id": "ho-07",
+      "accept": { "files": ["file-collector.js"], "symbols": ["collectFiles", "parseMalongignore", "isIgnored"] },
+      "rationale": "默认跳过目录（DEFAULT_IGNORE_DIRS + 点开头目录）在 collectFiles/collectFilesWithDirStats；忽略规则解析 parseMalongignore（读 .malongignore）与 isIgnored（gitignore 语义：尾斜杠目录、任意层级匹配）。"
+    },
+    {
+      "id": "ho-08",
+      "accept": { "files": ["workflow/jobs.js"], "symbols": ["startJob", "cancelJob", "reconcileJobs"] },
+      "rationale": "取消要等确认在 cancelJob：waitMs 窗口内未确认停止 → 返回 indeterminate（不谎报 cancelled）；心跳在 startJob 的 setInterval（HEARTBEAT_MS 写 job.heartbeat，终态自动停）；孤儿核对 reconcileJobs。"
+    },
+    {
+      "id": "ho-09",
+      "accept": { "files": ["path-guard.js"], "symbols": ["atomicWrite"] },
+      "rationale": "原子写 tmp+rename 在 path-guard.atomicWrite；临时名 = 目标 + .txn-<时间戳>-<randomUUID 前 8 位> —— 随机后缀防预植 .tmp symlink 穿透；恢复资产先 fsync 再 rename。"
+    },
+    {
+      "id": "ho-10",
+      "accept": { "files": ["symbol-anchors.js", "lang-parser.js"], "symbols": ["langOf", "computeFileAnchors"] },
+      "rationale": "扩展名 → 语言由 symbol-anchors.langOf 判定；锚点解析器选择/生成为 computeFileAnchors（按 lang 装配 anchor 信息，lang-parser 服务以其为解析适配层）。"
+    },
+    {
+      "id": "ho-11",
+      "accept": { "files": ["error-codes.js", "tools/tool-edit-transaction/transaction-store.js"], "symbols": ["findClosestMatch", "addLongLineHint", "simulateEdits"] },
+      "rationale": "未命中提示在 edit_transaction 路径：simulateEdits 对 not_found 编辑写 failed_edits.closest_match（findClosestMatch：空白归一 + 行窗相似度，给出 similarity/whitespace_diff/suggestion），addLongLineHint 对超长行（>120 字符）提示改 line_span+expect_sha。注：code_patch(write-runtime) 路径只回 PATCH_OLD_STRING_NOT_FOUND，无 closest——'最接近提示'的真实分支在 edit 事务路径。"
+    },
+    {
+      "id": "ho-12",
+      "accept": { "files": ["mcp-server.js"], "symbols": ["registerService", "getService"] },
+      "rationale": "服务注册表按名取用/注入：mcp-server core.registerService(name, svc) / getService(name)，各服务在 init(core) 时注册（langParser/codeIndex/repoMap 等），消费方按名注入。"
+    }
+  ]
+}

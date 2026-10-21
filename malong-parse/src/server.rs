@@ -49,10 +49,17 @@ pub struct ServerState {
     pub hot_files: std::sync::Mutex<Vec<(String, u64)>>, // (file_path, access_count)
     // r8(F1)：socket 认证 token。None = 不要求认证（测试/无 token 场景），Some = 每连接首帧必须是 __hello 且 token 匹配
     pub auth_token: Option<String>,
+    // 7-C（2026-10-07 专家复测 P1-B）：运行身份——自报告 exe 路径/大小/mtime + 构建 commit。
+    // 部署漂移（默认 daemon 与可解析二进制不是同一个）从 health 直接可见。
+    pub exe_path: Option<String>,
+    pub exe_size: Option<u64>,
+    pub exe_mtime_ms: Option<u64>,
+    pub build_commit: &'static str,
 }
 
 impl ServerState {
     pub fn new() -> Self {
+        let (exe_path, exe_size, exe_mtime_ms) = exe_identity();
         Self {
             parser_pool: ParserPool::new(),
             start_time: Instant::now(),
@@ -64,8 +71,24 @@ impl ServerState {
             sym_count_buckets: Mutex::new([0; 5]),
             hot_files: Mutex::new(Vec::new()),
             auth_token: None,
+            exe_path,
+            exe_size,
+            exe_mtime_ms,
+            build_commit: option_env!("MALONG_GIT_COMMIT").unwrap_or("unknown"),
         }
     }
+}
+
+/// 7-C：自身二进制身份——current_exe 路径 + 大小 + mtime（sha256 由 JS 侧对可解析二进制计算，
+/// 两侧路径/大小对比即可发现「默认 daemon ≠ 新构建」的部署漂移）。
+fn exe_identity() -> (Option<String>, Option<u64>, Option<u64>) {
+    let Ok(p) = std::env::current_exe() else { return (None, None, None) };
+    let path = Some(p.to_string_lossy().to_string());
+    let Ok(meta) = std::fs::metadata(&p) else { return (path, None, None) };
+    let mtime = meta.modified().ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as u64);
+    (path, Some(meta.len()), mtime)
 }
 
 // Priority queue wrapper for requests
@@ -364,6 +387,10 @@ fn dispatch(decoded: DecodedRequest, state: &ServerState) -> Response {
             Response::success(req.id, serde_json::json!({
                 "version": env!("CARGO_PKG_VERSION"),
                 "pid": std::process::id(),
+                "exe_path": state.exe_path.as_deref(),
+                "exe_size": state.exe_size,
+                "exe_mtime_ms": state.exe_mtime_ms,
+                "build_commit": state.build_commit,
                 "uptime": uptime,
                 "parsers_loaded": state.parser_pool.supported_languages(),
                 "requests_served": count,
@@ -871,6 +898,10 @@ mod tests {
         let r = result(call(&s, "health", serde_json::json!({})));
         assert!(r["result"]["version"].is_string(), "version must be present");
         assert!(r["result"]["requests_served"].is_u64());
+        // 7-C：运行身份——自报告 exe 路径/大小/构建 commit（部署漂移可验）
+        assert!(r["result"]["exe_path"].is_string(), "exe_path must be present");
+        assert!(r["result"]["exe_size"].is_u64(), "exe_size must be present");
+        assert!(r["result"]["build_commit"].is_string(), "build_commit must be present");
         assert!(r["result"]["cache"]["max_entries"].is_u64());
         assert!(r["result"]["stats"]["symbol_counts"]["0_10"].is_u64());
         assert_eq!(r["result"]["stats"]["hot_files"], serde_json::json!([]));

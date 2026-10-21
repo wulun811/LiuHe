@@ -11,38 +11,21 @@ rsync -a \
   --exclude='node_modules' --exclude='data' --exclude='docs' --exclude='dsh' \
   --exclude='tests' --exclude='scripts' --exclude='benchmarks' \
   --exclude='package.json' --exclude='package-lock.json' --exclude='.malong' \
+  --exclude='/bin/' \
   --exclude='.gitignore' --exclude='.ai-patterns.json' --exclude='PROJECT_RULES.md' \
+  --exclude='.ai-transactions' --exclude='.malongignore.bak' \
   "$MALONG_ROOT" server/
 
-echo "[reprep] platform binaries NOT bundled (esbuild-style: npm optionalDependencies pull @jieai/malong-parse-<platform>)"
+echo "[reprep] parser binaries NOT bundled; optionalDependencies removed in 0.5.13 (declared 0.5.9 never existed) — SET MALONG_PARSE_BIN or install ~/.local/bin/malong-parse; see README Platform support"
 
-echo "[reprep] patching bridge (bundle fallback) ..."
+echo "[reprep] copying bridge ..."
+# 0.5.13：一体包所需的 serverPath 回退已上移到 dsh-bridge.mjs 源码（defaultServerPath），
+# 此处只做复制。旧版在这里用 python 字符串替换改 import/赋值，断言随源码行变动即失效
+# （本轮就因加了 readFileSync 而炸）——不再需要。
 cp "$MALONG_ROOT/dsh/dsh-bridge.mjs" dsh-bridge.mjs
-python3 - <<'PYEOF'
-p = 'dsh-bridge.mjs'
-s = open(p).read()
-old = '''import { dirname, join } from "node:path"
-import { mkdirSync } from "node:fs"
-import os from "node:os"'''
-new = '''import { dirname, join } from "node:path"
-import { fileURLToPath } from "node:url"
-import { mkdirSync } from "node:fs"
-import os from "node:os"'''
-assert old in s, 'bridge import block changed'
-s = s.replace(old, new)
-old2 = '''  const serverPath = cfg.serverPath
-  if (typeof serverPath !== "string" || serverPath.length === 0) {'''
-new2 = '''  // r0.4.5-post5（一体包）：serverPath 缺省时回退到包内 server/mcp-server.js——
-  // import.meta.url 在 ESM 内恒可用，零配置安装；MALONG_SERVER_PATH 仍可覆盖
-  const serverPath = cfg.serverPath ?? fileURLToPath(new URL('./server/mcp-server.js', import.meta.url))
-  if (typeof serverPath !== "string" || serverPath.length === 0) {'''
-assert old2 in s, 'bridge serverPath block changed'
-s = s.replace(old2, new2)
-open(p, 'w').write(s)
-print('  bridge patched')
-PYEOF
+node --check dsh-bridge.mjs
 
-echo "[reprep] bundle tree ready: $(du -sh server | cut -f1) server/, $(ls server/bin/)"
+echo "[reprep] bundle tree ready: $(du -sh server | cut -f1) server/"
 if [ "${1:-}" = "--pack" ]; then
   npm pack
 fi

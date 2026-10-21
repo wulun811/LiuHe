@@ -39,7 +39,7 @@
       },
       "verify_cmd": {
         "type": "string",
-        "description": "Optional shell command run in the worktree before commit; non-zero exit aborts and rolls back"
+        "description": "Optional command run in the worktree before commit (cmd.exe on Windows, bash on Unix); non-zero exit aborts and rolls back"
       },
       "timeout": {
         "type": "number",

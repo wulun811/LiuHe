@@ -1,0 +1,25 @@
+{
+  "name": "code_worktree",
+  "version": "0.1.0",
+  "interface": "graph",
+  "requires_state": true,
+  "description": "Isolated git worktree: preview / apply / status, one persisted operation. apply = temp worktree → verify_cmd → commit → fast-forward merge into the CURRENT branch (HEAD moves; not just a sandbox dir). preview lists touched files, base/ref, verify_cmd, rollback/preserve behavior.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "workspace_dir": { "type": "string", "description": "Project root (abs, git repo)." },
+      "task_id": { "type": "string", "description": "Task id." },
+      "action": { "type": "string", "enum": ["preview", "apply", "status"], "description": "preview default; apply: dry_run=false; status: list." },
+      "changes": { "type": "array", "description": "Required for preview/apply: [{path, new_content, delete}]." },
+      "message": { "type": "string", "description": "Commit message." },
+      "verify_cmd": { "type": "string", "description": "Non-zero = abort + rollback." },
+      "timeout": { "type": "integer", "description": "verify_cmd timeout ms." },
+      "dry_run": { "type": "boolean", "description": "true = preview." },
+      "request_id": { "type": "string", "description": "Idempotency key." },
+      "expected_state_revision": { "type": "integer", "description": "Optimistic guard." }
+    },
+    "required": ["workspace_dir", "task_id"]
+  },
+  "handler": "./handler.js",
+  "protocol_version": "1.0"
+}

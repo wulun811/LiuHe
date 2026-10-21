@@ -545,6 +545,25 @@ function collectJsScope(content) {
   return locals
 }
 
+// dogfood-050：CJS require 绑定的静态提取（与 regex 路径同口径：const 声明 + 解构别名取末段）。
+// 供 AST 路径补盲区——Rust parser 只产 ESM import refs，require 不产出 import ref。
+export function collectCjsImports(lines) {
+  const out = []
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim()
+    let jm
+    if ((jm = trimmed.match(/^const\s+\{([^}]+)\}\s*=\s*require\(/))) {
+      for (const part of jm[1].split(',')) {
+        const name = part.trim().split(/[\s:]+/).pop().trim()
+        if (name) out.push({ name, line: i + 1, statement: trimmed })
+      }
+    } else if ((jm = trimmed.match(/^const\s+(\w+)\s*=\s*require\(/))) {
+      out.push({ name: jm[1], line: i + 1, statement: trimmed })
+    }
+  }
+  return out
+}
+
 async function analyzeFileAST(content, lang, currentFile, langParser) {
   if (!langParser || (lang !== 'javascript' && lang !== 'typescript')) return null
   const ext = lang === 'typescript' ? '.ts' : '.js'
@@ -609,6 +628,17 @@ async function analyzeFileAST(content, lang, currentFile, langParser) {
             relativeImports.push({ module, line: ref.line, relative: module, absolute: resolveRelativeImport(module, currentFile) || module })
           }
         }
+      }
+
+      // dogfood-050 修复：Rust parser 只产 ESM import refs，CJS require 绑定是盲区——
+      // `const x = require('m')` / `const {a} = require('m')` 未用时旧实现不报 unused_import。
+      // 去重按 imports 集合（不能按 definedSymbols——parser symbols 含绑定名，恒真跳过）
+      const importedNames = new Set(imports.map(i => i.name))
+      for (const cjs of collectCjsImports(lines)) {
+        if (importedNames.has(cjs.name)) continue
+        importedNames.add(cjs.name)
+        definedSymbols.add(cjs.name)
+        imports.push({ name: cjs.name, line: cjs.line, statement: cjs.statement, key: 'l' + cjs.line, kind: 'named', stmtStart: -1, stmtEnd: -1 })
       }
 
       const builtins = BUILTINS_MAP[lang] || BUILTINS_JS

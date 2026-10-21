@@ -11,9 +11,14 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const MALONG = dirname(__dirname)
 const imp = (p) => import(pathToFileURL(p).href)
 
-let pass = 0, fail = 0
+let pass = 0, fail = 0, notRun = 0
 function assert(cond, msg) {
   if (cond) { pass++; console.log(`  ✓ ${msg}`) } else { fail++; console.error(`  ✗ FAIL: ${msg}`) }
+}
+// 第三轮 Windows 复验：symlink 需权限（Windows 默认 EPERM）——依赖断言显式 not_run，不计通过也不算失败
+function markNotRun(msg, n = 1) {
+  notRun += n
+  console.log(`  ⚠ NOT_RUN: ${msg}`)
 }
 const tmp = (tag) => {
   const ws = join(os.tmpdir(), 'opencode', `r8-${tag}-${process.pid}`)
@@ -26,16 +31,22 @@ const tmp = (tag) => {
 console.log('── B1 transaction-store symlink escape ──')
 {
   const { TransactionStore } = await imp(join(MALONG, 'tools/tool-edit-transaction/transaction-store.js'))
+  let linkedB1 = true
   const ws = tmp('symlink')
   const outside = join(ws, '..', `r8-outside-${process.pid}.txt`)
   writeFileSync(outside, 'original-external')
   writeFileSync(join(ws, 'app.py'), 'return 1')
-  try { symlinkSync(outside, join(ws, 'victim.py')) } catch (e) { console.error('  symlink failed:', e.message) }
-  const store = new TransactionStore(ws)
-  const txnId = store.begin('t1')
-  const r = await store.applyEdits(txnId, 'victim.py', [{ old_string: 'original-external', new_string: 'PWNED' }])
-  assert(r.error_code === 'PATH_BLOCKED' && /symlink escape/.test(r.message || ''), `写穿 symlink 应 PATH_BLOCKED（得 ${r.error_code}:${r.message}）`)
-  assert(readFileSync(outside, 'utf-8') === 'original-external', `外部文件不应被改`)
+  try {
+    if (process.env.MALONG_TEST_FORCE_NO_SYMLINK) { const e = Object.assign(new Error('forced: no symlink privilege'), { code: 'EPERM' }); throw e }
+    symlinkSync(outside, join(ws, 'victim.py'))
+  } catch (e) { linkedB1 = false; markNotRun(`B1 写穿 symlink（创建失败: ${e.code || e.message}）`, 2) }
+  if (linkedB1) {
+    const store = new TransactionStore(ws)
+    const txnId = store.begin('t1')
+    const r = await store.applyEdits(txnId, 'victim.py', [{ old_string: 'original-external', new_string: 'PWNED' }])
+    assert(r.error_code === 'PATH_BLOCKED' && /symlink escape/.test(r.message || ''), `写穿 symlink 应 PATH_BLOCKED（得 ${r.error_code}:${r.message}）`)
+    assert(readFileSync(outside, 'utf-8') === 'original-external', `外部文件不应被改`)
+  }
   try { rmSync(ws, { recursive: true, force: true }) } catch {}
   rmSync(outside, { force: true })
 }
@@ -71,9 +82,15 @@ console.log('── B3 read-symbol symlink guard ──')
   const secret = join(ws, '..', `r8-secret-${process.pid}.key`)
   writeFileSync(secret, 'TOP-SECRET')
   writeFileSync(join(ws, 'real.js'), 'const x = 1')
-  try { symlinkSync(secret, join(ws, 'notes.py')) } catch {}
-  let r = await handle({ workspace_dir: ws, locator: { file_path: 'notes.py' } }, {})
-  assert(r.error === 'PATH_BLOCKED', `symlink 指向 .key 应 PATH_BLOCKED（得 ${r.error}:${r.message}）`)
+  let linkedB3 = true
+  try {
+    if (process.env.MALONG_TEST_FORCE_NO_SYMLINK) { const e = Object.assign(new Error('forced: no symlink privilege'), { code: 'EPERM' }); throw e }
+    symlinkSync(secret, join(ws, 'notes.py'))
+  } catch (e) { linkedB3 = false; markNotRun(`B3 read-symbol symlink 守卫（创建失败: ${e.code || e.message}）`) }
+  if (linkedB3) {
+    const r = await handle({ workspace_dir: ws, locator: { file_path: 'notes.py' } }, {})
+    assert(r.error === 'PATH_BLOCKED', `symlink 指向 .key 应 PATH_BLOCKED（得 ${r.error}:${r.message}）`)
+  }
   try { rmSync(ws, { recursive: true, force: true }) } catch {}
   rmSync(secret, { force: true })
 }
@@ -159,14 +176,20 @@ console.log('── E1 lock heartbeat keeps lock fresh ──')
   const ws = tmp('hb')
   const f = join(ws, 'x.txt')
   writeFileSync(f, 'x')
+  // 测试提速：心跳默认 15s；用 env 缩到 200ms，轮询到 mtime 变化即可（不需要真等 17s）
+  process.env.MALONG_TEST_HEARTBEAT_MS = '200'
   const l1 = await acquireLock(f, 1000)
   const mtime1 = statSync(`${f}.mlock`).mtimeMs
-  await new Promise(r => setTimeout(r, 17000))
-  const mtime2 = statSync(`${f}.mlock`).mtimeMs
-  assert(mtime2 > mtime1, `持锁 17s 后锁 mtime 应被心跳刷新（${mtime1} → ${mtime2}）`)
+  let mtime2 = mtime1
+  for (let i = 0; i < 40 && !(mtime2 > mtime1); i++) {
+    await new Promise(r => setTimeout(r, 50))
+    mtime2 = statSync(`${f}.mlock`).mtimeMs
+  }
+  delete process.env.MALONG_TEST_HEARTBEAT_MS
+  assert(mtime2 > mtime1, `持锁后锁 mtime 应被心跳刷新（${mtime1} → ${mtime2}）`)
   l1.release()
   try { rmSync(ws, { recursive: true, force: true }) } catch {}
 }
 
-console.log(`\ntest-r8: ${pass} passed, ${fail} failed`)
+console.log(`\ntest-r8: ${pass} passed, ${fail} failed${notRun ? `, ${notRun} not_run` : ''}`)
 if (fail > 0) process.exit(1)

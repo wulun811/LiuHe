@@ -84,23 +84,41 @@ pub fn extract_all(tree: &Tree, source: &str) -> super::ExtractResult {
                 }
             }
             "short_var_declaration" | "var_declaration" => {
+                // LH-003：短变量声明左值在 expression_list 里；var 声明在 var_spec 里。
+                // 统一取整条声明范围（RHS 多行不再截断）。
+                let start_line = node.start_position().row as u32 + 1;
+                let end_line = node.end_position().row as u32 + 1;
                 for i in 0..node.child_count() {
                     if let Some(c) = node.child(i) {
                         if c.kind() == "identifier" {
                             symbols.push(Symbol {
                                 name: source[c.byte_range()].to_string(),
                                 kind: "variable".to_string(),
-                                start_line: c.start_position().row as u32 + 1,
-                                end_line: c.end_position().row as u32 + 1,
+                                start_line,
+                                end_line,
                                 impl_for: None,
                             });
+                        } else if c.kind() == "expression_list" {
+                            for j in 0..c.child_count() {
+                                if let Some(id) = c.child(j) {
+                                    if id.kind() == "identifier" {
+                                        symbols.push(Symbol {
+                                            name: source[id.byte_range()].to_string(),
+                                            kind: "variable".to_string(),
+                                            start_line,
+                                            end_line,
+                                            impl_for: None,
+                                        });
+                                    }
+                                }
+                            }
                         } else if c.kind() == "var_spec" {
                             if let Some(name_node) = c.child_by_field_name("name") {
                                 symbols.push(Symbol {
                                     name: source[name_node.byte_range()].to_string(),
                                     kind: "variable".to_string(),
-                                    start_line: c.start_position().row as u32 + 1,
-                                    end_line: c.end_position().row as u32 + 1,
+                                    start_line,
+                                    end_line,
                                     impl_for: None,
                                 });
                             }
@@ -212,23 +230,41 @@ pub fn extract_symbols(tree: &Tree, source: &str) -> (Vec<Symbol>, Vec<Import>) 
                 }
             }
             "short_var_declaration" | "var_declaration" => {
+                // LH-003：短变量声明左值在 expression_list 里；var 声明在 var_spec 里。
+                // 统一取整条声明范围（RHS 多行不再截断）。
+                let start_line = node.start_position().row as u32 + 1;
+                let end_line = node.end_position().row as u32 + 1;
                 for i in 0..node.child_count() {
                     if let Some(c) = node.child(i) {
                         if c.kind() == "identifier" {
                             symbols.push(Symbol {
                                 name: source[c.byte_range()].to_string(),
                                 kind: "variable".to_string(),
-                                start_line: c.start_position().row as u32 + 1,
-                                end_line: c.end_position().row as u32 + 1,
+                                start_line,
+                                end_line,
                                 impl_for: None,
                             });
+                        } else if c.kind() == "expression_list" {
+                            for j in 0..c.child_count() {
+                                if let Some(id) = c.child(j) {
+                                    if id.kind() == "identifier" {
+                                        symbols.push(Symbol {
+                                            name: source[id.byte_range()].to_string(),
+                                            kind: "variable".to_string(),
+                                            start_line,
+                                            end_line,
+                                            impl_for: None,
+                                        });
+                                    }
+                                }
+                            }
                         } else if c.kind() == "var_spec" {
                             if let Some(name_node) = c.child_by_field_name("name") {
                                 symbols.push(Symbol {
                                     name: source[name_node.byte_range()].to_string(),
                                     kind: "variable".to_string(),
-                                    start_line: c.start_position().row as u32 + 1,
-                                    end_line: c.end_position().row as u32 + 1,
+                                    start_line,
+                                    end_line,
                                     impl_for: None,
                                 });
                             }
@@ -385,4 +421,27 @@ pub fn extract_references(tree: &Tree, source: &str) -> Vec<Reference> {
 
     walk(tree.root_node(), source, 0, &mut refs);
     refs
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse_go(src: &str) -> Tree {
+        let mut parser = tree_sitter::Parser::new();
+        let lang: tree_sitter::Language = tree_sitter_go::LANGUAGE.into();
+        parser.set_language(&lang).unwrap();
+        parser.parse(src, None).unwrap()
+    }
+
+    #[test]
+    fn variable_declarations_cover_multiline_values() {
+        let src = "var cfg = map[string]int{\n    \"a\": 1,\n    \"b\": 2,\n}\n\nfunc main() {\n    x, y := pair(\n        1,\n        2,\n    )\n    _ = x\n    _ = y\n}\n";
+        let tree = parse_go(src);
+        let result = extract_all(&tree, src);
+        let range = |name: &str| result.symbols.iter().find(|s| s.name == name).map(|s| (s.start_line, s.end_line));
+        assert_eq!(range("cfg"), Some((1, 4)), "var multi-line composite literal");
+        assert_eq!(range("x"), Some((7, 10)), "short var x range");
+        assert_eq!(range("y"), Some((7, 10)), "short var y range");
+    }
 }

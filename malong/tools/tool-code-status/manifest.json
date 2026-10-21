@@ -1,0 +1,16 @@
+{
+  "name": "code_status",
+  "version": "0.1.0",
+  "interface": "graph",
+  "description": "Task state, materials, evidence. Omit task_id → list actives.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "workspace_dir": { "type": "string", "description": "Project root (abs)." },
+      "task_id": { "type": "string", "description": "Task id; omit = list." }
+    },
+    "required": ["workspace_dir"]
+  },
+  "handler": "./handler.js",
+  "protocol_version": "1.0"
+}

@@ -1,0 +1,9 @@
+# AC22 冻结题库逐字节契约（第三轮 Windows 复验：autocrlf 检出 CRLF → questions_sha256 冻结锚失配）
+# 必须保持 LF 检出，测试与 oracle 不改写、不归一：
+benchmarks/retrieval/*.json text eol=lf
+benchmarks/retrieval/run.mjs text eol=lf
+
+# 0.5.10 审核修复（R04）：G0 合同冻结「manifest/handler 原始字节」哈希——Windows autocrlf 检出 CRLF 会全量漂移。
+# 以下路径必须 LF 检出（与 Linux 基线合同一致）；既有 CRLF 工作区：git add --renormalize . 后重新检出。
+tools/*/manifest.json text eol=lf
+tools/*/handler.js text eol=lf

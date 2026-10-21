@@ -1,7 +1,7 @@
 {
   "name": "dependency_gatekeeper",
   "version": "1.1.0",
-  "description": "Imports vs manifests: undeclared deps + install hints (Py/JS/Go/Rust). Pairs with guard_patterns.",
+  "description": "Per-file import check vs manifests: undeclared deps + install hints (Py/JS/Go/Rust). Requires file (relative path). Pairs with guard_patterns.",
   "inputSchema": {
     "type": "object",
     "properties": {

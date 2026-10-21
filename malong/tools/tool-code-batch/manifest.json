@@ -1,0 +1,41 @@
+{
+  "name": "code_batch",
+  "version": "0.1.0",
+  "interface": "graph",
+  "requires_state": true,
+  "description": "N edits in ONE op (all-or-nothing default); dry_run previews, apply with dry_run:false. New file: create:true + content + locator.file_path.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "workspace_dir": { "type": "string", "description": "Project root." },
+      "task_id": { "type": "string", "description": "Task id." },
+      "read_ref": { "type": "string", "description": "Default base; same file only." },
+      "writes": {
+        "type": "array",
+        "description": "Non-empty; per entry: read_ref/locator + one edit payload.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "read_ref": { "type": "string", "description": "Supplies base_version." },
+            "create": { "type": "boolean", "description": "New file: content + locator.file_path." },
+            "locator": { "type": "object", "description": "Target {file_path, name}/{symbol_id}." },
+            "edit_mode": { "type": "string", "enum": ["patch", "replace_symbol", "insert_after_symbol"], "description": "patch: old/new; replace_symbol: content." },
+            "patch": { "type": "object", "description": "For patch {old_string, new_string}." },
+            "content": { "type": "string" },
+            "boundary": { "type": "string", "description": "replace_symbol: full (default) or body." },
+            "preserve_decorators": { "type": "boolean", "description": "replace_symbol: keep decorators (default true)." }
+          }
+        }
+      },
+      "dry_run": { "type": "boolean", "description": "true = preview." },
+      "policy": { "type": "object", "description": "{all_or_nothing: boolean} (default true)." },
+      "safety": { "type": "object", "description": "Validation gate: {profile: standard|strict|fast, block_on_validation_error: boolean}." },
+      "allow_unsafe_no_base": { "type": "boolean", "description": "Force apply without prior file-level reads (default false; gate)." },
+      "expected_state_revision": { "type": "integer", "description": "Guard." },
+      "request_id": { "type": "string", "description": "Idempotency key." }
+    },
+    "required": ["workspace_dir", "task_id", "writes"]
+  },
+  "handler": "./handler.js",
+  "protocol_version": "1.0"
+}

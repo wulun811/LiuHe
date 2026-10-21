@@ -28,7 +28,7 @@ const realWorktree = realpathSync(repo)
 console.log('\n── ① 中间层 symlink + 深层不存在 → 拒绝 ──')
 {
   mkdirSync(join(repo, 'docs'))
-  symlinkSync(outside, join(repo, 'docs', 'linkdir'))
+  symlinkSync(outside, join(repo, 'docs', 'linkdir'), process.platform === 'win32' ? 'junction' : 'dir')
   const fullPath = join(repo, 'docs', 'linkdir', 'new', 'deep', 'file.txt')
   throws(() => _assertInsideWorktreeForTest(realWorktree, fullPath), '写穿路径被拒（旧守卫此处 ENOENT 全跳过）')
   assert(!rmSync ? true : true)
@@ -38,7 +38,7 @@ console.log('\n── ① 中间层 symlink + 深层不存在 → 拒绝 ──'
 console.log('\n── ② symlink 指向内部 → 放行 ──')
 {
   mkdirSync(join(repo, 'inner'))
-  symlinkSync(join(repo, 'inner'), join(repo, 'docs', 'inlink'))
+  symlinkSync(join(repo, 'inner'), join(repo, 'docs', 'inlink'), process.platform === 'win32' ? 'junction' : 'dir')
   _assertInsideWorktreeForTest(realWorktree, join(repo, 'docs', 'inlink', 'a.js'))
   ok(true, '内部 symlink 路径不拒绝')
 }
@@ -61,10 +61,23 @@ console.log('\n── ⑤ 断链 symlink → 拒绝 ──')
 {
   const broken = join(root, 'broken-target')
   const link = join(repo, 'docs', 'broken-link')
-  try { symlinkSync(broken, link) } catch { /* 已存在则跳过 */ }
+  symlinkSync(broken, link, process.platform === 'win32' ? 'junction' : 'dir')
   throws(() => _assertInsideWorktreeForTest(realWorktree, join(link, 'x.js')),
     /broken symlink|refusing to write through/,
     '断链 symlink 拒绝（旧实现 realpathSync 裸 ENOENT）')
+}
+
+// ── ⑥ R4：仓库无 commit → no_commits 结构化错误 + 引导 ──
+console.log('\n── ⑥ 空仓库（unborn HEAD）→ no_commits ──')
+{
+  const { execSync } = await import('node:child_process')
+  const { handle: gwtHandle } = await import('../tools/tool-git-worktree/handler.js')
+  const emptyRepo = join(root, 'empty-repo')
+  mkdirSync(emptyRepo, { recursive: true })
+  execSync('git init -q', { cwd: emptyRepo })
+  const r = await gwtHandle({ workspace_dir: emptyRepo, changes: [{ path: 'a.txt', new_content: 'x\n' }], message: 't' }, {})
+  ok(r.error === 'no_commits', `空仓库 → no_commits（得 ${r.error}）`)
+  ok(/initial commit/i.test(r.suggestion || ''), '引导含 initial commit')
 }
 
 rmSync(root, { recursive: true, force: true })

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>文档 — 码龙·六合工具</title>
-    <meta name="description" content="码龙·六合工具文档：安装指南、快速开始、MCP 客户端接入（opencode / Claude Desktop / Claude Code / codex）、命令行与环境变量参考、44 个工具全量说明、语言支持、安全机制、自检与 FAQ。">
+    <meta name="description" content="码龙·六合工具文档：安装指南、快速开始、MCP 客户端接入（opencode / Claude Desktop / Claude Code / codex）、命令行与环境变量参考、44 件经典工具（graph 13 / diagnostic 18 白名单）全量说明、语言支持、安全机制、自检与 FAQ。">
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -45,7 +45,7 @@
                 <a href="download.html" class="hover:text-white transition-colors">下载</a>
             </div>
             <div class="flex items-center gap-3">
-                <span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(201,125,42,0.1);border:1px solid rgba(201,125,42,0.2);color:#e8b86e">v0.4.7</span>
+                <span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(201,125,42,0.1);border:1px solid rgba(201,125,42,0.2);color:#e8b86e">v0.5.27</span>
                 <a href="docs.en.html" class="hover:text-white transition-colors text-sm" style="color:#888">EN</a>
                 <a href="https://github.com/wulun811/LiuHe" target="_blank" class="hover:text-white transition-colors text-sm" style="color:#888">GitHub</a>
             </div>
@@ -89,7 +89,7 @@
                 <div class="px-6 py-3 text-xs font-mono" style="background:rgba(255,255,255,0.03);border-bottom:1px solid rgba(255,255,255,0.05);color:#e8b86e">免构建部署（离线 / 沙盒 · sql.js 后端）</div>
                 <div class="p-5 flex items-center gap-3">
                     <span class="w-2 h-2 rounded-full" style="background:#c97d2a"></span>
-                    <span class="text-sm font-mono" style="color:#b0b0b0">tar -xzf malong-liuhe-0.4.7-linux-x86_64.tar.gz && cd malong && node mcp-server.js --workspace .</span>
+                    <span class="text-sm font-mono" style="color:#b0b0b0">tar -xzf malong-liuhe-0.5.27-linux-x86_64.tar.gz && cd malong && node mcp-server.js --workspace .</span>
                 </div>
             </div>
             <p class="text-sm mb-6" style="color:#6d6d6d">
@@ -209,7 +209,7 @@ args = ["/path/to/malong/mcp-server.js", "--workspace", "/path/to/project"]</pre
                 <pre class="p-5 text-sm font-mono overflow-x-auto" style="color:#b0b0b0">bash malong/dsh/install-dsh.sh        # 幂等；编辑 ~/.dsh/profiles/web/cordis.patch.yml 并自动备份
 pkill -f "dsh web"; dsh web --port 3456 --host 0.0.0.0 --trusted-host &lt;LAN IP&gt;</pre>
             </div>
-            <p class="text-sm mb-8" style="color:#6d6d6d">桥接插件把全部 38 个工具注册为 <span class="font-mono" style="color:#e8b86e">malong__&lt;tool&gt;</span>，并自动从当前会话工作区填充 <span class="font-mono" style="color:#e8b86e">workspace_dir</span>（显式路径仍然优先）。完整指南（含索引规则）：<span class="font-mono">malong/dsh/DSH-INTEGRATION.md</span></p>
+            <p class="text-sm mb-8" style="color:#6d6d6d">桥接插件默认只暴露六合线 13 个工具（<span class="font-mono" style="color:#e8b86e">malong__&lt;tool&gt;</span>），并自动从当前会话工作区填充 <span class="font-mono" style="color:#e8b86e">workspace_dir</span>（显式路径仍然优先）。需要经典全量（44）或分析器档（18）时，在 dsh 宿主上导出 <span class="font-mono">MALONG_INTERFACE=classic|diagnostic</span> 即可。完整指南（含索引规则）：<span class="font-mono">malong/dsh/DSH-INTEGRATION.md</span></p>
         </section>
 
         <section id="cli" class="mb-14" style="scroll-margin-top:150px">
@@ -251,13 +251,16 @@ pkill -f "dsh web"; dsh web --port 3456 --host 0.0.0.0 --trusted-host &lt;LAN IP
                         <tr style="border-bottom:1px solid rgba(255,255,255,0.04)"><td class="px-5 py-3" style="color:#93c5fd">MALONG_PARSE_BIN</td><td class="px-5 py-3">内置 / PATH</td><td class="px-5 py-3">自动拉起守护进程时使用的二进制</td></tr>
                         <tr style="border-bottom:1px solid rgba(255,255,255,0.04)"><td class="px-5 py-3" style="color:#93c5fd">MALONG_PARSE_MODE</td><td class="px-5 py-3">rust-service</td><td class="px-5 py-3">解析传输方式，当前版本仅支持 rust-service</td></tr>
                         <tr><td class="px-5 py-3" style="color:#93c5fd">MALONG_WS_GC_DAYS</td><td class="px-5 py-3">14</td><td class="px-5 py-3">health cleanup 修剪闲置工作区缓存的天数阈值；0 禁用</td></tr>
+                        <tr style="border-bottom:1px solid rgba(255,255,255,0.04)"><td class="px-5 py-3" style="color:#93c5fd">MALONG_INTERFACE</td><td class="px-5 py-3">graph（六和线）</td><td class="px-5 py-3">默认即六合线 13 个工具（4 个读入口 + 8 个状态化入口 + edit_transaction）；设为 classic 得经典全量 44，设为 diagnostic 得分析器档 18</td></tr>
+                        <tr><td class="px-5 py-3" style="color:#93c5fd">MALONG_ENTRY_STATE</td><td class="px-5 py-3">（默认开）</td><td class="px-5 py-3">状态层默认放行（与显式 1 等价）；设为 0 则退回只读 5 工具（graph 档不带状态机）</td></tr>
+                        <tr><td class="px-5 py-3" style="color:#93c5fd">MALONG_PYTHON</td><td class="px-5 py-3">（未设）</td><td class="px-5 py-3">Python 测试（test_bridge / verify_pipeline）用的解释器；未设时自动探测项目 venv（项目根旁的 .venv/venv/env），再退系统 python3</td></tr>
                     </tbody>
                 </table>
             </div>
         </section>
 
         <section id="tools" class="mb-14" style="scroll-margin-top:150px">
-            <h2 class="font-serif-cn text-2xl font-bold text-white mb-1">44 个 MCP 工具</h2>
+            <h2 class="font-serif-cn text-2xl font-bold text-white mb-1">默认 13 个 MCP 工具（六和线）；classic 44 / diagnostic 18 按需开启</h2>
             <p class="text-sm mb-6" style="color:#888">全部工具纯正则 / AST 实现，零 LLM 调用，可复现、可审计、可 CI。点击分组展开工具说明。</p>
 
             <div class="flex flex-wrap gap-2 mb-8">
@@ -292,7 +295,7 @@ pkill -f "dsh web"; dsh web --port 3456 --host 0.0.0.0 --trusted-host &lt;LAN IP
                     <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#d8b4fe">symbol_search</span><span class="text-sm" style="color:#888">按符号名子串查找定义（含全限定路径）</span></div>
                     <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#d8b4fe">code_search</span><span class="text-sm" style="color:#888">自然语言意图搜索代码，确定性实现零 LLM</span></div>
                     <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#d8b4fe">repo_map</span><span class="text-sm" style="color:#888">文件 ↔ 符号项目地图，适合 100+ 文件代码库</span></div>
-                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#d8b4fe">outline_reader</span><span class="text-sm" style="color:#888">文件结构大纲（函数 / 类 / 签名），无需读全文</span></div>
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#d8b4fe">read_outline</span><span class="text-sm" style="color:#888">文件结构大纲（函数 / 类 / 签名），无需读全文</span></div>
                 </div>
             </details>
 
@@ -319,13 +322,13 @@ pkill -f "dsh web"; dsh web --port 3456 --host 0.0.0.0 --trusted-host &lt;LAN IP
                     <span class="text-xs font-mono chev" style="color:#6d6d6d">▸</span>
                 </summary>
                 <div class="px-6 pb-5 space-y-3 border-t" style="border-color:rgba(255,255,255,0.05)">
-                    <div class="flex flex-col md:flex-row md:items-baseline gap-1 pt-4"><span class="font-mono text-sm shrink-0" style="color:#fcd34d">batch_edit</span><span class="text-sm" style="color:#888">单文件多处编辑原子应用，支持 dry-run 预览</span></div>
-                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#fcd34d">edit_transaction</span><span class="text-sm" style="color:#888">多文件编辑事务：begin → edit → commit，可回滚 / 撤销</span></div>
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1 pt-4"><span class="font-mono text-sm shrink-0" style="color:#fcd34d">edit_batch</span><span class="text-sm" style="color:#888">单文件多处编辑原子应用，支持 dry-run 预览</span></div>
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#fcd34d">edit_transaction</span><span class="text-sm" style="color:#888">多文件编辑事务：begin → edit → commit，dry_run 预览 / create 新建 / 可回滚 / 撤销</span></div>
                     <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#fcd34d">edit_collision_guard</span><span class="text-sm" style="color:#888">读后改前快照对比，检测外部并发编辑冲突</span></div>
                     <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#fcd34d">git_worktree</span><span class="text-sm" style="color:#888">隔离 git 分支批量改动，零工作区污染，失败自动回滚</span></div>
                     <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#fcd34d">rename_symbol</span><span class="text-sm" style="color:#888">跨文件符号重命名（词边界、字符串 / 注释感知）</span></div>
                     <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#fcd34d">fix_imports</span><span class="text-sm" style="color:#888">清理未用导入、补未定义符号、破除循环依赖</span></div>
-                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#fcd34d">edit_sandbox</span><span class="text-sm" style="color:#888">编辑前预校验（语法 / 结构 dry-run）</span></div>
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#fcd34d">sandbox_validate</span><span class="text-sm" style="color:#888">编辑前预校验（语法 / 结构 dry-run）</span></div>
                 </div>
             </details>
 
@@ -337,11 +340,11 @@ pkill -f "dsh web"; dsh web --port 3456 --host 0.0.0.0 --trusted-host &lt;LAN IP
                 <div class="px-6 pb-5 space-y-3 border-t" style="border-color:rgba(255,255,255,0.05)">
                     <div class="flex flex-col md:flex-row md:items-baseline gap-1 pt-4"><span class="font-mono text-sm shrink-0" style="color:#86efac">code_review</span><span class="text-sm" style="color:#888">形状级代码检查：命名 / 注释 / 长函数 / 重复块</span></div>
                     <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#86efac">security_review</span><span class="text-sm" style="color:#888">注入 / XSS / 密钥 / CORS 模式扫描，严重度分级</span></div>
-                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#86efac">dead_code_sweeper</span><span class="text-sm" style="color:#888">死代码检测：未用导入 / 孤儿文件（宁可漏删不误删）</span></div>
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#86efac">sweep_dead_code</span><span class="text-sm" style="color:#888">死代码检测：未用导入 / 孤儿文件（宁可漏删不误删）</span></div>
                     <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#86efac">guard_patterns</span><span class="text-sm" style="color:#888">AST 规则门禁：禁裸 except / debugger / eval</span></div>
                     <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#86efac">exception_guard</span><span class="text-sm" style="color:#888">检查项目使用自定义异常而非内建，配 <span style="color:#cbd5e1">test_bridge</span> 修复验证</span></div>
                     <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#86efac">config_drift</span><span class="text-sm" style="color:#888">环境变量 / 数据表 / 服务与 .env.example 漂移检测</span></div>
-                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#86efac">mock_syncer</span><span class="text-sm" style="color:#888">签名变更后的 mock / patch 失配检测</span></div>
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#86efac">mock_sync</span><span class="text-sm" style="color:#888">签名变更后的 mock / patch 失配检测</span></div>
                     <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#86efac">naming_consistency</span><span class="text-sm" style="color:#888">新符号命名与项目风格一致性校验</span></div>
                 </div>
             </details>
@@ -380,7 +383,7 @@ pkill -f "dsh web"; dsh web --port 3456 --host 0.0.0.0 --trusted-host &lt;LAN IP
 
         <section id="routing" class="mb-14" style="scroll-margin-top:150px">
     <h2 class="font-serif-cn text-2xl font-bold text-white mb-6">工具路由地图</h2>
-    <p class="text-sm mb-4" style="color:#888">44 个工具拆成 4 份时序图——每一条 ok/err 去向都已画入（绿实线 = 成功，红虚线 = 出错）；虚线卡片 = 目标工具在另一份图里；粗绿线为主链。编辑&rarr;测试闭环（edit_transaction &harr; diff_facts &harr; test_bridge &harr; debug_runner）完整位于 2/4。</p>
+    <p class="text-sm mb-4" style="color:#888">44 个常驻工具拆成 4 份时序图——每一条 ok/err 去向都已画入（绿实线 = 成功，红虚线 = 出错）；虚线卡片 = 目标工具在另一份图里；粗绿线为主链。编辑&rarr;测试闭环（edit_transaction &harr; diff_facts &harr; test_bridge &harr; debug_runner）完整位于 2/4。（graph/stateful 增量入口未入图）</p>
     <div class="rounded-xl border border-white/5 bg-ink-950/50 p-4 overflow-x-auto">
         <img src="routing-seq-1-zh.svg" alt="1/4 索引、读取与影响" class="max-w-none" style="width:100%;max-width:1160px;height:auto;display:block">
         <img src="routing-seq-2-zh.svg" alt="2/4 编辑、提交与测试闭环" class="max-w-none mt-6" style="width:100%;max-width:1160px;height:auto;display:block">
@@ -424,7 +427,7 @@ pkill -f "dsh web"; dsh web --port 3456 --host 0.0.0.0 --trusted-host &lt;LAN IP
           </div>
 <div class="rounded border border-white/5 bg-ink-950/40 p-2">
             <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T08</span> ol</div>
-            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">outline_reader</span></div><div class="leading-snug"><span style="color:#888">完成 → impact_analysis</span></div></div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">read_outline</span></div><div class="leading-snug"><span style="color:#888">完成 → impact_analysis</span></div></div>
           </div>
 <div class="rounded border border-white/5 bg-ink-950/40 p-2">
             <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T09</span> cc</div>
@@ -488,7 +491,7 @@ pkill -f "dsh web"; dsh web --port 3456 --host 0.0.0.0 --trusted-host &lt;LAN IP
           </div>
 <div class="rounded border border-white/5 bg-ink-950/40 p-2">
             <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T24</span> ms</div>
-            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">mock_syncer</span></div><div class="leading-snug"><span style="color:#888">失配 → 修复 → test_bridge</span></div><div class="leading-snug"><span style="color:#888">同步 → test_bridge</span></div></div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">mock_sync</span></div><div class="leading-snug"><span style="color:#888">失配 → 修复 → test_bridge</span></div><div class="leading-snug"><span style="color:#888">同步 → test_bridge</span></div></div>
           </div>
 <div class="rounded border border-white/5 bg-ink-950/40 p-2">
             <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T25</span> df</div>
@@ -605,7 +608,7 @@ pkill -f "dsh web"; dsh web --port 3456 --host 0.0.0.0 --trusted-host &lt;LAN IP
                 </div>
                 <div class="rounded-xl p-5" style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06)">
                     <div class="text-white font-medium mb-1">撤销日志 <span class="font-mono text-xs" style="color:#6d6d6d">.malong/journal/</span></div>
-                    <div class="text-sm" style="color:#888">每次安全写入（write_symbol / write_symbols / batch_edit）都在工作区 <span class="font-mono" style="color:#e8b86e">.malong/journal/</span> 留下回滚日志；已终止事务按 24h TTL 自动清理（每小时最多扫一次），进行中 / 待人工审查（needs_review）的日志永不删除；只清理工具自身的回滚备份，从不触碰源码。</div>
+                    <div class="text-sm" style="color:#888">每次安全写入（write_symbol / write_symbols / edit_batch）都在工作区 <span class="font-mono" style="color:#e8b86e">.malong/journal/</span> 留下回滚日志；已终止事务按 24h TTL 自动清理（每小时最多扫一次），进行中 / 待人工审查（needs_review）的日志永不删除；只清理工具自身的回滚备份，从不触碰源码。</div>
                 </div>
             </div>
         </section>
@@ -616,13 +619,13 @@ pkill -f "dsh web"; dsh web --port 3456 --host 0.0.0.0 --trusted-host &lt;LAN IP
                 <div class="px-6 py-3 text-xs font-mono" style="background:rgba(255,255,255,0.03);border-bottom:1px solid rgba(255,255,255,0.05);color:#e8b86e">一键全链（需守护进程运行）</div>
                 <div class="p-5">
                     <div class="text-sm font-mono mb-3" style="color:#b0b0b0">./scripts/ci.sh    <span style="color:#6d6d6d"># cargo test + npm test + dogfood</span></div>
-                    <div class="text-sm font-mono" style="color:#b0b0b0">npm test    <span style="color:#6d6d6d"># 2013 断言 / 81 个测试文件</span></div>
+                    <div class="text-sm font-mono" style="color:#b0b0b0">npm test    <span style="color:#6d6d6d"># 166 个测试文件（全链 0 失败）</span></div>
                 </div>
             </div>
             <div class="space-y-3 text-sm font-mono" style="color:#b0b0b0">
                 <div>node tests/test-db-adapter.js   <span style="color:#6d6d6d"># 22 断言：sql.js 后端 + 持久化</span></div>
-                <div>node tests/test-mcp-server.js    <span style="color:#6d6d6d"># 25 断言：MCP stdio + 守护进程往返</span></div>
-                <div>cd malong-parse && cargo test    <span style="color:#6d6d6d"># 92 断言：多语言提取 / 协议 / 缓存 / 调度</span></div>
+                <div>node tests/test-mcp-server.js    <span style="color:#6d6d6d"># 35 断言：MCP stdio + 守护进程往返</span></div>
+                <div>cd malong-parse && cargo test    <span style="color:#6d6d6d"># 97 断言：多语言提取 / 协议 / 缓存 / 调度</span></div>
             </div>
         </section>
 
@@ -661,6 +664,10 @@ pkill -f "dsh web"; dsh web --port 3456 --host 0.0.0.0 --trusted-host &lt;LAN IP
                     <div class="text-white font-medium mb-1">编辑可以撤销吗？</div>
                     <div class="text-sm" style="color:#888">每次安全写入都在 <span class="font-mono" style="color:#e8b86e">.malong/journal/</span> 留回滚日志；已终止事务按 24h TTL 自动清理，进行中 / 待审查日志永不删除；只清理工具自身的备份，不碰源码。</div>
                 </div>
+                <div class="rounded-xl p-5" style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06)">
+                    <div class="text-white font-medium mb-1">code_check 报 failed，但代码没问题？</div>
+                    <div class="text-sm" style="color:#888">多半是<strong style="color:#e8b86e">请求预算截断</strong>：MCP 请求硬上限 120s、前台阶段实际只给 110s，跑更久的套件会被判超时——这不是代码缺陷。改用 <span class="font-mono" style="color:#e8b86e">code_check(async=true)</span>（后台 600s 上限）重跑；证据里会带「120s hard timeout」原文并直接指异步重跑，不会让你去改代码。</div>
+                </div>
             </div>
         </section>
 
@@ -679,7 +686,7 @@ pkill -f "dsh web"; dsh web --port 3456 --host 0.0.0.0 --trusted-host &lt;LAN IP
 
     <footer class="py-10 border-t" style="border-color:rgba(255,255,255,0.05)">
         <div class="max-w-5xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-4 text-sm" style="color:#6d6d6d">
-            <div>码龙·六合工具 v0.4.7 · MIT License</div>
+            <div>码龙·六合工具 v0.5.27 · MIT License</div>
             <div class="flex gap-6">
                 <a href="download.html" class="hover:text-white transition-colors">下载</a>
                 <a href="https://github.com/wulun811/LiuHe" target="_blank" class="hover:text-white transition-colors">GitHub</a>

@@ -19,11 +19,18 @@ const SEARCH_REPLACE_RE = /<<<<<<<\s*SEARCH\s*([\s\S]*?)=======\s*([\s\S]*?)>>>>
 const COMMON_MODULES = new Set(['process', 'require', 'console', 'module', 'exports', 'Buffer', 'globalThis', 'window', 'document', 'fetch', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'])
 
 function getNameConvention(fileName) {
-  const base = basename(fileName, extname(fileName))
-  if (/^[a-z]+(-[a-z0-9]+)*$/.test(base)) return 'kebab-case'
-  if (/^[a-z]+([A-Z][a-z0-9]*)*$/.test(base)) return 'camelCase'
+  let base = basename(fileName, extname(fileName))
+  // S1：复合后缀（x.test.js / x.spec.ts / index.d.ts / x.stories.jsx）看主体——
+  // 旧实现把 'greeting.test' 判 unknown → test 文件命名误报
+  base = base.replace(/\.(test|spec|stories|d)$/i, '')
+  if (!base) return 'unknown'
+  // LH-012：单词语（无分隔符/无驼峰）是中性态——'unused' 同时合法于 kebab/snake/camel，
+  // 旧实现正则 `(-...)*` 允许零段 → 单词名先判 kebab，.py/.rs/.sh 单词语文件名全量误报
+  if (base.includes('-') && /^[a-z0-9]+(-[a-z0-9]+)+$/.test(base)) return 'kebab-case'
+  if (base.includes('_') && /^[a-z0-9]+(_[a-z0-9]+)+$/.test(base)) return 'snake_case'
   if (/^[A-Z][a-z0-9]*([A-Z][a-z0-9]*)*$/.test(base)) return 'PascalCase'
-  if (/^[a-z]+(_[a-z0-9]+)*$/.test(base)) return 'snake_case'
+  if (/^[a-z][a-zA-Z0-9]*$/.test(base) && /[A-Z]/.test(base)) return 'camelCase'
+  if (/^[a-z][a-z0-9]*$/.test(base)) return 'lowercase-neutral'
   return 'unknown'
 }
 
@@ -48,7 +55,7 @@ function checkNaming(source, fileName) {
   const ext = extname(fileName)
   const convention = getNameConvention(fileName)
   const legal = LEGAL_NAME_STYLES[ext]
-  if (legal && !legal.includes(convention)) {
+  if (legal && convention !== 'lowercase-neutral' && !legal.includes(convention)) {
     issues.push({ severity: 'info', category: 'naming', message: `File "${basename(fileName)}" does not follow ${ext} naming convention (${legal.join('/')})`, line: 1 })
   }
 
@@ -307,6 +314,8 @@ export async function handle(args, context) {
     ...(promptInjection ? { prompt_injection: promptInjection } : {}),
     next_step: result.summary.warnings > 0
       ? 'Fix warnings above (long functions, duplication, naming). Deep probe: code_quality(file=...). After: test_bridge(action="run")'
-      : 'No shape-level issues found. Shape check only — logic/semantic correctness and security require deeper review. Deep probe: code_quality(file=...)',
+      : result.summary.total_issues > 0
+        ? `Review the info-level issue(s) above (missing JSDoc/TODO etc.); ${result.summary.total_issues} found, 0 warnings. Shape check only — logic/semantic correctness and security NOT covered. Deep probe: code_quality(file=...)`
+        : 'No shape-level issues found. Shape check only — logic/semantic correctness and security require deeper review. Deep probe: code_quality(file=...)',
   }
 }

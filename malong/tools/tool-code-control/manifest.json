@@ -1,0 +1,25 @@
+{
+  "name": "code_control",
+  "version": "0.1.0",
+  "interface": "graph",
+  "requires_state": true,
+  "description": "status/resume/cancel/reopen/switch_route/expand/job/cancel_job. resume = self-contained brief.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "workspace_dir": { "type": "string", "description": "Project root (abs)." },
+      "task_id": { "type": "string", "description": "Task id." },
+      "action": { "type": "string", "enum": ["status", "resume", "cancel", "reopen", "switch_route", "expand", "job", "cancel_job"], "description": "Action." },
+      "ref": { "type": "string", "description": "expand: id or candidates." },
+      "route": { "type": "string", "enum": ["understand", "change", "diagnose", "review", "maintain", "document", "isolate", "system"], "description": "switch_route." },
+      "goal": { "type": "string", "description": "switch_route goal." },
+      "reason": { "type": "string", "description": "cancel/reopen: why." },
+      "job_id": { "type": "string", "description": "job/cancel_job id." },
+      "wait_ms": { "type": "integer", "description": "cancel_job: ms (5000)." },
+      "expected_state_revision": { "type": "integer", "description": "Guard." }
+    },
+    "required": ["workspace_dir", "task_id", "action"]
+  },
+  "handler": "./handler.js",
+  "protocol_version": "1.0"
+}

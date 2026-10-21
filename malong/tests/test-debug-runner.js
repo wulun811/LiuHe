@@ -92,5 +92,20 @@ const { analyzeError, handle } = await import(pathToFileURL(join(__dirname, '..'
   try { rmSync(ws, { recursive: true, force: true }) } catch {}
 }
 
+// ── ⑥ dogfood-050 r3：无括号栈帧语言判定——node:internal 不得标 rs ──
+{
+  const r = analyzeError({ stdout: '', stderr: "TypeError: boom\n    at buildPath (/ws/src/broken.js:5:10)\n    at node:internal/main/run_main_module:36:49\n", exitCode: 1 })
+  const traces = r.stack_traces || []
+  const mainFrame = traces.find(t => t.file === 'node:internal/main/run_main_module')
+  assert(mainFrame && mainFrame.lang === 'js', `⑥ node:internal 帧标 js（得 ${mainFrame ? mainFrame.lang : 'missing'}）`)
+  const rustish = analyzeError({ stdout: '', stderr: 'x\n    at src/main.rs:10:5\n', exitCode: 1 })
+  const rsFrame = (rustish.stack_traces || []).find(t => t.file === 'src/main.rs')
+  assert(rsFrame && rsFrame.lang === 'rs', `⑥ .rs 无括号帧仍标 rs（得 ${rsFrame ? rsFrame.lang : 'missing'}）`)
+  // 狗粮r2：V8 合成帧 [eval]/[eval]-wrapper 也是 JS（旧实现落 rs）
+  const evalish = analyzeError({ stdout: '', stderr: 'Error: boom\n    at [eval]:1:7\n    at [eval]-wrapper:6:24\n', exitCode: 1 })
+  const evalFrame = (evalish.stack_traces || []).find(t => t.file === '[eval]')
+  assert(evalFrame && evalFrame.lang === 'js', `⑥ [eval] 合成帧标 js（得 ${evalFrame ? evalFrame.lang : 'missing'}）`)
+}
+
 console.log(`== test-debug-runner: ${pass} passed, ${fail} failed ==`)
 if (fail > 0) process.exit(1)

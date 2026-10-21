@@ -73,15 +73,72 @@ export function applyInsertAfter(lines, range, newContent) {
   return { lines: [...before, ...newContent.split('\n'), ...after], diff: makeSimpleDiff(lines, [...before, ...newContent.split('\n'), ...after]) }
 }
 
+// P0 修复（2026-10-12 狗粮发现）：正则字面量识别——含括号/引号的正则（如 /['"]/）旧实现当作代码，
+// 造成 bracket 假阳性；而写路径的 syntax 仲裁恰在 daemon 漏报（EOF 未闭合括号）时失守。
+// 剥离器补正则识别后，bracket 结果可独立成立，不再依赖降级仲裁。
+const REGEX_ALLOWED_AFTER = new Set(['(', ',', '=', ':', '[', '!', '&', '|', '?', '{', '}', ';', '+', '-', '*', '%', '<', '>', '^', '~'])
+const REGEX_KEYWORDS = new Set(['return', 'typeof', 'case', 'in', 'of', 'new', 'delete', 'void', 'instanceof', 'do', 'else', 'yield', 'await', 'throw'])
+const ID_CHAR = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_$'
+
+function regexMayStart(out) {
+  let j = out.length - 1
+  while (j >= 0 && (out[j] === ' ' || out[j] === '\n' || out[j] === '\t' || out[j] === '\r')) j--
+  if (j < 0) return true
+  const pc = out[j]
+  if (ID_CHAR.includes(pc)) {
+    let k = j
+    while (k >= 0 && ID_CHAR.includes(out[k])) k--
+    return REGEX_KEYWORDS.has(out.slice(k + 1, j + 1))
+  }
+  return REGEX_ALLOWED_AFTER.has(pc)
+}
+
+// 返回闭合 '/' 之后的下标；未闭合或遇换行（正则不可跨行）返回 -1 —— 保守回退为普通字符（除法）
+function scanRegexLiteral(text, start) {
+  let i = start + 1
+  let inClass = false
+  while (i < text.length) {
+    const ch = text[i]
+    if (ch === '\n') return -1
+    if (ch === '\\') { i += 2; continue }
+    if (ch === '[') inClass = true
+    else if (ch === ']') inClass = false
+    else if (ch === '/' && !inClass) return i + 1
+    i++
+  }
+  return -1
+}
+
 function stripLiteralsForBracket(text) {
-  // 字符串/注释里的括号不是代码结构：先剥掉再平衡校验（尽力而为，不处理 ${} 内的代码）
-  return text
-    .replace(/\/\*[\s\S]*?\*\//g, ' ')
-    .replace(/\/\/.*$/gm, ' ')
-    .replace(/#.*$/gm, ' ')
-    .replace(/`(?:[^`\\]|\\.)*`/g, ' ')
-    .replace(/"(?:[^"\\]|\\.)*"/g, ' ')
-    .replace(/'(?:[^'\\]|\\.)*'/g, ' ')
+  // 字符串/注释/正则里的括号不是代码结构：先剥掉再平衡校验（尽力而为，不处理模板串内代码）
+  // R22 修复 #3b（2026-10-12）：单趟扫描替代 regex 链——旧实现先跑注释 regex，把字符串里的 //
+  // （如 URL https://…）当行注释剥掉、连带吞掉闭合引号，跨行级联误判（合法 JSON/含 URL 的 JS 误报不平衡）
+  let out = ''
+  let i = 0
+  const n = text.length
+  while (i < n) {
+    const c = text[i]
+    if (c === '"' || c === "'" || c === '`') {
+      i++
+      while (i < n) {
+        if (text[i] === '\\') { i += 2; continue }
+        if (text[i] === c) { i++; break }
+        i++
+      }
+      out += ' '
+      continue
+    }
+    if (c === '/' && text[i + 1] === '/') { while (i < n && text[i] !== '\n') i++; out += ' '; continue }
+    if (c === '/' && text[i + 1] === '*') { i += 2; while (i < n && !(text[i] === '*' && text[i + 1] === '/')) i++; i = Math.min(n, i + 2); out += ' '; continue }
+    if (c === '#') { while (i < n && text[i] !== '\n') i++; out += ' '; continue }
+    if (c === '/' && regexMayStart(out)) {
+      const end = scanRegexLiteral(text, i)
+      if (end !== -1) { out += ' '; i = end; continue }
+    }
+    out += c
+    i++
+  }
+  return out
 }
 
 export function checkBracketBalance(text) {

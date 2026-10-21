@@ -41,6 +41,9 @@ export async function handle(args, context) {
   await codeIndexService.initWorkspace(workspaceDir)
 
   const symbol = args?.symbol || ''
+  if (args?.symbol != null && !['string', 'number'].includes(typeof args.symbol)) {
+    return { error: 'invalid_input', message: `symbol must be a string (got ${typeof args.symbol})` }
+  }
   if (!symbol) {
     return { error: 'missing_parameter', message: 'symbol is required', suggestion: 'Provide a symbol name / call target to find references for' }
   }
@@ -56,16 +59,30 @@ export async function handle(args, context) {
     if (codeIndexService?.ensureFreshFile) {
       try { await codeIndexService.ensureFreshFile(fileArg) } catch {}
     }
-    const resolved = codeIndexService.resolveFileArg(fileArg)
+    const resolved = codeIndexService.resolveFileArg(fileArg, workspaceDir)
     if (!resolved.ok) return { error: resolved.error.code, message: resolved.error.message, suggestion: resolved.error.suggestion, workspace_dir: workspaceDir }
     fileArg = resolved.path
   }
 
   let results = await codeIndexService.getReferences(symbol, fileArg)
+  // dogfood-050（P1 + 防抖窗口补强）：无 fileArg 路径统一有界刷新陈旧文件后重查——
+  // ① 零命中假空自锁；② watcher 防抖窗口内查询有命中但漏新引用。
+  let refreshedStale = 0
+  if (!fileArg && typeof codeIndexService?.refreshStaleFiles === 'function') {
+    try {
+      const info = await codeIndexService.refreshStaleFiles()
+      refreshedStale = info?.refreshed || 0
+      if (refreshedStale > 0) {
+        const retry = await codeIndexService.getReferences(symbol, fileArg)
+        if (Array.isArray(retry)) results = retry
+      }
+    } catch {}
+  }
   // R17-1（审核透出修复）：服务层在数组上挂 truncated 属性，JSON 序列化会丢——handler 显式透出到结果对象
   // （后续 kind 过滤/next_step 逻辑不动——truncated 标记独立保留）
   const refsTruncated = Array.isArray(results) && results.truncated === true
   const result = { symbol, results, count: results.length, workspace_dir: workspaceDir }
+  if (refreshedStale > 0) result.refreshed_stale = refreshedStale
   if (refsTruncated) result.truncated = true
   // R19-②：服务层 freshness（getReferences 有 filePath 时数组挂属性）——JSON 序列化会丢，显式透出
   if (Array.isArray(results) && results.freshness) result.auto_indexed = true
@@ -108,7 +125,9 @@ export async function handle(args, context) {
         result.suggestion = `No references to "${symbol}" in ${fileArg}. Remove the file filter to search the whole workspace.`
       }
     } else {
-      result.suggestion = `No references in index for "${symbol}". This is authoritative: the symbol is not referenced by indexed code (or the file is not indexed — reindex(workspace_dir="${workspaceDir}") if files were recently added).`
+      result.suggestion = refreshedStale > 0
+        ? `No references to "${symbol}" after refreshing ${refreshedStale} stale file(s) — the index is up to date for the scanned files; the symbol is not referenced by indexed code.`
+        : `No references in index for "${symbol}". This is authoritative: the symbol is not referenced by indexed code (or the file is not indexed — reindex(workspace_dir="${workspaceDir}") if files were recently added).`
     }
   }
   

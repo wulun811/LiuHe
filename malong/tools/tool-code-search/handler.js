@@ -4,6 +4,9 @@
 
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
+// 0.5.25：文档字面兜底——.md 等交付物型文件不在符号索引里（Rust 解析服务只吃代码），
+// 「交付物就是文档」的仓搜代码永远 0 命中。这里做一次受限的字面扫描补上。
+import { searchDocFiles } from '../../doc-files.js'
 
 function traceId() {
   return `trc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
@@ -50,6 +53,9 @@ export async function handle(args, context) {
   const limit = Math.max(1, Math.min(50, parseInt(args?.limit) || 10))
   try {
     const r = await codeSearchService.search(query, { topK: limit })
+    // 0.5.25：文档兜底（字面扫描 .md/.rst/.txt）——符号索引之外的交付物也能被搜到
+    let docHits = []
+    try { docHits = searchDocFiles(workspaceDir, query, { limit }) } catch { docHits = [] }
     return {
       query: r.query,
       intent: r.intent,
@@ -57,11 +63,19 @@ export async function handle(args, context) {
       matching_note: 'Deterministic token+intent matching (NOT semantic/embedding search): exact symbol/file names score highest; long natural-language sentences degrade to loose file-level matches (0.5). Use precise symbol/file names for best results.',
       results: r.results.slice(0, limit),
       count: r.results.length,
-      summary: `${r.results.length} matches found`,
+      // 文档命中独立字段（不混进符号结果，避免污染排序语义）
+      ...(docHits.length ? {
+        doc_results: docHits,
+        doc_count: docHits.length,
+        doc_note: 'doc_results come from a literal text scan of .md/.mdx/.rst/.txt files — those are NOT in the symbol index (the parser handles code languages only). Read one with code_query(mode="body", file="<path>").',
+      } : {}),
+      summary: `${r.results.length} matches found${docHits.length ? ` (+${docHits.length} document hits)` : ''}`,
       ...(initWarning ? { init_warning: initWarning } : {}),
       next_step: r.results.length > 0
         ? 'To inspect a hit: read_symbol(file=..., name=...) or references(symbol=...)'
-        : 'No matches. Try references(symbol=...) or reindex if the workspace changed.',
+        : (docHits.length
+          ? 'Only document hits: read one with code_query(mode="body", file="<path>").'
+          : 'No matches. Try references(symbol=...) or reindex if the workspace changed.'),
     }
   } catch (e) {
     return makeError('search_failed', `Search failed: ${e.message}${initWarning ? ` (${initWarning})` : ''}`, 'Ensure the workspace is indexed.')

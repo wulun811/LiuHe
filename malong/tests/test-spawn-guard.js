@@ -91,5 +91,49 @@ const isWin = process.platform === 'win32'
   assert(res.stdout.length <= 2048, `stdout 被限制在 maxBuffer 内（${res.stdout.length}）`)
 }
 
+// ⑤ 宿主门控 env 剥离（live 复验 2026-10-07）：默认不带 MALONG_INTERFACE/MALONG_ENTRY_STATE；
+//    调用方 opts.env 显式覆盖可回填（opt-in）
+{
+  const savedI = process.env.MALONG_INTERFACE
+  const savedS = process.env.MALONG_ENTRY_STATE
+  process.env.MALONG_INTERFACE = 'graph'
+  process.env.MALONG_ENTRY_STATE = '1'
+  const printEnv = "console.log(JSON.stringify({ i: process.env.MALONG_INTERFACE || null, s: process.env.MALONG_ENTRY_STATE || null }))"
+  let res, resOpt
+  try {
+    res = await spawnWithGroup(process.execPath, ['-e', printEnv], { timeout: 5000 })
+    resOpt = await spawnWithGroup(process.execPath, ['-e', printEnv], { timeout: 5000, env: { MALONG_INTERFACE: 'diagnostic' } })
+  } finally {
+    if (savedI === undefined) delete process.env.MALONG_INTERFACE; else process.env.MALONG_INTERFACE = savedI
+    if (savedS === undefined) delete process.env.MALONG_ENTRY_STATE; else process.env.MALONG_ENTRY_STATE = savedS
+  }
+  const d = JSON.parse(res.stdout.trim())
+  assert(d.i === null && d.s === null, '默认剥离宿主门控 env（得 ' + res.stdout.trim() + '）')
+  const dOpt = JSON.parse(resOpt.stdout.trim())
+  assert(dOpt.i === 'diagnostic' && dOpt.s === null, 'opts.env 可显式覆盖单键（得 ' + resOpt.stdout.trim() + '）')
+}
+
+// ⑥ R25（批17-A）：Windows 裸名解析与 cmd 引用（IO 注入，Linux 可守）——
+// 锁定第三轮 Windows 复验缺陷：node 必须 exe 直跑；() > {} 等元字符参数必须引号（旧实现漏引 → cmd 解析 SyntaxError）
+{
+  const { _winCommandKind, _winCmd, _winQuote } = await import(pathToFileURL(join(__dirname, '..', 'spawn-guard.js')).href)
+  const io = (files) => ({ path: 'C:\\bin', pathext: '.EXE;.CMD', join: (d, n) => d + '\\' + n, exists: (p) => files.includes(p) })
+  assert(_winCommandKind('node', io(['C:\\bin\\node.EXE'])) === 'exe', 'node.EXE → exe 直跑（不再进 cmd）')
+  assert(_winCommandKind('npm', io(['C:\\bin\\npm.CMD'])) === 'shim', 'npm.CMD → shim 走 cmd')
+  assert(_winCommandKind('nope', io([])) === null, '未命中 → null（cmd 兜底报错语义）')
+  assert(_winCommandKind('tool.cmd', io(['C:\\bin\\tool.cmd'])) === 'shim', '带扩展名 .cmd → shim')
+  assert(_winCmd('node', ['-e', 'setInterval(()=>{},1000)'], io(['C:\\bin\\node.EXE'])) === null, 'winCmd(node)=null（exe 直跑）')
+  const shim = _winCmd('npm', ['run', 'build'], io(['C:\\bin\\npm.CMD']))
+  assert(shim && shim.cmd === 'cmd.exe' && shim.args[3] === 'npm run build', `winCmd(npm) → cmd 包层（得 ${JSON.stringify(shim)}）`)
+  assert(_winCmd('cmd.exe', []) === null && _winCmd('C:\\t\\a.exe', []) === null, 'cmd 本体/带路径 exe → 直跑')
+  const pshim = _winCmd('C:\\t\\a.cmd', [])
+  assert(pshim && pshim.cmd === 'cmd.exe', '带路径 .cmd → cmd 包层')
+  assert(_winQuote('-e') === '-e' && _winQuote('a b') === '"a b"', '安全 token 免引号 / 空格加引号')
+  assert(_winQuote('setInterval(()=>{},1000)') === '"setInterval(()=>{},1000)"', '元字符 () => {} 整体加引号（旧实现漏引号导致 cmd 解析）')
+  assert(_winQuote('he said "hi"') === '"he said ""hi"""', '内部引号双写')
+  assert(_winQuote('C:\\dir\\') === 'C:\\dir\\', '纯路径安全 token 免引号（行尾单反斜杠无需双写）')
+  assert(_winQuote('C:\\my dir\\') === '"C:\\my dir\\\\"', '需引号时行尾反斜杠双写（防 CRT 转义引号）')
+}
+
 console.log(`== test-spawn-guard: ${pass} passed, ${fail} failed ==`)
 process.exit(fail > 0 ? 1 : 0)

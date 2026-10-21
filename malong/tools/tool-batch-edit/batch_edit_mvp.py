@@ -354,7 +354,7 @@ def batch_edit(file_path: str, edits_data: List[Dict], dry_run: bool = False, ba
     except Exception as e:
         return {
             "success": False,
-            "error": f"Failed to read file: {e}",
+            "error": f"Failed to read file: {e} (edit_batch only edits existing files; to create a new file pass create:true to write_symbol/write_symbols/code_patch/code_batch, or use git_worktree)",
             "edits_applied": 0,
             "results": []
         }

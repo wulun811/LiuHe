@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Docs — Malong·Liuhe Toolkit</title>
-    <meta name="description" content="Malong Liuhe documentation: installation guide, quick start, MCP client setup (opencode / Claude Desktop / Claude Code / codex), CLI & env reference, all 44 tools, language support, safety mechanisms, self-checks and FAQ.">
+    <meta name="description" content="Malong Liuhe documentation: installation guide, quick start, MCP client setup (opencode / Claude Desktop / Claude Code / codex), CLI & env reference, all 44 classic tools (13 graph / 18 diagnostic whitelist), language support, safety mechanisms, self-checks and FAQ.">
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -45,7 +45,7 @@
                 <a href="download.en.html" class="hover:text-white transition-colors">Download</a>
             </div>
             <div class="flex items-center gap-3">
-                <span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(201,125,42,0.1);border:1px solid rgba(201,125,42,0.2);color:#e8b86e">v0.4.7</span>
+                <span class="px-3 py-1 rounded-full text-xs font-mono" style="background:rgba(201,125,42,0.1);border:1px solid rgba(201,125,42,0.2);color:#e8b86e">v0.5.27</span>
                 <a href="docs.html" class="hover:text-white transition-colors text-sm" style="color:#888">中文</a>
                 <a href="https://github.com/wulun811/LiuHe" target="_blank" class="hover:text-white transition-colors text-sm" style="color:#888">GitHub</a>
             </div>
@@ -89,7 +89,7 @@
                 <div class="px-6 py-3 text-xs font-mono" style="background:rgba(255,255,255,0.03);border-bottom:1px solid rgba(255,255,255,0.05);color:#e8b86e">Zero-build deployment (offline / sandbox · sql.js backend)</div>
                 <div class="p-5 flex items-center gap-3">
                     <span class="w-2 h-2 rounded-full" style="background:#c97d2a"></span>
-                    <span class="text-sm font-mono" style="color:#b0b0b0">tar -xzf malong-liuhe-0.4.7-linux-x86_64.tar.gz && cd malong && node mcp-server.js --workspace .</span>
+                    <span class="text-sm font-mono" style="color:#b0b0b0">tar -xzf malong-liuhe-0.5.27-linux-x86_64.tar.gz && cd malong && node mcp-server.js --workspace .</span>
                 </div>
             </div>
             <p class="text-sm mb-6" style="color:#6d6d6d">
@@ -209,7 +209,7 @@ args = ["/path/to/malong/mcp-server.js", "--workspace", "/path/to/project"]</pre
                 <pre class="p-5 text-sm font-mono overflow-x-auto" style="color:#b0b0b0">bash malong/dsh/install-dsh.sh        # idempotent; edits ~/.dsh/profiles/web/cordis.patch.yml with backup
 pkill -f "dsh web"; dsh web --port 3456 --host 0.0.0.0 --trusted-host &lt;LAN IP&gt;</pre>
             </div>
-            <p class="text-sm mb-8" style="color:#6d6d6d">The bridge registers all 38 tools as <span class="font-mono" style="color:#e8b86e">malong__&lt;tool&gt;</span> and auto-fills <span class="font-mono" style="color:#e8b86e">workspace_dir</span> from the current conversation's workspace (explicit paths still win). Full guide incl. index rules: <span class="font-mono">malong/dsh/DSH-INTEGRATION.md</span></p>
+            <p class="text-sm mb-8" style="color:#6d6d6d">The bridge exposes the Six-He line only — 13 tools as <span class="font-mono" style="color:#e8b86e">malong__&lt;tool&gt;</span> — and auto-fills <span class="font-mono" style="color:#e8b86e">workspace_dir</span> from the current conversation's workspace (explicit paths still win). Export <span class="font-mono">MALONG_INTERFACE=classic|diagnostic</span> on the dsh host for the classic full catalog (44) or the analyzer tier (18). Full guide incl. index rules: <span class="font-mono">malong/dsh/DSH-INTEGRATION.md</span></p>
         </section>
 
         <section id="cli" class="mb-14" style="scroll-margin-top:150px">
@@ -251,13 +251,16 @@ pkill -f "dsh web"; dsh web --port 3456 --host 0.0.0.0 --trusted-host &lt;LAN IP
                         <tr style="border-bottom:1px solid rgba(255,255,255,0.04)"><td class="px-5 py-3" style="color:#93c5fd">MALONG_PARSE_BIN</td><td class="px-5 py-3">bundled / PATH</td><td class="px-5 py-3">Binary used when the client auto-starts the daemon</td></tr>
                         <tr style="border-bottom:1px solid rgba(255,255,255,0.04)"><td class="px-5 py-3" style="color:#93c5fd">MALONG_PARSE_MODE</td><td class="px-5 py-3">rust-service</td><td class="px-5 py-3">Parse transport; only rust-service is supported in the current version</td></tr>
                         <tr><td class="px-5 py-3" style="color:#93c5fd">MALONG_WS_GC_DAYS</td><td class="px-5 py-3">14</td><td class="px-5 py-3">Days a workspace index cache may sit untouched before health cleanup prunes it; 0 disables</td></tr>
+                        <tr style="border-bottom:1px solid rgba(255,255,255,0.04)"><td class="px-5 py-3" style="color:#93c5fd">MALONG_INTERFACE</td><td class="px-5 py-3">graph (Six-He line)</td><td class="px-5 py-3">Default is the Six-He line: 13 tools (4 read entries + 8 stateful entries + edit_transaction); set classic for the full 44-tool catalog, diagnostic for the 18-tool analyzer tier</td></tr>
+                        <tr><td class="px-5 py-3" style="color:#93c5fd">MALONG_ENTRY_STATE</td><td class="px-5 py-3">on by default</td><td class="px-5 py-3">The state layer is allowed by default (same as setting 1); set 0 to fall back to the read-only 5-tool tier</td></tr>
+                        <tr><td class="px-5 py-3" style="color:#93c5fd">MALONG_PYTHON</td><td class="px-5 py-3">(unset)</td><td class="px-5 py-3">Interpreter used for Python test runs (test_bridge / verify_pipeline); when unset the project venv is auto-detected (.venv/venv/env next to the project root), then system python3</td></tr>
                     </tbody>
                 </table>
             </div>
         </section>
 
         <section id="tools" class="mb-14" style="scroll-margin-top:150px">
-            <h2 class="text-2xl font-bold text-white mb-1">44 MCP tools</h2>
+            <h2 class="text-2xl font-bold text-white mb-1">13 MCP tools by default (Six-He line); classic 44 / diagnostic 18 on demand</h2>
             <p class="text-sm mb-6" style="color:#888">Every tool is pure regex / AST — zero LLM calls, reproducible, auditable, CI-friendly. Expand a group for per-tool descriptions.</p>
 
             <div class="flex flex-wrap gap-2 mb-8">
@@ -292,7 +295,7 @@ pkill -f "dsh web"; dsh web --port 3456 --host 0.0.0.0 --trusted-host &lt;LAN IP
                     <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#d8b4fe">symbol_search</span><span class="text-sm" style="color:#888">Finds definitions by symbol-name substring (incl. fully-qualified paths)</span></div>
                     <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#d8b4fe">code_search</span><span class="text-sm" style="color:#888">Natural-language intent search over code; deterministic, zero LLM</span></div>
                     <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#d8b4fe">repo_map</span><span class="text-sm" style="color:#888">File ↔ symbol project map; built for 100+ file codebases</span></div>
-                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#d8b4fe">outline_reader</span><span class="text-sm" style="color:#888">File structure outline (functions / classes / signatures) without reading it all</span></div>
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#d8b4fe">read_outline</span><span class="text-sm" style="color:#888">File structure outline (functions / classes / signatures) without reading it all</span></div>
                 </div>
             </details>
 
@@ -319,13 +322,13 @@ pkill -f "dsh web"; dsh web --port 3456 --host 0.0.0.0 --trusted-host &lt;LAN IP
                     <span class="text-xs font-mono chev" style="color:#6d6d6d">▸</span>
                 </summary>
                 <div class="px-6 pb-5 space-y-3 border-t" style="border-color:rgba(255,255,255,0.05)">
-                    <div class="flex flex-col md:flex-row md:items-baseline gap-1 pt-4"><span class="font-mono text-sm shrink-0" style="color:#fcd34d">batch_edit</span><span class="text-sm" style="color:#888">Multiple edits to one file applied atomically; dry-run preview supported</span></div>
-                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#fcd34d">edit_transaction</span><span class="text-sm" style="color:#888">Multi-file transaction: begin → edit → commit, with rollback / undo</span></div>
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1 pt-4"><span class="font-mono text-sm shrink-0" style="color:#fcd34d">edit_batch</span><span class="text-sm" style="color:#888">Multiple edits to one file applied atomically; dry-run preview supported</span></div>
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#fcd34d">edit_transaction</span><span class="text-sm" style="color:#888">Multi-file transaction: begin → edit → commit, with dry-run preview / create / rollback / undo</span></div>
                     <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#fcd34d">edit_collision_guard</span><span class="text-sm" style="color:#888">Snapshot compare between read and write; detects concurrent external edits</span></div>
                     <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#fcd34d">git_worktree</span><span class="text-sm" style="color:#888">Isolated-branch multi-file changes: zero working-tree pollution, rollback on failure</span></div>
                     <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#fcd34d">rename_symbol</span><span class="text-sm" style="color:#888">Cross-file symbol rename (word-boundary, string / comment aware)</span></div>
                     <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#fcd34d">fix_imports</span><span class="text-sm" style="color:#888">Removes unused imports, resolves undefined symbols, breaks circular deps</span></div>
-                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#fcd34d">edit_sandbox</span><span class="text-sm" style="color:#888">Pre-edit validation (syntax / structure dry-run)</span></div>
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#fcd34d">sandbox_validate</span><span class="text-sm" style="color:#888">Pre-edit validation (syntax / structure dry-run)</span></div>
                 </div>
             </details>
 
@@ -337,11 +340,11 @@ pkill -f "dsh web"; dsh web --port 3456 --host 0.0.0.0 --trusted-host &lt;LAN IP
                 <div class="px-6 pb-5 space-y-3 border-t" style="border-color:rgba(255,255,255,0.05)">
                     <div class="flex flex-col md:flex-row md:items-baseline gap-1 pt-4"><span class="font-mono text-sm shrink-0" style="color:#86efac">code_review</span><span class="text-sm" style="color:#888">Shape-level check: naming / comments / long functions / duplicated blocks</span></div>
                     <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#86efac">security_review</span><span class="text-sm" style="color:#888">Scans for injection / XSS / secrets / CORS patterns, severity-graded</span></div>
-                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#86efac">dead_code_sweeper</span><span class="text-sm" style="color:#888">Dead code detection: unused imports / orphan files (miss-over-delete bias)</span></div>
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#86efac">sweep_dead_code</span><span class="text-sm" style="color:#888">Dead code detection: unused imports / orphan files (miss-over-delete bias)</span></div>
                     <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#86efac">guard_patterns</span><span class="text-sm" style="color:#888">AST rule gate: no bare except / debugger / eval</span></div>
                     <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#86efac">exception_guard</span><span class="text-sm" style="color:#888">Checks project exceptions vs builtins; pair with <span style="color:#cbd5e1">test_bridge</span> to verify fixes</span></div>
                     <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#86efac">config_drift</span><span class="text-sm" style="color:#888">Detects env vars / tables / services missing from .env.example</span></div>
-                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#86efac">mock_syncer</span><span class="text-sm" style="color:#888">Detects mock / patch mismatches after signature changes</span></div>
+                    <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#86efac">mock_sync</span><span class="text-sm" style="color:#888">Detects mock / patch mismatches after signature changes</span></div>
                     <div class="flex flex-col md:flex-row md:items-baseline gap-1"><span class="font-mono text-sm shrink-0" style="color:#86efac">naming_consistency</span><span class="text-sm" style="color:#888">Checks new symbol names against project style</span></div>
                 </div>
             </details>
@@ -380,7 +383,7 @@ pkill -f "dsh web"; dsh web --port 3456 --host 0.0.0.0 --trusted-host &lt;LAN IP
 
         <section id="routing" class="mb-14" style="scroll-margin-top:150px">
     <h2 class="text-2xl font-bold text-white mb-6">Tool Routing Map</h2>
-    <p class="text-sm mb-4" style="color:#888">All 44 tools split into 4 sequence diagrams — every ok/err route is drawn (green solid = ok, red dashed = err); dashed card = target lives in another group; thick green = main chain. The edit &rarr; test loop (edit_transaction &harr; diff_facts &harr; test_bridge &harr; debug_runner) is fully inside 2/4.</p>
+    <p class="text-sm mb-4" style="color:#888">All 44 classic tools split into 4 sequence diagrams — every ok/err route is drawn (green solid = ok, red dashed = err); dashed card = target lives in another group; thick green = main chain. The edit &rarr; test loop (edit_transaction &harr; diff_facts &harr; test_bridge &harr; debug_runner) is fully inside 2/4. (Graph/stateful entries are not in these diagrams.)</p>
     <div class="rounded-xl border border-white/5 bg-ink-950/50 p-4 overflow-x-auto">
         <img src="routing-seq-1-en.svg" alt="1/4 Indexing, Reading & Impact" class="max-w-none" style="width:100%;max-width:1160px;height:auto;display:block">
         <img src="routing-seq-2-en.svg" alt="2/4 Edit, Commit & Test Loop" class="max-w-none mt-6" style="width:100%;max-width:1160px;height:auto;display:block">
@@ -424,7 +427,7 @@ pkill -f "dsh web"; dsh web --port 3456 --host 0.0.0.0 --trusted-host &lt;LAN IP
           </div>
 <div class="rounded border border-white/5 bg-ink-950/40 p-2">
             <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T08</span> ol</div>
-            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">outline_reader</span></div><div class="leading-snug"><span style="color:#86efac">ok</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">impact_analysis</span></div></div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">read_outline</span></div><div class="leading-snug"><span style="color:#86efac">ok</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">impact_analysis</span></div></div>
           </div>
 <div class="rounded border border-white/5 bg-ink-950/40 p-2">
             <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T09</span> cc</div>
@@ -488,7 +491,7 @@ pkill -f "dsh web"; dsh web --port 3456 --host 0.0.0.0 --trusted-host &lt;LAN IP
           </div>
 <div class="rounded border border-white/5 bg-ink-950/40 p-2">
             <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T24</span> ms</div>
-            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">mock_syncer</span></div><div class="leading-snug"><span style="color:#f87171">err</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">mismatch → fix → test_bridge</span></div><div class="leading-snug"><span style="color:#86efac">ok</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">test_bridge</span></div></div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">mock_sync</span></div><div class="leading-snug"><span style="color:#f87171">err</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">mismatch → fix → test_bridge</span></div><div class="leading-snug"><span style="color:#86efac">ok</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">test_bridge</span></div></div>
           </div>
 <div class="rounded border border-white/5 bg-ink-950/40 p-2">
             <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T25</span> df</div>
@@ -605,7 +608,7 @@ pkill -f "dsh web"; dsh web --port 3456 --host 0.0.0.0 --trusted-host &lt;LAN IP
                 </div>
                 <div class="rounded-xl p-5" style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06)">
                     <div class="text-white font-medium mb-1">Undo journal <span class="font-mono text-xs" style="color:#6d6d6d">.malong/journal/</span></div>
-                    <div class="text-sm" style="color:#888">Every safe write (write_symbol / write_symbols / batch_edit) leaves a rollback journal in the workspace's <span class="font-mono" style="color:#e8b86e">.malong/journal/</span>; terminal transactions are pruned after a 24h TTL (at most once per hour per workspace). In-flight and <span class="font-mono" style="color:#e8b86e">needs_review</span> journals are never auto-deleted — and only the tool's own rollback backups are touched, never your source files.</div>
+                    <div class="text-sm" style="color:#888">Every safe write (write_symbol / write_symbols / edit_batch) leaves a rollback journal in the workspace's <span class="font-mono" style="color:#e8b86e">.malong/journal/</span>; terminal transactions are pruned after a 24h TTL (at most once per hour per workspace). In-flight and <span class="font-mono" style="color:#e8b86e">needs_review</span> journals are never auto-deleted — and only the tool's own rollback backups are touched, never your source files.</div>
                 </div>
             </div>
         </section>
@@ -616,13 +619,13 @@ pkill -f "dsh web"; dsh web --port 3456 --host 0.0.0.0 --trusted-host &lt;LAN IP
                 <div class="px-6 py-3 text-xs font-mono" style="background:rgba(255,255,255,0.03);border-bottom:1px solid rgba(255,255,255,0.05);color:#e8b86e">One-shot full chain (daemon must be running)</div>
                 <div class="p-5">
                     <div class="text-sm font-mono mb-3" style="color:#b0b0b0">./scripts/ci.sh    <span style="color:#6d6d6d"># cargo test + npm test + dogfood</span></div>
-                    <div class="text-sm font-mono" style="color:#b0b0b0">npm test    <span style="color:#6d6d6d"># 2013 assertions / 81 test files</span></div>
+                    <div class="text-sm font-mono" style="color:#b0b0b0">npm test    <span style="color:#6d6d6d"># 166 test files (full chain, 0 failures)</span></div>
                 </div>
             </div>
             <div class="space-y-3 text-sm font-mono" style="color:#b0b0b0">
                 <div>node tests/test-db-adapter.js   <span style="color:#6d6d6d"># 22 assertions: sql.js backend + persistence</span></div>
-                <div>node tests/test-mcp-server.js    <span style="color:#6d6d6d"># 25 assertions: MCP stdio + daemon round-trip</span></div>
-                <div>cd malong-parse && cargo test    <span style="color:#6d6d6d"># 92 assertions: extraction / protocol / cache / dispatch</span></div>
+                <div>node tests/test-mcp-server.js    <span style="color:#6d6d6d"># 35 assertions: MCP stdio + daemon round-trip</span></div>
+                <div>cd malong-parse && cargo test    <span style="color:#6d6d6d"># 97 assertions: extraction / protocol / cache / dispatch</span></div>
             </div>
         </section>
 
@@ -661,6 +664,10 @@ pkill -f "dsh web"; dsh web --port 3456 --host 0.0.0.0 --trusted-host &lt;LAN IP
                     <div class="text-white font-medium mb-1">Can edits be undone?</div>
                     <div class="text-sm" style="color:#888">Every safe write leaves a rollback journal under <span class="font-mono" style="color:#e8b86e">.malong/journal/</span>; terminal transactions are pruned on a 24h TTL while in-flight / needs-review journals are never deleted — only the tool's own backups are cleaned, never your source.</div>
                 </div>
+                <div class="rounded-xl p-5" style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06)">
+                    <div class="text-white font-medium mb-1">code_check says failed but the code is fine?</div>
+                    <div class="text-sm" style="color:#888">Almost always a <strong style="color:#e8b86e">request-budget truncation</strong>: the MCP request has a hard 120s ceiling and a foreground stage gets 110s, so a longer suite is cut off and reported as a timeout — that is not a code defect. Re-run it as <span class="font-mono" style="color:#e8b86e">code_check(async=true)</span> (600s background cap); the evidence carries the literal "120s hard timeout" note and points at the async retry instead of telling you to edit code.</div>
+                </div>
             </div>
         </section>
 
@@ -679,7 +686,7 @@ pkill -f "dsh web"; dsh web --port 3456 --host 0.0.0.0 --trusted-host &lt;LAN IP
 
     <footer class="py-10 border-t" style="border-color:rgba(255,255,255,0.05)">
         <div class="max-w-5xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-4 text-sm" style="color:#6d6d6d">
-            <div>Malong·Liuhe Toolkit v0.4.7 · MIT License</div>
+            <div>Malong·Liuhe Toolkit v0.5.27 · MIT License</div>
             <div class="flex gap-6">
                 <a href="download.en.html" class="hover:text-white transition-colors">Download</a>
                 <a href="https://github.com/wulun811/LiuHe" target="_blank" class="hover:text-white transition-colors">GitHub</a>

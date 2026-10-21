@@ -12,9 +12,14 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const MALONG = dirname(__dirname)
 const imp = (p) => import(pathToFileURL(p).href)
 
-let pass = 0, fail = 0
+let pass = 0, fail = 0, notRun = 0
 function assert(cond, msg) {
   if (cond) { pass++; console.log(`  ✓ ${msg}`) } else { fail++; console.error(`  ✗ FAIL: ${msg}`) }
+}
+// 第三轮 Windows 复验：不可执行用例显式 not_run（不计通过不算失败）
+function markNotRun(msg, n = 1) {
+  notRun += n
+  console.log(`  ⚠ NOT_RUN: ${msg}`)
 }
 const tmp = (tag) => {
   const ws = join(os.tmpdir(), 'opencode', `r9-${tag}-${process.pid}`)
@@ -58,16 +63,22 @@ console.log('── P2 batch-edit write guard ──')
   const ws = tmp('batch')
   const outside = join(ws, '..', `r9-outside-${process.pid}.txt`)
   writeFileSync(outside, 'ORIGINAL')
-  symlinkSync(outside, join(ws, 'victim.txt'))
-  const r = await delegateWrite({
-    absPath: join(ws, 'victim.txt'),
-    filePath: 'victim.txt',
-    workspaceDir: ws,
-    originalContent: 'ORIGINAL',
-    finalContent: 'EVIL',
-  })
-  assert(r.error?.code === 'PATH_BLOCKED', `symlink 写穿被拒（得 ${JSON.stringify(r.error)}）`)
-  assert(readFileSync(outside, 'utf-8') === 'ORIGINAL', '外部文件未被写入')
+  let linked = true
+  try {
+    if (process.env.MALONG_TEST_FORCE_NO_SYMLINK) { const e = Object.assign(new Error('forced: no symlink privilege'), { code: 'EPERM' }); throw e }
+    symlinkSync(outside, join(ws, 'victim.txt'))
+  } catch (e) { linked = false; markNotRun(`P2/P3 symlink 写穿守卫（创建失败: ${e.code || e.message}）`, 2) }
+  if (linked) {
+    const r = await delegateWrite({
+      absPath: join(ws, 'victim.txt'),
+      filePath: 'victim.txt',
+      workspaceDir: ws,
+      originalContent: 'ORIGINAL',
+      finalContent: 'EVIL',
+    })
+    assert(r.error?.code === 'PATH_BLOCKED', `symlink 写穿被拒（得 ${JSON.stringify(r.error)}）`)
+    assert(readFileSync(outside, 'utf-8') === 'ORIGINAL', '外部文件未被写入')
+  }
   rmSync(outside, { force: true })
   try { rmSync(ws, { recursive: true, force: true }) } catch {}
 }
@@ -183,8 +194,54 @@ console.log('── F4c batch lock: live batch protected, stale batch recoverabl
   const m1 = jr.createBatchMarker(ws, ['a'], 'strict')
   let busy = false
   try { jr.createBatchMarker(ws, ['b'], 'strict') } catch (e) { busy = e.code === 'BATCH_LOCK_BUSY' }
-  jr.finishBatchMarker(ws, m1.batchId)
   assert(busy, 'F4c: 并发建批次 → BATCH_LOCK_BUSY')
+  // 第二轮审查（P0）：获取失败不得删他人活锁（旧实现 catch 无条件 rmSync 窃锁）
+  const lockPath0 = join(ws, '.malong', 'batches', '.batch-lock')
+  const lock0 = JSON.parse(readFileSync(lockPath0, 'utf-8'))
+  assert(lock0.pid === process.pid, 'F4c: 失败获取后活锁仍在且归属持锁进程（P0 锁窃取）')
+  jr.finishBatchMarker(ws, m1.batchId)
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
+}
+console.log('── F4e batch lock: dead-owner lock auto-reclaimed (第二轮审查 P0) ──')
+{
+  const jr = await imp(join(MALONG, 'write-journal.js'))
+  const ws = tmp('locksteal')
+  mkdirSync(ws, { recursive: true })
+  const lockPath = join(ws, '.malong', 'batches', '.batch-lock')
+  mkdirSync(dirname(lockPath), { recursive: true })
+  writeFileSync(lockPath, JSON.stringify({ pid: 999999999, ts: Date.now() - 60_000 }))
+  let reclaimed = null
+  try { reclaimed = jr.createBatchMarker(ws, ['x'], 'strict') } catch (e) { reclaimed = { error: e.code } }
+  assert(typeof reclaimed?.batchId === 'string', `F4e: 死锁主的锁可回收并获得批次锁（得 ${JSON.stringify(reclaimed)}）`)
+  if (reclaimed?.batchId) jr.finishBatchMarker(ws, reclaimed.batchId)
+  try { rmSync(ws, { recursive: true, force: true }) } catch {}
+}
+console.log('── F4d batch lock: stale mtime + live pid protected; dead pid recoverable ──')
+{
+  const jr = await imp(join(MALONG, 'write-journal.js'))
+  const { sha256 } = await imp(join(MALONG, 'hash-utils.js'))
+  const ws = tmp('lockpid')
+  mkdirSync(ws, { recursive: true })
+  writeFileSync(join(ws, 'f1.js'), 'let f1 = 2;')
+  writeFileSync(join(ws, 'f2.js'), 'let f2 = 1;')
+  const j1 = jr.createJournal(ws, 'f1.js', join(ws, 'f1.js'), 'let f1 = 1;', { editMode: 'patch' })
+  jr.updateJournalState(j1.dir, { state: 'staged', new_hash: sha256('let f1 = 2;') })
+  jr.updateJournalState(j1.dir, { state: 'committed' })
+  const { batchId } = jr.createBatchMarker(ws, ['f1.js', 'f2.js'], 'strict')
+  jr.updateBatchMarker(ws, batchId, { txnIds: [j1.txnId] })
+  const lockPath = join(ws, '.malong', 'batches', '.batch-lock')
+  const old = new Date(Date.now() - 60_000)
+  utimesSync(lockPath, old, old) // 模拟批次已运行 60s（无 pid 判活的旧实现会误判死并回滚）
+  const r1 = await jr.recoverJournals(ws)
+  assert(!r1.some(x => x.action === 'batch_partial_rollback'), 'F4d: 存活 pid + 陈旧 mtime 不被误判死')
+  assert(readFileSync(join(ws, 'f1.js'), 'utf-8') === 'let f1 = 2;', 'F4d: 活跃批次文件未被回滚')
+  // 死 pid + 陈旧 mtime → 正常崩溃恢复
+  jr.releaseBatchLock(ws)
+  writeFileSync(lockPath, JSON.stringify({ pid: 999999999, ts: Date.now() - 60000 }))
+  utimesSync(lockPath, old, old)
+  const r2 = await jr.recoverJournals(ws)
+  assert(r2.some(x => x.action === 'batch_partial_rollback'), 'F4d: 死 pid → 恢复回滚')
+  assert(readFileSync(join(ws, 'f1.js'), 'utf-8') === 'let f1 = 1;', 'F4d: f1 回滚到原内容')
   try { rmSync(ws, { recursive: true, force: true }) } catch {}
 }
 console.log('── H11 stale txn sweep ──')
@@ -238,9 +295,9 @@ console.log('── H10 error normalization ──')
 console.log('── B8 dual daemon startup race ──')
 {
   const bin = join(MALONG, '..', '..', '..', 'malong-parse', 'target', 'release', 'malong-parse')
-  if (!existsSync(bin)) {
-    console.log('  (skip: release binary not built)')
-    pass++
+  if (process.platform === 'win32' || !existsSync(bin)) {
+    // 第三轮 Windows 复验：旧实现此处 pass++（假绿）——本地无 release binary / Windows 无 UDS 语义时显式 not_run
+    markNotRun(`B8 双 daemon 竞态（${process.platform === 'win32' ? 'Windows 无 UDS 语义' : 'release binary 未构建'}）`, 4)
   } else {
     const sock = join(os.tmpdir(), 'opencode', `r9-race-${process.pid}.sock`)
     const env = { ...process.env, MALONG_SOCKET: sock }
@@ -294,5 +351,5 @@ console.log('── B8 dual daemon startup race ──')
   }
 }
 
-console.log(`\nr9: ${pass} passed, ${fail} failed`)
+console.log(`\nr9: ${pass} passed, ${fail} failed${notRun ? `, ${notRun} not_run` : ''}`)
 process.exit(fail > 0 ? 1 : 0)

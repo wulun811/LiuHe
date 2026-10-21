@@ -18,20 +18,34 @@ export const version = '0.1.0'
 
 let _core, _codeIndex, _langParser
 
+// ── H01（0.5.14 复审修复）：轻量排序改进（确定性规则，不引入语义检索/embedding）──
+// ① 停用词：自然语言里的 after/how/the/for 等普通词不再当强锚点（仅多词查询过滤；单词查询原样保留）；
+// ② fixtures/历史 benchmark 副本默认降权；目标在测试目录或用户明确找测试时不降权（有限改进，不当通用语义检索宣传）；
+// ③ 低置信声明：无强匹配时明确说低置信并建议补锚点，不强造答案。
+const STOPWORDS = new Set(['a', 'an', 'and', 'are', 'as', 'at', 'be', 'been', 'before', 'after', 'by', 'can', 'could', 'did', 'do', 'does', 'for', 'from', 'how', 'if', 'in', 'into', 'is', 'it', 'its', 'me', 'my', 'of', 'on', 'or', 'our', 'please', 'should', 'so', 'some', 'that', 'the', 'their', 'them', 'then', 'there', 'these', 'this', 'those', 'to', 'up', 'use', 'used', 'using', 'was', 'we', 'were', 'what', 'when', 'where', 'which', 'while', 'who', 'why', 'will', 'with', 'would', 'you', 'your', 'find', 'search', 'locate', 'show', 'list', 'get', 'all', 'any', 'need', 'want'])
+const TEST_INTENT = /\b(tests?|specs?|fixtures?|benchs?|benchmarks?|mocks?)\b/i
+const TESTY_PATH = /(^|\/)(tests?|__tests__|fixtures?|benchmarks?|mocks?|samples?)(\/|$)|\.[a-z0-9]+\.(test|spec)\.[a-z0-9]+$/i
+
 export async function init(core) {
   _core = core
   core.registerService('codeSearch', {
     async search(query, { topK = 10, tenantId = 'default' } = {}) {
-      if (!query || query.trim().length < 2) return { query, results: [], intent: 'unknown' }
+      if (!query || query.trim().length < 2) return { query, results: [], intent: 'unknown', confidence: 'none', search_method: 'deterministic tokens + intent regex (NOT semantic/RAG)' }
       const intent = _classifyQuery(query)
       const tokens = _tokenize(query)
       const [symbolResults, fileResults, callResults] = await Promise.all([
-        _searchSymbols(tokens, topK),
-        _searchFiles(tokens, topK),
+        _searchSymbols(tokens, topK, query),
+        _searchFiles(tokens, topK, query),
         _executeIntent(intent, tokens, query),
       ])
       const combined = _fuseResults(symbolResults, fileResults, callResults, query, topK)
-      return { query, intent, results: combined }
+      // H01：低置信声明（不强造答案；有限改进不等于通用语义检索）
+      const topScore = combined.length ? (combined[0].score || 0) : 0
+      const confidence = combined.length === 0 ? 'none' : topScore >= 0.75 ? 'high' : topScore >= 0.5 ? 'medium' : 'low'
+      const note = (confidence === 'low' || confidence === 'none')
+        ? 'Low-confidence: no strong match on natural-language terms (deterministic token search + intent regex, NOT semantic/RAG). Add an exact identifier/backticked symbol, or pass file/symbol anchors — weak or zero hits are not proof of absence.'
+        : undefined
+      return { query, intent, results: combined, confidence, search_method: 'deterministic tokens + intent regex (NOT semantic/RAG)', ...(note ? { note } : {}) }
     },
   })
   core.log('info', `[code-search] service registered`)
@@ -55,13 +69,44 @@ function _classifyQuery(query) {
 }
 
 function _tokenize(query) {
-  return query
+  const raw = query
     .replace(/[^a-zA-Z0-9_\u4e00-\u9fff]/g, ' ')
     .split(/\s+/)
     .filter(t => t.length >= 1)
+  // H01：仅多词查询做停用词过滤；过滤后为空则回退原样（不吞用户输入）
+  if (raw.length <= 2) return raw
+  const filtered = raw.filter(t => /[\u4e00-\u9fff]/.test(t) || t.length < 3 || !STOPWORDS.has(t.toLowerCase()))
+  return filtered.length ? filtered : raw
 }
 
-async function _searchSymbols(tokens, limit) {
+// H01/F3：路径降权（测试/夹具/基准副本）；F3（0.5.14 Windows 复核）修正语义——明确测试意图不再「整体豁免」
+// 降权（测试候选仍可见、降到 0.8 并标原因），否则无关夹具只靠通用词就能排到实现前面（专家 035：Command 夹具首位）。
+function _pathPenalty(p, query) {
+  const s = String(p || '')
+  if (!s) return 1
+  const testIntent = TEST_INTENT.test(String(query || ''))
+  if (TESTY_PATH.test(s)) return testIntent ? 0.8 : 0.45
+  return 1
+}
+
+function _testyPenaltyReason(query) {
+  return TEST_INTENT.test(String(query || ''))
+    ? 'test/fixture path (explicit test intent: kept but ranked after production)'
+    : 'test/fixture/benchmark path downranked (no explicit test intent in query)'
+}
+
+// H01：符号评分——精确名 > 名称包含 token > token 包含名称 > 仅弱子串命中（不把通用词抬成强锚点）
+function _symbolScore(tok, name) {
+  const t = String(tok || '').toLowerCase()
+  const n = String(name || '').toLowerCase()
+  if (!t || !n) return 0
+  if (t === n) return 0.9
+  if (n.includes(t)) return 0.6 + 0.1 * (t.length / Math.max(1, n.length))
+  if (t.includes(n)) return 0.55
+  return 0.3 * (t.length / Math.max(t.length, n.length))
+}
+
+async function _searchSymbols(tokens, limit, rawQuery) {
   const _getService = () => _core?.services?.codeIndex
   const ci = _getService()
   if (!ci?.searchSymbols) return []
@@ -73,13 +118,15 @@ async function _searchSymbols(tokens, limit) {
     try {
       const matches = await ci.searchSymbols(tok, { limit: Math.ceil(limit / Math.max(1, tokens.length)) })
       for (const m of matches) {
+        const pen = _pathPenalty(m.file, rawQuery)
         results.push({
           type: 'symbol',
           name: m.name,
           kind: m.type,
           file: m.file,
           line: m.start_line,
-          score: tok === m.name ? 0.9 : tok.length / Math.max(tok.length, m.name.length) * 0.7,
+          score: _symbolScore(tok, m.name) * pen,
+          ...(pen < 1 ? { rank_reason: _testyPenaltyReason(rawQuery) } : {}),
         })
       }
     } catch {}
@@ -88,7 +135,7 @@ async function _searchSymbols(tokens, limit) {
   return results.slice(0, limit)
 }
 
-async function _searchFiles(tokens, limit) {
+async function _searchFiles(tokens, limit, rawQuery) {
   const _getService = () => _core?.services?.codeIndex
   const ci = _getService()
   if (!ci?.getStats) return []
@@ -105,7 +152,8 @@ async function _searchFiles(tokens, limit) {
       for (const s of syms) {
         if (!seen.has(s.file)) {
           seen.add(s.file)
-          results.push({ type: 'file', path: s.file, score: tok.length > 3 ? 0.5 : 0.3 })
+          const pen = _pathPenalty(s.file, rawQuery)
+          results.push({ type: 'file', path: s.file, score: (tok.length > 3 ? 0.5 : 0.3) * pen, ...(pen < 1 ? { rank_reason: _testyPenaltyReason(rawQuery) } : {}) })
         }
       }
     } catch {}
@@ -179,6 +227,13 @@ function _fuseResults(symbolResults, fileResults, intentResults, query, topK) {
     const key = `${r.type}:${r.path}`
     if (!seen.has(key)) { seen.add(key); all.push(r) }
   }
-  all.sort((a, b) => (b.score || 0) - (a.score || 0))
+  all.sort((a, b) => _testyTier(a) - _testyTier(b) || (b.score || 0) - (a.score || 0))
   return all.slice(0, topK)
+}
+
+// F3（0.5.14 Windows 复核）：测试/夹具候选统一排到生产候选之后（仍可见，不隐藏）——
+// 专家 035：原实现按分数排序，夹具 Command（0.9 精确名）压过目标实现。
+function _testyTier(r) {
+  const f = String((r && (r.file || r.path || r.callerFile || r.sourceFile)) || '')
+  return TESTY_PATH.test(f) ? 1 : 0
 }

@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, writeFileSync, accessSync, constants, unlinkSync, statSync, rmSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, writeFileSync, accessSync, constants, unlinkSync, statSync, rmSync, realpathSync } from 'node:fs'
 import net from 'node:net'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -108,9 +108,10 @@ export function readUsageStats() {
   } catch { return null }
 }
 
-export async function runHealthCheck({ stateDir, toolsDir, workspacesDir, registry, log, semaphore, activeRequests, parseService }) {
+export async function runHealthCheck({ stateDir, toolsDir, workspacesDir, registry, log, semaphore, activeRequests, parseService, buildInfo }) {
   const checks = []
   let ok = true
+  let parserIdentity = null
 
   function add(name, status, detail) {
     checks.push({ name, status, detail })
@@ -173,13 +174,77 @@ export async function runHealthCheck({ stateDir, toolsDir, workspacesDir, regist
       const mode = parseService.getMode()
       const isRust = parseService.isRustService()
       if (isRust) {
-        add('Parse Service', 'PASS', `rust-service mode, config=${parseService.getConfigMode?.() || '?'}`)
+        // 7-C：运行身份核验——daemon 自报告（version/pid/exe_path/exe_size/build_commit）与
+        // 本 MCP 可解析二进制对比；不一致 = 部署漂移（默认 daemon 仍是旧构建）
+        let identity = null
+        try { identity = await parseService.getIdentity?.() } catch (e) { identity = { error: (e && e.message) || 'identity_failed' } }
+        if (identity && !identity.error) {
+          const d = identity.daemon
+          const daemonOk = !!(d && !d.error)
+          const daemonDesc = daemonOk
+            ? ('daemon v' + d.version + ' pid=' + d.pid + ' uptime=' + d.uptime + 's' + (d.exe_path ? ' exe=' + d.exe_path : '') + (d.exe_size != null ? ' size=' + d.exe_size : '') + (d.build_commit && d.build_commit !== 'unknown' ? ' commit=' + d.build_commit : ''))
+            : (d && d.error ? 'daemon health error: ' + d.error : 'daemon identity unavailable (not connected)')
+          // 7-C 修正（2026-10-18 Windows 复核）：比较前先 realpath —— daemon 自报的是 /proc/self/exe 真路径，
+          // 而 resolved_bin 来自配置/环境变量；两者经符号链接（本机 ~/.local/bin → /mnt/ssd/NAI/.local/bin）
+          // 或 Windows 8.3 短名/目录联接时字符串不同 → 旧实现把「同一个二进制」误报成 DRIFT。
+          const norm = (p) => {
+            const raw = String(p || '')
+            let real = raw
+            try { real = realpathSync(raw) } catch { real = raw }
+            return real.replace(/\\/g, '/').toLowerCase()
+          }
+          let drift = null
+          if (daemonOk && d.exe_path && identity.resolved_bin) {
+            if (norm(d.exe_path) !== norm(identity.resolved_bin)) {
+              drift = 'daemon binary (' + d.exe_path + ') differs from resolvable binary (' + identity.resolved_bin + ') — parser upgrade pending or MALONG_PARSE_BIN mismatch'
+            } else if (d.exe_size != null && identity.resolved_bin_size != null && d.exe_size !== identity.resolved_bin_size) {
+              drift = 'same exe path but size mismatch (daemon ' + d.exe_size + ' vs resolved ' + identity.resolved_bin_size + ')'
+            }
+          }
+          const oldDaemon = daemonOk && d.exe_path == null
+          parserIdentity = {
+            ...identity,
+            drift: drift ? { detected: true, reason: drift } : { detected: false },
+            ...(oldDaemon ? { note: 'daemon predates identity fields (exe_path/exe_size) — rebuild and redeploy to expose build identity' } : {}),
+          }
+          const resolvedDesc = identity.resolved_bin
+            ? ('; resolved=' + identity.resolved_bin + (identity.resolved_bin_sha256 ? ' sha256=' + identity.resolved_bin_sha256.slice(0, 12) : ''))
+            : ''
+          add('Parse Service', drift ? 'WARN' : 'PASS', 'rust-service ' + identity.endpoint + ' connected=' + identity.connected + '; ' + daemonDesc + (oldDaemon ? ' (predates identity fields)' : '') + resolvedDesc + (drift ? '; DRIFT: ' + drift : ''))
+        } else {
+          add('Parse Service', 'PASS', 'rust-service mode, config=' + (parseService.getConfigMode?.() || '?') + (identity && identity.error ? ' (identity: ' + identity.error + ')' : ''))
+        }
       } else if (mode === 'builtin') {
-        add('Parse Service', 'INFO', `builtin mode (fallback), env=${parseService.getConfigMode?.() || '?'}`)
+        add('Parse Service', 'INFO', 'builtin mode (fallback), env=' + (parseService.getConfigMode?.() || '?'))
       } else {
-        add('Parse Service', 'WARN', `unexpected mode: ${mode}`)
+        add('Parse Service', 'WARN', 'unexpected mode: ' + mode)
       }
     }
+  }
+
+  // 7-C：服务器运行身份（版本/commit/pid/node）——与解析器身份并列，升级状态一眼可核
+  if (buildInfo) {
+    add('Server Identity', 'PASS', 'malong v' + (buildInfo.version || '?') + (buildInfo.commit ? ' commit=' + buildInfo.commit : '') + ' pid=' + (buildInfo.pid || process.pid) + ' node=' + (buildInfo.node || process.version))
+  }
+
+  // 7-D：状态目录迁移状态（LH-002 闭环）——incomplete 必须可见且给出受控重试入口
+  try {
+    const migPath = join(stateDir, 'state-migration.json')
+    if (existsSync(migPath)) {
+      let mig = null
+      try { mig = JSON.parse(readFileSync(migPath, 'utf-8')) } catch {}
+      if (mig?.status === 'complete') {
+        add('State Migration', 'PASS', 'complete (' + (mig.moved?.length || 0) + ' moved, ' + (mig.skipped?.length || 0) + ' skipped)')
+      } else if (mig?.status === 'incomplete') {
+        add('State Migration', 'WARN', 'incomplete (attempts=' + (mig.attempts || 0) + '/3, last_error=' + (mig.last_error || '?') + '); source kept at ' + (mig.legacy_dir || '?') + ' — retry: MALONG_RETRY_STATE_MIGRATION=1 + restart, or node state-migrate-cli.js <legacy> <next>')
+      } else {
+        add('State Migration', 'PASS', 'marker unreadable/unknown — ignored')
+      }
+    } else {
+      add('State Migration', 'PASS', 'no pending migration')
+    }
+  } catch (e) {
+    add('State Migration', 'WARN', 'cannot read migration marker: ' + e.message)
   }
 
   try {
@@ -213,32 +278,40 @@ export async function runHealthCheck({ stateDir, toolsDir, workspacesDir, regist
               : ageMs < 86400000 ? `${Math.round(ageMs / 3600000)}h ago`
               : `${Math.round(ageMs / 86400000)}d ago`
           } catch {}
-          databases.push({ workspace: e.name, size_mb: sizeMB, last_access: lastAccess })
-          if (createDb) {
-            let db = null
-            try {
-              // 7（#18）：busy_timeout——恰逢 indexBatch 的 DROP/CREATE INDEX（schema 锁）时
-              // SQLITE_BUSY 被旧实现当损坏计 WARN
-              db = await createDb(dbPath, { readonly: true, timeout: 5000 })
-              const r = db.pragma('integrity_check')
-              const integrityOk = Array.isArray(r) && r.length === 1 && r[0]?.integrity_check === 'ok'
-              if (!integrityOk) badCount++
-            } catch { badCount++ } finally {
-              // 审核补：createDb 成功后 integrity_check 抛错（或路径）时 db 未 close——句柄泄漏；finally 兜底
-              try { db?.close() } catch {}
-            }
-          }
+          databases.push({ workspace: e.name, size_mb: sizeMB, last_access: lastAccess, path: dbPath })
         }
       }
       // r48: 原代码引用未定义变量 `Database`（只在 db-adapter.js 内部定义）→ 恒抛
       // ReferenceError 被外层 catch 吞 → DB integrity 永远 WARN "cannot scan: Database is not defined"
       if (createDb) {
-        add('DB integrity', badCount === 0 ? 'PASS' : 'WARN', `${dbCount} workspace(s), ${badCount} corrupted, total ${Math.round(totalSizeMB)}MB`)
+        // 第二轮审查：integrity_check 同步全量扫（27 库实测）阻塞事件循环——每次最多查 3 个轮转，
+        // 多轮扫描覆盖全部；细节注明本次覆盖面，避免 PASS 被读作全量健康
+        const start = databases.length ? Math.floor(Date.now() / 30000) % databases.length : 0
+        const upto = Math.min(3, databases.length)
+        for (let i = 0; i < upto; i++) {
+          const rec = databases[(start + i) % databases.length]
+          let db = null
+          try {
+            // 7（#18）：busy_timeout——恰逢 indexBatch 的 DROP/CREATE INDEX（schema 锁）时
+            // SQLITE_BUSY 被旧实现当损坏计 WARN
+            db = await createDb(rec.path, { readonly: true, timeout: 5000 })
+            const r = db.pragma('integrity_check')
+            const integrityOk = Array.isArray(r) && r.length === 1 && r[0]?.integrity_check === 'ok'
+            if (!integrityOk) badCount++
+          } catch { badCount++ } finally { try { db?.close() } catch {} }
+        }
+        add('DB integrity', badCount === 0 ? 'PASS' : 'WARN', `${dbCount} workspace(s), ${badCount} corrupted (checked ${upto}/${databases.length} this scan), total ${Math.round(totalSizeMB)}MB`)
       } else {
         add('DB integrity', 'PASS', `${dbCount} workspace(s), total ${Math.round(totalSizeMB)}MB — sqlite3 not available for integrity check`)
       }
       if (databases.length > 0) {
-        checks.push({ name: 'Workspace databases', status: 'INFO', detail: `${databases.length} database(s)`, databases })
+        // S3：库列表过长（28+ 条日志刷屏）——只回传前 10 条 + 总数，完整信息在各库 path 可推
+        checks.push({
+          name: 'Workspace databases', status: 'INFO',
+          detail: `${databases.length} database(s)` + (databases.length > 10 ? ` (showing first 10)` : ''),
+          databases: databases.slice(0, 10),
+          ...(databases.length > 10 ? { databases_omitted: databases.length - 10 } : {}),
+        })
       }
     } catch (e) {
       add('DB integrity', 'WARN', `cannot scan: ${e.message}`)
@@ -323,7 +396,7 @@ export async function runHealthCheck({ stateDir, toolsDir, workspacesDir, regist
     add('Tool registry', count > 0 ? 'PASS' : 'WARN', `${count} tools loaded`)
   }
 
-  return { status: ok ? 'ok' : 'warn', checks, timestamp: Date.now() }
+  return { status: ok ? 'ok' : 'warn', checks, ...(parserIdentity ? { parser_identity: parserIdentity } : {}), ...(buildInfo ? { build: buildInfo } : {}), timestamp: Date.now() }
 }
 
 /**
@@ -344,15 +417,20 @@ export function cleanupStaleWorkspaces(workspacesDir, opts = {}) {
   }
   const maxAgeMs = maxAgeDays * 86400000
   const now = Date.now()
+  // S3.3（T14）：永不删除的目录名/内容标记——即使误传状态根，也不误删任务/日志/job 活跃资产
+  const KEEP_DIR_NAMES = new Set(['entry-tasks', 'jobs', 'journal', 'batches', 'workspaces'])
+  const KEEP_MARKERS = new Set(['entry-tasks', 'jobs', 'journal', 'batches'])
   const deleted = []
   let keptCount = 0
   let freedBytes = 0
   for (const e of readdirSync(workspacesDir, { withFileTypes: true })) {
     if (!e.isDirectory()) continue
     if (protect.includes(e.name)) { keptCount++; continue }
+    if (KEEP_DIR_NAMES.has(e.name)) { keptCount++; continue } // T14 保留名
     const wsDir = join(workspacesDir, e.name)
     let files
     try { files = readdirSync(wsDir) } catch { keptCount++; continue }
+    if (files.some(f => KEEP_MARKERS.has(f))) { keptCount++; continue } // T14 含活跃资产标记
     let lastActivity = 0
     let sizeBytes = 0
     for (const f of files) {

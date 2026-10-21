@@ -6,8 +6,13 @@ import os from 'node:os'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const FIXTURES = join(__dirname, 'fixtures')
 
-let passed = 0, failed = 0
+let passed = 0, failed = 0, notRun = 0
 const failures = []
+// 第三轮 Windows 复验：symlink 不可用（EPERM）→ 显式 not_run（旧 assert(false,'symlink 创建') 污染失败统计）
+function markNotRun(label, detail) {
+  notRun++
+  console.log(`  ⚠ NOT_RUN: ${label}${detail ? ' (' + detail + ')' : ''}`)
+}
 
 function assert(cond, label) {
   if (cond) { passed++; console.log(`  ✓ ${label}`) }
@@ -84,11 +89,15 @@ async function testA3() {
 
   const result = await handle({ workspace_dir: FIXTURES, file: 'src/sql_queries.py' }, mockContext)
 
-  // .env.production 有 export REDIS_URL=... 和 export SECRET_KEY=...
+  // .env.production.example 有 export REDIS_URL=... 和 export SECRET_KEY=...
   // BUG: parseEnvFiles 不解析 export 前缀 → REDIS_URL 被误报为 drift
   const declaredVars = result.config_manifest?.declared_vars || []
   assert(declaredVars.includes('REDIS_URL'), `A3: REDIS_URL 在 declared_vars 中 (export 前缀)`)
   assert(declaredVars.includes('SECRET_KEY'), `A3: SECRET_KEY 在 declared_vars 中 (export 前缀)`)
+  // 0.5.23：夹具改名 .env.production → .env.production.example（公开仓不留 .env* 真名文件），
+  // 扫描白名单必须跟上——否则本用例会因「找不到 env 文件」而静默失效（边界断言）
+  const envFiles = result.config_manifest?.env_files || []
+  assert(envFiles.includes('.env.production.example'), `A3: 扫描白名单含 .env.production.example (得 ${JSON.stringify(envFiles)})`)
 
   const envDrifts = (result.drifts || []).filter(d => d.type === 'missing_env_var')
   const redisDrift = envDrifts.find(d => d.name === 'REDIS_URL')
@@ -528,13 +537,26 @@ async function testA25() {
   const outside = join(FIXTURES, 'outside-todo')
   mkdirSync(outside, { recursive: true })
   writeFileSync(join(outside, 'secret.js'), '// TODO: 外部文件不该被扫到\n')
-  try { symlinkSync(join(outside, 'secret.js'), join(ws, 'link.js')) } catch { assert(false, 'symlink 创建'); return }
-  const r = await at({ workspace_dir: ws, scope: 'link.js' }, { ...mockContext, codeIndexService: null })
-  assert(r.error === 'path_blocked', `scope 指向外部 symlink → path_blocked（得 ${r.error}）`)
+  // NR01（第四轮复验）：两分支互不早退——文件链失败只 not_run 本分支，目录分支独立执行/记账
+  let fileLinked = true
+  try {
+    if (process.env.MALONG_TEST_FORCE_NO_SYMLINK) { const e = Object.assign(new Error('forced: no symlink privilege'), { code: 'EPERM' }); throw e }
+    symlinkSync(join(outside, 'secret.js'), join(ws, 'link.js'))
+  } catch (e) { fileLinked = false; markNotRun('A25 文件 symlink 逃逸', `创建失败: ${e.code || e.message}`) }
+  if (fileLinked) {
+    const r = await at({ workspace_dir: ws, scope: 'link.js' }, { ...mockContext, codeIndexService: null })
+    assert(r.error === 'path_blocked', `scope 指向外部 symlink → path_blocked（得 ${r.error}）`)
+  }
   // R22-⑯：目录 symlink 同样拦截（旧守卫只在 isFile 分支，目录绕行）
-  try { symlinkSync(outside, join(ws, 'extdir'), 'dir') } catch { assert(false, 'dir symlink 创建'); return }
-  const rDir = await at({ workspace_dir: ws, scope: 'extdir' }, { ...mockContext, codeIndexService: null })
-  assert(rDir.error === 'path_blocked', `scope 指向外部目录 symlink → path_blocked（得 ${rDir.error}）`)
+  let dirLinked = true
+  try {
+    if (process.env.MALONG_TEST_FORCE_NO_SYMLINK) { const e = Object.assign(new Error('forced: no symlink privilege'), { code: 'EPERM' }); throw e }
+    symlinkSync(outside, join(ws, 'extdir'), 'dir')
+  } catch (e) { dirLinked = false; markNotRun('A25 目录 symlink 拦截', `创建失败: ${e.code || e.message}`) }
+  if (dirLinked) {
+    const rDir = await at({ workspace_dir: ws, scope: 'extdir' }, { ...mockContext, codeIndexService: null })
+    assert(rDir.error === 'path_blocked', `scope 指向外部目录 symlink → path_blocked（得 ${rDir.error}）`)
+  }
   try { rmSync(ws, { recursive: true, force: true }) } catch {}
   try { rmSync(outside, { recursive: true, force: true }) } catch {}
 }
@@ -600,7 +622,7 @@ async function testA24() {
 
 
 console.log('\n══════════════════════════════════════════════════')
-console.log(`总计: ${passed} passed, ${failed} failed`)
+console.log(`总计: ${passed} passed, ${failed} failed${notRun ? `, ${notRun} not_run` : ''}`)
 if (failures.length > 0) {
   console.log('\n失败列表:')
   for (const f of failures) console.log(`  ✗ ${f}`)

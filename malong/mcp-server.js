@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, appendFileSync, writeFileSync, statSync, openSync, renameSync, unlinkSync } from 'node:fs'
+import { existsSync, mkdirSync, appendFileSync, writeFileSync, readFileSync, statSync, openSync, closeSync, renameSync, unlinkSync, utimesSync } from 'node:fs'
 import { join, resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawn } from 'node:child_process'
@@ -10,9 +10,31 @@ import os from 'node:os'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
-import { Semaphore, heavyToolWeight } from './semaphore.js'
+// 版本单一来源：package.json（历史硬编码 '0.3.0' 与包版本漂移——F5/S0.1）
+// 版本解析：读 <本目录>/package.json；打包副本（DSH bundle：server/ 与上级 package.json
+// 分离）回退读 ../package.json——否则 npm 安装副本报告 0.0.0（DSH 狗粮 2026-10-13 发现）。
+const PKG_VERSION = readPackageVersion(__dirname)
 
-const REQUEST_TIMEOUT_MS = parseInt(process.env.MALONG_REQUEST_TIMEOUT_MS || '120000', 10)
+// 7-C（2026-10-07 专家复测 P1-B）：服务器运行身份——version + git commit（env MALONG_BUILD_COMMIT
+// 优先；其次读 .git/HEAD，npm 安装副本无 .git → commit=null）+ pid/node。health 直接可见。
+const BUILD_INFO = (() => {
+  let commit = process.env.MALONG_BUILD_COMMIT || null
+  if (!commit) {
+    for (const gitDir of [join(__dirname, '.git'), join(__dirname, '..', '.git')]) {
+      try {
+        const head = readFileSync(join(gitDir, 'HEAD'), 'utf-8').trim()
+        if (head.startsWith('ref: ')) { commit = readFileSync(join(gitDir, head.slice(5).trim()), 'utf-8').trim().slice(0, 12); break }
+        if (/^[0-9a-f]{7,40}$/i.test(head)) { commit = head.slice(0, 12); break }
+      } catch {}
+    }
+  }
+  return { version: PKG_VERSION, commit, pid: process.pid, node: process.version }
+})()
+
+import { Semaphore, heavyToolWeight } from './semaphore.js'
+import { getStateDir, ensureStateDir, migrateLegacyStateDir, readPackageVersion } from './host-config.js'
+
+const REQUEST_TIMEOUT_MS = (() => { const n = parseInt(process.env.MALONG_REQUEST_TIMEOUT_MS || '120000', 10); return Number.isFinite(n) && n > 0 ? n : 120000 })()
 const SEMAPHORE_TIMEOUT_MS = 60_000
 const RECOMMENDED_HEAP_MB = 512
 // r10e(F3)：并发 3 → 5——实测 RSS 194MB/heap 12MB 内存充足（上限 480MB），3 槽在 verify_pipeline 120s 长任务占 1 槽时
@@ -33,10 +55,10 @@ const IS_WIN = process.platform === 'win32'
 // r9(H14)：parse-client 的 socket 路径已跟随 env（r8 F4 pid 同步）——mcp-server 的检查/spawn 探测
 // 还硬编码默认路径 → 设了 MALONG_SOCKET 的会话双 spawn / 孤儿 daemon
 const PARSE_SERVICE_SOCKET = process.env.MALONG_SOCKET || `/tmp/malong-parse-${UID}.sock`
-const PARSE_SERVICE_TCP_PORT = parseInt(process.env.MALONG_PORT || '31001', 10)
+const PARSE_SERVICE_TCP_PORT = (() => { const n = parseInt(process.env.MALONG_PORT || '31001', 10); return Number.isFinite(n) && n > 0 && n < 65536 ? n : 31001 })()
 // r53: MALONG_PARSE_BIN env 覆盖（与 parse-client 对齐——此前启动 daemon 用硬编码路径，运行期重启用 env 路径，用户设 env 后两个路径 daemon 可能并存）
 // r0.4.5-post5: 统一走 parse-bin.js 共享解析（env → npm 平台包 → 包内 server/bin → ~/.local/bin → dev target）
-import { resolveParseBin } from './parse-bin.js'
+import { resolveParseBin, resolveParseBinCandidates } from './parse-bin.js'
 const PARSE_SERVICE_BIN = resolveParseBin() ?? join(os.homedir(), '.local', 'bin', 'malong-parse')
 const PARSE_SERVICE_BIN_ALT = join(__dirname, '..', 'malong-parse', 'target', 'release', 'malong-parse')
 
@@ -89,10 +111,12 @@ function probeParseService(timeoutMs = 1000) {
     const test = IS_WIN
       ? net.createConnection({ host: '127.0.0.1', port: PARSE_SERVICE_TCP_PORT })
       : net.createConnection(PARSE_SERVICE_SOCKET)
-    const done = (ok) => { test.destroy(); resolve(ok) }
+    // 第二轮审查：探测 timer 必须清理（旧实现每次探测泄漏一个 1s timer，ensureParseService 最多 20 连探）
+    let timer = null
+    const done = (ok) => { clearTimeout(timer); test.destroy(); resolve(ok) }
     test.on('connect', () => done(true))
     test.on('error', () => done(false))
-    setTimeout(() => done(false), timeoutMs)
+    timer = setTimeout(() => done(false), timeoutMs)
   })
 }
 
@@ -115,7 +139,7 @@ async function ensureParseService() {
       binPath = binPath + '.exe'
     }
     if (!existsSync(binPath)) {
-      crashLog('malong-parse binary not found, parse service unavailable')
+      crashLog('malong-parse binary not found, parse service unavailable; searched: ' + resolveParseBinCandidates().filter(Boolean).join(' | '))
       return
     }
   }
@@ -134,10 +158,14 @@ async function ensureParseService() {
       crashLog('malong-parse spawn lock held but service never appeared; giving up')
       return
     }
+    const stderrFd = openParseStderrFd()
     const child = spawn(binPath, [], {
       detached: true,
-      stdio: ['ignore', 'ignore', openParseStderrFd()],
+      windowsHide: true,
+      stdio: ['ignore', 'ignore', stderrFd],
     })
+    // 第二轮审查：spawn 已同步 dup fd，父进程拷贝必须关（旧实现每 spawn 泄漏一个 fd；与 parse-client 对齐）
+    try { closeSync(stderrFd) } catch {}
     child.on('error', (e) => {
       // 二进制不可执行（EACCES/损坏 ELF 等）：异步错误，必须监听否则 uncaughtException 崩服务
       crashLog(`malong-parse spawn error: ${e.message}`)
@@ -194,9 +222,14 @@ const concurrency = cliOpts.concurrency || DEFAULT_CONCURRENCY
 const semaphore = new Semaphore(concurrency)
 
 const services = {}
-const stateDir = join(baseDir, 'data', 'malong-mcp')
+// U（2026-10-05）：状态目录统一——单一 MALONG_STATE_DIR（默认 ~/.config/malong），
+// workspaces/crash.log 一并归位；旧 repo 相对 data/malong-mcp 启动时一次性迁入。
+const stateDir = getStateDir()
+ensureStateDir()
+// 迁移先于预建 workspaces（顺序反了会让“目标已存在→skip”把整棵目录跳过；
+// 且 migrateLegacyStateDir 自身对目录做按条目合并，双保险）
+migrateLegacyStateDir(join(baseDir, 'data', 'malong-mcp'), stateDir, (lvl, msg) => safeLog(msg))
 const workspacesDir = join(stateDir, 'workspaces')
-if (!existsSync(stateDir)) mkdirSync(stateDir, { recursive: true })
 if (!existsSync(workspacesDir)) mkdirSync(workspacesDir, { recursive: true })
 
 const CRASH_LOG = join(stateDir, 'crash.log')
@@ -208,6 +241,10 @@ function safeLog(msg) {
 function crashLog(msg) {
   const ts = new Date().toISOString()
   const line = `[${ts}] ${msg}\n`
+  // 第二轮审查：crash.log 追加无轮转（旧实现可无限增长）——>5MB 轮转保留一份
+  try {
+    if (statSync(CRASH_LOG).size > 5 * 1024 * 1024) renameSync(CRASH_LOG, `${CRASH_LOG}.1`)
+  } catch {}
   try { appendFileSync(CRASH_LOG, line) } catch {}
   safeLog(msg)
 }
@@ -216,6 +253,13 @@ function getWorkspaceDir(workspaceDir) {
   const hash = crypto.createHash('md5').update(resolve(workspaceDir)).digest('hex').slice(0, 12) // malong-ignore: 仅用于生成缓存目录名，非安全用途
   const wsDir = join(workspacesDir, hash)
   if (!existsSync(wsDir)) mkdirSync(wsDir, { recursive: true })
+  // 第二轮审查：跨进程 GC 活性心跳——任一进程每次访问工作区即刷新 metadata.json mtime；
+  // cleanupStaleWorkspaces 按目录内最新 mtime 判活，避免 B 进程删掉 A 进程在用但暂未写入的库
+  try {
+    const metaPath = join(wsDir, 'metadata.json')
+    if (existsSync(metaPath)) utimesSync(metaPath, new Date(), new Date())
+    else writeFileSync(metaPath, JSON.stringify({ last_accessed: new Date().toISOString() }), 'utf8')
+  } catch {}
   return wsDir
 }
 
@@ -281,6 +325,7 @@ async function initModules() {
   const health = await runHealthCheck({
     stateDir, toolsDir, workspacesDir, registry, log: core.log, semaphore, activeRequests,
     parseService: core.getService('langParser'),
+    buildInfo: BUILD_INFO,
   })
   for (const c of health.checks) {
     safeLog(`[health] ${c.status === 'PASS' ? '✓' : c.status === 'CLEANED' ? '♻' : '✗'} ${c.name}: ${c.detail}`)
@@ -291,7 +336,8 @@ async function initModules() {
 
   // 工作区索引库自清理（治本 B）：启动时按 last activity 清 stale 缓存（可重建，删了下次 reindex 恢复）。
   // env MALONG_WS_GC_DAYS 控制阈值（r10：默认 3 天，设 0 禁用）。
-  const gcDays = Number(process.env.MALONG_WS_GC_DAYS ?? 3)
+  const gcRaw = Number(process.env.MALONG_WS_GC_DAYS ?? 3)
+  const gcDays = Number.isFinite(gcRaw) ? gcRaw : 3
   if (gcDays > 0) {
     try {
       // r9(F10/H12)：启动 GC 保护本进程全部已初始化 workspace（不只当前一个）——
@@ -321,6 +367,7 @@ function buildContext() {
     runHealthCheck: () => runHealthCheck({
       stateDir, toolsDir: join(__dirname, 'tools'), workspacesDir, registry, log: core.log, semaphore, activeRequests,
       parseService: core.getService('langParser'),
+      buildInfo: BUILD_INFO,
     }),
     semaphore,
     activeRequests,
@@ -372,7 +419,7 @@ function handleRequest(req) {
       safeRespond(id, {
         protocolVersion: '2024-11-05',
         capabilities: { tools: {} },
-        serverInfo: { name: 'malong-mcp', version: '0.3.0' },
+        serverInfo: { name: 'malong-mcp', version: PKG_VERSION },
       })
       break
 
@@ -405,7 +452,13 @@ function handleRequest(req) {
       }
 
       if (!registry.hasTool(name)) {
-        safeRespondError(id, -32601, `Tool not found: ${name}`)
+        const gated = registry.getHiddenReason?.(name)
+        if (gated) {
+          const mode = process.env.MALONG_INTERFACE === 'graph' || process.env.MALONG_INTERFACE === 'diagnostic' ? process.env.MALONG_INTERFACE : 'classic'
+          safeRespondError(id, -32601, `Tool '${name}' is not available in the current interface (${gated}; interface=${mode}). Change MALONG_INTERFACE/MALONG_ENTRY_STATE or call tools/list to see the current set.`)
+        } else {
+          safeRespondError(id, -32601, `Tool not found: ${name}`)
+        }
         break
       }
 
@@ -446,7 +499,13 @@ function handleRequest(req) {
           // r8(F9)：信号量在工具真正结束时释放——旧实现超时即放账，僵尸工具仍在跑 → 并发超限 + 客户端重试与僵尸写交错
           // r9(F9)：先响应后释放——finally 挂工具上会让 release 先于 safeRespond（大结果 stringify 可达百 ms 级同步），
           // 期间新重工具（reindex weight=3）抢占全部槽位 → 旧响应被推迟 → 客户端超时重试 → 重复副作用
-          rawPromise = registry.callTool(name, toolArgs, context)
+          // dogfood-050 r4：入场绑定——凡带 workspace_dir 的请求，在 dispatch 层统一进入该 ws 的
+          // AsyncLocalStorage 绑定；后续任何早于 initWorkspace 的服务读（现有/未来 handler）
+          // 都不会回退到「最后触碰的工作区」查错库（read_symbol 早期 symbol_id 分支曾因此假 SYMBOL_NOT_FOUND）
+          const wsArg = toolArgs?.workspace_dir
+          rawPromise = (typeof wsArg === 'string' && wsArg && codeIndexMod?.wsContext)
+            ? codeIndexMod.wsContext.run({ ws: resolve(wsArg) }, () => registry.callTool(name, toolArgs, context))
+            : registry.callTool(name, toolArgs, context)
           rawPromise.catch(() => {})
           await Promise.race([rawPromise, timeoutPromise])
           if (!timedOut) {
@@ -596,8 +655,7 @@ let _stdinClosed = false
 process.stdin.on('end', () => {
   if (_initialized && !_stdinClosed) {
     _stdinClosed = true
-    crashLog('stdin ended after init, exiting')
-    writeCrashDump('stdin_end')
+    crashLog('stdin ended after init, exiting gracefully (normal client shutdown)')
     process.stderr.end(() => process.exit(0))
     setTimeout(() => process.exit(0), 500).unref()
   } else if (!_initialized && !_stdinClosed) {
@@ -611,8 +669,7 @@ process.stdin.on('end', () => {
 process.stdin.on('close', () => {
   if (_initialized && !_stdinClosed) {
     _stdinClosed = true
-    crashLog('stdin closed after init, exiting')
-    writeCrashDump('stdin_close')
+    crashLog('stdin closed after init, exiting gracefully (normal client shutdown)')
     process.stderr.end(() => process.exit(0))
     setTimeout(() => process.exit(0), 500).unref()
   } else if (!_initialized && !_stdinClosed) {
@@ -623,6 +680,11 @@ process.stdin.on('close', () => {
 
 process.stdout.on('error', (e) => {
   crashLog(`stdout error: ${e.code || e.message}`)
+})
+// 第二轮审查：stderr 异步流错误（EPIPE）必须监听——safeLog/crashLog 的同步 try/catch 拦不住，
+// 无监听时以 uncaughtException 杀掉整个 MCP 服务（crash.log 有两次 write EPIPE 实证）
+process.stderr.on('error', (e) => {
+  try { appendFileSync(CRASH_LOG, `[${new Date().toISOString()}] stderr error: ${e.code || e.message}\n`) } catch {}
 })
 
 initModules().then(() => {
@@ -654,7 +716,8 @@ initModules().then(() => {
     watchdogRunning = true
     try {
       const health = await runHealthCheck({
-        stateDir, toolsDir: join(__dirname, 'tools'), workspacesDir, registry, log: core.log, semaphore, activeRequests
+        stateDir, toolsDir: join(__dirname, 'tools'), workspacesDir, registry, log: core.log, semaphore, activeRequests,
+        buildInfo: BUILD_INFO,
       })
 
       // 检查是否有 FAIL 状态

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Malong·Liuhe Toolkit — Reinventing Code Operations for LLMs</title>
-    <meta name="description" content="Malong Liuhe: a 44-tool MCP server suite designed for LLMs, not humans — symbolic read/write, Rust parsing, transactional safety, deterministic quality gates.">
+    <meta name="description" content="Malong Liuhe: a 44-classic/11-graph/16-diagnostic-tool MCP server suite designed for LLMs, not humans — symbolic read/write, Rust parsing, transactional safety, deterministic quality gates.">
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -54,7 +54,7 @@
                 <a href="docs.en.html" class="nav-link hover:text-white transition-colors">Docs</a>
             </div>
             <div class="flex items-center gap-3">
-                <span class="tag-pill px-3 py-1 rounded-full text-xs font-mono">v0.4.7</span>
+                <span class="tag-pill px-3 py-1 rounded-full text-xs font-mono">v0.5.27</span>
                 <a href="index.zh.html" class="text-ink-400 hover:text-white transition-colors text-sm">中文</a>
                 <a href="https://github.com/wulun811/LiuHe" target="_blank" class="text-ink-400 hover:text-white transition-colors">
                     <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
@@ -96,7 +96,7 @@
         <div class="relative z-10 max-w-5xl mx-auto px-6 text-center">
             <div class="mb-8 inline-flex items-center gap-2 px-4 py-2 rounded-full border border-dragon-500/20 bg-dragon-500/5">
                 <span class="w-2 h-2 rounded-full bg-verdant-400 animate-pulse"></span>
-                <span class="text-dragon-300 text-sm font-mono">2013 assertions green · 44 MCP tools · 10 languages</span>
+                <span class="text-dragon-300 text-sm font-mono">166 test files green · 44 classic / 13 graph / 18 diagnostic MCP tools · 10 languages</span>
             </div>
             
             <h1 class="font-sans text-5xl md:text-7xl font-black mb-6 leading-tight">
@@ -161,7 +161,7 @@
                 </div>
                 <h2 class="text-4xl font-bold text-white mt-4 mb-6">Every tool tells you where to go next</h2>
                 <p class="text-ink-400 max-w-3xl mb-12">
-                    44 tools form a routing network — every result carries a <span class="font-mono text-ink-200">next_step</span>:
+                    44 classic / 13 graph / 18 diagnostic tools form a routing network — every result carries a <span class="font-mono text-ink-200">next_step</span>:
                     where to go on success, where to go on error. Six layers, six return loops.
                 </p>
             </div>
@@ -193,7 +193,7 @@ flowchart TB
                 </pre>
             </div>
             <div class="mt-8 section-reveal">
-                <a href="docs.en.html#routing" class="text-dragon-300 hover:text-dragon-200 text-sm underline underline-offset-4">Full 44-tool routing map in docs →</a>
+                <a href="docs.en.html#routing" class="text-dragon-300 hover:text-dragon-200 text-sm underline underline-offset-4">Full toolkit routing map (44 classic / 13 graph / 18 diagnostic) in docs →</a>
             </div>
         </div>
     </section>
@@ -368,6 +368,11 @@ flowchart TB
                                 <td class="py-4 px-4 text-ink-500">same task 7673 → 2662 est</td>
                             </tr>
                             <tr class="comparison-row border-b border-white/5">
+                                <td class="py-4 px-4">Default-tier catalog tax</td>
+                                <td class="py-4 px-4 text-right font-mono text-dragon-300">16.5 KB ≈ 4.86k tok/turn</td>
+                                <td class="py-4 px-4 text-ink-500">13 tools — descriptions 0.60k + schemas 4.26k</td>
+                            </tr>
+                            <tr class="comparison-row border-b border-white/5">
                                 <td class="py-4 px-4">Call count</td>
                                 <td class="py-4 px-4 text-right font-mono text-verdant-300">↓50.0%</td>
                                 <td class="py-4 px-4 text-ink-500">old 6 steps → new 3 primitives</td>
@@ -432,7 +437,7 @@ flowchart TB
                                 </div>
                                 <div>
                                     <h4 class="text-white font-bold mb-1">Node.js orchestration</h4>
-                                    <p class="text-ink-400 text-sm">MCP protocol, 44-tool orchestration, error recovery, Semaphore scheduling</p>
+                                    <p class="text-ink-400 text-sm">MCP protocol, 44/13/18-tool orchestration, error recovery, Semaphore scheduling</p>
                                 </div>
                             </div>
 
@@ -474,7 +479,7 @@ flowchart TB
                             
                             <rect x="80" y="20" width="240" height="60" rx="8" fill="rgba(234,179,8,0.08)" stroke="rgba(234,179,8,0.3)" stroke-width="1"/>
                             <text x="200" y="45" text-anchor="middle" fill="#eab308" font-family="JetBrains Mono" font-size="12" font-weight="600">Node.js MCP Orchestration</text>
-                            <text x="200" y="62" text-anchor="middle" fill="#888" font-family="Inter" font-size="10">44 Tools · JSON-RPC · Semaphore</text>
+                            <text x="200" y="62" text-anchor="middle" fill="#888" font-family="Inter" font-size="10">44/13/18 Tools · JSON-RPC · Semaphore</text>
                             
                             <path d="M200 85 L200 105" stroke="#c97d2a" stroke-width="1.5" stroke-dasharray="4 2" class="architecture-line"/>
                             <polygon points="196,102 200,108 204,102" fill="#c97d2a"/>
@@ -573,7 +578,7 @@ flowchart TB
                     <div class="w-12 h-px bg-dragon-500"></div>
                     <span class="text-dragon-400 text-sm font-mono uppercase tracking-wider">Toolbox</span>
                 </div>
-                <h2 class="font-sans text-4xl md:text-5xl font-bold text-white mb-6">44 MCP Tools</h2>
+                <h2 class="font-sans text-4xl md:text-5xl font-bold text-white mb-6">44 MCP Tools (graph 13 / diagnostic 18)</h2>
                 <p class="text-xl text-ink-400 max-w-2xl">
                     From symbolic read/write to quality gates — the full code-operation chain. Pure regex/AST, zero LLM calls.
                 </p>
@@ -639,7 +644,7 @@ flowchart TB
                     </div>
                     <div class="space-y-2">
                         <div class="font-mono text-xs text-dragon-300">edit_batch · edit_transaction</div>
-                        <div class="font-mono text-xs text-dragon-300">edit_sandbox · rename_symbol</div>
+                        <div class="font-mono text-xs text-dragon-300">sandbox_validate · rename_symbol</div>
                         <div class="text-xs text-ink-500">atomic transactions + rollback + cross-file rename</div>
                     </div>
                 </div>
@@ -678,7 +683,7 @@ flowchart TB
             </div>
 
             <div class="section-reveal mt-8 text-center">
-                <a href="docs.en.html#tools" class="text-dragon-300 hover:text-dragon-200 text-sm underline underline-offset-4">Full 44-tool matrix in docs →</a>
+                <a href="docs.en.html#tools" class="text-dragon-300 hover:text-dragon-200 text-sm underline underline-offset-4">Full toolkit matrix (44/13/18) in docs →</a>
             </div>
         </div>
     </section>
@@ -845,16 +850,16 @@ flowchart TB
                     <h3 class="text-lg font-bold text-white mb-6">Test Matrix</h3>
                     <div class="grid grid-cols-2 gap-4 mb-6">
                         <div class="p-4 rounded-xl bg-white/[0.02] text-center">
-                            <div class="text-3xl font-bold text-white font-mono test-counter" data-target="2013">0</div>
-                            <div class="text-xs text-ink-500 mt-1">JS assertions</div>
+                            <div class="text-3xl font-bold text-white font-mono test-counter" data-target="166">0</div>
+                            <div class="text-xs text-ink-500 mt-1">JS test files</div>
                         </div>
                         <div class="p-4 rounded-xl bg-white/[0.02] text-center">
-                            <div class="text-3xl font-bold text-white font-mono">81</div>
-                            <div class="text-xs text-ink-500 mt-1">test files</div>
-                        </div>
-                        <div class="p-4 rounded-xl bg-white/[0.02] text-center">
-                            <div class="text-3xl font-bold text-white font-mono">92</div>
+                            <div class="text-3xl font-bold text-white font-mono">97</div>
                             <div class="text-xs text-ink-500 mt-1">Rust assertions</div>
+                        </div>
+                        <div class="p-4 rounded-xl bg-white/[0.02] text-center">
+                            <div class="text-3xl font-bold text-white font-mono">44</div>
+                            <div class="text-xs text-ink-500 mt-1">classic tools</div>
                         </div>
                         <div class="p-4 rounded-xl bg-verdant-500/5 border border-verdant-500/10 text-center">
                             <div class="text-3xl font-bold text-verdant-300 font-mono">0</div>
@@ -865,7 +870,7 @@ flowchart TB
                         <svg class="w-4 h-4 text-verdant-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
                         </svg>
-                        <span>Full-chain tests green · 2026-08-15 (v0.4.7)</span>
+                        <span>Full-chain tests green · 2026-10-21 (v0.5.27)</span>
                     </div>
                 </div>
 
@@ -915,7 +920,7 @@ flowchart TB
                             <span class="tag-pill px-3 py-1 rounded-full text-xs">300 protocol fuzz rounds</span>
                             <span class="tag-pill px-3 py-1 rounded-full text-xs">fixed-seed determinism</span>
                             <span class="tag-pill px-3 py-1 rounded-full text-xs">crash injection</span>
-                            <span class="tag-pill px-3 py-1 rounded-full text-xs">89 golden assertions</span>
+                            <span class="tag-pill px-3 py-1 rounded-full text-xs">90 golden assertions</span>
                             <span class="tag-pill px-3 py-1 rounded-full text-xs">16/16 concurrent, no silent overwrite</span>
                         </div>
                     </div>
@@ -1029,7 +1034,7 @@ flowchart TB
 <span class="text-dragon-300">node</span> mcp-server.js --workspace /path/to/project
 
 <span class="text-ink-500"># 3) Self-check (30s)</span>
-<span class="text-dragon-300">node</span> tests/test-mcp-server.js  <span class="text-ink-500"># 25 assertions</span></pre>
+<span class="text-dragon-300">node</span> tests/test-mcp-server.js  <span class="text-ink-500"># 37 assertions</span></pre>
                 </div>
             </div>
 
@@ -1093,7 +1098,7 @@ flowchart TB
                         <div class="code-block rounded-lg p-4 text-xs text-ink-300">
 <pre><span class="text-dragon-300">dsh plugin</span> --profile web add @jieai/dsh-malong-bridge</pre>
                         </div>
-                        <p class="text-ink-500 text-xs mt-3 leading-relaxed">One command; all 44 tools auto-registered as <code class="text-dragon-300 font-mono">malong__*</code> with dynamic workspace injection. npm package: <code class="text-dragon-300 font-mono">@jieai/dsh-malong-bridge</code></p>
+                        <p class="text-ink-500 text-xs mt-3 leading-relaxed">One command; all 44 classic tools auto-registered as <code class="text-dragon-300 font-mono">malong__*</code> with dynamic workspace injection. npm package: <code class="text-dragon-300 font-mono">@jieai/dsh-malong-bridge</code></p>
                     </div>
                 </div>
             </div>
@@ -1109,7 +1114,7 @@ flowchart TB
                         <span class="text-white font-bold text-sm font-mono">LH</span>
                     </div>
                     <span class="font-sans font-bold text-white">Malong·Liuhe Toolkit</span>
-                    <span class="text-ink-600 text-sm">v0.4.7</span>
+                    <span class="text-ink-600 text-sm">v0.5.27</span>
                 </div>
                 <div class="flex items-center gap-6 text-sm text-ink-500">
                     <a href="https://github.com/wulun811/LiuHe" target="_blank" class="hover:text-white transition-colors">GitHub</a>

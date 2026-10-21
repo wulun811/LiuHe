@@ -1,0 +1,4 @@
+# dogfood-050：dsh bundle 快照是生成副本（dsh/bundle/server/ 拷贝 server 源码），索引会造成结果翻倍
+dsh/bundle/
+# 专家 05109e1：本地探针/报告输出（Git 忽略 ≠ 索引忽略；reports/ 排除避免污染候选）
+reports/

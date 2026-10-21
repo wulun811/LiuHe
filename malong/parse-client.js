@@ -1,9 +1,10 @@
 // malong/parse-client.js — Rust 解析服务客户端
 // 通过 Unix socket 连接到 malong-parse 守护进程
-// 详见：docs/六合工具集/docs/P3-rust-parser-service.md
+// 守护进程用法 / socket 路径 / Windows TCP 端口：见仓内 README.md（Parse daemon 段）
 
 import net from 'node:net'
-import { join } from 'node:path'
+import { createHash } from 'node:crypto'
+import { join, dirname } from 'node:path'
 import os from 'node:os'
 import { existsSync, unlinkSync, openSync, writeSync, closeSync, readFileSync, statSync, renameSync, mkdirSync } from 'node:fs'
 import { spawn } from 'node:child_process'
@@ -17,8 +18,11 @@ const SOCKET_PATH = IS_WIN ? '' : (process.env.MALONG_SOCKET || `/tmp/malong-par
 // r8(F4)：pid 路径跟随 socket——隔离 daemon（MALONG_SOCKET）的 pid 是 {socket}.pid，
 // 旧实现硬编码默认路径 → 熔断重启会 SIGKILL 无辜的生产 daemon
 const PID_PATH = IS_WIN ? '' : (process.env.MALONG_SOCKET ? `${process.env.MALONG_SOCKET}.pid` : `/tmp/malong-parse-${UID}.pid`)
-const RESTART_LOCK = IS_WIN ? '' : `/tmp/malong-parse-${UID}.restart-lock`
-const TCP_PORT = parseInt(process.env.MALONG_PORT || '31001', 10)
+// 第二轮审查：重启锁与 mcp-server 的 spawn 锁统一为同一文件（socket 旁 .parse-spawn.lock，跟随 MALONG_SOCKET）——
+// 旧实现 mcp-server 用 .parse-spawn.lock、parse-client 用 /tmp/malong-parse-${UID}.restart-lock，两把锁互不认，
+// 并发启动时双 daemon 都能成功（Rust 端 bind 前先 unlink socket）
+const RESTART_LOCK = IS_WIN ? '' : join(dirname(SOCKET_PATH), '.parse-spawn.lock')
+const TCP_PORT = (() => { const n = parseInt(process.env.MALONG_PORT || '31001', 10); return Number.isFinite(n) && n > 0 && n < 65536 ? n : 31001 })()
 
 // r8(F1)：握手认证失败标记——避免 auth 失败后 1s 自动重连死循环
 let _authFailed = false
@@ -70,9 +74,11 @@ function _pidLooksLikeMalong(pid) {
 function _createConn() {
   return IS_WIN ? net.createConnection({ host: '127.0.0.1', port: TCP_PORT }) : net.createConnection(SOCKET_PATH)
 }
-const RESTART_LOCK_STALE_MS = 30000
+const RESTART_LOCK_STALE_MS = 10000 // 与 mcp-server acquireSpawnLock 的 stale 阈值对齐（同文件）
 const HEALTH_PROBE_TIMEOUT_MS = 8000 // r9(H3)：旧 2s ≪ 请求超时 30s——共享 daemon 排队 >2s 回帧被误判死 → 熔断 SIGKILL 健康 daemon；对齐 heartbeat 级别
-const MAX_FRAME_SIZE = 64 * 1024 * 1024
+// 第二轮审查：与 daemon protocol.rs 的 MAX_FRAME_SIZE 对齐（16MB）——旧 64MB 超帧被 daemon Skip 后
+// 余留字节被逐帧重解析（O(n²) memmove）且请求永不回答，客户端白等 120s
+const MAX_FRAME_SIZE = 16 * 1024 * 1024
 const CONNECT_TIMEOUT_MS = 3000
 const REQUEST_TIMEOUT_MS = 30000
 const MAX_RETRIES = 2
@@ -80,8 +86,17 @@ const HEARTBEAT_INTERVAL_MS = 15000 // r9(B1)：旧 30s 恰等于服务端 READ_
 const CIRCUIT_BREAKER_THRESHOLD = 3
 // r52: MALONG_PARSE_BIN env 覆盖此前只在 describeConfig 生效，_startProcess 用硬编码路径 → env 覆盖静默失效且配置显示与实际运行路径不一致
 // r0.4.5-post5: 统一走 parse-bin.js 共享解析（env → npm 平台包 → 包内 server/bin → ~/.local/bin → dev target）
-import { resolveParseBin } from './parse-bin.js'
+import { resolveParseBin, resolveParseBinCandidates } from './parse-bin.js'
 const BINARY_PATH = resolveParseBin() ?? `${process.env.HOME || '/home'}/.local/bin/malong-parse`
+
+// R6（0.5.14 复审修复）：解析器不可用且二进制解析为空时，错误里列出已搜位置（进 tool 回执，不再只有一句 not connected）
+function parseUnavailableDetail() {
+  try {
+    if (resolveParseBin()) return ''
+    const cands = resolveParseBinCandidates().filter(Boolean)
+    return ' — malong-parse binary not found. Searched: ' + cands.join(' | ') + '. Set MALONG_PARSE_BIN (Windows: point at the .exe) or install it (~/.local/bin/malong-parse).'
+  } catch { return '' }
+}
 const MAX_RESTART_ATTEMPTS = 3
 const RESTART_COOLDOWN_MS = 10000
 const RESTART_ATTEMPTS_DECAY_MS = 300000 // r9(H5)：旧 60s 衰减 + 每进程独立计数 → 二进制坏时「每 60s 复活 3 次」永续 + N 会话放大；拉长到 5min 收敛
@@ -94,6 +109,7 @@ let _socket = null
 let _connected = false
 let _connecting = false
 let _stopped = false
+let _connectingSock = null // live 审查 K3：在途 connect 的 sock 引用（disconnect 可取消）
 let _pending = new Map()
 let _reqId = 0
 let _buffer = Buffer.alloc(0)
@@ -152,8 +168,10 @@ export async function connect() {
 
       const result = await new Promise((resolve) => {
         const sock = _createConn()
+        _connectingSock = sock
         const timer = setTimeout(() => {
           sock.destroy()
+          _connectingSock = null
           _connecting = false
           _reconnectPromise = null
           resolve(false)
@@ -161,7 +179,17 @@ export async function connect() {
 
         sock.on('connect', async () => {
           clearTimeout(timer)
+          // live 审查 K3：disconnect 后不得复活僵尸连接（在途 connect 早于 stop 发起的窗口）
+          if (_stopped) {
+            sock.destroy()
+            _connectingSock = null
+            _connecting = false
+            _reconnectPromise = null
+            resolve(false)
+            return
+          }
           _socket = sock
+          _connectingSock = null
           _setupHandlers()
           // r8(F1)：握手认证——新 daemon 有 {socket}.token 需 __hello 确认；无 token 文件（旧 daemon/测试）跳过，向后兼容
           const token = _loadAuthToken()
@@ -172,6 +200,7 @@ export async function connect() {
               _core?.log('error', '[parse-client] auth handshake failed')
               sock.destroy()
               _socket = null
+              _connectingSock = null
               _connecting = false
               _reconnectPromise = null
               resolve(false)
@@ -191,6 +220,7 @@ export async function connect() {
 
         sock.on('error', (err) => {
           clearTimeout(timer)
+          _connectingSock = null
           _connecting = false
           _reconnectPromise = null
           _core?.log('warn', `[parse-client] connection failed: ${err.message}`)
@@ -224,7 +254,9 @@ function _setupHandlers() {
     // 拒绝所有 pending 请求（wrapper reject 记一次熔断失败；清 timer 防 30s 后双倍计数）
     for (const [id, { reject, timer }] of _pending) {
       clearTimeout(timer)
-      reject(new Error('connection closed'))
+      const err = new Error('connection closed')
+      err.connectionClosed = true // dogfood ③：标记 in-flight 断连可重试（解析请求幂等）
+      reject(err)
     }
     _pending.clear()
     _buffer = Buffer.alloc(0) // B2：残留半帧缓冲跨连接污染（帧中断 + 重连 = 边界错位）
@@ -243,7 +275,9 @@ function _setupHandlers() {
       reconnectResolve = resolve
     })
     setTimeout(async () => {
-      if (_stopped) return // B6：disconnect 后已调度的重连不得复活（连接会照常建立 → 僵尸连接）
+      // 第二轮审查：disconnect 后已调度的重连不得复活；且必须 settle reconnect promise，否则
+      // 等它的 connect() 调用永远挂起（旧实现直接 return 不 resolve）
+      if (_stopped) { reconnectResolve(false); return }
       _core?.log(wasBusyReject ? 'warn' : 'info', wasBusyReject
         ? `[parse-client] server busy (connection rejected), retrying in ${BUSY_RECONNECT_DELAY_MS / 1000}s...`
         : '[parse-client] attempting reconnect...')
@@ -341,6 +375,8 @@ async function _startProcess() {
     stdio: ['ignore', 'ignore', stderrFd],
     detached: true,
   })
+  // live 审查 K3：spawn 已复制 fd 给子进程，父进程必须关闭，否则每次重启泄漏一个 fd
+  if (typeof stderrFd === 'number') { try { closeSync(stderrFd) } catch {} }
   _childPid = child.pid
   child.on('error', (e) => {
     // 二进制不可执行（EACCES/损坏 ELF 等）：异步错误，必须监听否则 uncaughtException 崩服务
@@ -551,7 +587,7 @@ function _processBuffer() {
   }
 }
 
-async function request(method, params, timeoutMs = REQUEST_TIMEOUT_MS, priority = 0, noCircuitFailure = false) {
+async function _requestOnce(method, params, timeoutMs = REQUEST_TIMEOUT_MS, priority = 0, noCircuitFailure = false) {
   if (_circuitOpen) {
     throw new Error('circuit breaker open')
   }
@@ -572,7 +608,7 @@ async function request(method, params, timeoutMs = REQUEST_TIMEOUT_MS, priority 
       if (!ok) {
         // r52: connect 失败必须计入熔断——此前不计，stale socket（daemon 被 SIGKILL 残留）时熔断永不打开、_restartProcess（unlink socket + 重启）永不触发，解析功能永久不可用直到人工删 socket
         if (!noCircuitFailure) _circuitRecordFailure()
-        throw new Error('not connected to malong-parse')
+        throw new Error('not connected to malong-parse' + parseUnavailableDetail())
       }
     }
   }
@@ -619,8 +655,43 @@ async function request(method, params, timeoutMs = REQUEST_TIMEOUT_MS, priority 
       rawReject: reject,
       timer,
     })
-    _socket.write(frame)
+    // 第二轮审查：同步 write 抛异常（write-after-destroy）必须清 pending+timer，否则残留到超时并误记熔断
+    try {
+      _socket.write(frame)
+    } catch (e) {
+      clearTimeout(timer)
+      _pending.delete(id)
+      reject(new Error(`write failed: ${e.message}`))
+    }
   })
+}
+
+// 等重连完成（≤ms）；已在连则直接 true。返回 false = 重连失败/超时。
+async function _waitForReconnect(ms) {
+  if (_connected) return true
+  if (_reconnectPromise) {
+    const r = await Promise.race([
+      _reconnectPromise,
+      new Promise(res => setTimeout(() => res('timeout'), ms)),
+    ])
+    return r !== false && r !== 'timeout'
+  }
+  return await connect()
+}
+
+// dogfood ③：in-flight 断连（daemon 忙拒/重启时 close 拒掉 pending）→ 幂等解析请求
+// 有界重试一次（等重连 ≤5s 后重发）；已停/鉴权失败/熔断打开/非断连错误 → 原样抛。
+async function request(method, params, timeoutMs = REQUEST_TIMEOUT_MS, priority = 0, noCircuitFailure = false) {
+  try {
+    return await _requestOnce(method, params, timeoutMs, priority, noCircuitFailure)
+  } catch (e) {
+    const retryable = e?.connectionClosed === true && !_stopped && !_authFailed && !_circuitOpen
+    if (!retryable) throw e
+    _core?.log('info', `[parse-client] in-flight connection closed, retrying ${method} once after reconnect`)
+    const ok = await _waitForReconnect(5000)
+    if (!ok) throw e
+    return await _requestOnce(method, params, timeoutMs, priority, noCircuitFailure)
+  }
 }
 
 // ── 对外 API（对应 lang-parser.js 的方法） ──
@@ -755,8 +826,43 @@ export function describeConfig() {
   return IS_WIN ? `tcp=127.0.0.1:${TCP_PORT} connected=${_connected ? 'yes' : 'no'}` : `uds=${SOCKET_PATH} bin=${bin} connected=${_connected ? 'yes' : 'no'}`
 }
 
+// 7-C（专家复测 P1-B）：运行身份核验——解析出的二进制（路径/大小/sha256）+ 连接端点 +
+// daemon 自报告（health RPC：version/pid/uptime/exe_path/exe_size/build_commit）。
+// 旧 daemon 无 exe 字段时仍有 version/pid；未连接时 daemon=null。sha 缓存按路径失效。
+let _binIdentityCache = null
+export async function describeIdentity() {
+  const bin = process.env.MALONG_PARSE_BIN || process.env.MALONG_PARSE_BIN_ALT || BINARY_PATH
+  let size = null, sha = null
+  try {
+    if (!_binIdentityCache || _binIdentityCache.bin !== bin) {
+      const buf = readFileSync(bin)
+      _binIdentityCache = { bin, size: buf.length, sha: createHash('sha256').update(buf).digest('hex') }
+    }
+    size = _binIdentityCache.size
+    sha = _binIdentityCache.sha
+  } catch {}
+  let daemon = null
+  if (_connected) {
+    // noCircuitFailure=true：身份探测失败不得触发熔断
+    try { daemon = await request('health', {}, 5000, 0, true) } catch (e) { daemon = { error: (e && e.message) || 'health_request_failed' } }
+  }
+  return {
+    endpoint: IS_WIN ? ('tcp=127.0.0.1:' + TCP_PORT) : ('uds=' + SOCKET_PATH),
+    connected: _connected,
+    resolved_bin: bin,
+    resolved_bin_size: size,
+    resolved_bin_sha256: sha,
+    daemon,
+  }
+}
+
 export async function disconnect() {
   _stopped = true
+  // live 审查 K3：取消在途 connect（否则 on('connect') 仍会置 _socket/_connected 并起心跳）
+  if (_connectingSock) {
+    try { _connectingSock.destroy(new Error('client disconnect')) } catch {}
+    _connectingSock = null
+  }
   if (_socket) {
     _socket.end()
     _socket = null
