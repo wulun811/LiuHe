@@ -1,3 +1,5 @@
+import { fileURLToPath } from 'node:url'
+
 const ANSI_RE = /\x1b\[[0-9;]*m/g
 
 function stripAnsi(s) {
@@ -236,7 +238,12 @@ export function parseNodeTap(output) {
       const loc = block.map(l => /^\s+location:\s*'?(.+?)'?\s*$/.exec(l)).find(Boolean)
       if (loc) {
         const lm = /^(.+):(\d+):\d+$/.exec(loc[1])
-        if (lm) { failure.file = lm[1]; failure.line = parseInt(lm[2]) }
+        if (lm) {
+          let locFile = lm[1]
+          if (locFile.startsWith('file://')) { try { locFile = fileURLToPath(locFile) } catch {} }
+          failure.file = locFile
+          failure.line = parseInt(lm[2])
+        }
       }
       const nm = block.map(l => /^\s+name:\s*'?(.+?)'?\s*$/.exec(l)).find(Boolean)
       const errIdx = block.findIndex(l => /^\s+error:\s*/.test(l))

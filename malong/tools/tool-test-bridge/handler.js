@@ -1,5 +1,6 @@
-import { join, extname, basename, resolve, sep } from 'node:path'
-import { existsSync, readFileSync, statSync } from 'node:fs'
+import { join, extname, basename, resolve, sep, isAbsolute } from 'node:path'
+import { existsSync, readFileSync, statSync, realpathSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { spawnWithGroup } from '../../spawn-guard.js'
 import { getPythonCmd } from '../../python-cmd.js'
 // 0.5.25：Python 项目/解释器解析（项目根 + venv）——工作区在项目之上时不再落回系统 python3
@@ -146,20 +147,29 @@ function enrichFailures(failures, workspaceDir, pyInfo) {
   for (const f of failures) {
     f.root_cause_hint = suggestRootCause(f, pyInfo)
 
-    if (f.file && f.line) {
+    if (f.file) {
       try {
-        // 7（T4）：f.file 来自测试输出解析，可被 `../../etc/passwd::x FAILED` 污染 → 任意文件内容泄露
-        const abs = resolve(workspaceDir, f.file)
-        if (!abs.startsWith(resolve(workspaceDir) + sep) && abs !== resolve(workspaceDir)) continue
-        const absPath = abs
-        if (existsSync(absPath)) {
-          const content = readFileSync(absPath, 'utf-8')
+        // 7（T4）：f.file 来自测试输出解析，可被 `../../etc/passwd::x FAILED` 污染 → 任意文件内容泄露。
+        // macOS：os.tmpdir() 是 /var/...，Node TAP 报 /private/var/...——先 realpath 两侧再比较。
+        let raw = String(f.file)
+        if (raw.startsWith('file://')) { try { raw = fileURLToPath(raw) } catch {} }
+        const wsPlain = resolve(workspaceDir)
+        let wsReal = wsPlain
+        try { wsReal = realpathSync(wsPlain) } catch {}
+        const absPlain = isAbsolute(raw) ? resolve(raw) : resolve(wsPlain, raw)
+        let absReal = absPlain
+        try { absReal = realpathSync(absPlain) } catch {}
+        // 只认 realpath 后的归属：工作区内软链指向区外的文件仍然拒绝
+        if (absReal !== wsReal && !absReal.startsWith(wsReal + sep)) continue
+        if (existsSync(absReal)) {
+          const content = readFileSync(absReal, 'utf-8')
           const lines = content.split('\n')
-          const start = Math.max(0, f.line - 4)
-          const end = Math.min(lines.length, f.line + 3)
+          const lineNo = Number.isFinite(f.line) && f.line > 0 ? f.line : 1
+          const start = Math.max(0, lineNo - 4)
+          const end = Math.min(lines.length, lineNo + 3)
           f.test_snippet = lines.slice(start, end).map((l, i) => `${start + i + 1}: ${l}`).join('\n')
 
-          const mtime = statSync(absPath).mtimeMs
+          const mtime = statSync(absReal).mtimeMs
           const minutesAgo = Math.floor((Date.now() - mtime) / 60000)
           f.test_recently_modified = minutesAgo < 5
           f.test_modified_minutes_ago = minutesAgo

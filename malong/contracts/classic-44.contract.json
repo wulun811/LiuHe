@@ -1811,7 +1811,7 @@
       "manifest_sha256": "sha256:a9c376e0303bc42e2fce13af9a291e0421eec8e9edd7ff01395ab379de1e09a7",
       "schema_sha256": "sha256:12e62e33bc3ed591554ff634a84c4aac9676c69520367e20fefee79ed4849756",
       "handler": "./handler.js",
-      "handler_sha256": "sha256:c5b4eea1d0b1ca2333bef6a3c91e649941e20eec3876c3691b9fe2463f0a20c9",
+      "handler_sha256": "sha256:4be7d59ff4fdd0a5fe280d40cdabd868459d9b99ded7309d29fca9ac72fd2433",
       "params": {
         "required": [
           "action",

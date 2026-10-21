@@ -2,7 +2,7 @@
 // 覆盖：pytest pass+fail 计数 / stdout+stderr 合并（2>&1 剥离后语义等价）/
 //       exitCode 透传 / 失败时 raw_hint 不丢失
 import { join, dirname } from 'node:path'
-import { mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdirSync, writeFileSync, rmSync, symlinkSync } from 'node:fs'
 import os from 'node:os'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
@@ -118,6 +118,30 @@ try { rmSync(WS, { recursive: true, force: true }) } catch {}
   assert(rg.exit_code === 0 && rg.summary?.passed === 2 && rg.summary?.failed === 0, `④h TAP 全绿 2/0（得 ${rg.exit_code}/${JSON.stringify(rg.summary)}）`)
   assert(rg.failures?.length === 0, `④h 全绿无 failures（得 ${rg.failures?.length}）`)
   try { rmSync(nd, { recursive: true, force: true }) } catch {}
+}
+
+// ④h2 macOS 路径归一：TAP location 为 file:// URL / workspace 软链拼写（/var → /private/var）
+{
+  const { parseNodeTap } = await import(pathToFileURL(join(__dirname, '..', 'tools', 'tool-test-bridge', 'parsers.js')).href)
+  const absUrlFile = join(os.tmpdir(), 'opencode', 'tap-url.test.js')
+  const parsed = parseNodeTap(`not ok 1 - url loc\n  ---\n  location: '${pathToFileURL(absUrlFile).href}:4:9'\n  ---\n`)
+  assert(parsed.failures?.[0]?.file === absUrlFile && parsed.failures?.[0]?.line === 4, `④h2 TAP file:// location 归一（得 ${parsed.failures?.[0]?.file}/${parsed.failures?.[0]?.line}）`)
+
+  if (process.platform !== 'win32') {
+    const real = join(os.tmpdir(), 'opencode', 'b13-tb-tap-real')
+    const link = join(os.tmpdir(), 'opencode', 'b13-tb-tap-link')
+    try { rmSync(link, { force: true }); rmSync(real, { recursive: true, force: true }) } catch {}
+    mkdirSync(join(real, 'tests'), { recursive: true })
+    writeFileSync(join(real, 'tests', 'mix2.test.js'), [
+      "const test = require('node:test')",
+      "const assert = require('node:assert')",
+      "test('fails linked', () => { assert.equal(5, 6) })",
+    ].join('\n') + '\n')
+    symlinkSync(real, link, 'dir')
+    const rl = await handle({ action: 'run', workspace_dir: link, framework: 'node', scope: 'tests/mix2.test.js', timeout: 60 }, {})
+    assert(rl.failures?.[0]?.test_snippet, `④h2 软链工作区仍富化 snippet（得 ${String(rl.failures?.[0]?.test_snippet).slice(0, 40)}）`)
+    try { rmSync(link, { force: true }); rmSync(real, { recursive: true, force: true }) } catch {}
+  }
 }
 
 // ④i dogfood-050 修复：package.json `node --test` 自动识别（旧实现 unknown_framework，建议也不给 verify_pipeline）
