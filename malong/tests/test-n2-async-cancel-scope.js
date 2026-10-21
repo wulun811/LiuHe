@@ -5,7 +5,7 @@
 // 覆盖：不带 request_id 与带 request_id 两条真实父子进程取消对照。
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs'
+import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, realpathSync } from 'node:fs'
 import os from 'node:os'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -141,7 +141,13 @@ function readPid(name) { try { return parseInt(readFileSync(join(WORK, name), 'u
 }
 
 function readCwd() { try { return readFileSync(join(WORK, 'ran-cwd.txt'), 'utf-8').trim() } catch { return '' } }
-function readCwdOk() { return readCwd() === WORK }
+// macOS：os.tmpdir() 是 /var/...，子进程 process.cwd() 返回物理路径 /private/var/...
+function readCwdOk() {
+  const cwd = readCwd()
+  if (!cwd) return false
+  if (cwd === WORK) return true
+  try { return cwd === realpathSync(WORK) } catch { return false }
+}
 
 console.log(`\n=== test-n2-async-cancel-scope: ${pass} passed, ${fail} failed ===`)
 process.exit(fail === 0 ? 0 : 1)
