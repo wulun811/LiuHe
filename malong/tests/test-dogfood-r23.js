@@ -244,11 +244,16 @@ const debugRunner = (await imp(join(MALONG, 'tools/tool-debug-runner/handler.js'
   writeFileSync(join(fixRepo, 'dirty.txt'), 'x\n')
   const gd = await gitWorktree({ workspace_dir: fixRepo, changes: [{ path: 'b.txt', new_content: 'x\n' }] })
   assert(gd.error === 'dirty_workspace', `git_worktree: dirty 拒绝（得 ${gd.error}）`)
-  // Windows 上 git clean 对刚写入的文件偶发静默不删（Defender 短暂持句柄）→ 确定性删除
-  rmSync(join(fixRepo, 'dirty.txt'), { force: true })
+  // Windows 上删除刚写入的文件后，目录项可能因 Defender 持句柄短暂残留（delete-pending）→ 轮询至 git 认为干净
+  for (let i = 0; i < 20; i++) {
+    try { rmSync(join(fixRepo, 'dirty.txt'), { force: true }) } catch {}
+    if (!execSync('git status --porcelain', { cwd: fixRepo, encoding: 'utf-8' }).trim()) break
+    await new Promise(r => setTimeout(r, 50))
+  }
   execSync('git checkout -q --detach HEAD', { cwd: fixRepo })
   const gdd = await gitWorktree({ workspace_dir: fixRepo, changes: [{ path: 'd.txt', new_content: 'x\n' }] })
-  assert(gdd.error === 'detached_head', `git_worktree: detached 拒绝（得 ${gdd.error}）`)
+  const detachStatus = execSync('git status --porcelain', { cwd: fixRepo, encoding: 'utf-8' })
+  assert(gdd.error === 'detached_head', `git_worktree: detached 拒绝（得 ${gdd.error}；status=${JSON.stringify(detachStatus)}；files=${JSON.stringify(gdd.files)}）`)
   execSync('git checkout -q main', { cwd: fixRepo })
 
   // 负数 max_issues clamp
