@@ -2,14 +2,17 @@
 // 假守护：连接#1 收首帧后吐 1 字节再 destroy（非零数据关闭 → 1s 快速重连路径）；连接#2 正常应答。
 // 通过 MALONG_SOCKET 隔离，不碰真实 daemon。
 import { createServer } from 'node:net'
-import { rmSync } from 'node:fs'
+import { rmSync, mkdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import os from 'node:os'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const IS_WIN = process.platform === 'win32'
-const SOCK = '/tmp/opencode/parse-retry-fake.sock'
+// macOS CI 干净环境无 /tmp/opencode，且 macOS 对不存在父目录 bind 报 EACCES（非 ENOENT）
+const SOCK = join(os.tmpdir(), 'opencode', 'parse-retry-fake.sock')
 if (!IS_WIN) {
+  try { mkdirSync(dirname(SOCK), { recursive: true }) } catch {}
   try { rmSync(SOCK, { force: true }) } catch {}
   try { rmSync(`${SOCK}.token`, { force: true }) } catch {}
   process.env.MALONG_SOCKET = SOCK // 必须在 import parse-client 前设置（模块加载期读 env）

@@ -1,11 +1,15 @@
 // test-parse-disconnect.js — live 审查 K3：disconnect 取消在途 connect（不复活僵尸连接）
 // 假守护：accept 后永不响应；connect() 在途时立即 disconnect → 返回 false 且不置 connected。
 import { createServer } from 'node:net'
-import { rmSync } from 'node:fs'
+import { rmSync, mkdirSync } from 'node:fs'
+import { join, dirname } from 'node:path'
+import os from 'node:os'
 
-const SOCK = '/tmp/opencode/parse-disc-fake.sock'
+// macOS CI 干净环境无 /tmp/opencode，且 macOS 对不存在父目录 bind 报 EACCES（非 ENOENT）
+const SOCK = join(os.tmpdir(), 'opencode', 'parse-disc-fake.sock')
 const IS_WIN = process.platform === 'win32'
 if (!IS_WIN) {
+  try { mkdirSync(dirname(SOCK), { recursive: true }) } catch {}
   try { rmSync(SOCK, { force: true }) } catch {}
   try { rmSync(`${SOCK}.token`, { force: true }) } catch {}
   process.env.MALONG_SOCKET = SOCK // 必须在 import parse-client 前设置（模块加载期读 env）
