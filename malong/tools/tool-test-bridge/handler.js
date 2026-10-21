@@ -295,7 +295,8 @@ async function handleRun(args, context) {
   } catch (e) {
     // 审查修复（二轮）：spawn error 的 e.code 是字符串（'ENOENT'/'EACCES'）——旧实现 exit_code 变字符串类型错乱
     exitCode = typeof e.code === 'number' ? e.code : 1
-    rawOutput = ''
+    // 14：spawn 失败（命令不存在/EACCES）的错误本身也是原始信息，吞掉会让 run_error 为空
+    rawOutput = e && e.message ? String(e.message) : ''
     if (e.code === 'ETIMEDOUT') timedOut = true
   }
 
@@ -308,7 +309,9 @@ async function handleRun(args, context) {
   // 14：run 失败但一个结果都没解析出来时（如 npx 未装、命令不存在），parser 的 raw_hint 或输出尾部
   // 必须透出——否则 agent 只能看到 exit_code=1 + 全空结果，分不清「没装依赖」和「测试挂了」
   const runError = exitCode !== 0 && parsed.results.length === 0
-    ? (parsed.raw_hint || rawOutput.slice(-500))
+    ? (parsed.raw_hint || rawOutput.slice(-500) || (timedOut
+        ? `Test command timed out after ${effectiveTimeout}ms with no captured output: ${command}`
+        : `Command exited with code ${exitCode} and produced no output: ${command}`))
     : undefined
 
   let suggestedFix = null
