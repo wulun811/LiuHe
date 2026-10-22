@@ -382,8 +382,10 @@ pkill -f "dsh web"; dsh web --port 3456 --host 0.0.0.0 --trusted-host &lt;LAN IP
         </section>
 
         <section id="routing" class="mb-14" style="scroll-margin-top:150px">
-    <h2 class="text-2xl font-bold text-white mb-6">Tool Routing Map</h2>
-    <p class="text-sm mb-4" style="color:#888">All 44 classic tools split into 4 sequence diagrams — every ok/err route is drawn (green solid = ok, red dashed = err); dashed card = target lives in another group; thick green = main chain. The edit &rarr; test loop (edit_transaction &harr; diff_facts &harr; test_bridge &harr; debug_runner) is fully inside 2/4. (Graph/stateful entries are not in these diagrams.)</p>
+    <h2 class="text-2xl font-bold text-white mb-6">Tool Routing Map (classic 44 · appendix)</h2>
+    <p class="text-sm mb-4" style="color:#888">The default tier is the Six-He line (13 entries: <span class="font-mono">code_task → code_read → code_patch / code_batch / code_maintain → code_check → code_control</span>); see the <a href="index.html#loop" class="underline underline-offset-2" style="color:#e8b86e">home page</a> for the full loop. The four sequence diagrams and the T01–T44 index below cover the <strong class="text-ink-300">classic 44 catalog</strong> and are kept as a deep reference. On the default tier, action-map rewrites classic tool names in responses into callable graph calls.</p>
+    <details class="mb-4">
+      <summary class="cursor-pointer select-none text-sm font-medium mb-4" style="color:#e8b86e">Expand: classic 44 full routing diagrams (4) + T01–T44 index</summary>
     <div class="rounded-xl border border-white/5 bg-ink-950/50 p-4 overflow-x-auto">
         <img src="routing-seq-1-en.svg" alt="1/4 Indexing, Reading & Impact" class="max-w-none" style="width:100%;max-width:1160px;height:auto;display:block">
         <img src="routing-seq-2-en.svg" alt="2/4 Edit, Commit & Test Loop" class="max-w-none mt-6" style="width:100%;max-width:1160px;height:auto;display:block">
@@ -407,7 +409,7 @@ pkill -f "dsh web"; dsh web --port 3456 --host 0.0.0.0 --trusted-host &lt;LAN IP
           </div>
 <div class="rounded border border-white/5 bg-ink-950/40 p-2">
             <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T03</span> ss</div>
-            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">symbol_search</span></div><div class="leading-snug"><span style="color:#86efac">ok</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">impact_analysis</span></div><div class="leading-snug"><span style="color:#f87171">err</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">empty → reindex / glob</span></div></div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">symbol_search</span></div><div class="leading-snug"><span style="color:#86efac">ok</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">impact_analysis</span></div><div class="leading-snug"><span style="color:#f87171">err</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">empty → code_search / code_query(mode=impact)</span></div></div>
           </div>
 <div class="rounded border border-white/5 bg-ink-950/40 p-2">
             <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T04</span> cs</div>
@@ -463,7 +465,7 @@ pkill -f "dsh web"; dsh web --port 3456 --host 0.0.0.0 --trusted-host &lt;LAN IP
           </div>
 <div class="rounded border border-white/5 bg-ink-950/40 p-2">
             <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T17</span> et</div>
-            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">edit_transaction</span></div><div class="leading-snug"><span style="color:#86efac">ok</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">commit → diff_facts → test_bridge</span></div><div class="leading-snug"><span style="color:#f87171">err</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">debug_runner</span></div></div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">edit_transaction</span></div><div class="leading-snug"><span style="color:#86efac">ok</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">commit → code_check(run=true) → code_query / invoke_capability</span></div><div class="leading-snug"><span style="color:#f87171">err</span><span style="color:#6d6d6d"> → </span><span style="color:#cbd5e1">debug_runner</span></div></div>
           </div>
 <div class="rounded border border-white/5 bg-ink-950/40 p-2">
             <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T18</span> eb</div>
@@ -576,6 +578,7 @@ pkill -f "dsh web"; dsh web --port 3456 --host 0.0.0.0 --trusted-host &lt;LAN IP
     </div>
   </div>
     </div>
+    </details>
 </section>
 
         <section id="languages" class="mb-14" style="scroll-margin-top:150px">

@@ -66,7 +66,7 @@ Traditional tools (git, sed, IDE) assume a user with hands, eyes, and memory. An
 
 | Category | Tools |
 |----------|-------|
-| **Six-He line** (graph + stateful — recommended daily entry) | `code_task` (resolve + plan) → `code_read` (materials + `read_ref`) → `code_patch` / `code_batch` / `code_maintain` (journaled writes) → `code_check` (evidence) → `code_control` (status / resume / expand / reopen / job); plus `code_status`, `code_audit`, `code_worktree`, `edit_transaction` — 11 tools, env-gated |
+| **Six-He line** (graph + stateful — recommended daily entry) | `code_task` (resolve + plan) → `code_read` (materials + `read_ref`) → `code_patch` / `code_batch` / `code_maintain` (journaled writes) → `code_check` (evidence) → `code_control` (status / resume / expand / reopen / job); plus `code_status`, `code_query`, `code_audit`, `code_worktree`, `invoke_capability`, `edit_transaction` — 13 tools, env-gated |
 | **I/O primitives** | `read_symbol` (symbol read + version), `write_symbol` / `write_symbols` (safe write: conflict state machine + atomic write + undo) |
 | **Index & search** | `reindex`, `symbol_search`, `code_search` (keyword + regex intent patterns — NOT semantic search), `repo_map` (98ms file map; skeleton pagination: `page`/`page_size`/`prefix` — truncated output always carries the full top-level skeleton with page numbers)
 | **Analysis** | `impact_analysis` (blast radius + risk), `call_chain`, `references`, `dep_graph`, `inspect` (outline + refs + call chain in one), `trace_symbol` (constant tracing + hardcoded copies) |

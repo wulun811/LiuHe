@@ -6,7 +6,7 @@
 
 [![wulun811/LiuHe MCP server](https://glama.ai/mcp/servers/wulun811/LiuHe/badges/score.svg)](https://glama.ai/mcp/servers/wulun811/LiuHe)
 ![tests](https://img.shields.io/badge/tests-166%20files%20%C2%B7%200%20failed-brightgreen)
-![tools](https://img.shields.io/badge/tools-44%20classic%20%2F%2011%20graph%20%2F%2016%20diagnostic-blue)
+![tools](https://img.shields.io/badge/tools-44%20classic%20%2F%2013%20graph%20%2F%2018%20diagnostic-blue)
 ![languages](https://img.shields.io/badge/parsers-10%20languages-brightgreen)
 ![read](https://img.shields.io/badge/read%20P95-1ms-brightgreen)
 ![write](https://img.shields.io/badge/write%20P95-7ms-blue)
@@ -67,7 +67,7 @@
 
 | 类别 | 工具 |
 |------|------|
-| **六合线**（graph + stateful——推荐日常入口） | `code_task`（定位 + 规划）→ `code_read`（材料 + `read_ref`）→ `code_patch` / `code_batch` / `code_maintain`（事务化写）→ `code_check`（落证据）→ `code_control`（status / resume / expand / reopen / job）；另含 `code_status`、`code_audit`、`code_worktree`、`edit_transaction`——共 11 个，env 门控开启 |
+| **六合线**（graph + stateful——推荐日常入口） | `code_task`（定位 + 规划）→ `code_read`（材料 + `read_ref`）→ `code_patch` / `code_batch` / `code_maintain`（事务化写）→ `code_check`（落证据）→ `code_control`（status / resume / expand / reopen / job）；另含 `code_status`、`code_query`、`code_audit`、`code_worktree`、`invoke_capability`、`edit_transaction`——共 13 个，env 门控开启 |
 | **I/O 原语** | `read_symbol`（符号读 + 版本）、`write_symbol` / `write_symbols`（安全写，冲突状态机 + 原子写 + undo） |
 | **索引与搜索** | `reindex`、`symbol_search`、`code_search`（自然语言意图搜索）、`repo_map`（98ms 级文件地图） |
 | **分析** | `impact_analysis`（影响面 + 风险）、`call_chain`、`references`、`dep_graph`、`inspect`（大纲+引用+调用链三合一）、`trace_symbol`（常量追踪 + 硬编码副本） |

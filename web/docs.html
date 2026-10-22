@@ -251,7 +251,7 @@ pkill -f "dsh web"; dsh web --port 3456 --host 0.0.0.0 --trusted-host &lt;LAN IP
                         <tr style="border-bottom:1px solid rgba(255,255,255,0.04)"><td class="px-5 py-3" style="color:#93c5fd">MALONG_PARSE_BIN</td><td class="px-5 py-3">内置 / PATH</td><td class="px-5 py-3">自动拉起守护进程时使用的二进制</td></tr>
                         <tr style="border-bottom:1px solid rgba(255,255,255,0.04)"><td class="px-5 py-3" style="color:#93c5fd">MALONG_PARSE_MODE</td><td class="px-5 py-3">rust-service</td><td class="px-5 py-3">解析传输方式，当前版本仅支持 rust-service</td></tr>
                         <tr><td class="px-5 py-3" style="color:#93c5fd">MALONG_WS_GC_DAYS</td><td class="px-5 py-3">14</td><td class="px-5 py-3">health cleanup 修剪闲置工作区缓存的天数阈值；0 禁用</td></tr>
-                        <tr style="border-bottom:1px solid rgba(255,255,255,0.04)"><td class="px-5 py-3" style="color:#93c5fd">MALONG_INTERFACE</td><td class="px-5 py-3">graph（六和线）</td><td class="px-5 py-3">默认即六合线 13 个工具（4 个读入口 + 8 个状态化入口 + edit_transaction）；设为 classic 得经典全量 44，设为 diagnostic 得分析器档 18</td></tr>
+                        <tr style="border-bottom:1px solid rgba(255,255,255,0.04)"><td class="px-5 py-3" style="color:#93c5fd">MALONG_INTERFACE</td><td class="px-5 py-3">graph（六合线）</td><td class="px-5 py-3">默认即六合线 13 个工具（4 个读入口 + 8 个状态化入口 + edit_transaction）；设为 classic 得经典全量 44，设为 diagnostic 得分析器档 18</td></tr>
                         <tr><td class="px-5 py-3" style="color:#93c5fd">MALONG_ENTRY_STATE</td><td class="px-5 py-3">（默认开）</td><td class="px-5 py-3">状态层默认放行（与显式 1 等价）；设为 0 则退回只读 5 工具（graph 档不带状态机）</td></tr>
                         <tr><td class="px-5 py-3" style="color:#93c5fd">MALONG_PYTHON</td><td class="px-5 py-3">（未设）</td><td class="px-5 py-3">Python 测试（test_bridge / verify_pipeline）用的解释器；未设时自动探测项目 venv（项目根旁的 .venv/venv/env），再退系统 python3</td></tr>
                     </tbody>
@@ -260,7 +260,7 @@ pkill -f "dsh web"; dsh web --port 3456 --host 0.0.0.0 --trusted-host &lt;LAN IP
         </section>
 
         <section id="tools" class="mb-14" style="scroll-margin-top:150px">
-            <h2 class="font-serif-cn text-2xl font-bold text-white mb-1">默认 13 个 MCP 工具（六和线）；classic 44 / diagnostic 18 按需开启</h2>
+            <h2 class="font-serif-cn text-2xl font-bold text-white mb-1">默认 13 个 MCP 工具（六合线）；classic 44 / diagnostic 18 按需开启</h2>
             <p class="text-sm mb-6" style="color:#888">全部工具纯正则 / AST 实现，零 LLM 调用，可复现、可审计、可 CI。点击分组展开工具说明。</p>
 
             <div class="flex flex-wrap gap-2 mb-8">
@@ -382,8 +382,10 @@ pkill -f "dsh web"; dsh web --port 3456 --host 0.0.0.0 --trusted-host &lt;LAN IP
         </section>
 
         <section id="routing" class="mb-14" style="scroll-margin-top:150px">
-    <h2 class="font-serif-cn text-2xl font-bold text-white mb-6">工具路由地图</h2>
-    <p class="text-sm mb-4" style="color:#888">44 个常驻工具拆成 4 份时序图——每一条 ok/err 去向都已画入（绿实线 = 成功，红虚线 = 出错）；虚线卡片 = 目标工具在另一份图里；粗绿线为主链。编辑&rarr;测试闭环（edit_transaction &harr; diff_facts &harr; test_bridge &harr; debug_runner）完整位于 2/4。（graph/stateful 增量入口未入图）</p>
+    <h2 class="font-serif-cn text-2xl font-bold text-white mb-6">工具路由地图（classic 44 · 附录）</h2>
+    <p class="text-sm mb-4" style="color:#888">默认档是六合线 13 个入口（<span class="font-mono">code_task → code_read → code_patch / code_batch / code_maintain → code_check → code_control</span>），完整闭环见<a href="index.zh.html#loop" class="underline underline-offset-2" style="color:#e8b86e">首页</a>。下面这 4 张时序图与 T01–T44 对照是 <strong class="text-ink-300">classic 44 的全量路由</strong>，保留作深度参考；默认档下响应中的经典工具名会被 action-map 自动改写成可调用的 graph 调用。</p>
+    <details class="mb-4">
+      <summary class="cursor-pointer select-none text-sm font-medium mb-4" style="color:#e8b86e">展开：classic 44 全量路由时序图（4 张）+ T01–T44 对照</summary>
     <div class="rounded-xl border border-white/5 bg-ink-950/50 p-4 overflow-x-auto">
         <img src="routing-seq-1-zh.svg" alt="1/4 索引、读取与影响" class="max-w-none" style="width:100%;max-width:1160px;height:auto;display:block">
         <img src="routing-seq-2-zh.svg" alt="2/4 编辑、提交与测试闭环" class="max-w-none mt-6" style="width:100%;max-width:1160px;height:auto;display:block">
@@ -407,7 +409,7 @@ pkill -f "dsh web"; dsh web --port 3456 --host 0.0.0.0 --trusted-host &lt;LAN IP
           </div>
 <div class="rounded border border-white/5 bg-ink-950/40 p-2">
             <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T03</span> ss</div>
-            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">symbol_search</span></div><div class="leading-snug"><span style="color:#888">命中 → impact_analysis</span></div><div class="leading-snug"><span style="color:#888">空结果 → reindex / glob</span></div></div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">symbol_search</span></div><div class="leading-snug"><span style="color:#888">命中 → impact_analysis</span></div><div class="leading-snug"><span style="color:#888">空结果 → code_search / code_query(mode=impact)</span></div></div>
           </div>
 <div class="rounded border border-white/5 bg-ink-950/40 p-2">
             <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T04</span> cs</div>
@@ -463,7 +465,7 @@ pkill -f "dsh web"; dsh web --port 3456 --host 0.0.0.0 --trusted-host &lt;LAN IP
           </div>
 <div class="rounded border border-white/5 bg-ink-950/40 p-2">
             <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T17</span> et</div>
-            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">edit_transaction</span></div><div class="leading-snug"><span style="color:#888">提交 → diff_facts → test_bridge</span></div><div class="leading-snug"><span style="color:#888">失败 → debug_runner</span></div></div>
+            <div class="text-xs space-y-0.5"><div class="leading-snug"><span style="color:#888">edit_transaction</span></div><div class="leading-snug"><span style="color:#888">提交 → code_check(run=true) → code_query / invoke_capability</span></div><div class="leading-snug"><span style="color:#888">失败 → debug_runner</span></div></div>
           </div>
 <div class="rounded border border-white/5 bg-ink-950/40 p-2">
             <div class="font-mono text-xs mb-1" style="color:#f9ecd6"><span style="color:#e8b86e">T18</span> eb</div>
@@ -576,6 +578,7 @@ pkill -f "dsh web"; dsh web --port 3456 --host 0.0.0.0 --trusted-host &lt;LAN IP
     </div>
   </div>
     </div>
+    </details>
 </section>
 
         <section id="languages" class="mb-14" style="scroll-margin-top:150px">
