@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "interface": "graph",
   "requires_state": true,
-  "description": "Isolated git worktree: preview / apply / status, one persisted operation. apply = temp worktree → verify_cmd → commit → fast-forward merge into the CURRENT branch (HEAD moves; not just a sandbox dir). preview lists touched files, base/ref, verify_cmd, rollback/preserve behavior.",
+  "description": "Land a risky change safely: apply runs edits in a temp git worktree, your verify command gates it, and only on pass does the commit fast-forward into the CURRENT branch.",
   "inputSchema": {
     "type": "object",
     "properties": {

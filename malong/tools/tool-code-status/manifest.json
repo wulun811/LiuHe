@@ -2,7 +2,7 @@
   "name": "code_status",
   "version": "0.1.0",
   "interface": "graph",
-  "description": "Task state, materials, evidence. Omit task_id → list actives.",
+  "description": "See what a task changed so far: state, files, evidence. Omit task_id → list active tasks.",
   "inputSchema": {
     "type": "object",
     "properties": {

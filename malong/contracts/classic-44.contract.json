@@ -478,7 +478,6 @@
       "test_refs": [
         "tests/measure-trail.js",
         "tests/test-g3-acceptance.js",
-        "tests/test-graph-catalog-budget.js",
         "tests/test-health-check.js",
         "tests/test-r10.js",
         "tests/test-s1-entry.js",
@@ -562,7 +561,7 @@
         "transaction"
       ],
       "dependencies": [],
-      "manifest_sha256": "sha256:b45b7ef9dd34b1d21b4074c8f5756d1be0fcb0be578ba3b61c4630c9b73ca06a",
+      "manifest_sha256": "sha256:f7d82319af095c4d3ade75a4aca0441b204aa8e45f1d8d59adc4745604b1cc5c",
       "schema_sha256": "sha256:bade4ed048417e8d54c7cacae5ed5aeaa36123e6d39477700a86a87255e82593",
       "handler": "./handler.js",
       "handler_sha256": "sha256:5179137fab4a966c2ae14095b8bc2f5c8c5fae5553cb517557c8dddf7d90a0cf",

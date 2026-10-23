@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "interface": "graph",
   "requires_state": true,
-  "description": "Run checks (test/typecheck/lint) + record evidence. Preview default; async:true for long suites.",
+  "description": "Run test/typecheck/lint after editing — records commands + results as task evidence; better than raw shell. Previews exact commands first; async:true for long suites.",
   "inputSchema": {
     "type": "object",
     "properties": {

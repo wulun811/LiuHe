@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "interface": "graph",
   "requires_state": true,
-  "description": "status/resume/cancel/reopen/switch_route/expand/job/cancel_job. resume = self-contained brief.",
+  "description": "Manage task lifecycle: cancel a running task, resume a dropped one (returns a self-contained brief), reopen a finished one, check a background job.",
   "inputSchema": {
     "type": "object",
     "properties": {

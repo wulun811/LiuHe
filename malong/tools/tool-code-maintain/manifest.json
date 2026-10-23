@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "interface": "graph",
   "requires_state": true,
-  "description": "Propose import fixes; apply journaled. plan = default (preview); dead code never auto-removed.",
+  "description": "Clean up imports in files you touched (missing/unused). plan = preview by default; dead code is never removed automatically, only flagged.",
   "inputSchema": {
     "type": "object",
     "properties": {

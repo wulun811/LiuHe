@@ -122,7 +122,7 @@ export function hasNonAscii(s) { return /[^\x00-\x7F]/.test(String(s ?? '')) }
 // S3.3（T20）：任务 schema/graph 版本。新建任务盖章；读/写入口对「更新的版本」显式拒绝（不猜）。
 // 旧任务（无 schema_version）视为当前兼容，不强制迁移、不写盘（向后兼容 fixtures）。
 export const TASK_SCHEMA_VERSION = 1
-export const GRAPH_VERSION = '0.5.27'
+export const GRAPH_VERSION = '0.5.28'
 export function ensureTaskVersion(task) {
   const v = task?.schema_version
   if (v == null) return { ok: true, legacy: true }

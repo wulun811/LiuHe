@@ -117,7 +117,8 @@ const CLASSIC_GOLDEN_NAMES = ['active_todos','call_chain','code_quality','code_r
 // 狗粮r2（2026-10-13）有意识变更：dependency_gatekeeper/security_review 描述补「需 file/scope」约束——golden 随之更新
 // F5（2026-10-18 Windows 复核）有意识变更：repo_map manifest 声明 page/page_size/prefix（handler 早已接受，
 //   但 schema 未公开 → 「实现接受、模型看不见」）。参数只增不减，原有语义不变；golden 随之更新。
-const CLASSIC_GOLDEN_HASH = 'sha256:378dc21544a3409b57f698f02623d70b1eb6b067a91c2f252f7f56f10ffa1586'
+// 0.5.28 有意识变更：edit_transaction 描述改中性表述（classic-44 冻结合同按流程显式重生），golden 随之更新。
+const CLASSIC_GOLDEN_HASH = 'sha256:71861fcb377af10905a45cefbd5a03a11a182959bd1ae8376bbf3c0b682bc618'
 function classicManifests() {
   const rows = []
   for (const d of readdirSync(TOOLS_DIR)) {

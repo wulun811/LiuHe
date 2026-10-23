@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "interface": "graph",
   "requires_state": true,
-  "description": "Fallback outlet (ADR-018, state-gated): call ONE classic tool by exact name (list: code_query mode=capabilities). args = that tool's own arguments; top-level workspace_dir/task_id override nested ones; delegates once, result preserved. Side effects: terminal guard + task ledger; request_id consumed (replay/conflict). Success != verified.",
+  "description": "Escape hatch: call a tool not listed above, by exact name; delegates once per call — no retries. Prefer listed tools; read-only unless the target itself writes.",
   "inputSchema": {
     "type": "object",
     "properties": {

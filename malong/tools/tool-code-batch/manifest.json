@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "interface": "graph",
   "requires_state": true,
-  "description": "N edits in ONE op (all-or-nothing default); dry_run previews, apply with dry_run:false. New file: create:true + content + locator.file_path.",
+  "description": "Apply edits to N files in ONE atomic call — all or nothing; single edit → code_patch. New: create:true + content + locator.file_path. dry_run default preview.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -27,7 +27,7 @@
           }
         }
       },
-      "dry_run": { "type": "boolean", "description": "true = preview." },
+      "dry_run": { "type": "boolean", "description": "true = preview; false = apply." },
       "policy": { "type": "object", "description": "{all_or_nothing: boolean} (default true)." },
       "safety": { "type": "object", "description": "Validation gate: {profile: standard|strict|fast, block_on_validation_error: boolean}." },
       "allow_unsafe_no_base": { "type": "boolean", "description": "Force apply without prior file-level reads (default false; gate)." },

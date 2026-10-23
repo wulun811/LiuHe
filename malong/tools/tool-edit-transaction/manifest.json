@@ -1,7 +1,7 @@
 {
   "name": "edit_transaction",
   "version": "1.4.1",
-  "description": "Multi-file edit with rollback/undo (begin->edit->commit); one file -> edit_batch.",
+  "description": "Multi-file edit with rollback/undo (begin->edit->commit); single-file edits don't need one.",
   "inputSchema": {
     "type": "object",
     "properties": {

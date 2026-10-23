@@ -2,7 +2,7 @@
   "name": "code_read",
   "version": "0.1.0",
   "interface": "graph",
-  "description": "Read a symbol/file under task (read-only): body, versions, read_refs. budget_hint=0 → full.",
+  "description": "Read a file or one symbol before editing; returns content + a read_ref to pass back when editing. budget_hint=0 → full file.",
   "inputSchema": {
     "type": "object",
     "properties": {

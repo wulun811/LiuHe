@@ -68,7 +68,7 @@ const KEY_PHRASES = {
   code_maintain: ['plan'],
   code_patch: ['locator.file_path', 'read_ref'],
   code_worktree: ['apply'],
-  edit_transaction: ['rollback', 'edit_batch'],
+  edit_transaction: ['rollback'],
   invoke_capability: ['delegates once'],
 }
 

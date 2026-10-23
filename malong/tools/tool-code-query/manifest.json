@@ -2,7 +2,7 @@
   "name": "code_query",
   "version": "0.1.0",
   "interface": "graph",
-  "description": "Read-only lookups, no task — fast path for known file/symbol questions. mode: outline|symbols|body|map|search|impact|references|callers|callees|tests|validate|capabilities|capability. search=code_search, tests=find_tests, validate=sandbox_validate; capabilities describes the classic 44. To edit: code_task → code_read → code_batch.",
+  "description": "Look things up fast, no task needed: where is X, who calls it, what's in this file. mode: outline|symbols|body|map|search|impact|references|callers|callees|tests|validate|capabilities. Read-only.",
   "inputSchema": {
     "type": "object",
     "properties": {

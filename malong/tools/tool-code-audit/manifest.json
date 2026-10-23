@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "interface": "graph",
   "requires_state": true,
-  "description": "Read-only analyzers + false-positive ledger (see checks). Zero findings ≠ proof.",
+  "description": "Read-only review pass (code review, security, dead code…) on files you touched — reports findings via checks, changes nothing. Zero findings is not proof.",
   "inputSchema": {
     "type": "object",
     "properties": {

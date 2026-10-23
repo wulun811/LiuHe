@@ -2,7 +2,7 @@
   "name": "code_task",
   "version": "0.1.1",
   "interface": "graph",
-  "description": "Start here for any change: goal → candidates, structure, impact. Does not itself edit or check — read once (code_read), edit via code_patch / code_batch (N edits, 1 call), verify code_check.",
+  "description": "Start here for any change: describe the goal, get candidates + structure + impact in one call. Planning only — does not itself edit or check; then code_read → code_patch / code_batch → code_check.",
   "inputSchema": {
     "type": "object",
     "properties": {
