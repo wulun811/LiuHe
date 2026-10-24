@@ -1,0 +1,83 @@
+name: Release Backfill (v0.5.28)
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - '.github/workflows/release-backfill.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: malong-parse-linux-x86_64
+            osname: linux
+            arch: x86_64
+          - os: macos-15-intel
+            artifact: malong-parse-darwin-x86_64
+            osname: darwin
+            arch: x86_64
+          - os: macos-15
+            artifact: malong-parse-darwin-aarch64
+            osname: darwin
+            arch: aarch64
+          - os: windows-latest
+            artifact: malong-parse-windows-x86_64
+            osname: windows
+            arch: x86_64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: v0.5.28
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build release
+        working-directory: malong-parse
+        run: cargo build --release
+
+      - name: Package full tarball
+        shell: bash
+        run: |
+          rm -rf releases && mkdir -p releases
+          bash scripts/package-full.sh ${{ matrix.osname }} ${{ matrix.arch }}
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: ${{ matrix.artifact }}
+          path: releases/malong-liuhe-*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: v0.5.28
+
+      - uses: actions/download-artifact@v7
+        with:
+          path: artifacts
+
+      - name: List artifacts
+        run: find artifacts -type f
+
+      - uses: softprops/action-gh-release@v3
+        with:
+          tag_name: v0.5.28
+          name: v0.5.28
+          files: artifacts/**/*
+          generate_release_notes: true
+          draft: false
+          prerelease: false
