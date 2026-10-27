@@ -44,6 +44,32 @@ export function executableNextAction(na, ctx) {
   return { tool, args, note: na?.note || ('Re-run ' + tool + ' with these args to fill the failed write precondition.') }
 }
 
+// 0.5.29：写失败的「判据详情」必须与「结论」走同一条返回路径。
+// 旧实现：三个 handler 各自用字段白名单重建错误对象（mapWriteError / mapBatchError /
+// maintain 版 mapWriteError），只保留 code/message/conflict_type/candidates/suggestion/
+// next_action 六项，把 write-runtime 早已装配好的详情静默丢弃：
+//   validation         —— 判据本体（syntax/bracket 的 status + errors，含真实文件名与行号）
+//   assembled_excerpt  —— 实际送校验的装配后内容，区分「内容错」与「传输/转义错」的唯一自证
+//   hint               —— 字面 \\n 转义误用等调用方侧提示
+//   txn_id             —— ATOMIC_WRITE_FAILED / READBACK_MISMATCH 的崩溃恢复取证锚
+// 后果最刺眼的一条：block_on_validation_error=false 的预览能看到 validation 全文，
+// 而默认（真出错的主路径）只回一句「syntax/bracket errors detected」——P1-3 把临时路径
+// 换成真实文件名的成果在主路径上完全作废，用户只能靠关掉校验才能看见它查出了什么。
+// 修法：详情字段集中在此转发，三个 handler 不再各自维护白名单（防再次漂移）。
+export const WRITE_ERROR_DETAIL_KEYS = ['validation', 'assembled_excerpt', 'hint', 'txn_id']
+
+export function forwardWriteErrorDetail(r) {
+  const e = (r?.error && typeof r.error === 'object') ? r.error : {}
+  const out = {}
+  for (const k of WRITE_ERROR_DETAIL_KEYS) {
+    const v = e[k]
+    if (v === undefined || v === null) continue
+    // hint 是指引文本（可能提到 read_symbol 旧名）；assembled_excerpt 是真实文件内容，绝不能改写
+    out[k] = (k === 'hint' && typeof v === 'string') ? normalizeReadToolText(v) : v
+  }
+  return out
+}
+
 // LH-001：终态写守卫——cancelled 任务拒绝一切新副作用操作（已完成操作的无副作用结果核对
 // 由调用方先行的 request_id dedup 分支放行）。返回 error 对象，或 null（可写）。
 export function assertTaskWritable(task) {
@@ -122,7 +148,7 @@ export function hasNonAscii(s) { return /[^\x00-\x7F]/.test(String(s ?? '')) }
 // S3.3（T20）：任务 schema/graph 版本。新建任务盖章；读/写入口对「更新的版本」显式拒绝（不猜）。
 // 旧任务（无 schema_version）视为当前兼容，不强制迁移、不写盘（向后兼容 fixtures）。
 export const TASK_SCHEMA_VERSION = 1
-export const GRAPH_VERSION = '0.5.28'
+export const GRAPH_VERSION = '0.5.29'
 export function ensureTaskVersion(task) {
   const v = task?.schema_version
   if (v == null) return { ok: true, legacy: true }

@@ -889,9 +889,9 @@ export class TransactionStore {
   async _validateContent(fileRel, content) {
     const validation = {}
     if (langOf(fileRel)) {
-      validation.syntax = await validateSyntax(this.langParser, content, extname(fileRel))
-      const b = sharedBracketCheck(content)
-      validation.bracket = b.ok ? { status: 'pass' } : { status: 'fail', errors: [b.detail] }
+      validation.syntax = await validateSyntax(this.langParser, content, extname(fileRel), fileRel)
+      const b = sharedBracketCheck(content, langOf(fileRel))
+      validation.bracket = b.ok ? (b.not_applicable ? { status: 'skip', reason: b.reason } : { status: 'pass' }) : { status: 'fail', errors: [b.detail] }
     } else {
       validation.syntax = { status: 'skip', reason: 'non-code file' }
       validation.bracket = { status: 'skip', reason: 'non-code file' }
@@ -903,7 +903,9 @@ export class TransactionStore {
         for (const e of validation.syntax.errors || ['syntax errors detected']) diag.push({ source: 'syntax', message: e })
       }
       if (validation.bracket?.status === 'fail') {
-        const hints = bracketWarnings(content)
+        // bash 修复（2026-10-27）：行号提示同样按语言分派——旧实现无条件把 # 当注释，
+        // 会把 JS #private 行的 { 抹到行尾，报出指向未改动处的假行号（与主校验同根因）。
+        const hints = bracketWarnings(content, langOf(fileRel))
         if (hints.length === 0) {
           for (const e of validation.bracket.errors || ['unbalanced brackets']) diag.push({ source: 'bracket', message: e })
         } else {
@@ -1088,7 +1090,8 @@ function _diffStats(file, oldText, newText, backupPath, curPath) {
   return out
 }
 
-function bracketWarnings(content) {
+function bracketWarnings(content, lang = null) {
+  const hashIsComment = lang === 'py' || lang === 'rb'
   const warnings = []
   const pairs = { ')': '(', ']': '[', '}': '{' }
   const opens = new Set(['(', '[', '{'])
@@ -1118,7 +1121,7 @@ function bracketWarnings(content) {
     if (ch === '/' && next === '/') { inLineComment = true; continue }
     if (ch === '/' && next === '*') { inBlockComment = true; i++; continue }
     if (ch === '"' || ch === "'" || ch === '`') { inString = ch; continue }
-    if (ch === '#') { inLineComment = true; continue }
+    if (ch === '#' && hashIsComment) { inLineComment = true; continue }
 
     if (opens.has(ch)) {
       stack.push({ char: ch, line: content.slice(0, i).split('\n').length })

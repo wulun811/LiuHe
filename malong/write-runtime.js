@@ -14,6 +14,7 @@ import { guardRealPath } from './path-guard.js'
 import { extractSignatureLine, langOf } from './symbol-anchors.js'
 import { checkFileStaleness } from './staleness.js'
 import { countOccurrences, makeSimpleDiff, applyReplace, applyBodyEdit, applyInsertAfter, checkBracketBalance } from './write-edit.js'
+import { validateShellSyntax } from './shell-syntax.js'
 import { createJournal, updateJournalState, auditLog, recoverJournals, recoverTransactions, pruneJournals, JOURNAL_ROOT, JOURNAL_RETENTION_HOURS, createBatchMarker, updateBatchMarker, finishBatchMarker } from './write-journal.js'
 import { registerWriter } from './writer-registry.js'
 import { replaceFilePreservingMetadataSync } from './windows-file-replace.js'
@@ -59,10 +60,15 @@ export function shouldBlockValidation(safety, validation) {
   const explicit = safety?.block_on_validation_error
   if (explicit === false) return false
   const hardFail = validation.syntax?.status === 'fail' || validation.bracket?.status === 'fail'
-  if (explicit === true) return hardFail || validation.syntax?.status === 'skip'
+  // 修复 P0-3（2026-10-27）：strict 含 skip 的本意是「拿不到判据就别蒙混过关」，但「本机没装
+  // 解释器」（syntax.unavailable=true）与「解析服务挂了/文件不支持」（普通 skip）性质不同——
+  // 前者是环境缺失，Windows 用户永远无法满足；strict 一旦当硬错，等于让 Windows 上所有 .sh
+  // 编辑永久失败。故 unavailable 不计入 strict 的 skip 拦截（仍是 skip，不是 pass）。
+  const skipCountsAsFail = validation.syntax?.status === 'skip' && validation.syntax?.unavailable !== true
+  if (explicit === true) return hardFail || skipCountsAsFail
   const profile = safety?.profile || 'standard'
   if (profile === 'fast') return false
-  if (profile === 'strict') return hardFail || validation.syntax?.status === 'skip'
+  if (profile === 'strict') return hardFail || skipCountsAsFail
   return hardFail
 }
 
@@ -192,7 +198,13 @@ const CONFLICT_POLICY = {
 // ---------- 校验（附录：sandbox + 语法，尽力而为） ----------
 
 
-export async function validateSyntax(langParser, source, ext) {
+export async function validateSyntax(langParser, source, ext, displayName) {
+  // shell 修复（2026-10-27）：tree-sitter 对 .sh 的语法层实测几乎空转（missing fi/done、未闭合 $(
+  // 全部 has_errors:false），而括号启发式在 shell 上原理性不可判（已在 write-edit.js 整体跳过）——
+  // 两侧都不管 = shell 零校验。故 shell 改走真解释器 bash -n（只解析不执行），与 fix-imports 对
+  // Python 用 ast.parse / JS 用 node --check 同一条思路。
+  // displayName：bash -n 的报错默认带已删除的临时路径，换成调用方的真实文件名才可定位。
+  if (ext === '.sh' || ext === '.bash') return await validateShellSyntax(source, ext, displayName)
   if (!langParser?.hasErrorsAsync) return { status: 'skip', reason: 'langParser unavailable' }
   try {
     // 注意：不传 filePath —— 校验的是内存中的 newContent，不是磁盘文件
@@ -568,12 +580,14 @@ export async function writeSymbol(args, context) {
     // R22 修复 #3（2026-10-12）：括号校验仅对代码文件；非代码（json/md/txt…）与 edit_transaction 语义一致地 skip——
     // 旧实现无条件检查，合法 JSON（含 https:// 字符串）被剥离器误伤 → 误拒写（真阳性：package-lock 批改被 VALIDATION_FAILED 拦）
     const isCodeFile = !!langOf(filePath)
-    const bracket = isCodeFile ? checkBracketBalance(newContent) : null
+    const bracket = isCodeFile ? checkBracketBalance(newContent, langOf(filePath)) : null
     validation = {
-      bracket: isCodeFile ? (bracket.ok ? { status: 'pass' } : { status: 'fail', errors: [bracket.detail] }) : { status: 'skip', reason: 'non-code file' },
+      bracket: isCodeFile
+        ? (bracket.ok ? (bracket.not_applicable ? { status: 'skip', reason: bracket.reason } : { status: 'pass' }) : { status: 'fail', errors: [bracket.detail] })
+        : { status: 'skip', reason: 'non-code file' },
     }
     if (langOf(filePath)) {
-      const syn = await validateSyntax(langParser, newContent, extname(filePath))
+      const syn = await validateSyntax(langParser, newContent, extname(filePath), filePath)
       validation.syntax = syn
     } else {
       validation.syntax = { status: 'skip', reason: 'non-code file' }
@@ -1043,10 +1057,10 @@ export async function writeSymbols(args, context) {
       const newContent = lines.join('\n')
       // R22 修复 #3（2026-10-12）：同单品路径——括号校验仅对代码文件，非代码 skip（edit_transaction 语义一致）
       const isCodeFile = !!langOf(fp)
-      const bracket = isCodeFile ? checkBracketBalance(newContent) : null
-      const validation = { bracket: isCodeFile ? (bracket.ok ? { status: 'pass' } : { status: 'fail', errors: [bracket.detail] }) : { status: 'skip', reason: 'non-code file' } }
+      const bracket = isCodeFile ? checkBracketBalance(newContent, langOf(fp)) : null
+      const validation = { bracket: isCodeFile ? (bracket.ok ? (bracket.not_applicable ? { status: 'skip', reason: bracket.reason } : { status: 'pass' }) : { status: 'fail', errors: [bracket.detail] }) : { status: 'skip', reason: 'non-code file' } }
       if (langOf(fp)) {
-        validation.syntax = await validateSyntax(langParser, newContent, extname(fp))
+        validation.syntax = await validateSyntax(langParser, newContent, extname(fp), fp)
       } else {
         validation.syntax = { status: 'skip', reason: 'non-code file' }
       }

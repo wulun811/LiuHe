@@ -495,6 +495,128 @@ assert(v3.bracket.status === 'fail', 'P3 syntax fail → bracket 保留 fail（�
 const v4 = reconcileBracketWithSyntax({ syntax: { status: 'pass' }, bracket: { status: 'pass' } })
 assert(v4.bracket.status === 'pass' && !v4.bracket.syntax_disagreement, 'P3 双 pass 不动')
 
+// 3.19 shell / #-语义（2026-10-27 修）：旧 stripLiteralsForBracket 无条件把 # 当注释——bash 的
+// ${VAR#pat}/${#ARR[@]} 与 JS 的 #private 被吞到行尾，左侧 { 失衡 → 合法文件被判 bracket fail。
+// 真阳性：给含 ${ROOT#/home} 的 ci.sh 只插一行纯注释也遭 VALIDATION_FAILED，报错行号全在未改动处。
+// 决策：shell 的括号配对本原理上不可判（${…#…}、case 的 )、heredoc），整体 skip 交语法层；
+// # 仅在 Python 系当注释。
+assert(checkBracketBalance('P=${ROOT#/home}\n', 'bash').not_applicable === true, 'shell ${VAR#pat} → not_applicable（不得误报）')
+assert(checkBracketBalance('P=${ROOT##*/}\nN=${#ARR[@]}\n', 'bash').not_applicable === true, 'shell ${VAR##pat}/${#ARR[@]} → not_applicable')
+assert(checkBracketBalance('case "$1" in\n  a) echo a ;;\nesac\n', 'bash').not_applicable === true, 'shell case 的 ) → not_applicable')
+assert(checkBracketBalance('cat <<EOF\n{\n(\nEOF\n', 'bash').not_applicable === true, 'shell heredoc 内任意括号 → not_applicable')
+assert(checkBracketBalance('#!/bin/bash\nset -euo pipefail\nROOT="$(cd "$(dirname "$0")/.." && pwd)"\n', 'bash').not_applicable === true, 'shell $() 嵌套引号 → not_applicable')
+assert(checkBracketBalance('class A {\n  #x = 1\n  get() { return this.#x }\n}\n', 'js').ok === true, 'JS #private 字段不再被当注释吞行')
+assert(checkBracketBalance('class A {\n  #x = (1\n}\n', 'js').ok === false, 'JS #private 行内的真失衡仍报')
+assert(checkBracketBalance('x = 1  # note (\n', 'py').ok === true, 'Python # 注释仍正常剥离（语义未回退）')
+assert(checkBracketBalance('x = {1: 2  # oops (\n', 'py').ok === false, 'Python 真失衡 + 行尾注释仍报')
+assert(checkBracketBalance('function f( { return 1 }', 'js').ok === false, 'JS 真失衡仍报（守卫未因分派而失效）')
+
+// 3.20 shell 语法真校验（2026-10-27）：tree-sitter 对 .sh 几乎空转（missing fi/done、未闭合 $(
+// 全 has_errors:false），括号启发式又原理性不可判——两侧都不管 = shell 零校验。故 shell 走 bash -n。
+// 失败路径：坏写法必须 fail（否则等于没兜底）；合法写法必须 pass（否则又回到误拦）。
+const { validateShellSyntax, getShellCmd, _resetShellCmdCache } = await imp(join(MALONG_DIR, 'shell-syntax.js'))
+const shellCmd = getShellCmd()
+if (!shellCmd) {
+  // Windows 无 bash：如实声明未验证，不伪造通过
+  console.log('  [SKIP] shell syntax: no bash/sh on this host — 真实校验 NOT_RUN')
+} else {
+  const shellBad = [
+    ['if true; then\n  echo a\n', 'missing fi'],
+    ['for i in 1 2; do\n  echo $i\n', 'missing done'],
+    ['X=$(date\n', 'unclosed $('],
+    ['f() {\n  echo a\n', 'unclosed {'],
+    ['echo "abc\n', 'unclosed quote'],
+    ['if true\n  echo a\nfi\n', 'missing then'],
+    ['case "$1" in\n  a) echo a ;;\n', 'missing esac'],
+    ['fi\n', 'stray fi'],
+  ]
+  for (const [src, name] of shellBad) {
+    const r = await validateShellSyntax(src, '.sh')
+    assert(r.status === 'fail', `shell 坏写法必须 fail（${name}）—— 得 ${r.status}`)
+  }
+  const shellGood = [
+    ['if true; then\n  for i in 1 2; do\n    echo "$i"\n  done\nfi\n', 'nested if/for'],
+    ['P=${ROOT#/home}\nN=${#ARR[@]}\n', '${VAR#pat} / ${#ARR[@]}'],
+    ['case "$1" in\n  a) echo a ;;\n  *) echo b ;;\nesac\n', 'case/esac'],
+    ['cat <<EOF\n{\n(\nEOF\n', 'heredoc 内任意括号'],
+    ['n=$((1 + 2))\nif (( n > 0 )); then echo ok; fi\n', '$(( ))'],
+  ]
+  for (const [src, name] of shellGood) {
+    const r = await validateShellSyntax(src, '.sh')
+    assert(r.status === 'pass', `shell 合法写法必须 pass、零误报（${name}）—— 得 ${r.status}${r.errors ? ': ' + r.errors[0].slice(0, 60) : ''}`)
+  }
+  // 安全：-n 只解析不执行，待校验内容里的命令不得产生副作用
+  const canary = join(tmpdir(), `malong-sh-canary-${process.pid}`)
+  const r = await validateShellSyntax(`echo x > ${canary}\nif true; then\n`, '.sh')
+  assert(r.status === 'fail', 'shell 含副作用的坏脚本仍必须 fail')
+  assert(!existsSync(canary), 'bash -n 不得执行待校验内容（canary 文件不应被创建）')
+  // .bash 扩展名同路径
+  assert((await validateShellSyntax('if true; then\n', '.bash')).status === 'fail', '.bash 扩展名同样走真校验')
+
+  // 3.21 全面审查补修（2026-10-27，用户要求「升 5.29 就把它做扎实」后实测出 4 处真阳性）
+  // P0-1 CRLF：malong 在 transaction-store 里刻意保留 CRLF→CRLF（15-B Windows 行尾继承），
+  //   而 bash -n 把 `then\r` 当非法 token → Windows 上每个 .sh 的每次编辑都被 VALIDATION_FAILED 拦。
+  //   这是 0.5.29 自己引入的新误拦，与它要修的「合法文件被拦」同型，必须同版修掉。
+  const lfScript = '#!/bin/bash\nif true; then\n  echo a\nfi\n'
+  const crlfScript = lfScript.replace(/\n/g, '\r\n')
+  const crlfOk = await validateShellSyntax(crlfScript, '.sh', 'win.sh')
+  assert(crlfOk.status === 'pass', `P0-1 合法 CRLF 脚本不得误拦（得 ${crlfOk.status}${crlfOk.errors ? ': ' + crlfOk.errors[0] : ''}）`)
+  assert(typeof crlfOk.notice === 'string' && crlfOk.notice.includes('CRLF'), 'P0-1 CRLF 以 notice 如实告知，不静默隐藏')
+  // 规范化只去行尾噪声，真语法错仍必须照报（否则等于把 CRLF 文件全放行）
+  const crlfBad = '#!/bin/bash\r\nif true; then\r\n  echo a\r\n'
+  const crlfBadR = await validateShellSyntax(crlfBad, '.sh', 'win-bad.sh')
+  assert(crlfBadR.status === 'fail', `P0-1 CRLF 下真缺 fi 仍必须 fail（得 ${crlfBadR.status}）`)
+
+  // P0-2 缓存必须返回副本：旧实现返回同一对象引用，调用方改写 status 就污染后续同内容校验
+  // （实测能把 fail 改成 pass —— 等于永久放行一个坏脚本）。
+  const polluteSrc = 'if true; then\n  echo pollute\n'
+  const first = await validateShellSyntax(polluteSrc, '.sh', 'p.sh')
+  assert(first.status === 'fail', 'P0-2 前置：该内容本身是坏脚本')
+  first.status = 'pass'
+  first.errors = null
+  const second = await validateShellSyntax(polluteSrc, '.sh', 'p.sh')
+  assert(second.status === 'fail', `P0-2 调用方改结果不得污染缓存（得 ${second.status}）`)
+  assert(Array.isArray(second.errors) && second.errors.length > 0, 'P0-2 缓存命中仍返回完整 errors')
+
+  // P1-3 错误消息不得带已删除的临时路径：bash -n 报错默认是 /tmp/malong-sh-XXXX/snippet.sh，
+  // 该目录在返回前已删，用户无法据此定位——正是最初「报错指向未改动处」的同类体验问题。
+  const named = await validateShellSyntax('if true; then\n  echo a\n', '.sh', 'ci.sh')
+  assert(!/malong-sh-/.test(named.errors[0]), `P1-3 错误消息不得泄露临时路径（得 ${named.errors[0]}）`)
+  assert(named.errors[0].includes('ci.sh'), `P1-3 错误消息须含真实文件名（得 ${named.errors[0]}）`)
+
+  // P0-3 环境缺失（unavailable）在 strict / 显式 true 下不得当硬错：
+  // 否则 Windows（无 bash）上 strict 档等于让所有 .sh 编辑永久失败；但普通 skip（解析服务挂）仍须拦。
+  assert(shouldBlockValidation({ profile: 'strict' }, { syntax: { status: 'skip', unavailable: true }, bracket: { status: 'skip' } }) === false, 'P0-3 strict 下无 bash（unavailable）不拦')
+  assert(shouldBlockValidation({ block_on_validation_error: true }, { syntax: { status: 'skip', unavailable: true }, bracket: { status: 'skip' } }) === false, 'P0-3 显式 true 下无 bash 不拦')
+  assert(shouldBlockValidation({ profile: 'strict' }, { syntax: { status: 'skip', reason: 'parse unavailable' }, bracket: { status: 'pass' } }) === true, 'P0-3 普通 skip（解析服务挂）strict 仍拦（语义未回退）')
+  assert(shouldBlockValidation({ profile: 'strict' }, { syntax: { status: 'fail' }, bracket: { status: 'skip' } }) === true, 'P0-3 真语法错 strict 仍拦（语义未回退）')
+}
+
+// P1-4 临时目录不可用（只读 TMPDIR / 配额满）不得炸穿写盘：旧实现直接 throw ENOENT，
+// 而写盘主路径无 catch → 用户得到裸异常而非 VALIDATION_FAILED 语义。
+if (shellCmd) {
+  // Windows 复核（2026-10-27）：os.tmpdir() 在 win32 读 TEMP/TMP 而非 TMPDIR——
+  // 只改 TMPDIR 会让这个 mock 在 Windows 上静默失效（临时目录仍可用 → 校验照跑 → 得 fail 而非 skip）。
+  const TMP_VARS = process.platform === 'win32' ? ['TMPDIR', 'TEMP', 'TMP'] : ['TMPDIR']
+  const oldTmp = Object.fromEntries(TMP_VARS.map((k) => [k, process.env[k]]))
+  const noSuch = join(tmpdir(), `malong-no-such-dir-${process.pid}`)
+  for (const k of TMP_VARS) process.env[k] = noSuch
+  let tmpRes = null, tmpThrew = null
+  try {
+    tmpRes = await validateShellSyntax('if true; then\n  echo a\n', '.sh', 'tmpfail.sh')
+  } catch (e) {
+    tmpThrew = e
+  } finally {
+    for (const k of TMP_VARS) {
+      if (oldTmp[k] === undefined) delete process.env[k]
+      else process.env[k] = oldTmp[k]
+    }
+  }
+  assert(tmpThrew === null, `P1-4 临时目录不可用不得抛裸异常（得 ${tmpThrew && tmpThrew.message}）`)
+  assert(tmpRes && tmpRes.status === 'skip' && tmpRes.unavailable === true, `P1-4 临时目录不可用 → skip+unavailable（得 ${JSON.stringify(tmpRes)}）`)
+  assert(tmpRes && String(tmpRes.reason || '').includes('NOT a syntax error'), 'P1-4 如实声明这不是语法错，不伪装 pass')
+}
+
 // ══════════════ 汇总 ══════════════
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0) // 9（F8）：成功也要显式退出——否则 parse-client 的常驻 socket 挂住 event loop，进程不退（并行跑表现为超时）

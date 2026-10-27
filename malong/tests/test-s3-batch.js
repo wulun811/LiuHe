@@ -269,6 +269,10 @@ assert(read(V1) === 'const v1 = 1\n', '校验失败不落盘')
 mkTask('task_valfail2', [material('rv2', V2, 'const v2a = 1\nconst v2b = 2\n')])
 r = await batch.handle({ workspace_dir: WS, task_id: 'task_valfail2', writes: [patchW('rv2', 'const v2a = 1', 'const v2a = {'), patchW('rv2', 'const v2b = 2', 'const v2b = 3')] }, ctx)
 assert(r.ok === false && r.error === 'VALIDATION_FAILED', '校验失败多条同文件 → VALIDATION_FAILED（得 ok=' + r.ok + ' error=' + r.error + '）')
+// 0.5.29：batch 的 mapBatchError 同样丢弃过 validation（与 code_patch 同根）——
+// 修复前这里只有一句泛化文本，无法定位是哪个文件、哪一行错
+assert(r.validation != null, 'B1 batch 校验失败带 validation 详情（得 ' + JSON.stringify(r.validation) + '）')
+assert(r.validation?.syntax?.status === 'fail' || r.validation?.bracket?.status === 'fail', 'B2 validation 如实报告判据为 fail（得 ' + JSON.stringify(r.validation) + '）')
 assert(read(V2) === 'const v2a = 1\nconst v2b = 2\n', '校验失败多条不落盘')
 
 // R22 修复 #3：非代码（JSON）不跑括号校验——含 URL 的合法 JSON 可正常预演（旧实现误报 unclosed 拦写）

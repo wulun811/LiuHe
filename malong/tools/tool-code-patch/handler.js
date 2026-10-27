@@ -6,6 +6,7 @@ import { existsSync, writeFileSync } from 'node:fs'
 import {
   makeError, envelope, getTask, updateTaskCas, findOperation, payloadHash, newOperationId,
   traceId, fileHash, operationEvent, ensureTaskVersion, assertTaskWritable, taskHeader, unknownTaskError, addWriteBasesToTask, writeBasesForOperation,
+  forwardWriteErrorDetail,
 } from '../entry-shared.js'
 import { handle as writeSymbolHandle } from '../tool-write-symbol/handler.js'
 import { serializeReceipt, opGuarantee } from '../../workflow/receipt.js'
@@ -431,6 +432,9 @@ function mapWriteError(r, op, ctx) {
     error: code,
     code,
     message: toS2ReadTool(e.message || r?.message) || 'write failed',
+    // 0.5.29：判据详情随结论一起透出（validation/assembled_excerpt/hint/txn_id）——
+    // 旧实现只保留下面几个字段，把 write-runtime 装配好的 validation 丢掉（详见 entry-shared 注释）
+    ...forwardWriteErrorDetail(r),
     ...(e.conflict_type ? { conflict_type: e.conflict_type } : {}),
     ...(e.candidates ? { candidates: e.candidates } : {}),
     ...(r?.current_version ? { current_version: r.current_version } : {}),

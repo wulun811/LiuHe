@@ -109,7 +109,18 @@ function scanRegexLiteral(text, start) {
   return -1
 }
 
-function stripLiteralsForBracket(text) {
+// bash 修复（2026-10-27）：lang 决定两件事——
+// ① `#` 是否为行注释：只有 Python 系（py/rb/php…）是。旧实现无条件把 `#` 当注释，把 bash 的
+//    ${VAR#pat}/${VAR##pat}/${#ARR[@]} 与 JS 的 #private 一路吞到行尾，左侧 { 失去配对 →
+//    合法文件被判 bracket fail（真阳性：给含 ${ROOT#/home} 的 ci.sh 只插一行纯注释也遭
+//    VALIDATION_FAILED，报错行号全在未改动处）。
+// ② shell（bash）直接不适用：${…} 修饰符、case 的 `)`、heredoc、$(( )) 在 shell 里合法但不配对，
+//    原理上无法用 JS/Python 式括号配对判定——真值由语法层（tree-sitter bash）负责。
+const HASH_COMMENT_LANGS = new Set(['py', 'rb'])
+const SHELL_LANGS = new Set(['bash'])
+
+function stripLiteralsForBracket(text, lang) {
+  const hashIsComment = HASH_COMMENT_LANGS.has(lang)
   // 字符串/注释/正则里的括号不是代码结构：先剥掉再平衡校验（尽力而为，不处理模板串内代码）
   // R22 修复 #3b（2026-10-12）：单趟扫描替代 regex 链——旧实现先跑注释 regex，把字符串里的 //
   // （如 URL https://…）当行注释剥掉、连带吞掉闭合引号，跨行级联误判（合法 JSON/含 URL 的 JS 误报不平衡）
@@ -130,7 +141,8 @@ function stripLiteralsForBracket(text) {
     }
     if (c === '/' && text[i + 1] === '/') { while (i < n && text[i] !== '\n') i++; out += ' '; continue }
     if (c === '/' && text[i + 1] === '*') { i += 2; while (i < n && !(text[i] === '*' && text[i + 1] === '/')) i++; i = Math.min(n, i + 2); out += ' '; continue }
-    if (c === '#') { while (i < n && text[i] !== '\n') i++; out += ' '; continue }
+    // bash 修复（2026-10-27）：`#` 只在 Python 系当注释（bash 参数展开 / JS 私有名里的 # 不是注释）
+    if (c === '#' && hashIsComment) { while (i < n && text[i] !== '\n') i++; out += ' '; continue }
     if (c === '/' && regexMayStart(out)) {
       const end = scanRegexLiteral(text, i)
       if (end !== -1) { out += ' '; i = end; continue }
@@ -141,8 +153,11 @@ function stripLiteralsForBracket(text) {
   return out
 }
 
-export function checkBracketBalance(text) {
-  const code = stripLiteralsForBracket(text)
+export function checkBracketBalance(text, lang) {
+  // bash 修复（2026-10-27）：shell 的括号语法（${…#…}、case 的 )、heredoc、$(( ))）在此启发式下
+  // 原理性不可判——返回 not_applicable 而非假报 pass：调用方据此 skip，真值交给语法层。
+  if (SHELL_LANGS.has(lang)) return { ok: true, not_applicable: true, reason: 'shell: bracket heuristic not applicable' }
+  const code = stripLiteralsForBracket(text, lang)
   const pairs = { '(': ')', '[': ']', '{': '}' }
   const stack = []
   for (const ch of code) {

@@ -1,6 +1,6 @@
 {
   "name": "@jieai/dsh-malong-bridge",
-  "version": "0.5.28",
+  "version": "0.5.29",
   "description": "LiuHe (Six Harmonies) tool suite as a DeepSeek Harness (dsh) plugin bundle — 44 classic / 13 graph / 18 diagnostic MCP tools with dynamic workspace injection (DSH defaults to the Six-He line: 13)",
   "keywords": [
     "dsh",

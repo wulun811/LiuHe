@@ -6,7 +6,7 @@
   "inputSchema": {
     "type": "object",
     "properties": {
-      "workspace_dir": { "type": "string", "description": "Root (abs)." },
+      "workspace_dir": { "type": "string", "description": "Root (abs). Any workspace path works — a fresh one is indexed automatically on first read." },
       "mode": { "type": "string", "enum": ["outline", "symbols", "references", "callers", "callees", "impact", "map", "body", "search", "tests", "validate", "capabilities", "capability"], "description": "map=compact paged overview (+dir drill); body=read file/symbol content without a task; search=code_search intent search; tests=find_tests candidates; validate=sandbox_validate content; capabilities=list; capability=describe by name." },
       "file": { "type": "string", "description": "Required for outline/callers/callees/impact/tests/validate; optional with symbol for references." },
       "symbol": { "type": "string", "description": "Required for references; optional with file for callers/callees/impact." },

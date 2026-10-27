@@ -6,6 +6,7 @@ import { existsSync } from 'node:fs'
 import {
   makeError, envelope, getTask, updateTaskCas, findOperation, payloadHash, newOperationId,
   newEvidenceId, traceId, fileHash, operationEvent, ensureTaskVersion, assertTaskWritable, taskHeader, unknownTaskError, normalizeReadToolText, executableNextAction,
+  forwardWriteErrorDetail,
 } from '../entry-shared.js'
 import { writeSymbols } from '../../write-runtime.js'
 import { serializeReceipt, opGuarantee } from '../../workflow/receipt.js'
@@ -322,6 +323,8 @@ function mapWriteError(r, op, ctx) {
   return {
     ok: false, error: code, code,
     message: normalizeReadToolText(e.message || r?.message) || 'maintain write failed',
+    // 0.5.29：判据详情随结论一起透出（validation/assembled_excerpt/hint/txn_id）
+    ...forwardWriteErrorDetail(r),
     ...(e.conflict_type ? { conflict_type: e.conflict_type } : {}),
     ...(e.file ? { file: e.file } : {}),
     ...(e.itemIndex != null ? { item_index: e.itemIndex } : {}),

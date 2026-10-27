@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "interface": "graph",
   "requires_state": true,
-  "description": "Edit one file — a reversible alternative to Edit/Write: patch text you already read (pass its read_ref), or create:true + content + locator.file_path. dry_run default: preview; false applies.",
+  "description": "Edit any text file (code, md, config) — a reversible alternative to Edit/Write: patch text you already read (pass its read_ref), or create:true + content + locator.file_path. dry_run default: preview; false applies.",
   "inputSchema": {
     "type": "object",
     "properties": {

@@ -218,5 +218,48 @@ assert(r.error === 'missing_parameter' && /Apply shape/.test(r.suggestion || '')
   assert(rj.ok === true, 'R22 #3 单品 JSON 含 URL 预演不被误拒（得 ok=' + rj.ok + ' err=' + rj.error + '）')
 }
 
+// ── 0.5.29：校验失败的「判据详情」必须跟结论一起透出（不再只回一句泛化文本）──
+// 旧实现：write-runtime 已把 validation/assembled_excerpt/hint 装配进 error，
+// 但本 handler 的 mapWriteError 逐字段白名单重建时全部丢弃。后果：block=false 的预览
+// 能看到 validation 全文，而默认（真出错的主路径）只回一句 “syntax/bracket errors detected”
+// ——用户只能靠关掉校验才能看见它查出了什么，P1-3 换真实文件名的成果在主路径上作废。
+{
+  const FS = 'src/val_gate_new.sh'   // 必须新建（create:true 不得指向已存在文件）
+  const BROKEN = '#!/bin/bash\nif true; then\n  echo hi\n'  // 缺 fi
+
+  // ① 预览 + block=false：旧实现就能看到 validation 全文（用户报告的对照基线）
+  mkTask('task_val_prev', [])
+  const rvPrev = await patch.handle({
+    workspace_dir: WS, task_id: 'task_val_prev',
+    locator: { file_path: FS }, create: true, content: BROKEN,
+    dry_run: true,
+    safety: { block_on_validation_error: false },
+  }, ctx)
+  assert(rvPrev.observation?.validation != null, `V0 预览(block=false) 带 validation（得 ${JSON.stringify(rvPrev.observation?.validation)}）`)
+
+  // ② 默认拦截主路径（真出错、真拒绝）：必须同样带 validation，且含真实文件名
+  mkTask('task_val_hard', [])
+  const rvHard = await patch.handle({
+    workspace_dir: WS, task_id: 'task_val_hard',
+    locator: { file_path: FS }, create: true, content: BROKEN,
+    dry_run: false, request_id: 'req_val_hard',
+    safety: { block_on_validation_error: true },
+  }, ctx)
+  assert(rvHard.ok === false && rvHard.code === 'VALIDATION_FAILED', `V1 坏脚本被拦（得 ${rvHard.ok}/${rvHard.code}/${rvHard.message?.slice(0,60)}）`)
+  assert(rvHard.validation != null, `V2 主路径也带 validation 详情（得 ${JSON.stringify(rvHard.validation)}）`)
+  assert(rvHard.validation?.syntax?.status === 'fail', `V3 validation.syntax.status=fail（得 ${JSON.stringify(rvHard.validation?.syntax)?.slice(0, 90)}）`)
+  // P1-3 联动：报错必须指向真实文件名，不得是已删的临时路径
+  const vErrs = JSON.stringify(rvHard.validation?.syntax?.errors || [])
+  assert(vErrs.includes('val_gate_new.sh'), `V4 报错含真实文件名（得 ${vErrs.slice(0, 120)}）`)
+  assert(!/malong-sh-/.test(vErrs), `V5 报错不含临时目录（得 ${vErrs.slice(0, 120)}）`)
+  assert(rvHard.assembled_excerpt != null, 'V6 主路径带 assembled_excerpt（区分内容错/转义错的唯一自证）')
+
+  // ③ 预览与硬失败两条路径必须看到同一个判据（本次修复的核心不变量）
+  assert(
+    rvHard.validation?.syntax?.status === rvPrev.observation?.validation?.syntax?.status,
+    `V7 两条返回路径的 syntax.status 一致（得 hard=${rvHard.validation?.syntax?.status} vs prev=${rvPrev.observation?.validation?.syntax?.status}）`,
+  )
+}
+
 console.log('\n=== test-s2-patch: ' + pass + ' passed, ' + fail + ' failed ===')
 process.exit(fail > 0 ? 1 : 0)
