@@ -1,7 +1,7 @@
 # RELEASING — npm 发布操作手册（给 CI 维护团队）
 
 LiuHe 的 npm 发布链：打 `v*` 标签 → 4 平台 runner 构建 → 发 npm 平台包 → 发 npm 主包。
-主包 `@jieai/dsh-malong-bridge` 已在 npmjs 发布至 0.4.8（4 平台包 + 主包齐备）。0.5.27 待发布：打 `v0.5.27` tag 触发本流水线全自动发布（4 平台包 + 主包 + GitHub Release tarball）。
+主包 `@jieai/dsh-malong-bridge` 已在 npmjs 发布至 0.5.29（4 平台包 + 主包齐备）。下一个版本：升版本并全链测试后，打对应 `v<version>` tag 触发本流水线全自动发布（4 平台包 + 主包 + GitHub Release tarball）。
 
 ## 1. 前置配置（一次性）
 
@@ -19,8 +19,9 @@ LiuHe 的 npm 发布链：打 `v*` 标签 → 4 平台 runner 构建 → 发 npm
 #    malong/dsh/bundle/package.json 的 version 与 optionalDependencies（CI 会自动 sed 对齐，手动改也可，以 malong/package.json 为准）
 #    dev 侧 CHANGELOG / docs
 # 2. 全链测试门禁：cd malong && npm test（166 个测试文件，全链 0 失败）
-# 3. 打标签推送
-git tag v0.5.27 && git push origin v0.5.27
+# 3. 打标签推送（版本号从 malong/package.json 读取，避免手写漂移）
+VER="$(node -p "require('./malong/package.json').version")"
+git tag "v$VER" && git push origin "v$VER"
 ```
 
 release.yml 自动执行：

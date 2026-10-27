@@ -15,7 +15,7 @@
 ![throughput](https://img.shields.io/badge/throughput-588%20calls%2Fs-blue)
 ![token](https://img.shields.io/badge/token%20est%20(fixed--path)-65%25-blue)
 ![license](https://img.shields.io/badge/license-MIT-blue)
-![version](https://img.shields.io/badge/version-0.5.27-blue)
+![version](https://img.shields.io/badge/version-0.5.29-blue)
 ![commits](https://img.shields.io/github/commit-count/wulun811/LiuHe)
 
 **Malong LiuHe** is a toolkit built for LLMs rather than humans. It ships two components:
@@ -174,7 +174,7 @@ git clone <repo-url> liuhe && cd liuhe/malong
 
 # 1) Parse daemon — prebuilt binary from releases/ (no cargo needed):
 mkdir -p ~/.local/bin
-tar -xzf ../releases/malong-liuhe-0.5.27-linux-x86_64.tar.gz
+tar -xzf ../releases/malong-liuhe-0.5.29-linux-x86_64.tar.gz
 cp malong-parse/target/release/malong-parse ~/.local/bin
 malong-parse &                                   # start the daemon (socket: /tmp/malong-parse-$UID.sock)
 
@@ -187,7 +187,7 @@ node tests/test-db-adapter.js   # 22 assertions: sql.js backend + persistence
 node tests/test-mcp-server.js   # 37 assertions: MCP stdio + daemon round-trip
 ```
 
-> **Windows users:** use `malong-liuhe-0.5.27-windows-x86_64.tar.gz` from GitHub Releases (contains `malong-parse.exe`), extract and put it on PATH; the MCP server auto-starts the daemon, so step 1's `malong-parse &` is not required. The `mkdir -p`/`tar -xzf` above are Unix syntax — on Windows use any extractor (`tar -xzf` works on Win10+).
+> **Windows users:** use `malong-liuhe-0.5.29-windows-x86_64.tar.gz` from GitHub Releases (contains `malong-parse.exe`), extract and put it on PATH; the MCP server auto-starts the daemon, so step 1's `malong-parse &` is not required. The `mkdir -p`/`tar -xzf` above are Unix syntax — on Windows use any extractor (`tar -xzf` works on Win10+).
 
 > Note: if the daemon is not running, parse-dependent tools (symbol extraction
 > etc.) degrade; the SQLite-backed tools (repo-map / code-index / health-check)
