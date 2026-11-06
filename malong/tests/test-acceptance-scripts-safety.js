@@ -9,7 +9,7 @@
 // 两个用例都直接跑真实脚本（不是复制逻辑），失败路径优先。
 
 import { spawn, spawnSync } from 'node:child_process'
-import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs'
+import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, symlinkSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import os from 'node:os'
@@ -70,6 +70,33 @@ mkdirSync(TMP, { recursive: true })
   assert(existsSync(fresh), '必须真的创建出目录')
   r.dispose()
   assert(!existsSync(fresh), 'dispose 必须能清掉自己创建的目录')
+}
+
+// ── F01-d：祖先软链（macOS /var→/private/var 同型）不得让 dispose 放弃清理；
+//           root 自身被替换成软链时必须跳过、不删目标 ──
+if (process.platform !== 'win32') {
+  const mod = await import(pathToFileURL(join(SCRIPTS, 'acceptance-workdir.mjs')).href)
+  const base = join(TMP, 'sym-base-' + Date.now())
+  const link = join(TMP, 'sym-link-' + Date.now())
+  mkdirSync(base, { recursive: true })
+  symlinkSync(base, link, 'dir')
+  const viaLink = mod.prepareWorkdirOrExit(join(link, 'created'), 'test-')
+  assert(viaLink.ok === true, `祖先软链下必须允许创建（得 ${JSON.stringify(viaLink)}）`)
+  viaLink.dispose()
+  assert(!existsSync(join(base, 'created')), '祖先软链下 dispose 必须清掉自己创建的目录')
+
+  const victim = join(TMP, 'victim-' + Date.now())
+  mkdirSync(victim)
+  const swap = join(TMP, 'swap-' + Date.now())
+  const r3 = mod.prepareWorkdirOrExit(swap, 'test-')
+  rmSync(swap, { recursive: true, force: true })
+  symlinkSync(victim, swap, 'dir')
+  r3.dispose()
+  assert(existsSync(victim), 'root 被换成软链时 dispose 必须跳过、不删目标')
+  rmSync(swap, { force: true })
+  rmSync(victim, { recursive: true, force: true })
+  rmSync(link, { force: true })
+  rmSync(base, { recursive: true, force: true })
 }
 
 // ── F02：子进程自杀后，在途 RPC 必须【立刻】结算，而不是等超时 ──

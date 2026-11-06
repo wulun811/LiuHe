@@ -15,7 +15,7 @@
 // 「目标必须不存在」一条就足以防止删既有数据——既有目录根本走不到删除逻辑。
 
 import { mkdtempSync, mkdirSync, existsSync, rmSync, realpathSync, statSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, join, resolve, basename } from 'node:path'
 import os from 'node:os'
 
 export class WorkdirRefused extends Error {
@@ -117,11 +117,13 @@ export function prepareWorkdirOrExit(explicit, prefix = 'malong-accept-') {
 function makeDisposer(root) {
   return () => {
     // 清理前复核：只删自己创建的、且确实是目录的路径。
-    // realpath 对比可挡住「创建后被换成指向他处的符号链接」这类替换。
+    // 只有 root 自身被换成指向他处的软链才拒绝；祖先软链属正常——macOS 的
+    // os.tmpdir() 就是 /var → /private/var，直接拿 realpath 比 resolve 会永远不等。
     try {
-      const real = realpathSync(root)
       const expected = resolve(root)
-      if (real !== expected) return // 被替换成软链 → 不动
+      const real = realpathSync(expected)
+      const expectedReal = join(realpathSync(dirname(expected)), basename(expected))
+      if (real !== expectedReal) return // 被替换成软链 → 不动
       rmSync(real, { recursive: true, force: true })
     } catch {
       // 已不存在 / 无权限 → 清不掉就算了，不抛（清理失败不该把通过变成失败）
