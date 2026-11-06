@@ -6,7 +6,7 @@ import { existsSync, writeFileSync } from 'node:fs'
 import {
   makeError, envelope, getTask, updateTaskCas, findOperation, payloadHash, newOperationId,
   traceId, fileHash, operationEvent, ensureTaskVersion, assertTaskWritable, taskHeader, unknownTaskError, addWriteBasesToTask, writeBasesForOperation,
-  forwardWriteErrorDetail,
+  forwardWriteErrorDetail, stateCommitPendingText,
 } from '../entry-shared.js'
 import { handle as writeSymbolHandle } from '../tool-write-symbol/handler.js'
 import { serializeReceipt, opGuarantee } from '../../workflow/receipt.js'
@@ -121,8 +121,13 @@ export async function handle(args, context) {
     const v = r.validation || null
     const vHardFail = !!v && (v.syntax?.status === 'fail' || v.bracket?.status === 'fail')
     const vSkip = !!v && v.syntax?.status === 'skip'
-    // WP08R-3 A2：预览免 base——预览结果可用，但 apply 需要 file 级 read（下一步直接给 code_read）
-    // 狗粮r2 修复：create:true 新建文件本无 base——不得走 noBasePreview（否则误导去 read 不存在的文件）
+    // P-A（2026-10-30 自用试用）："无 diff" 不得报成 "Preview OK"。
+    // old_string 匹配 0 次、但 new_string 已在文件里时，write-runtime 返回
+    // status='already_applied'（正确的幂等去重）但不带 diff。旧实现只看 vHardFail，
+    // 于是 diff=null 被当成 OK，还教调用方 dry_run:false 去 apply 一个什么都不改的补丁——
+    // 对调用方而言这是一次完全无效的编辑，却拿到了 OK。
+    const alreadyApplied = r?.status === 'already_applied'
+    const noDiff = !r.diff
     const isCreate = args?.create === true
     const noBasePreview = !base_version && !isCreate
     return envelope({
@@ -130,12 +135,19 @@ export async function handle(args, context) {
       observation: {
         summary: vHardFail
           ? `Preview has validation errors for ${locator.file_path} (edit_mode=${isCreate ? 'create' : edit_mode}); apply will be blocked unless safety.block_on_validation_error=false. No file changed.`
-          : `Preview OK for ${locator.file_path} (edit_mode=${isCreate ? 'create' : edit_mode})${vSkip ? ' [syntax unverified: skip]' : ''}. No file changed.`,
+          : alreadyApplied
+            ? `Nothing to change for ${locator.file_path}: old_string was not found but the new content is already present (already applied). No file changed.`
+            : noDiff
+              ? `Preview produced no diff for ${locator.file_path} (edit_mode=${isCreate ? 'create' : edit_mode}) — the edit would change nothing. No file changed.`
+              : `Preview OK for ${locator.file_path} (edit_mode=${isCreate ? 'create' : edit_mode})${vSkip ? ' [syntax unverified: skip]' : ''}. No file changed.`,
         effect: 'preview', dry_run: true,
         target: { canonical_path: locator.file_path, locator, read_ref: read_ref || null },
         new_version: r.new_version || null,
         diff: r.diff || null, validation: v,
-        ...((vHardFail || noBasePreview) ? { warning: [vHardFail ? 'syntax/bracket validation failed — apply will be blocked unless safety.block_on_validation_error=false' : null, noBasePreview ? 'no base_version: applying requires a file-level read first — code_read the FILE (whole file; a symbol read does not establish a file base), then re-issue with that read_ref.' : null].filter(Boolean).join(' ') } : {}),
+        ...(r.warning ? { warning: r.warning } : {}),
+        ...(alreadyApplied ? { already_applied: true } : {}),
+        ...(noDiff && !alreadyApplied && !vHardFail ? { no_effect: true } : {}),
+        ...((vHardFail || noBasePreview) ? { warning: [vHardFail ? 'syntax/bracket validation failed — apply will be blocked unless safety.block_on_validation_error=false' : null, noBasePreview ? 'no base_version: applying requires a read_ref for this file — code_read the file, then re-issue with the read_ref it returns.' : null].filter(Boolean).join(' ') } : {}),
         ...(noBasePreview ? { preview_without_base: true } : {}),
       },
       allowed_actions: ['code_patch', 'code_read', 'code_status'],
@@ -143,8 +155,10 @@ export async function handle(args, context) {
         request_id: args?.request_id,
         ...(batchNudge ? { batch_hint: batchNudge } : {}),
         next_action: noBasePreview
-          ? { tool: 'code_read', args: { workspace_dir: workspaceDir, task_id, locator: { file_path: locator.file_path } }, note: 'Preview OK (no file changed) but no base_version is available: read the FILE first, then re-issue code_patch with that read_ref and dry_run:false to apply.' }
-          : (() => {
+          ? { tool: 'code_read', args: { workspace_dir: workspaceDir, task_id, locator: { file_path: locator.file_path } }, note: (alreadyApplied || noDiff ? 'Nothing to apply — but a file-level read is still missing if you intend a different edit. ' : 'Preview OK (no file changed) but no base_version is available: ') + 'Read the FILE first, then re-issue code_patch with that read_ref and dry_run:false to apply.' }
+          : (alreadyApplied || noDiff)
+            ? null
+            : (() => {
             // 协议压缩（2026-10-12 狗粮）：大载荷不回显（对齐 code_batch WP08R-2 阈值 2KB）——调用方手里就有原载荷，
             // 回显纯重复；超限改「复用指示」防截断误导。
             const echoBytes = Buffer.byteLength(JSON.stringify({ patch: args?.patch ?? null, content: args?.content ?? null }), 'utf8')
@@ -173,7 +187,13 @@ export async function handle(args, context) {
                   : 'Preview only (no file changed). Payload ' + echoBytes + 'B too large to echo — reuse the exact patch/content from your previous call, with dry_run:false.'),
             }
           })(),
-        next_step: noBasePreview ? 'Preview only (no file changed; no base_version). Read the FILE first with code_read, then re-issue code_patch with that read_ref and dry_run:false to apply.' : 'Preview only. To apply, call code_patch with next_action.args (dry_run=false); large payloads are reused from your previous call, not echoed.',
+        next_step: noBasePreview
+          ? 'Preview only (no file changed; no base_version). Read the FILE first with code_read, then re-issue code_patch with that read_ref and dry_run:false to apply.'
+          : alreadyApplied
+            ? 'Already applied: the new content is already in the file, so there is nothing to do. If you expected a change, re-read the file — your old_string may be stale.'
+            : noDiff
+              ? 'Nothing to apply: this edit would produce no change. Check that old_string matches the current file content.'
+              : 'Preview only. To apply, call code_patch with next_action.args (dry_run=false); large payloads are reused from your previous call, not echoed.',
       },
     })
   }
@@ -256,6 +276,10 @@ export async function handle(args, context) {
   const finalOp = {
     ...(op || { operation_id: newOperationId(), request_id: null, payload_hash, kind: 'patch', file: locator.file_path, read_ref: read_ref || null, base_version, created: now }),
     state: 'succeeded', updated: now,
+    // F41（真机走查）：无 request_id 的 modify 也要有 pre/intended；否则回执 hashes 双 null，
+    // 与 batch modify（pre=base、intended=result）不一致。create 的 pre 仍为 null。
+    pre_file_hash: op?.pre_file_hash ?? (base_version?.file?.hash || null),
+    intended_file_hash: op?.intended_file_hash ?? (r.new_version?.file?.hash || null),
     result_file_hash: r.new_version?.file?.hash || null,
     result_kind: 'partial',
     txn_id: r.txn_id || null,
@@ -274,14 +298,16 @@ export async function handle(args, context) {
     return envelope({
       task: taskHeader({ ...task, revision: currentRev, node: 'edit' }),
       observation: {
-        summary: `Edit applied to ${locator.file_path}, but task state commit raced (${cas2.code}); retry with the same request_id to finalize.`,
+        summary: stateCommitPendingText('code_patch', `Edit applied to ${locator.file_path}`, cas2.code, args.request_id).summary,
         effect: 'workspace_write', committed: false, result_kind: 'partial',
         target: { canonical_path: locator.file_path }, diff: r.diff || null, operation: finalOp,
+        ...(r.warning ? { warning: r.warning } : {}),
         receipt: serializeReceipt({
           kind: 'patch', operation_id: finalOp.operation_id, request_id: args.request_id || null,
           ...opGuarantee('patch', args.create === true),
           files: [{ file: locator.file_path, status: 'written', pre_file_hash: finalOp.pre_file_hash || null, intended_file_hash: finalOp.intended_file_hash || null, result_file_hash: finalOp.result_file_hash || null }],
           committed: false, result_kind: 'partial', index_sync: r.reindex || null, undo: r.undo || null,
+          readback_verified: r.readback_verified === true,
         }),
       },
       allowed_actions: ['code_patch', 'code_read', 'code_status'],
@@ -297,22 +323,32 @@ export async function handle(args, context) {
       effect: 'workspace_write', committed: true, result_kind: 'partial',
       target: { canonical_path: locator.file_path, locator, read_ref: read_ref || null, file_version: r.new_version?.file || null },
       diff: r.diff || null, validation: r.validation || null, reindex: r.reindex || null,
+      ...(r.warning ? { warning: r.warning } : {}),
       operation: finalOp,
       ...(Object.keys(writeBases).length ? { write_read_refs: writeBases } : {}),
       receipt: serializeReceipt({
         kind: 'patch', operation_id: finalOp.operation_id, request_id: args?.request_id || null,
         ...opGuarantee('patch', args?.create === true),
         files: [{ file: locator.file_path, status: r.status === 'already_applied' ? 'already_applied' : 'written', pre_file_hash: finalOp.pre_file_hash || null, intended_file_hash: finalOp.intended_file_hash || null, result_file_hash: finalOp.result_file_hash || null }],
-        committed: true, result_kind: 'partial', index_sync: r.reindex || null, undo: r.undo || null, readback: 'enforced',
+        committed: true, result_kind: 'partial', index_sync: r.reindex || null, undo: r.undo || null,
+        // R16k：readback 已经是真事实（不一致早就返回 READBACK_MISMATCH），
+        // 但只写 'enforced'（策略口号）上层读不出「验过了」。补上可判读的布尔。
+        readback_verified: r.readback_verified === true,
+        readback: 'enforced',
       }),
     },
-    allowed_actions: ['code_read', 'code_patch', 'code_status'],
+    // R22-F18b（重启后真机复验）：next_action 指向 code_check，allowed_actions 却不含它——
+    // 两处建议面自相矛盾。allowed_actions 是建议不是权限，必须包含自己推荐的动作。
+    allowed_actions: ['code_read', 'code_patch', 'code_check', 'code_status'],
     extra: {
       request_id: args?.request_id, result_kind: 'partial', undo: r.undo || null,
       ...(batchNudge ? { batch_hint: batchNudge } : {}),
       // 13-C（专家 c2a83e4 P3-a）：应用成功补结构化检查边（旧只有文字建议，需再查 status 才出现）
-      next_action: { tool: 'code_check', args: { workspace_dir: workspaceDir, task_id, checks: ['test'], run: true }, note: 'Edit applied (result_kind=partial): run checks to validate (run=true executes).' },
-      next_step: (batchNudge && priorPatchOps >= 2) ? 'STOP single-edit mode — put ALL remaining edits in ONE code_batch (read FILE once → dry_run → reuse writes with dry_run:false). For the current edit: re-read or run code_check to confirm.' : 'Run code_check to validate, or reuse write_read_refs (wbase_*) as the base for the next edit — no re-read needed.',
+      // R22-F18：per-write 的检查建议不得说成前置条件——实测两次检查间平均连写 29.4 次，
+      // 采纳率 A 池 0% / B 池 5%。结构化边保留（照做仍可成），但标明可选与真实时机。
+      next_action: { tool: 'code_check', args: { workspace_dir: workspaceDir, task_id, checks: ['test'], run: true }, optional: true, note: 'Edit applied (result_kind=partial). Validation is optional here — keep going with write_read_refs if you have more edits; run code_check (run=true) once at the end (it runs the repo test command; can be slow in large repos).' },
+      // R22-F18b：文本面与结构化面同序——先给下一步编辑，再提「完成时验一次」（旧实现开头就劝跑 59s 检查）。
+      next_step: (batchNudge && priorPatchOps >= 2) ? 'STOP single-edit mode — put ALL remaining edits in ONE code_batch (read FILE once → dry_run → reuse writes with dry_run:false). For the current edit: re-read or run code_check to confirm.' : 'Reuse write_read_refs (wbase_*) as the base for your next edit — no re-read needed; run code_check once when the task is done.',
     },
   })
 }
@@ -370,7 +406,8 @@ export function reconcileOperation(workspaceDir, task_id, expectedRev, op, route
     const cas = updateTaskCas(workspaceDir, task_id, expectedRev, (t) => operationEvent(t, fin, { node: 'edit', result_kind: 'partial' }))
     if (!cas.ok) {
       // 第二轮审查：CAS 失败不得宣称 committed——文件已是 intended 态但 op 未收口，如实报待重试
-      return makeError('state_commit_pending', `recovered write detected but state commit raced (${cas.code}); retry with the same request_id`, 'Retry with the same request_id to finalize.')
+      const txt = stateCommitPendingText('code_patch', 'recovered write detected', cas.code, op.request_id)
+      return makeError('state_commit_pending', txt.message, txt.suggestion)
     }
     const revision = cas.task.revision
     return envelope({

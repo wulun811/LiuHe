@@ -11,6 +11,7 @@ function assert(cond, msg) {
   if (cond) { pass++ } else { fail++; console.error('  FAIL:', msg) }
 }
 const { handle } = await import(pathToFileURL(join(__dirname, '..', 'tools', 'tool-symbol-search', 'handler.js')).href)
+const { INDEX_SCOPE_NOTE } = await import(pathToFileURL(join(__dirname, '..', 'index-scope.js')).href)
 
 const ws = join(os.tmpdir(), 'opencode', 'ss-test-ws')
 try { rmSync(ws, { recursive: true, force: true }) } catch {}
@@ -52,6 +53,9 @@ function makeCtx(searchImpl) {
 {
   const empty = await handle({ workspace_dir: ws, query: 'nonexist' }, makeCtx(async () => []))
   assert(empty.count === 0 && empty.suggestion && empty.suggestion.includes('reindex'), '④ 空结果带 reindex 建议')
+  // R18-B11：索引「新」不等于「全」——空结果必须随回执说明覆盖边界，
+  // 且边界文案与解析器实现一致：顶层 try/catch/if 体内【收】，函数体/循环体/class 静态块【不收】。
+  assert((empty.suggestion || '').includes(INDEX_SCOPE_NOTE), `④ 空结果建议必须带共享的覆盖边界说明（得 ${JSON.stringify(empty.suggestion)}）`)
   const hit = await handle({ workspace_dir: ws, query: 'foo' }, makeCtx(async () => [{ name: 'fetchUser', type: 'function' }]))
   // H05（0.5.14）：建议动作升级为 code_query(mode="impact") 完整参数（file/symbol/workspace_dir）
   assert(hit.count === 1 && hit.next_step && hit.next_step.includes('mode="impact"') && hit.next_step.includes('file=') && hit.next_step.includes('symbol='), '④ 有结果 next_step 指向可执行 impact 查询（得 ' + String(hit.next_step).slice(0, 140) + '）')

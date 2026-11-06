@@ -2,6 +2,7 @@ import { readUsageStats, cleanupStaleWorkspaces } from '../../health-check.js'
 import { pruneAllTaskNamespaces } from '../entry-store.js'
 import { pruneJobs } from '../../workflow/jobs.js'
 import { getStateDir } from '../../host-config.js'
+import { traceStats } from '../../trace.js'
 import { appendFileSync, readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -151,6 +152,8 @@ export async function handle(args, context) {
   const result = await runHealthCheck()
   if (args?.stats) {
     result.usage_stats = readUsageStats()
+    // TRACE v0（专家 0.6.1 §4）：写日志失败必有界可见——health(stats=true).trace
+    try { result.trace = traceStats() } catch (e) { result.trace = { error: e.message } }
   }
 
   // 添加自愈建议

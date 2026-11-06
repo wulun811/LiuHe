@@ -34,8 +34,13 @@ export function currentInterface(env = process.env) {
   return v === 'classic' || v === 'diagnostic' ? v : 'graph'
 }
 
-// 状态层（task/evidence 状态机）可见性开关：0.5.24 起默认开（graph 档 = 13 个工具），
-// 显式 MALONG_ENTRY_STATE=0 可退回只读 5 工具（graph 不带 state）。
+// 状态层（task/evidence 状态机）可见性开关：0.5.24 起默认开（graph 档 = 13 个工具）。
+// G0 校正（2026-10-29 / LH-S1-04 调研）：旧注释写「显式 MALONG_ENTRY_STATE=0 可退回**只读**
+// 5 工具」，与实际不符——这 5 个工具是 GRAPH_READ(4) + edit_transaction，而
+// edit_transaction 有写盘能力（begin→edit→commit，实测 state=0 下可落盘）。
+// 这是**刻意的设计**（崩溃恢复入口：写坏了必须能回滚，见 test-s5-catalog 锁定
+// "edit_transaction 在 graph 可见"），不是缺陷；但「只读」这个词会误导使用者据此判断安全边界。
+// 准确认知：state=0 关的是 task/operation/evidence 状态机与 8 个写工具，**不关事务级写盘**。
 export function stateEnabled(env = process.env) {
   return env.MALONG_ENTRY_STATE !== '0'
 }

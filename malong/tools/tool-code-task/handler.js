@@ -2,13 +2,17 @@
 import { existsSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import {
-  makeError, envelope, inferRoute, newTaskId, putTask, getTask, findByRequestId, ensureIndexed, findCandidates,
-  structureSummary, impactOf, payloadHash, TASK_SCHEMA_VERSION, GRAPH_VERSION, ACTIONS_NOTE, buildZeroHitGuidance, toWorkspaceRel,
+  makeError, envelope, inferRouteDetailed, ROUTE_CHOICES, newTaskId, putTask, getTask, findByRequestId, ensureIndexed, findCandidates,
+  structureSummary, selectBrowseSample, impactOf, payloadHash, TASK_SCHEMA_VERSION, GRAPH_VERSION, ACTIONS_NOTE, buildZeroHitGuidance, toWorkspaceRel, taskHeader, extractTokens,
 } from '../entry-shared.js'
 import { fitVisibleBudget, CODE_TASK_FILE_TARGET_BUDGET, CODE_TASK_GENERAL_BUDGET } from '../../workflow/output-budget.js'
 import { intentHints } from '../../workflow/capability-catalog.js'
 import { detectEntryPoints, reproBoundary, docCoverage } from '../../workflow/orient.js'
+import { normalizeSearchTerms } from '../../search-terms.js'
 import { parseMalongignore } from '../../file-collector.js'
+
+// P3：检索 MISS 本地日志（opt-in、默认 off；trace 刻意不记查询词，见 TRACE-GUIDE §9）
+import { logSearchMiss } from '../../search-log.js'
 
 const ROUTE_ENUM = new Set(['understand', 'change', 'diagnose', 'review', 'maintain', 'document', 'isolate', 'system'])
 
@@ -32,22 +36,13 @@ export async function handle(args, context) {
     return makeError('invalid_input', `route must be one of ${[...ROUTE_ENUM].join(', ')} (got ${args.route})`)
   }
   const target = (args?.target && typeof args.target === 'object') ? args.target : null
-  // 9-D：search_terms = 模型提供的概念词（假设，非事实）——确定性并入检索，不引入 LLM
-  let searchTerms = null
-  if (args?.search_terms != null) {
-    if (!Array.isArray(args.search_terms)) {
-      return makeError('invalid_input', 'search_terms must be an array of strings', 'Pass search_terms=["conceptTerm", ...] (model-supplied hypotheses, not facts).')
-    }
-    const cleaned = []
-    for (const s of args.search_terms) {
-      if (typeof s !== 'string') continue
-      const t = s.trim()
-      if (!t || t.length > 64) continue
-      if (!cleaned.includes(t)) cleaned.push(t)
-      if (cleaned.length >= 8) break
-    }
-    searchTerms = cleaned
+  // 9-D / P1：search_terms = 调用方假设词——两个入口共用 search-terms.js 的同一套校验，
+  // 否则同一份输入在 code_task 与 code_search 会得到不同结论（跨入口矛盾）。
+  const termCheck = normalizeSearchTerms(args?.search_terms)
+  if (!termCheck.ok) {
+    return makeError('invalid_input', termCheck.error, 'Pass search_terms=["conceptTerm", ...] (model-supplied hypotheses, not facts).')
   }
+  const searchTerms = termCheck.terms.length ? termCheck.terms : null
 
   // S2 去重：相同 request_id 不重复建任务（幂等）；同 ID 不同载荷拒绝（§7.6-2）
   if (args?.request_id) {
@@ -63,7 +58,7 @@ export async function handle(args, context) {
         return makeError('request_conflict', `request_id ${args.request_id} was used with a different goal/target/route`, 'Use a fresh request_id for a different task.')
       }
       return envelope({
-        task: { task_id: existing.task_id, revision: existing.revision, route: existing.route, node: existing.node, lifecycle: existing.lifecycle },
+        task: taskHeader(existing),
         observation: { summary: `Deduplicated: request_id already created ${existing.task_id}.`, deduplicated: true, candidates: existing.candidates || [], read_refs: (existing.materials || []).map(m => m.read_ref) },
         allowed_actions: ['code_read', 'code_status'],
         extra: { request_id: args.request_id, next_step: `code_read(workspace_dir="${workspaceDir}", task_id="${existing.task_id}", ...)`, actions_note: ACTIONS_NOTE },
@@ -72,7 +67,12 @@ export async function handle(args, context) {
   }
 
   const task_id = newTaskId()
-  const route = args?.route || inferRoute(goal)
+  // C 档：路由不再「猜完不吭声」——显式 / 命中词推断 / 兜底未识别，三态必须可区分
+  const explicitRoute = typeof args?.route === 'string' && args.route ? args.route : null
+  const routeInfo = explicitRoute
+    ? { route: explicitRoute, source: 'explicit', evidence: null }
+    : inferRouteDetailed(goal)
+  const route = routeInfo.route
 
   let indexInfo
   try {
@@ -140,6 +140,8 @@ export async function handle(args, context) {
     schema_version: TASK_SCHEMA_VERSION,
     graph_version: GRAPH_VERSION,
     route,
+    route_source: routeInfo.source,
+    ...(routeInfo.evidence ? { route_evidence: routeInfo.evidence } : {}),
     goal,
     target,
     workspace_dir: workspaceDir,
@@ -162,15 +164,19 @@ export async function handle(args, context) {
   const nav = (top.length && !directRead) ? await impactOf(codeIndexService, top[0], 6) : null
   // R4：显式文件目标直达时不再展开结构/导航（入口预算）；结构按需用 code_query(mode="outline"|"map") 展开
   const needStructure = !directRead && (route === 'system' || route === 'document' || top.length === 0)
+  // R16（真机试用 F2）：入口点探测现在会下探一层子包（liuhe/malong/package.json）；
+  // 取样也不再拿字母序前 20 个文件充结构（旧实现：本仓前 20 有 13 个属 integration/liuhe-lite）。
+  const entryPoints = detectEntryPoints(workspaceDir)
+  const browseSample = needStructure ? selectBrowseSample(indexInfo.files || [], { limit: 20, entryFiles: entryPoints.files }) : null
   const structure = needStructure
-    ? await structureSummary(codeIndexService, indexInfo.files || [], { limit: 20, workspaceDir })
+    ? await structureSummary(codeIndexService, browseSample?.files || [], { workspaceDir })
     : null
   const structModules = structure?.modules || []
   const structErrors = structure?.errors || []
   // 8-A（2026-10-07 专家复测 §1）：零候选不再只给 <path> 模板——从结构概览挑真实文件/符号给出可调用下一步
   // 9-A（2026-10-07 专家 Lite 建议）：按信息价值排序（入口点>业务目录>文档；噪声降权），并附紧凑仓库地图
   const zeroGuidance = (!directRead && top.length === 0)
-    ? buildZeroHitGuidance(structModules, { workspaceDir, task_id, entryFiles: detectEntryPoints(workspaceDir).files })
+    ? buildZeroHitGuidance(structModules, { workspaceDir, task_id, entryFiles: entryPoints.files })
     : null
   let navigation = null
   if (zeroGuidance) {
@@ -193,7 +199,7 @@ export async function handle(args, context) {
   // S5.3 路由纵切首屏（不猜业务影响；启发式附 note）
   let orientation = null
   if (route === 'system') {
-    orientation = { kind: 'system', entry_points: detectEntryPoints(workspaceDir), structure: structModules, ...(structErrors.length ? { structure_errors: structErrors } : {}) }
+    orientation = { kind: 'system', entry_points: entryPoints, structure: structModules, ...(structErrors.length ? { structure_errors: structErrors } : {}) }
   } else if (route === 'isolate') {
     orientation = { kind: 'isolate', boundary: reproBoundary(nav), limitations: nav ? [] : ['no candidate symbol to bound; pass target.symbol'] }
   } else if (route === 'document') {
@@ -207,7 +213,7 @@ export async function handle(args, context) {
   if (orientation?.kind === 'system') summaryParts.push(`Entry points: ${orientation.entry_points.files.length}.`)
   if (orientation?.kind === 'isolate' && orientation.boundary) summaryParts.push(`Repro boundary: ${orientation.boundary.files.length} file(s), ${orientation.boundary.callee_count} callee(s).`)
   if (orientation?.kind === 'document' && orientation.coverage?.coverage != null) summaryParts.push(`Doc coverage: ${orientation.coverage.documented}/${orientation.coverage.total}.`)
-  if (!top.length) summaryParts.push('No symbol candidates under the current scan scope (zero hits are not proof of absence). See observation.next_candidates + next_action (top-level) for concrete reads, or start a new code_task with target={file} or target={symbol}.')
+  if (!top.length) summaryParts.push('No symbol candidates under the current scan scope (zero hits are not proof of absence). See observation.next_candidates + next_action (top-level) for concrete reads, or start a new code_task with target={file} or target={symbol}. If the goal is Chinese, pass search_terms=[English identifier guesses] — they are hypotheses, not verified names.')
   if (confidenceNote) summaryParts.push(confidenceNote)
   if (testPathCandidates.length && !directRead) summaryParts.push('Test/fixture candidates kept visible: ' + testPathCandidates.map(c => c.file_path + '::' + c.name).join(', ') + ' (ranked after production candidates).')
   // R4：文件级目标明确时，把「读该文件」作为唯一主动作说明；目标缺失时明确拒绝而非用无关结构掩盖
@@ -226,8 +232,15 @@ export async function handle(args, context) {
   if (scanState.anchor && !scanState.anchor.matched) {
     scanWarnings.push(`Target symbol "${scanState.anchor.target_symbol}" not found in target file ${scanState.anchor.target_file}; candidates are ranked from other locations — verify the name/file or read the file directly.`)
   }
-  if (contentScan?.non_ascii_goal && !top.length) {
-    scanWarnings.push('Goal contains non-ASCII text but no ASCII identifiers were found to search; pass target={file|symbol}, quote exact identifiers in backticks, or code_read a file directly.')
+  // R15（真机试用）：警告也必须与实际相符——三种零扫描原因分开说。
+  // 旧文案对「有 token 但都 <6 字符」也报「没找到 ASCII 标识符」，并叫你去用反引号（实测无效）。
+  if (!top.length && contentScan?.skipped === 'tokens_too_short') {
+    // R22-F17：旧文案只说「content scan 被跳过」，读起来像「短 token 完全没用上」。
+    // 实际短 token 仍参与符号检索（findDefinitions/searchSymbols），只是不参与裸文本扫描——
+    // 两种通道要分开说，否则调用方会白白放弃一条可用路径。
+    scanWarnings.push(`No symbol matched the short token(s) ${(contentScan.short_tokens || []).join(', ')}. Short tokens are still used for symbol search; only the raw-text/content scan requires >= ${contentScan.min_token_length} chars. Backticks do not lift that limit. Pass target={file|symbol}, or use code_query(mode="search") for raw-text matching.`)
+  } else if (!top.length && contentScan?.non_ascii_goal) {
+    scanWarnings.push('Goal contains non-ASCII text but no ASCII identifiers were found to search; pass search_terms=[English identifier guesses] (hypotheses, not verified names), target={file|symbol}, or quote exact identifiers in backticks (at least 6 chars).')
   }
   if (scanWarnings.length) summaryParts.push(scanWarnings[0])
 
@@ -253,8 +266,53 @@ export async function handle(args, context) {
   }
   const fileGroups = [...groupMap.entries()].map(([file_path, syms]) => ({ file_path, count: syms.length, truncated: syms.length > 3, symbols: syms.slice(0, 3) }))
 
+  // C 档（2026-10-30）：路由是「建议」不是「理解」——三态一律写进响应，不让人盲信。
+  //  · explicit：调用方指定，没有可抱怨的
+  //  · inferred：命中了哪个词就写哪个词 → 使用者自己判对错
+  //  · default ：一个词都没命中 → 明说未识别 + 给出纠正路径
+  //    非 ASCII 目标额外点明语言层限制：中文动作词换个说法就匹配不上（实测 0/3）。
+  const routeNonAscii = /[^\u0000-\u007f]/.test(String(goal || ''))
+  const routeNote = routeInfo.source === 'explicit'
+    ? null
+    : routeInfo.source === 'inferred'
+      ? `Route inferred from goal keyword "${routeInfo.evidence}" — pass route to override if that reading is wrong, or switch_route on this task.`
+      : 'No action keyword was recognized in the goal, so route defaulted to "understand".'
+        + (routeNonAscii ? ' Non-ASCII goals (e.g. Chinese) often put the action in words the keyword list does not cover.' : '')
+        + ` Pass route explicitly (${ROUTE_CHOICES.join('|')}) or switch_route on this task if this is actually a change/review/diagnose task.`
+
+  // P3（2026-11-01）：入口零候选、且没给明确 target = 一次真实检索 MISS。
+  // 给了 target/fileTarget 说明调用方本来就知道去哪，不算 MISS。
+  if (top.length === 0 && !target && !fileTarget) {
+    logSearchMiss({
+      entry: 'code_task', reason: 'zero_hit', query: goal,
+      codeHits: 0, partialHits: 0, docHits: 0, docWeak: 0,
+      expandedHits: 0, searchTerms: termCheck.terms.length, workspaceDir,
+    })
+  }
+
   const observation = {
     summary: summaryParts.join(' '),
+    // 中文检索 P0（专家 2026-10-31 方案 §9）：原查询守恒——在说「找到了」之前，
+    // 先把「原话里到底有哪些可检索的 ASCII 标识符」摆出来；search_terms 只标为调用方假设，
+    // 不得把自己的扩展词包装成「用户原词命中」。
+    query_interpretation: (() => {
+      const goalTokens = extractTokens(goal)
+      const callerTerms = termCheck.terms
+      return {
+        original_query: String(goal).slice(0, 200),
+        ascii_identifiers_in_query: goalTokens,
+        search_terms_used: callerTerms,
+        ...(termCheck.provided ? { search_terms_source: 'caller_hypothesis' } : {}),
+        ...(termCheck.dropped.length ? { search_terms_dropped: termCheck.dropped } : {}),
+        // 文案随调用方的动作变：已经给了 search_terms 就不要再叫它「去传 search_terms」
+        note: callerTerms.length
+          ? 'search_terms are your hypothesis terms, not verified names: a hit reachable only through them is not proof the original wording was matched. Read it before treating it as the target. Literal matching does not understand Chinese meaning.'
+          : (goalTokens.length
+            ? 'Literal token search only: it matches ASCII identifiers that appear in code, paths and comments — it does not understand Chinese meaning. Hits are candidates to verify by reading.'
+            : 'The query has no searchable ASCII identifier, so literal matching had almost nothing to match. Pass search_terms = your English identifier guesses (e.g. bootstrap / init / startServer). Those are HYPOTHESES, not verified names: a hit found only through them is not proof that the original wording was matched.'),
+      }
+    })(),
+    ...(routeNote ? { route_source: routeInfo.source, route_evidence: routeInfo.evidence || null, route_note: routeNote } : {}),
     scope: top.map(c => `${c.file_path}::${c.name}`),
     target: target ? { locator: target } : null,
     ...(fileTarget ? { target_file: fileTarget } : {}),
@@ -265,9 +323,18 @@ export async function handle(args, context) {
     ...(candidatesTruncated ? { candidates_total: candidatesTotal, candidates_truncated: true } : {}),
     ...(nav ? { navigation: nav } : {}),
     ...(structModules.length ? { structure: structModules } : {}),
+    ...(browseSample?.sampling ? { structure_sampling: browseSample.sampling } : {}),
     ...(structErrors.length ? { structure_errors: structErrors } : {}),
     orientation,
-    index: { files_scanned: indexInfo.files_scanned, files_indexed: indexInfo.files_indexed, truncated: indexInfo.truncated },
+    // F3：把「本次写入数」与「索引是否新鲜」分开，避免 files_indexed=0 被读成「没有索引」
+    index: {
+      files_scanned: indexInfo.files_scanned,
+      files_indexed: indexInfo.files_indexed,
+      files_indexed_this_run: indexInfo.files_indexed_this_run ?? indexInfo.files_indexed,
+      ...(indexInfo.index_state ? { index_state: indexInfo.index_state } : {}),
+      ...(indexInfo.index_state_note ? { index_state_note: indexInfo.index_state_note } : {}),
+      truncated: indexInfo.truncated,
+    },
     ...(contentScan ? { content_scan: contentScan } : {}),
     ...(scanState.search_terms_used ? { search_terms_used: scanState.search_terms_used } : {}),
     ...(scanWarnings.length ? { scan_warnings: scanWarnings } : {}),
@@ -321,13 +388,30 @@ export async function handle(args, context) {
     { name: 'file_target_note', apply: (o) => { if (typeof o.observation?.target_note === 'string') { o.observation.target_note_omitted = 'target.file is read directly (anchor caveat not applicable)'; delete o.observation.target_note } } },
     { name: 'file_target_summary', apply: (o) => { const s = o.observation?.summary; if (typeof s === 'string' && s.length > 240) o.observation.summary = s.slice(0, 220).replace(/[ ,;]+$/, '') + ' … (summary truncated; target_file + next_action carry the decision)' } },
   ]
+  // R21-F04（2026-11-05 自用试用实测）：next_action 是 agent 唯一会照做的下一步，
+  // 必须「照做就能成」。旧实现直接把候选的 file_path+name 塞进 locator，
+  // 对两类候选必然失败：
+  //   · kind=content（注释/字符串里的词命中）：该 name 不是符号 → SYMBOL_NOT_FOUND
+  //   · 无 symbol_id 的变量（如 shell 里的 MALONG_TRACE）：同名多处 → AMBIGUOUS_SYMBOL
+  // 判据：有 symbol_id 才按符号读；否则退化为读整个文件（file_path 读取恒定可用）。
+  const readableLocator = (c) => {
+    if (!c) return null
+    if (c.symbol_id) return { symbol_id: c.symbol_id }
+    if (c.file_path) return { file_path: c.file_path }
+    return null
+  }
+
   const steps = directRead ? FILE_TARGET_BUDGET_STEPS : BUDGET_STEPS
   // M4：精确文件目标的超预算建议不得再叫用户 Narrow target（自指）；只保留可展开出口与安全字段承诺
   const overSuggestion = directRead
     ? 'Entry still above the ' + CODE_TASK_FILE_TARGET_BUDGET + '-char visible budget after folding entry-only fields: remaining fields are the safety/recovery anchor set (target_file, index, next_action). Use next_action (code_read) directly; expand detail with code_query(mode="outline"|"search").'
     : null
   const out = envelope({
-    task: { task_id, revision: 1, route, node: 'orient', lifecycle: 'active' },
+    task: {
+      task_id, revision: 1, route, node: 'orient', lifecycle: 'active',
+      route_source: routeInfo.source,
+      ...(routeInfo.evidence ? { route_evidence: routeInfo.evidence } : {}),
+    },
     observation,
     allowed_actions: ['code_read', 'code_status'],
     extra: {
@@ -338,7 +422,9 @@ export async function handle(args, context) {
           ? {
             next_action: {
               tool: 'code_read',
-              args: { workspace_dir: workspaceDir, task_id, locator: { file_path: conf.best_production.file, ...(conf.best_production.name ? { name: conf.best_production.name } : {}) } },
+              args: { workspace_dir: workspaceDir, task_id, locator: conf.best_production.symbol_id
+                ? { symbol_id: conf.best_production.symbol_id }
+                : { file_path: conf.best_production.file } },
               note: 'Low-confidence candidates: read the best PRODUCTION candidate (test/fixture hits stay listed in observation.test_path_candidates — they are not recommended as the target).',
             },
           }
@@ -353,7 +439,7 @@ export async function handle(args, context) {
             : (top.length ? {
         next_action: {
           tool: 'code_read',
-          args: { workspace_dir: workspaceDir, task_id, ...(top[0]?.symbol_id ? { locator: { symbol_id: top[0].symbol_id } } : { locator: { file_path: top[0]?.file_path } }) },
+          args: { workspace_dir: workspaceDir, task_id, locator: readableLocator(top[0]) },
           note: 'Read the top candidate to gather evidence; observation.candidates lists more. Multiple edits in one file: read once, then submit ALL edits in ONE code_batch (dry_run first, then reuse writes with dry_run:false).',
         },
       } : {}))),

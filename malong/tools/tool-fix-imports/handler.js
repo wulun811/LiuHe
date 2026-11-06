@@ -1,6 +1,6 @@
-import { join } from 'node:path'
+import { join, relative, dirname } from 'node:path'
 import { existsSync, readFileSync, writeFileSync, statSync, unlinkSync } from 'node:fs'
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import os from 'node:os'
 import { validateFilePath, ErrorCodes, makeError } from '../../error-codes.js'
 import { getPythonCmd } from '../../python-cmd.js'
@@ -75,6 +75,9 @@ export async function handle(args, context) {
   if (!autoFix && _fixImportsCache.has(cacheKey)) return _fixImportsCache.get(cacheKey)
 
   const issues = []
+  // B6：无法形成可执行提案的候选（跨语言目标等）不静默丢弃——降级成线索单独出口，
+  // 且显式标 verdict=lead。调用方可以据此人工判断，但不该把它当结论直接 apply。
+  const crossLangLeads = []
   // r54(P1): readFileSync 无 try/catch——file 为目录(EISDIR)/不可读时裸异常违反错误对象契约
   let content
   try { content = readFileSync(absPath, 'utf-8') } catch (e) {
@@ -103,13 +106,28 @@ export async function handle(args, context) {
   }
 
   for (const sym of analysis.undefinedSymbols) {
-    const candidates = await findCandidates(codeIndexService, sym, file, maxCandidates)
+    const candidates = await findCandidates(codeIndexService, sym, file, maxCandidates, lang)
+    // B6：候选里若全部是跨语言目标（module 为空），不给"建议 import"，改记线索
+    const usable = candidates.filter(c => !c.target_rejected)
+    const rejected = candidates.filter(c => c.target_rejected)
+    if (usable.length === 0 && rejected.length > 0) {
+      crossLangLeads.push({
+        kind: 'cross_language_import',
+        verdict: 'lead',
+        symbol: sym,
+        line: analysis.symbolLines[sym] || 0,
+        defined_in: rejected.map(c => c.defPath),
+        reason: `"${sym}" is defined only in non-importable target(s) ${rejected.map(c => c.defPath).join(', ')}; ` +
+          `a ${lang} file cannot import that. No proposal is emitted — resolve manually.`,
+      })
+    }
     issues.push({
       type: 'undefined_symbol',
       symbol: sym,
       line: analysis.symbolLines[sym] || 0,
-      suggestion: candidates.length > 0 ? importSuggestion(lang, candidates[0].module, sym) : `Define "${sym}" or add the appropriate import`,
-      candidates: candidates.slice(0, maxCandidates)
+      suggestion: usable.length > 0 ? importSuggestion(lang, usable[0].module, sym) : `Define "${sym}" or add the appropriate import`,
+      candidates: usable.slice(0, maxCandidates),
+      ...(usable.length === 0 && rejected.length > 0 ? { cross_language_targets: rejected.map(c => c.defPath) } : {}),
     })
   }
 
@@ -174,7 +192,7 @@ export async function handle(args, context) {
     fixesApplied.imports_trimmed = applied.partial
 
     // 合防护栏：写盘前语法验证，失败则不写（防误报转破坏）
-    const guard = await verifySyntax(newLines.join('\n'), lang)
+    const guard = await verifySyntax(newLines.join('\n'), lang, file)
     if (guard.ok) {
       // r8(D5)：锁 + TOCTOU——auto_fix 分析全程数秒，窗口内文件可能被改；锁内重读比对一致才写
       const lock = await acquireLock(absPath, 30000)
@@ -215,10 +233,16 @@ export async function handle(args, context) {
       if (stmts.length > 0) {
         const insertLine = findImportInsertLine(lines) || 0
         // r52: insertLine=0（文件首行即代码）时 oldText='' → applyEdits 的 `if (!oldStr) continue` 静默跳过，补丁永远插不进；跳过该文件的事务补丁（autoFix 的 splice(0,0) 不受影响）
+        // B4：但"静默不提案"本身也是缺陷——无 shebang 无注释头的普通文件（最常见形态）
+        // 会既不给提案也不报原因，调用方只看到 undefined_symbol 却无从修。
+        // insertLine=0 时改以首行为锚点（old_string 非空），提案依然可 apply。
         if (insertLine > 0) {
-          const oldText = lines.slice(0, insertLine).join('\n') + (insertLine > 0 ? '\n' : '')
+          const oldText = lines.slice(0, insertLine).join('\n') + '\n'
           const newText = oldText + stmts.join('\n') + '\n'
           transactionReady.push({ file, old_string: oldText, new_string: newText })
+        } else if (lines.length > 0 && lines[0] !== '') {
+          const anchor = lines[0] + '\n'
+          transactionReady.push({ file, old_string: anchor, new_string: stmts.join('\n') + '\n' + anchor })
         }
       }
     }
@@ -239,22 +263,48 @@ export async function handle(args, context) {
 
     // 合防护栏：补丁集应用后的语法验证，失败则整体丢弃（防误报转破坏）
     if (transactionReady.length > 0) {
-      const patched = [...lines]
-      for (const r of removals) {
-        if (r.type === 'block') {
-          for (let k = r.startIdx; k <= r.endIdx && k < patched.length; k++) patched[k] = ''
-          continue
-        }
-        if (r.lineIdx < 0 || r.lineIdx >= patched.length) continue
-        patched[r.lineIdx] = r.type === 'partial' ? r.newLine : ''
-      }
       // r54(P2): 语法护栏也模拟 import 插入——旧实现只模拟 removals，insertStmts 算后从未用，插入的 import 未过验证
-      const insertStmts = transactionReady.filter(t => t.new_string.startsWith('from ') || t.new_string.startsWith('import '))
-      if (insertStmts.length > 0) patched.splice(0, 0, ...insertStmts.map(s => s.new_string))
-      const guard = await verifySyntax(patched.join('\n'), lang)
+      // B4：旧判据 `new_string.startsWith('import '|'from ')` 只命中"插入单行语句"形态，
+      // 而真实提案是**整段文件头替换**（old_string = 前 N 行，new_string = 头 + 新 import），
+      // 该形态永远不匹配 → 护栏从未验证过任何真实 import 提案（DSH 实录即此形态坏文件）。
+      // 改为：在原始文本上按提案真实语义逐条 apply（与调用方 edit 工具同序），再验语法。
+      // 注意与 removals 的重叠：removals 已经改过的行不再走 head 替换，避免"验证的是空文本"。
+      const insertedLines = transactionReady.filter(t => t.new_string.startsWith('from ') || t.new_string.startsWith('import '))
+      const headProp = transactionReady.find(t => typeof t.old_string === 'string' && t.old_string
+        && content.startsWith(t.old_string)
+        && !t.new_string.startsWith('from ') && !t.new_string.startsWith('import '))
+      let guardedText
+      if (headProp) {
+        // 提案本身即「文件头 N 行 → 头 + 新 import」：直接按它算结果文本
+        guardedText = headProp.new_string + content.slice(headProp.old_string.length)
+      } else {
+        // B4：单行锚点型提案（insertLine=0 时以首行为锚，new_string = 新 import + 首行）
+        // 不是"多处替换"，而是"在锚点前插入"。旧实现把它当 removals 处理会重复锚点行
+        // （实测产出 `export function h() {` 两遍）。这里按真实语义逐条 apply。
+        let text = content
+        for (const t of transactionReady) {
+          if (typeof t.old_string !== 'string' || !t.old_string) continue
+          if (!text.includes(t.old_string)) continue
+          text = text.replace(t.old_string, t.new_string)
+        }
+        guardedText = text
+      }
+      // B4：node --check 抓不到"同名重复 import"（实测 exit=0），而重复导入正是 DSH 现场
+      // 的反例之一（插到既有 import 块之前造成 duplicate identifier）。这里补一道显式判据。
+      const dupImport = findDuplicateImport(guardedText)
+      const guard = dupImport
+        ? { ok: false, detail: `duplicate import of "${dupImport}" would be introduced` }
+        : await verifySyntax(guardedText, lang, file)
       if (!guard.ok) {
         transactionReady.length = 0
         issues.push({ type: 'syntax_guard_blocked', message: `proposed fixes would break syntax: ${guard.detail}` })
+      } else {
+        // B6：「要么让输出能被验证，要么别让它以结论形态出现」。
+        // 出去的每条提案自带验证结论，调用方不必先信再复跑。
+        for (const t of transactionReady) {
+          t.verdict = 'verified'
+          t.verification = { ok: true, kind: 'syntax', checked_with: `${lang}:node --check`, at: new Date().toISOString() }
+        }
       }
     }
   }
@@ -262,6 +312,10 @@ export async function handle(args, context) {
   const result = { file, issues, fixes_applied: fixesApplied }
   if (!autoFix && transactionReady.length > 0) {
     result.transaction_ready = transactionReady
+  }
+  // B6：跨语言等"不能成提案"的目标单独出口，显式标 lead——不是结论，不得直接 apply
+  if (crossLangLeads.length > 0) {
+    result.leads = crossLangLeads
   }
 
   if (issues.length === 0) {
@@ -664,7 +718,25 @@ function runSyntaxCheck(cmd, argsList) {
   })
 }
 
-async function verifySyntax(text, lang) {
+// B4：stdin 方式（.js 无法判定模块类型时用）——显式 --input-type=module 才能检出 ESM 语法错
+function runSyntaxCheckStdin(cmd, argsList, text) {
+  return new Promise((resolve) => {
+    let child
+    try {
+      child = spawn(cmd, argsList, { timeout: 8000 })
+    } catch (e) {
+      resolve(String(e?.message || e).split('\n')[0])
+      return
+    }
+    let se = ''
+    child.stderr.on('data', (d) => { se += String(d) })
+    child.on('error', (e) => resolve(String(e?.message || e).split('\n')[0]))
+    child.on('close', (code) => resolve(code === 0 ? null : (String(se).split('\n').find(l => l.trim()) || `exit ${code}`)))
+    try { child.stdin.end(text) } catch { try { child.stdin.destroy() } catch {} }
+  })
+}
+
+async function verifySyntax(text, lang, fileName = null) {
   if (lang === 'python') {
     const tmp = join(os.tmpdir(), `fiximports-${process.pid}-${Date.now()}.py`)
     writeFileSync(tmp, text)
@@ -676,7 +748,18 @@ async function verifySyntax(text, lang) {
     }
   }
   if (lang === 'javascript') {
-    const tmp = join(os.tmpdir(), `fiximports-${process.pid}-${Date.now()}.js`)
+    // B4：node --check 对 `.js` 里的 ESM import **直接放行**（实测：带 import + 语法错
+    // 仍 exit=0，因为 .js 按 CJS 解析、import 不被当作语法错误处理）。旧实现固定写 .js
+    // → 护栏对 ESM 提案全程失效，DSH 那条坏提案正是这样漏过去的。
+    // 修法：按真实后缀落盘（.mjs/.cjs 可被正确检查），未知后缀退化为 stdin + --input-type=module。
+    const src = String(fileName || '')
+    const ext = (src.match(/\.[mc]?jsx?$/i) || [])[0] || '.js'
+    if (ext === '.js' || ext === '.jsx') {
+      // .js 无法判定模块类型：用 stdin 显式声明 module（与调用方实际运行方式一致）
+      const err = await runSyntaxCheckStdin(process.execPath, ['--input-type=module', '--check'], text)
+      return err ? { ok: false, detail: err } : { ok: true }
+    }
+    const tmp = join(os.tmpdir(), `fiximports-${process.pid}-${Date.now()}${ext}`)
     writeFileSync(tmp, text)
     try {
       const err = await runSyntaxCheck(process.execPath, ['--check', tmp])
@@ -1258,20 +1341,22 @@ function resolveRelativeImport(relativeModule, currentFile) {
   return base.join('.') || '.'
 }
 
-async function findCandidates(codeIndexService, symbol, file, maxCandidates) {
+async function findCandidates(codeIndexService, symbol, file, maxCandidates, lang = null) {
   // r10e：候选只认「别处的顶层定义」——旧实现用 getReferences（使用点）当候选，局部变量
   // 只要在别文件碰巧出现过就被建议 `from x import v`（荒谬修复）。查定义后局部变量
   // （parent_id 非空）天然排除；无 findDefinitions 的旧 service 保守返回 []（不给补丁）。
   try {
     const defs = (await codeIndexService.findDefinitions?.(symbol)) || []
-    return defs
-      .filter(d => d.path !== file)
-      .slice(0, maxCandidates)
-      .map(d => ({
-        module: fileToModule(d.path),
-        name: symbol,
-        line: d.start_line || 0
-      }))
+    const out = []
+    for (const d of defs) {
+      if (d.path === file) continue
+      if (out.length >= maxCandidates) break
+      const module = importSpecifier(lang, d.path, file)
+      // B6：说明符为空 = 目标语言不兼容（如 .mjs 里用 .py 定义的符号）。
+      // 不丢信息：标 target_rejected，由调用方降级成线索而不是发一条跑不通的提案。
+      out.push({ module, name: symbol, line: d.start_line || 0, defPath: d.path, target_rejected: !module })
+    }
+    return out
   } catch {
     return []
   }
@@ -1307,22 +1392,92 @@ function fileToModule(filePath) {
   return filePath.replace(/\.[^.]+$/, '').replace(/[/\\]/g, '.')
 }
 
+// B4/B6：import 提案的模块说明符必须按语言给对——fileToModule 产出的是 Python 点号路径
+// （cycle 检测需要它），直接当 ESM specifier 会变成裸包名 `kernel` → ERR_MODULE_NOT_FOUND。
+// B6：跨语言目标（如 .mjs 里用 .py 定义的符号）**不可能**产生可执行的 import——
+// 此时不给 specifier，改由调用方降级成线索（leads），而不是发一条跑不通的提案。
+const JS_EXTS = ['.mjs', '.cjs', '.js', '.jsx', '.ts', '.tsx', '.mts', '.cts']
+function importSpecifier(lang, targetPath, fromFile) {
+  if (!targetPath) return ''
+  if (lang === 'javascript' || lang === 'typescript') {
+    // 目标不是 JS/TS 源文件 → 不可导入
+    if (!JS_EXTS.some(e => String(targetPath).toLowerCase().endsWith(e))) return ''
+    const target = targetPath.replace(/\\/g, '/')
+    const fromDir = dirname(String(fromFile || '').replace(/\\/g, '/'))
+    // Windows：path.relative 返回反斜杠，ESM specifier 必须是 POSIX 分隔符；且反斜杠在
+    // JS 字符串里是转义符（`\u` 语法错被护栏拦下；`\s` 被吞成 `s` 指向错文件却语法合法）。
+    let rel = relative(fromDir, target).replace(/\\/g, '/')
+    if (!rel.startsWith('.')) rel = './' + rel
+    // 保留目标真实扩展名（DSH 现场正确值就是 './闸门判据.mjs'，不是 './闸门判据.js'）
+    if (!/\.[mc]?[jt]sx?$/.test(rel)) {
+      if (/\.[A-Za-z0-9]+$/.test(rel)) return rel
+      rel += '.js'
+    } else if (lang === 'typescript' && /\.tsx?$/.test(rel)) {
+      rel = rel.replace(/\.tsx?$/, '.js')
+    }
+    return rel
+  }
+  return fileToModule(targetPath)
+}
+
 function suggestSharedModule(cycle) {
   const parts = cycle[0].split('.')
   parts.pop()
   return parts.join('.') + '.types'
 }
 
-function findImportInsertLine(lines) {
-  let lastImport = -1
-  for (let i = 0; i < Math.min(lines.length, 50); i++) {
-    const t = lines[i].trim()
-    if (t.startsWith('from ') || t.startsWith('import ')) {
-      lastImport = i
-    } else if (t && !t.startsWith('#') && !t.startsWith('//') && !t.startsWith('"') && !t.startsWith("'")) {
-      if (lastImport >= 0) return lastImport + 1
-      return i
+function findDuplicateImport(text) {
+  const seen = new Map()
+  for (const line of String(text || '').split('\n')) {
+    const t = line.trim()
+    if (!t.startsWith('import ') && !t.startsWith('from ')) continue
+    const m = t.match(/^import\s*(?:\{([^}]*)\}|(\*\s+as\s+\w+)|(\w+))\s*from\s*['"]([^'"]+)['"]/) ||
+      t.match(/^import\s*['"]([^'"]+)['"]/)
+    if (!m) continue
+    const names = m[1]
+      ? m[1].split(',').map(s => s.trim().split(/\s+as\s+/).pop().trim()).filter(Boolean)
+      : [m[2] || m[3]].filter(Boolean)
+    for (const n of names) {
+      if (!n) continue
+      // 同名不同源 = 冲突；同名同源重复（完全重复行）也算
+      const prev = seen.get(n)
+      if (prev !== undefined) return n
+      seen.set(n, m[4] || '')
     }
   }
-  return lastImport >= 0 ? lastImport + 1 : 0
+  return null
 }
+
+function findImportInsertLine(lines) {
+  let lastImport = -1
+  let firstCode = -1
+  let inBlockComment = false
+  for (let i = 0; i < Math.min(lines.length, 50); i++) {
+    const t = lines[i].trim()
+    // B4：文件头常见 `/** ... */` 块注释。旧实现不认块注释，第 2 行 `/**` 就被当成
+    // "代码已开始"，import 被插到 shebang 之后、注释与既有 import 块之前 → 第二个 import
+    // 语句（TS 报 duplicate identifier）。块注释整段视为可跳过区。
+    if (inBlockComment) {
+      if (t.includes('*/')) inBlockComment = false
+      continue
+    }
+    if (t.startsWith('/*')) {
+      if (!t.includes('*/')) inBlockComment = true
+      continue
+    }
+    if (t === '' || t.startsWith('#!')) continue
+    if (t.startsWith('from ') || t.startsWith('import ')) {
+      lastImport = i
+      continue
+    }
+    if (t.startsWith('#') || t.startsWith('//') || t.startsWith('"') || t.startsWith("'")) continue
+    if (firstCode < 0) firstCode = i
+    break
+  }
+  if (lastImport >= 0) return lastImport + 1
+  return firstCode >= 0 ? firstCode : 0
+}
+
+// B4：纯函数判据的测试出口（不是 public API）——端到端夹具会被语法护栏先拦，
+// 测不出判据本身是否还在，故直出。
+export const __test = { findDuplicateImport, importSpecifier, findImportInsertLine, verifySyntax }

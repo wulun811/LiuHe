@@ -7,7 +7,8 @@ import {
   makeError, envelope, getTask, updateTaskCas, findOperation, payloadHash, newOperationId,
   newEvidenceId, ensureTaskVersion, assertTaskWritable, taskHeader, buildTaskNextAction, completionProjection, unknownTaskError,
 } from '../entry-shared.js'
-import { handle as verifyPipelineHandle } from '../tool-verify-pipeline/handler.js'
+import { handle as verifyPipelineHandle, previewStagePlan } from '../tool-verify-pipeline/handler.js'
+import { join } from 'node:path'
 import { startJob, listJobs } from '../../workflow/jobs.js'
 import { currentDependencies } from '../../workflow/evidence.js'
 
@@ -152,33 +153,39 @@ export async function handle(args, context) {
 
   // ── 预览：不执行、不记证据 ──
   if (!run) {
+    // F1（2026-10-29 自用试用修正）：预览必须给出**真实命令行**。
+    // 旧预览只说「1 check(s) [test]」，调用方无法判断会跑单文件还是整条全链；
+    // 本仓要求全链进内存围栏，守纪律的 LLM 因此不敢 run=true。
+    const planDir = args?.workdir ? join(workspaceDir, args.workdir) : workspaceDir
+    let wouldRun = []
+    try { wouldRun = previewStagePlan(planDir, workspaceDir, kinds) } catch { wouldRun = [] }
+    const cmdSummary = wouldRun.filter(p => p.will_run).map(p => p.command).join(' ; ')
+    const notRunnable = wouldRun.filter(p => !p.will_run)
     return envelope({
       task: taskHeader(task),
       observation: {
-        summary: `Preview: ${kinds.length} check(s) [${kinds.join(', ')}] requested; run=false, nothing executed.`,
+        summary: cmdSummary
+          ? `Preview (nothing executed): would run [${cmdSummary}]${notRunnable.length ? `; not runnable: ${notRunnable.map(p => p.kind + ':' + p.reason).join(', ')}` : ''}`
+          : `Preview (nothing executed): no runnable check among [${kinds.join(', ')}]`,
         effect: 'preview', dry_run: true,
+        // F1：真实命令 + 会不会跑；will_run=false 时必须给原因（不得静默跳过）
+        would_run: wouldRun,
         // dogfood ②b：async 但未显式 run → 明确提示被忽略，不静默降级
         ...(asyncRun ? { note: 'async=true ignored because run=false: nothing executed. Pass run=true to launch the background job.' } : {}),
-        checks: kinds.map(kind => ({ kind, availability: 'unknown', note: 'not executed (run=false); availability is not measured by preview' })),
+        checks: wouldRun.map(p => ({
+          kind: p.kind,
+          availability: p.will_run ? 'runnable' : 'unavailable',
+          command: p.command || null,
+          cwd: p.cwd || null,
+          ...(p.reason ? { reason: p.reason } : {}),
+          ...(p.notice ? { notice: p.notice } : {}),
+          note: p.will_run ? 'preview only — not executed (pass run=true to execute)' : 'not runnable in this workspace; running it would produce no evidence',
+        })),
       },
       allowed_actions: ['code_check', 'code_patch', 'code_read', 'code_status'],
-      extra: {
-        next_action: {
-          tool: 'code_check',
-          args: {
-            workspace_dir: workspaceDir,
-            task_id,
-            checks: kinds,
-            run: true,
-            ...(args?.workdir ? { workdir: args.workdir } : {}),
-            ...(args?.timeout != null ? { timeout: args.timeout } : {}),
-            ...(asyncRun ? { async: true } : {}),
-            ...(args?.request_id ? { request_id: args.request_id } : {}),
-          },
-          note: 'Preview only (nothing executed). Call code_check with these args to run the checks.',
-        },
-        next_step: 'Preview only. To execute, call code_check with next_action.args (run=true).',
-      },
+      extra: buildPreviewExtra({
+        workspaceDir, task_id, kinds, args, asyncRun, wouldRun, notRunnable,
+      }),
     })
   }
 
@@ -310,7 +317,7 @@ export async function handle(args, context) {
     state: 'succeeded', updated: new Date().toISOString(), checks: kinds, result_kind,
     ...(verifierReused ? { verifier_reused: true } : {}),
   }
-  const cas = updateTaskCas(workspaceDir, task_id, currentRev, (t) => {
+  const applyCheck = (t) => {
     const arr = [...(t.operations || [])]
     const i = arr.findIndex(o => o.operation_id === finOp.operation_id)
     if (i >= 0) arr[i] = finOp; else arr.push(finOp)
@@ -321,9 +328,29 @@ export async function handle(args, context) {
     // 第二轮审查/13-B：记录验证时的 goal_revision——switch_route 后旧 validated 失效（effectiveState）
     if (result_kind === 'validated') t.validated_goal_revision = t.goal_revision || 1
     return { type: 'evidence', data: { evidences: evidence, operation: finOp, node: 'check', result_kind } }
-  })
-  if (!cas.ok) {
-    return makeError('state_commit_pending', `checks ran but task state commit raced (${cas.code}); retry with the same request_id`, 'Retry with the same request_id to finalize.')
+  }
+  // R22-F25（2026-11-05 极限风暴）：同步检查跑完后才提交 CAS；检查期间另一个工具
+  // （实测 audit + check 并行）会推高 revision，旧实现一次 CAS 失败就把已经跑完的检查丢掉，
+  // 还让调用方「用同一个 request_id 重试」——但无 request_id 时根本没得重试。
+  // 检查是追加式证据，重取 revision 后合并是安全的；最多重试 3 次。
+  let cas = null
+  let casRev = currentRev
+  for (let attempt = 0; attempt < 3; attempt++) {
+    cas = updateTaskCas(workspaceDir, task_id, casRev, applyCheck)
+    if (cas.ok || cas.code !== 'REVISION_CONFLICT') break
+    const fresh = getTask(workspaceDir, task_id)
+    if (!fresh || fresh.lifecycle === 'cancelled') break
+    casRev = fresh.revision
+  }
+  if (!cas || !cas.ok) {
+    const code = cas?.code || 'unknown'
+    return makeError('state_commit_pending',
+      args?.request_id
+        ? 'checks ran but task state commit raced (' + code + '); retry with the same request_id'
+        : 'checks ran but task state commit raced (' + code + '); no request_id was supplied — re-run code_check to record the result.',
+      args?.request_id
+        ? 'Retry with the same request_id to finalize.'
+        : 'Re-run code_check; the previous attempt\'s result was not recorded.')
   }
 
   const failed = evidence.filter(e => e.result !== 'passed').map(e => `${e.kind}:${e.result}`)
@@ -345,6 +372,38 @@ export async function handle(args, context) {
 
 // 8-补（2026-10-07 专家体验报告）：code_check envelope 一致性——下一步结构化（与 code_status/code_read 同源）。
 // validated → 路由生成器（change→code_patch 模板）；未通过/未验证 → 指回 code_patch 修复（不指回 code_check 自环）。
+// F1-b（2026-10-30 自用试用）：预览的 next_action 必须和「真能跑」一致。
+// 旧实现无条件给 code_check(run:true)；但预览已经知道 would_run 里没有任何可运行目标时，
+// 照做只会空跑一轮拿到 skipped，白白多一次往返，也让调用方误以为「再试一次就能验」。
+// 无可跑目标 → next_action=null + 如实说明（环境限制，不是代码缺陷）。
+function buildPreviewExtra({ workspaceDir, task_id, kinds, args, asyncRun, wouldRun, notRunnable }) {
+  const runnable = (wouldRun || []).filter(p => p.will_run)
+  if (runnable.length === 0) {
+    const why = (notRunnable || []).map(p => p.kind + ':' + p.reason).join(', ') || 'no check target'
+    return {
+      next_action: null,
+      next_step: 'Nothing is runnable here: ' + why + '. Running again would produce no evidence — this is an environment limitation, not a code defect. Add a runnable target (e.g. package.json "test"), or finish and report the change as unverified (result_kind=partial).',
+    }
+  }
+  return {
+    next_action: {
+      tool: 'code_check',
+      args: {
+        workspace_dir: workspaceDir,
+        task_id,
+        checks: kinds,
+        run: true,
+        ...(args?.workdir ? { workdir: args.workdir } : {}),
+        ...(args?.timeout != null ? { timeout: args.timeout } : {}),
+        ...(asyncRun ? { async: true } : {}),
+        ...(args?.request_id ? { request_id: args.request_id } : {}),
+      },
+      note: 'Preview only (nothing executed). Call code_check with these args to run the checks.',
+    },
+    next_step: 'Preview only. To execute, call code_check with next_action.args (run=true).',
+  }
+}
+
 function buildCheckFollowup({ workspaceDir, task_id, task, result_kind, failed = [], allPassed = false, evidence = [], checkKinds = [], timeout = null, verifier = null }) {
   if (result_kind === 'validated') {
     const na = buildTaskNextAction({ workspaceDir, task_id, task })
@@ -493,12 +552,21 @@ async function executeChecks(kinds, args, context, signal, op, deps = [], indexS
         // WP02：检查事实——可执行回传（LH-010）与 runner 名（命令首 token）
         ...(command ? { command } : {}),
         ...(runner ? { runner } : {}),
-        ...(stage?.timed_out ? { timed_out: true } : {}),
+        // B7：killed / timed_out 是两回事，必须分别透传。
+        // 旧实现只写 timed_out——若某路径 killed=true 但 timed_out 未置位，证据里就**什么都看不到**，
+        // 调用方无法区分「超时被杀」与「自己退出 1」，只能猜（DSH 实录正是这种困境）。
+        ...(stage?.killed === true ? { killed: true } : {}),
+        ...(stage?.timed_out ? { timed_out: true, timed_out_ms: stage.timed_out.timeout_ms ?? null } : {}),
         ...(verifier === 'exit' && result === 'passed' && stageNotice
           ? { notice: 'verdict declared by exit code (exit=0, verifier=exit); output did not match a test protocol' + (mcpNote ? ' | ' + mcpNote : ''), notice_protocol: stageNotice }
           : (noticeText ? { notice: noticeText } : {})),
         ...(typeof stage?.stdout === 'string' && stage.stdout ? { stdout_tail: stage.stdout.slice(-600) } : {}),
-        ...(typeof stage?.stderr === 'string' && stage.stderr ? { stderr_tail: stage.stderr.slice(-600) } : {}),
+        // B8：失败且 stderr 为空时，旧实现什么都不写 → 读者分不清"没有 stderr"与
+        // "stderr 没被采集"。DSH 最初那条 failed（exit_code=1、105860ms）就落在这种形态里，
+        // 我这边连"stderr 是不是空"都无法确认，只能猜。显式写出空串。
+        ...(result === 'failed' && typeof stage?.stderr === 'string'
+          ? { stderr_tail: stage.stderr.slice(-600) }
+          : (typeof stage?.stderr === 'string' && stage.stderr ? { stderr_tail: stage.stderr.slice(-600) } : {})),
         ...(stage?.error ? { error: String(stage.error).slice(0, 200) } : {}),
         ...(r?.error ? { error: r.error } : {}),
       },
@@ -517,7 +585,12 @@ async function executeChecks(kinds, args, context, signal, op, deps = [], indexS
     if (indexScope?.truncated) {
       const last = evidence[evidence.length - 1]
       last.limitations = [...(last.limitations || []), `workspace scan truncated at ${indexScope.files_scanned} file(s) — checks cover a partial tree (T18)`]
-      last.actual = { ...last.actual, truncated: true }
+      // B8：字段名从 `truncated` 改为 `scan_truncated`。
+      // `actual.truncated` 紧挨着 ran/exit_code/stdout_tail，任何读者都会理解成
+      // "输出被截断"——DSH 那条 evidence 就是 `truncated: true` 配两行 stdout_tail，
+      // 看起来像"结果不全所以不可信"。它真正的含义是**索引扫描**被截断。
+      // 同名字段两种含义，比没有字段更误导；`truncated` 保留为别名以免旧调用方解析失败。
+      last.actual = { ...last.actual, scan_truncated: true, truncated: true }
     }
   }
   return evidence

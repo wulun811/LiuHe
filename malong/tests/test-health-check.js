@@ -28,6 +28,25 @@ const TMP = join(os.tmpdir(), 'opencode', 'health-check-test')
   assert(p1 && p1.status === 'PASS' && /daemon v0\.5\.0 pid=42/.test(p1.detail), '7-C 身份行 PASS 含 daemon 版本/pid（得 ' + p1?.status + ' | ' + p1?.detail + '）')
   assert(r1.parser_identity && r1.parser_identity.daemon?.exe_path === same && r1.parser_identity.drift?.detected === false, '7-C 结构化 parser_identity（得 ' + JSON.stringify(r1.parser_identity?.drift) + '）')
 
+  // ⑦（2026-11-02 DSH 复验）：daemon 未注入 commit 时 build_commit 恒为 'unknown'——
+  // 不能让它以一个「看起来像值」的字符串留在 parser_identity 里；也不能让 drift 判据依赖它。
+  {
+    const identU = { ...ident, daemon: { ...ident.daemon, build_commit: 'unknown' } }
+    const rU = await hc.runHealthCheck({ stateDir: TMP, workspacesDir: join(TMP, 'ws'), semaphore: semX, activeRequests: activeX, log: () => {}, parseService: { ...svcBase, getIdentity: async () => identU } })
+    const pU = rU.checks.find(c => c.name === 'Parse Service')
+    const dU = rU.parser_identity?.daemon || {}
+    assert(dU.build_commit === null, '⑦ 未注入 commit → build_commit 置 null（得 ' + JSON.stringify(dU.build_commit) + '）')
+    assert(dU.build_commit_source === 'not_embedded', '⑦ 必须标明来源 not_embedded（得 ' + JSON.stringify(dU.build_commit_source) + '）')
+    assert(rU.parser_identity?.drift?.detected === false, '⑦ drift 判据不依赖 build_commit（exe 一致即不报漂移）')
+    assert(pU && pU.status === 'PASS' && !/commit=unknown/.test(pU.detail), '⑦ 日志不得出现 commit=unknown（得 ' + pU?.detail + '）')
+  }
+
+  // ⑧ 真注入了 commit → 保留原值并标明来源
+  {
+    const d1 = r1.parser_identity?.daemon || {}
+    assert(d1.build_commit === 'abc1234' && d1.build_commit_source === 'embedded', '⑧ 注入 commit → 保留并标 embedded（得 ' + JSON.stringify({ c: d1.build_commit, s: d1.build_commit_source }) + '）')
+  }
+
   // ② daemon 与可解析二进制不一致 → WARN drift（升级未生效可直接看见）
   const ident2 = { ...ident, daemon: { ...ident.daemon, exe_path: 'N:/old/malong-parse.exe' } }
   const r2 = await hc.runHealthCheck({ stateDir: TMP, workspacesDir: join(TMP, 'ws'), semaphore: semX, activeRequests: activeX, log: () => {}, parseService: { ...svcBase, getIdentity: async () => ident2 } })

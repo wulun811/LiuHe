@@ -253,7 +253,10 @@ const FILES = ['src/entity_registry.py', 'src/txn.js', 'repo-map.js', 'src/noise
 {
   const c = await findCandidates(svc, WS, '副本运行', null, { files: FILES, search_terms: ['bundleRun'] })
   const b = c.find(x => x.file_path === 'dsh/bundle/server/bench-copy.js')
-  assert(b && b.rank_reason.includes('benchmark_path'), '⑯ bundle 副本符号候选带 benchmark_path 原因（得 ' + (b && b.rank_reason) + '）')
+  // R16：构建副本不是基准——旧实现把 dsh/bundle 和 benchmarks 合在一个正则里，于是这里被标成
+  // benchmark_path（谎报归因）。降权保留，标签必须说“生成物”，且不得再出现 benchmark_path。
+  assert(b && b.rank_reason.includes('generated_bundle'), '⑯ bundle 副本符号候选带 generated_bundle 原因（得 ' + (b && b.rank_reason) + '）')
+  assert(b && !b.rank_reason.includes('benchmark_path'), '⑯ bundle 副本不得谎报 benchmark_path（得 ' + (b && b.rank_reason) + '）')
   const dir = mkdtempSync(join(tmpdir(), 'malong-bundle-'))
   mkdirSync(join(dir, 'src'), { recursive: true })
   mkdirSync(join(dir, 'dsh', 'bundle', 'server'), { recursive: true })

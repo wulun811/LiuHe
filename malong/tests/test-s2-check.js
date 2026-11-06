@@ -69,6 +69,9 @@ assert(/validated/i.test(r.next_step || '') && /host_required/i.test(r.next_step
 mkTask(WS, 'task_trunc', { operations: [patchOp('op_t1')], result_kind: 'partial', index_scope: { files_scanned: 5000, files_indexed: 5000, truncated: true } })
 r = await check.handle({ workspace_dir: WS, task_id: 'task_trunc', checks: ['test'], run: true, request_id: 'ck_trunc' }, ctx)
 assert(r.ok === true && r.observation.evidence[0].actual?.truncated === true, 'T18 截断标记入证据 actual')
+// B8：`truncated` 语义歧义（它指"索引扫描截断"，但位置紧挨 ran/exit_code/stdout_tail，
+// 读起来像"输出被截断"）。新增 scan_truncated 为准，truncated 保留作别名兼容旧调用方。
+assert(r.observation.evidence[0].actual?.scan_truncated === true, 'B8 截断标记应同时写 scan_truncated（消歧义）')
 assert(r.observation.evidence[0].limitations.some(l => l.includes('truncated')), 'T18 截断 limitation')
 
 // ── 去重：同 request_id 返回缓存证据 ──
@@ -95,6 +98,13 @@ assert(r.observation?.result_kind === 'partial', `超时不 validated（得 ${r.
 
 // ── 跳过（无 test 脚本）不做通过 ──
 mkTask(WSS, 'task_s', { operations: [patchOp('op_s1')], result_kind: 'partial' })
+// F1-b（2026-10-30 自用试用）：预览阶段已知道「无一个可运行目标」时，不得再教 run=true。
+// 照做只会空跑一轮拿 skipped，多一次往返，还让人误以为「再试一次就能验」。
+r = await check.handle({ workspace_dir: WSS, task_id: 'task_s', checks: ['test'] }, ctx)
+assert(r.ok === true && r.observation?.effect === 'preview', `F1-b 无目标仍能预览（ok=${r.ok}, effect=${r.observation?.effect}）`)
+assert(r.next_action === null, `F1-b 无目标预览 next_action 必为 null（得 ${JSON.stringify(r.next_action)}）`)
+assert(typeof r.next_step === 'string' && /no_test_target|no check target/.test(r.next_step), `F1-b next_step 给出真实原因（得 ${String(r.next_step).slice(0, 120)}）`)
+assert(/environment limitation/i.test(String(r.next_step)), 'F1-b 明说是环境限制，不是代码缺陷')
 r = await check.handle({ workspace_dir: WSS, task_id: 'task_s', checks: ['test'], run: true, request_id: 'ck_s' }, ctx)
 assert(r.observation?.evidence?.[0]?.result === 'skipped', `空运行 → skipped（得 ${r.observation?.evidence?.[0]?.result}）`)
 assert(r.observation?.result_kind === 'partial', `skipped 不 validated（得 ${r.observation?.result_kind}）`)

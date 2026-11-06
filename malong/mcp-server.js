@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process'
 import net from 'node:net'
 import ToolRegistry from './tool-registry.js'
 import { runHealthCheck, cleanupStaleWorkspaces } from './health-check.js'
+import { formatFailChecks, gcUnavailableNotice, restartExhaustedNotice, shouldNoticeExhausted, formatMemoryWarning, MEMORY_THRESHOLDS } from './watchdog-log.js'
 import crypto from 'node:crypto'
 import os from 'node:os'
 
@@ -33,6 +34,8 @@ const BUILD_INFO = (() => {
 
 import { Semaphore, heavyToolWeight } from './semaphore.js'
 import { getStateDir, ensureStateDir, migrateLegacyStateDir, readPackageVersion } from './host-config.js'
+// TRACE v0（专家 0.6.1 §4）：只在 dispatch 层低成本挂钩，工具自身 schema 不为轨迹改动
+import { traceStarted, traceFinished, summarizeToolResult, traceEnabled, extractSuggestedTool, opaqueCallId } from './trace.js'
 
 const REQUEST_TIMEOUT_MS = (() => { const n = parseInt(process.env.MALONG_REQUEST_TIMEOUT_MS || '120000', 10); return Number.isFinite(n) && n > 0 ? n : 120000 })()
 const SEMAPHORE_TIMEOUT_MS = 60_000
@@ -44,7 +47,8 @@ const RECOMMENDED_HEAP_MB = 512
 const DEFAULT_CONCURRENCY = 5
 const HEAVY_TOOLS = new Set(['reindex'])
 const MEMORY_CHECK_INTERVAL_MS = 30_000
-const MEMORY_DANGER_MB = 480
+// 阈值唯一真相在 watchdog-log.js 的 MEMORY_THRESHOLDS（与 health-check 的 WARN/FAIL 同源）
+const MEMORY_DANGER_MB = MEMORY_THRESHOLDS.softMB
 
 // ── Rust 解析服务自动拉起 ──
 // r35-fix: Windows 无 getuid → UID 兜底 0（与 parse-client.js 同款守卫）
@@ -191,16 +195,27 @@ async function ensureParseService() {
 }
 
 function checkV8HeapLimit() {
-  const maxOldSpace = process.argv.find(a => a.startsWith('--max-old-space-size='))
-  if (!maxOldSpace) {
-    safeLog(`WARNING: V8 heap limit is unlimited. Start with --max-old-space-size=${RECOMMENDED_HEAP_MB}`)
+  // B8：必须读 process.execArgv（真正传给 V8 的参数），不能读 process.argv。
+  // argv 里出现的 `--max-old-space-size=512` 可能只是**脚本参数**（node 把脚本名之后
+  // 的一切交给脚本），V8 根本没收到——旧实现因此打印 "V8 heap=512MB" 却实际无上限，
+  // 报告了一个不存在的约束。dsh-bridge 原来就是这么传的（已同时修正）。
+  const fromExec = process.execArgv.find(a => a.startsWith('--max-old-space-size='))
+  if (fromExec) {
+    const heapMB = parseInt(fromExec.split('=')[1], 10)
+    if (heapMB > RECOMMENDED_HEAP_MB * 2) {
+      safeLog(`WARNING: V8 heap limit is ${heapMB}MB. Consider --max-old-space-size=${RECOMMENDED_HEAP_MB}`)
+    }
+    return heapMB
+  }
+  // argv 里有、execArgv 里没有 = 传成了脚本参数，V8 未生效。必须说清，不能假装设了。
+  const fromArgv = process.argv.find(a => a.startsWith('--max-old-space-size='))
+  if (fromArgv) {
+    safeLog(`WARNING: ${fromArgv} was passed AFTER the script path, so V8 ignored it — `
+      + `heap limit is actually unlimited. Put it before the script: node --max-old-space-size=${RECOMMENDED_HEAP_MB} mcp-server.js`)
     return 0
   }
-  const heapMB = parseInt(maxOldSpace.split('=')[1], 10)
-  if (heapMB > RECOMMENDED_HEAP_MB * 2) {
-    safeLog(`WARNING: V8 heap limit is ${heapMB}MB. Consider --max-old-space-size=${RECOMMENDED_HEAP_MB}`)
-  }
-  return heapMB
+  safeLog(`WARNING: V8 heap limit is unlimited. Start with --max-old-space-size=${RECOMMENDED_HEAP_MB}`)
+  return 0
 }
 
 function parseArgs() {
@@ -394,18 +409,31 @@ function safeRespondError(id, code, message) {
 
 // r55: 客户端（opencode）收到 tools/list 的 -32000 会立即关闭 stdin kill 进程——初始化（含 Windows daemon TCP 等待）
 // 超过客户端重试窗口时永远连不上。未就绪改为轮询等待 _ready 后再响应（上限 15s，超过仍报错兜底）。
-function waitForReady(id) {
+//
+// R21-F05（2026-11-05 自用试用实测）：tools/call 原来在未就绪时【直接报错】，
+// 与 tools/list 的【等待】行为不一致。实测新进程启动后首次 tools/call 约 40% 概率
+// 撞上 -32000（5 次新进程里 2 次），而调用方往往把它当成真失败。
+// 同一个「还没装完」状态不该有两种待遇：现在两者都排队等待，超时才兜底报错。
+function waitForReadyThen(id, run) {
   let waited = 0
   const timer = setInterval(() => {
     waited += 250
     if (_ready && registry) {
       clearInterval(timer)
-      safeRespond(id, { tools: registry.listTools() })
+      try {
+        run()
+      } catch (e) {
+        safeRespondError(id, -32603, 'Internal error while handling queued request: ' + (e.code || e.message))
+      }
     } else if (waited >= 15_000) {
       clearInterval(timer)
       safeRespondError(id, -32000, 'Server still loading modules, please retry in a few seconds')
     }
   }, 250)
+}
+
+function waitForReady(id) {
+  waitForReadyThen(id, () => safeRespond(id, { tools: registry.listTools() }))
 }
 
 function handleRequest(req) {
@@ -436,8 +464,10 @@ function handleRequest(req) {
       break
 
     case 'tools/call': {
-      if (!_ready) {
-        safeRespondError(id, -32000, 'Server still loading modules, please retry in a few seconds')
+      if (!_ready || !registry) {
+        // R21-F05：与 tools/list 一致——排队等就绪，不把「还在装载」当失败甩给调用方。
+        // 把整个 handleRequest 重放一次即可（req 不可变，重放幂等：此刻还没执行任何工具）。
+        waitForReadyThen(id, () => { try { handleRequest(req) } catch (e) { safeRespondError(id, -32603, 'Internal error: ' + (e.code || e.message)) } })
         break
       }
       const { name, arguments: toolArgsRaw } = params || {}
@@ -463,8 +493,18 @@ function handleRequest(req) {
       }
 
       const weight = HEAVY_TOOLS.has(name) ? heavyToolWeight(concurrency) : 1
-      const reqId = `${id}_${name}_${Date.now()}`
+      // R16B-PRIV01（专家 2026-10-31 P1）：内部关联键用不透明 id。
+      // 旧实现 `${id}_${name}_${Date.now()}` 把客户端 JSON-RPC id 原文拼进来，
+      // 再当作轨迹 call_id 落盘 → 请求 id 里的密钥形态字符串会被原样持久化。
+      const reqId = opaqueCallId()
       activeRequests.set(reqId, { name, startTime: Date.now(), weight })
+
+      // TRACE v0：started 事件必须先写（崩溃时「有开始无结果」才可见）。
+      // traceEvent 内部吞掉所有异常，绝不改变工具结果；MALONG_TRACE=off 时零副作用。
+      const _traceOn = traceEnabled()
+      const _traceCallId = _traceOn ? reqId : null
+      const _traceT0 = Date.now()
+      if (_traceOn) traceStarted({ tool: name, callId: _traceCallId, parentCallId: null })
 
       const callTool = async () => {
         const lock = await semaphore.acquire(weight, SEMAPHORE_TIMEOUT_MS)
@@ -510,14 +550,40 @@ function handleRequest(req) {
           await Promise.race([rawPromise, timeoutPromise])
           if (!timedOut) {
             try {
+              const toolResult = await rawPromise
+              if (_traceOn) {
+                // 只取安全摘要；output_chars 是长度，不是正文
+                let _outChars = null
+                try { _outChars = JSON.stringify(toolResult)?.length ?? null } catch {}
+                let _truncated = null
+                try { _truncated = !!(toolResult && (toolResult.truncated || toolResult.output_truncated)) } catch {}
+                traceFinished({
+                  tool: name, callId: _traceCallId, parentCallId: null, phase: 'finished',
+                  latencyMs: Date.now() - _traceT0,
+                  summary: summarizeToolResult(toolResult),
+                  nextAction: extractSuggestedTool(toolResult),
+                  // basis 只在真取到值时才声称来源——否则 next_action=null 配一句「来自 handler 字段」是自相矛盾
+                  nextActionBasis: extractSuggestedTool(toolResult) ? 'handler_next_action_field' : null,
+                  outputChars: _outChars, truncated: _truncated,
+                })
+              }
               safeRespond(id, {
-                content: [{ type: 'text', text: JSON.stringify(await rawPromise, null, 2) }],
+                content: [{ type: 'text', text: JSON.stringify(toolResult, null, 2) }],
               })
             } finally {
               releaseSlot()
             }
           }
         } catch (e) {
+          if (_traceOn) {
+            traceFinished({
+              tool: name, callId: _traceCallId, parentCallId: null,
+              phase: timedOut ? 'timeout' : 'abandoned',
+              latencyMs: Date.now() - _traceT0,
+              summary: { outcome: timedOut ? 'timeout' : 'error', effect: 'unknown', state_commit: 'unknown', verification: 'unknown', error_code: e?.code || null },
+              nextAction: null, nextActionBasis: null,
+            })
+          }
           if (timedOut) {
             // B1：race 超时必以 rejection 结算，之前 try 内 else 分支不可达 = 超时零响应（A5 死代码）。
             // 超时响应必须在 catch 里发；工具本身仍在跑（已 .catch 兜住），结果丢弃。
@@ -692,23 +758,33 @@ initModules().then(() => {
   crashLog(`server ready, V8 heap=${heapMB}MB, concurrency=${concurrency}, pid=${process.pid}`)
 
   if (typeof global.gc === 'function') {
-    safeLog('[mcp] --expose-gc detected, periodic GC + memory monitoring enabled')
-    setInterval(() => {
-      try {
-        global.gc()
-        const mem = process.memoryUsage()
-        const rssMB = Math.round(mem.rss / 1048576)
-        if (rssMB > MEMORY_DANGER_MB) {
-          crashLog(`MEMORY WARNING: RSS=${rssMB}MB (danger threshold=${MEMORY_DANGER_MB}MB), heap=${Math.round(mem.heapUsed / 1048576)}MB, active_requests=${activeRequests.size}`)
-        }
-      } catch {}
-    }, MEMORY_CHECK_INTERVAL_MS)
+    safeLog('[mcp] --expose-gc detected, periodic GC enabled')
+  } else {
+    // B8：无 --expose-gc（dsh-bridge 只用 --max-old-space-size=512 启动）时，
+    // 旧实现把**周期性 GC 与内存监控**一起关掉——于是 480MB 软告警在那种部署里
+    // 一次都不会出现（实测 ~/.local/state/malong-dsh/crash.log: MEMORY WARNING 0 次、
+    // expose-gc 0 次），内存从 480MB 涨到 800MB 之间完全没有信号，只能等 FAIL。
+    // 监控不需要 global.gc；只有 gc() 调用需要。两者必须解耦。
+    safeLog('[mcp] --expose-gc not set: periodic GC disabled, memory monitoring still on')
   }
+  // 内存监控与 GC 解耦——监控不依赖 --expose-gc
+  setInterval(() => {
+    try {
+      if (typeof global.gc === 'function') global.gc()
+      const mem = process.memoryUsage()
+      const rssMB = Math.round(mem.rss / 1048576)
+      const heapMBUsed = Math.round(mem.heapUsed / 1048576)
+      if (rssMB > MEMORY_DANGER_MB) {
+        crashLog(formatMemoryWarning({ rssMB, heapMB: heapMBUsed, activeRequests: activeRequests.size }))
+      }
+    } catch {}
+  }, MEMORY_CHECK_INTERVAL_MS)
 
   // Watchdog: 每 30 秒检查一次健康状态
   let watchdogRestarts = 0
   const MAX_AUTO_RESTARTS = 3
   let lastAutoRestart = 0
+  let lastExhaustedNotice = 0
   let watchdogRunning = false
 
   setInterval(async () => {
@@ -723,16 +799,27 @@ initModules().then(() => {
       // 检查是否有 FAIL 状态
       const failChecks = health.checks.filter(c => c.status === 'FAIL')
       if (failChecks.length > 0) {
-        crashLog(`WATCHDOG: ${failChecks.length} FAIL checks: ${failChecks.map(c => c.name).join(', ')}`)
+        // B8：旧日志只打检查项名字（`FAIL checks: Memory RSS`），**丢掉了 detail 里的数值**。
+        // 现场只看到"内存超了"，无法判断是 801MB 还是 1.5GB，也无法判断是堆涨还是堆外涨
+        // （实测 RSS 530MB 时 heap 仅 75MB——7 倍差，--max-old-space-size 管不到）。
+        // 诊断日志没有数值等于没有日志。格式化逻辑见 watchdog-log.js（可单测）。
+        crashLog(`WATCHDOG: ${failChecks.length} FAIL checks: ${formatFailChecks(failChecks)}`)
 
         // 如果是内存问题，尝试 GC
         const memCheck = health.checks.find(c => c.name === 'Memory RSS')
-        if (memCheck && memCheck.status === 'FAIL' && typeof global.gc === 'function') {
-          try {
-            global.gc()
-            const mem = process.memoryUsage()
-            crashLog(`WATCHDOG: forced GC, RSS now ${Math.round(mem.rss / 1048576)}MB`)
-          } catch {}
+        if (memCheck && memCheck.status === 'FAIL') {
+          if (typeof global.gc === 'function') {
+            try {
+              global.gc()
+              const mem = process.memoryUsage()
+              crashLog(`WATCHDOG: forced GC, RSS now ${Math.round(mem.rss / 1048576)}MB`)
+            } catch {}
+          } else {
+            // B8：进程以 --max-old-space-size=512 启动、**没有 --expose-gc**，
+            // 于是 global.gc 恒为 undefined，这条自救分支从未执行过——而且旧实现是静默跳过，
+            // 现场看起来像"已经尝试过 GC 但没用"。必须说清"自救手段不可用"，而不是假装试过了。
+            crashLog(gcUnavailableNotice())
+          }
         }
 
         // 自动软重启：单进程 MCP 无 supervisor，无法真重启自己 —— 诚实地报告并复位可复位状态，
@@ -746,6 +833,15 @@ initModules().then(() => {
             if (semaphore.reset) semaphore.reset()
           } catch (e) {
             crashLog(`WATCHDOG: semaphore reset failed: ${e.message}`)
+          }
+        } else if (watchdogRestarts >= MAX_AUTO_RESTARTS) {
+          // B8：额度耗尽后旧实现彻底静默——只剩上面每 30s 一行的 "FAIL checks"，
+          // 看不出"已经放弃自救"。现场（~/.local/state/malong-dsh 2026-11-01）
+          // 就是这样：restart #1/3、#2/3 之后长时间只有 FAIL 行，无法判断是不是还在尝试。
+          // 每小时明确报一次"已放弃"，避免把静默当成"仍在处理"。
+          if (shouldNoticeExhausted(now, lastExhaustedNotice, watchdogRestarts, MAX_AUTO_RESTARTS)) {
+            lastExhaustedNotice = now
+            crashLog(restartExhaustedNotice(watchdogRestarts, MAX_AUTO_RESTARTS))
           }
         }
       }

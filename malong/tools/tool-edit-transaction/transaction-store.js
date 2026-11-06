@@ -36,8 +36,15 @@ async function _withManifestLock(txnId, fn) {
 
 const LARGE_FILE_BYTES = 100 * 1024 * 1024
 
-// R4a：清扫保护清单（显式列出防未来误删）——staged（崩溃恢复未处理）/ needs_review（外部修改待审）永不自动删
-const PRUNE_PROTECTED_TXN_STATES = new Set(['staged', 'needs_review'])
+// R7-CE19（专家 2026-10-30，P0）：清扫必须用【允许名单】，不是【保护名单】。
+// 旧实现只挡 staged/needs_review：manifest 解析失败 → state='unknown' → 不在保护名单 → 超龄即删；
+// 而那一刻文件可能已经落盘，backup 里就是唯一的恢复原像 → 恢复能力随目录一起永久消失。
+// 新语义：只有「manifest 可解析 + 结构合法 + state 明确属于可回收终态」的目录才允许删；
+// 其余一律保留，并在 sweepReport() 里给出原因（有界），不得静默跳过。
+// committed_recovered 故意【不在】允许名单：它是崩溃恢复留给 undoCommit 的唯一原像。
+const SWEEPABLE_TXN_STATES = new Set(['committed', 'rolled_back', 'abandoned', 'undone', 'failed'])
+// 报告有界：超过该条数只报计数，不把无限明细灌进回执
+const SWEEP_REPORT_MAX_ITEMS = 20
 
 // R22-④（审核修复）：按字节安全截断——slice(0,80) 按 UTF-16 code unit，80 个 CJK = 240B，
 // tmp 路径追加 `.tmp-8hex` 后 262B > NAME_MAX(255) → ENAMETOOLONG 崩溃（实测 '汉'×80 复现）。
@@ -54,12 +61,15 @@ function truncateBytes(s, maxBytes) {
 function safeBackupPath(backupDir, backupName) {
   // 批12-A：空/空白 backupName 拒绝——join(dir,'') 解析为目录本身，readFileSync 读目录 → EISDIR
   if (!backupName || !String(backupName).trim()) return null
-  const resolvedBackup = resolve(join(backupDir, backupName))
-  if (resolvedBackup !== backupDir && !resolvedBackup.startsWith(backupDir + sep)) return null
+  // Windows：backupDir 可能是驱动器相对路径（`\tmp\...`），不 resolve 则与 resolve 后的绝对路径
+  // 前缀比较必然不等，所有合法 backup 都被判 backup_escape。
+  const root = resolve(backupDir)
+  const resolvedBackup = resolve(join(root, backupName))
+  if (resolvedBackup !== root && !resolvedBackup.startsWith(root + sep)) return null
   if (!existsSync(resolvedBackup)) return null
   try {
     const real = realpathSync(resolvedBackup)
-    const realRoot = realpathSync(backupDir)
+    const realRoot = realpathSync(root)
     if (real !== realRoot && !real.startsWith(realRoot + sep)) return null
   } catch { return null }
   return resolvedBackup
@@ -79,26 +89,81 @@ export class TransactionStore {
   }
 
   // r9(H11)：崩溃残留的未提交事务目录（txnRoot/<id>，不在 recent/）永不回收 → .ai-transactions 无限增长。
-  // 仅清理超龄（>7 天）目录——任何合法事务不会存活超过一周，mtime 新鲜的在用事务不受影响
-  // R4a：只允许删终态目录（committed/committed_recovered/rolled_back/abandoned）——staged/needs_review 保护
+  // 仅清理超龄（>7 天）目录——任何合法事务不会存活超过一周，mtime 新鲜的在用事务不受影响。
+  // R7-CE19（P0）：删除条件从「不在保护名单」翻成「已证明属于可回收终态」：
+  //   允许删 = manifest 可解析 && 结构合法 && state ∈ SWEEPABLE_TXN_STATES
+  //   其余（坏 JSON / manifest 缺失 / unknown / 未知新状态 / staged / needs_review /
+  //   indeterminate / committed_recovered）全部保留，并把原因记进 _sweepReport。
+  // 清扫本身绝不改动工作区业务文件（只 rmSync txnRoot 下的目录）。
   _sweepStaleTxnDirs(maxAgeMs = 7 * 24 * 3600 * 1000) {
+    const report = { candidates: 0, swept: [], kept: [], kept_count: 0, kept_truncated: false, errors: 0 }
+    this._sweepReport = report
+    const keep = (txnId, reason) => {
+      report.kept_count++
+      if (report.kept.length < SWEEP_REPORT_MAX_ITEMS) report.kept.push({ txn_id: txnId, reason, kept: true })
+      else report.kept_truncated = true
+    }
     try {
       const now = Date.now()
       for (const d of readdirSync(this.txnRoot, { withFileTypes: true })) {
         if (!d.isDirectory() || d.name === 'recent') continue
+        const dir = join(this.txnRoot, d.name)
+        let aged = false
         try {
-          if (now - statSync(join(this.txnRoot, d.name)).mtimeMs > maxAgeMs) {
-            let state = 'unknown'
-            try {
-              const m = JSON.parse(readFileSync(join(this.txnRoot, d.name, 'manifest.json'), 'utf-8'))
-              state = m.state || 'unknown'
-            } catch {}
-            if (PRUNE_PROTECTED_TXN_STATES.has(state)) continue
-            rmSync(join(this.txnRoot, d.name), { recursive: true, force: true })
-          }
-        } catch {}
+          aged = now - statSync(dir).mtimeMs > maxAgeMs
+        } catch { continue } // 竞态：已被别的进程收走
+        if (!aged) continue
+        report.candidates++
+        // —— 判定「可证明可删」：任一环节无法证明 → 保留 ——
+        let raw
+        try {
+          raw = readFileSync(join(dir, 'manifest.json'), 'utf-8')
+        } catch {
+          keep(d.name, 'manifest_unreadable: cannot prove this transaction is terminal; recovery assets preserved for manual review')
+          continue
+        }
+        let manifest
+        try {
+          manifest = JSON.parse(raw)
+        } catch {
+          keep(d.name, 'manifest_unparseable: state unknown; deleting could destroy the only backup of a landed write')
+          continue
+        }
+        if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) {
+          keep(d.name, 'manifest_not_an_object: structure invalid, state unprovable')
+          continue
+        }
+        const state = manifest.state
+        if (typeof state !== 'string' || !state) {
+          keep(d.name, 'manifest_state_missing: cannot prove terminal state')
+          continue
+        }
+        if (!SWEEPABLE_TXN_STATES.has(state)) {
+          keep(d.name, `state_not_sweepable:${state}`)
+          continue
+        }
+        // manifest 声称是终态，但 txnId 对不上 → 可能被移动/伪造，不删
+        if (manifest.txnId && manifest.txnId !== d.name) {
+          keep(d.name, 'manifest_txn_id_mismatch: directory identity unproven')
+          continue
+        }
+        try {
+          rmSync(dir, { recursive: true, force: true })
+          report.swept.push(d.name)
+        } catch {
+          report.errors++
+          keep(d.name, 'sweep_failed: directory could not be removed')
+        }
       }
-    } catch {}
+    } catch {
+      report.errors++
+    }
+    return report
+  }
+
+  // R7-CE19：清扫结果查询（bounded）——构造副作用不得静默
+  sweepReport() {
+    return this._sweepReport || { candidates: 0, swept: [], kept: [], kept_count: 0, kept_truncated: false, errors: 0 }
   }
 
   begin(name) {
@@ -188,7 +253,16 @@ export class TransactionStore {
     // 改 sha256(fileRel) 前缀 + basename（旧事务 manifest 仍记 backupName 字段，恢复路径统一从字段读，兼容）
     const backupName = `${sha256(fileRel).slice(0, 16)}-${basename(fileRel)}`
     const backupPath = join(this._txnPath(txnId), 'backup', backupName)
-    copyFileSync(srcPath, backupPath)
+    // G1-R1 / LH-CE15（专家§2.1）：原像建立失败必须【写前失败闭合】。
+    // 旧实现 copyFileSync 裸抛（ENOSPC/EACCES/backup 目录被占）→ 异常穿到 handler，
+    // 且无结构化错误码；批量路径下还会只写成功一半。改为返回 BACKUP_FAILED，调用方中止写入。
+    try {
+      copyFileSync(srcPath, backupPath)
+    } catch (e) {
+      return makeError(ErrorCodes.BACKUP_FAILED,
+        `cannot create recovery preimage for ${fileRel}; refusing to write: ${e.message}`,
+        { file: fileRel, reason: 'backup_write_failed', note: 'Nothing was written. Without a preimage this transaction could not be safely rolled back.' })
+    }
     // r8(E4)：manifest read-modify-write 串行化——并行 edit 同一事务不再丢备份条目
     await _withManifestLock(txnId, () => {
       const m = this._readManifest(txnId)
@@ -344,12 +418,23 @@ export class TransactionStore {
       }
       _atomicWrite(absPath, content, { fsync: true, preservePermissions: true })
       registerWriter(this.projectRoot, fileRel, 'transaction')
+      const contentHash = sha256(Buffer.from(content, 'utf-8'))
       await _withManifestLock(txnId, () => {
         const m = this._readManifest(txnId)
-        m.files[fileRel] = { ...(m.files[fileRel] || {}), created: true, new_hash: sha256(Buffer.from(content, 'utf-8')) }
+        m.files[fileRel] = { ...(m.files[fileRel] || {}), created: true, new_hash: contentHash, last_txn_effect_hash: contentHash }
         this._writeManifest(txnId, m)
       })
       const res = { status: 'staged', file: fileRel, created: true, validation }
+      // G1-R2 / LH-S1-05 横向闭合（2026-10-29 专家独立复核 §3）：create 与 edit 必须使用同一套
+      // 事实投影。旧实现只有 edit 分支补了 written_to_disk/effect/state_commit，
+      // create:true 实测已写盘但回执无任何痕迹——同一副作用在不同入口说法不同。
+      res.effect = 'workspace_write'
+      res.written_to_disk = true
+      res.write_reported = true          // 写函数已返回（不等于已读回验证）
+      res.readback_verified = false      // 未做独立 read-back
+      res.state_commit = 'pending'
+      res.new_hash = contentHash
+      res.note = `${fileRel} created and already written to disk; the transaction is NOT committed yet — call action=commit to finalize, or action=rollback to remove it.`
       const validationWarnings = (validation.diagnostics || []).map(d => ({ type: d.source, bracket: d.bracket, line: d.line, detail: d.message }))
       if (validationWarnings.length > 0) res.validation_warnings = validationWarnings
       return res
@@ -394,11 +479,55 @@ export class TransactionStore {
     // 审查修复（H3）：锁内用刚读到的 content 刷新备份——backupFile 在锁外复制（backup=X），
     // 若外部修改 Y 发生在其后，旧 backup=X 比事务读到的 Y 旧；rollback 恢复 X 会覆盖 Y 的外部修改。
     // 锁内覆盖 backup == 事务读到的内容（含外部修改），回滚只撤事务自己的改动，不丢外部修改。
-    try {
-      const m = this._readManifest(txnId)
-      const bname = m.files[fileRel]?.backupName
-      if (bname) writeFileSync(join(this._txnPath(txnId), 'backup', bname), content, 'utf-8')
-    } catch {}
+    // G0 / LH-S1-01 修复（2026-10-29）：只在「本事务尚未写过该文件」时刷新备份。
+    // 旧实现无条件覆盖：同事务内第 2 次编辑同一文件时，content 已包含第 1 次编辑的结果，
+    // 备份被改写成「半途状态」→ rollback 返回 rolled_back（谎报成功）却只回退到半途，
+    // 第 1 次编辑的改动永久留在文件里（实测：a=1→10→rollback→仍是 10）。
+    //
+    // G1-R1 / LH-CE11 修复（2026-10-29 专家独立复核）：上面这条只在「备份该不该刷新」上正确，
+    // 但没解决「第二次写能不能接受当前磁盘」。旧实现无条件接受——于是同一事务内第 2 次编辑
+    // 会吸收第三方在两次编辑之间写入的内容（当前磁盘），随后 rollback/undo_commit 又以
+    // 「本事务产物」身份把它删掉，无声丢失他人数据。
+    // 判据：对已被本事务写过的文件，写前必须验证 hash(当前磁盘) == 本事务上次写入的 hash。
+    // 不等 → 版本冲突，拒绝写入（不落盘、不更新 manifest），由调用方重读/合并/分支处理。
+    const m0 = this._readManifest(txnId)
+    const meta0 = m0.files[fileRel]
+    const bname = meta0?.backupName
+    const priorHash = meta0?.last_txn_effect_hash ?? meta0?.new_hash ?? null
+
+    if (priorHash != null) {
+      // 已被本事务写过：磁盘必须仍是本事务上次确认写入的那一版
+      let diskHash
+      try { diskHash = sha256(readFileSync(absPath)) } catch { diskHash = null }
+      if (diskHash !== priorHash) {
+        const cur = { status: 'version_conflict', file: fileRel, edits_applied: 0 }
+        Object.assign(cur, makeError(ErrorCodes.TRANSACTION_VERSION_CONFLICT,
+          `${fileRel} was modified by another writer after this transaction last wrote it; refusing to write on top of it.`,
+          {
+            file: fileRel,
+            expected_hash: priorHash,
+            actual_hash: diskHash,
+            note: 'external change observed; NOTHING was written by this edit. The transaction\'s earlier effect may still be on disk — re-read the file, then merge manually, start a branch transaction, or rollback (rollback will skip this file if the external change is still present).',
+            suggestion: 'Re-read the file (code_read) to see the current content, then decide: retry with content based on the new version, or rollback and redo.',
+          }))
+        cur.observation = { external_change_observed: true, written_by_this_edit: false, prior_txn_effect_still_possible: true }
+        return cur
+      }
+    }
+
+    // 备份刷新：仅当本事务尚未写过该文件。已写过时备份保持「事务前原像」，
+    // 这是 rollback/undo 的唯一恢复依据；用当前 content 覆盖会把它降级为半途状态。
+    // 备份写失败必须写前失败闭合（旧实现 try{}catch{} 静默忽略后继续写盘 →
+    // 写盘成功但无可恢复原像，rollback 只能 skip，用户以为能回滚）。
+    if (bname && priorHash == null) {
+      try {
+        writeFileSync(join(this._txnPath(txnId), 'backup', bname), content, 'utf-8')
+      } catch (e) {
+        return makeError(ErrorCodes.BACKUP_FAILED,
+          `backup refresh failed; refusing to write ${fileRel}: ${e.message}`,
+          { file: fileRel, reason: 'backup_write_failed', note: 'Nothing was written to disk. The file still holds its previous content.' })
+      }
+    }
 
     _atomicWrite(absPath, result, { fsync: true, preservePermissions: true })
     // Y002-S1：事务写落盘后登记写者（collision_guard classify 识别 transaction）
@@ -408,10 +537,31 @@ export class TransactionStore {
     const newHash = sha256(Buffer.from(result, 'utf-8'))
     await _withManifestLock(txnId, () => {
       const m = this._readManifest(txnId)
-      m.files[fileRel] = { ...(m.files[fileRel] || {}), new_hash: newHash }
+      // G1-R1（LH-CE11/CE12）：区分两个不混淆的事实：
+      //   backupName/备份内容  —— transaction_origin：事务对目标的【原始】可恢复版本，全程不覆盖
+      //   last_txn_effect_hash —— 本事务【上一次已确认写入】的文件版本，每次成功写后刷新
+      // 下游（rollback/undoCommit）用 new_hash 判断「当前是否事务产物」，用本字段判断
+      // 「本事务是否在他人改动之上继续写过」——两者混用是 CE11 的根因。
+      m.files[fileRel] = { ...(m.files[fileRel] || {}), new_hash: newHash, last_txn_effect_hash: newHash }
       this._writeManifest(txnId, m)
     })
     const res = { status: 'staged', file: fileRel, edits_applied: applied, validation, new_hash: newHash }
+    // G0 / LH-S1-05 修复（2026-10-29）：staged 必须显式告知「已真实写盘」。
+    // 旧回执只有 status:'staged'，而 staged 在多数工具链里意味着「暂存、尚未生效」——
+    // 实测磁盘已变成新内容，回执却无一字承认（LLM 会误以为还要一步 apply）。
+    // 保留 status:'staged' 不变（不破坏现有调用方），改为补上无歧义的事实字段：
+    //   effect / written_to_disk —— 文件已改（这是 observed 事实，非推测）
+    //   state_commit:'pending'   —— 事务尚未终结（与「文件已写」是两个不同事实，不得互相代替）
+    // 对齐 workflow/receipt.js 的语义：state_commit=committed|pending 与 files[].status=written 共存。
+    res.effect = 'workspace_write'
+    res.written_to_disk = true
+    // 专家§3：written_to_disk 目前依据 _atomicWrite 无异常返回，不等于「已独立 read-back verified」。
+    // 拆成两个证据级：write_reported（写函数成功返回）/ readback_verified（独立读回比较过）。
+    // 目前不做 read-back（成本），所以 readback_verified 恒 false——宁可说未知，也不冒充已验。
+    res.write_reported = true
+    res.readback_verified = false
+    res.state_commit = 'pending'
+    res.note = `${fileRel} already written to disk (${applied} edit(s) applied); the transaction is NOT committed yet — call action=commit to finalize, or action=rollback to restore the original content.`
     if (failedEdits.length > 0) {
       res.failed_edits = failedEdits
       res.warning = `${failedEdits.length} edit(s) did not match`
@@ -569,28 +719,115 @@ export class TransactionStore {
     }
     const txnPath = this._txnPath(txnId)
     if (!existsSync(txnPath)) {
+      // R22-F35（2026-11-05 极限风暴）：commit 成功后目录 rename 到 recent/。
+      // 旧实现只查活动目录 → 丢失响应的调用方重发 commit 时得到 TXN_NOT_FOUND，
+      // 无法区分「从未存在」与「已经提交」，容易重做一遍编辑。事务 id 就是幂等键。
+      const recentPath = join(this.txnRoot, 'recent', txnId)
+      let recentManifest = null
+      try { recentManifest = JSON.parse(readFileSync(join(recentPath, 'manifest.json'), 'utf-8')) } catch {}
+      if (recentManifest && recentManifest.state === 'committed') {
+        const fileHashes = {}
+        const changed = []
+        for (const [fileRel, meta] of Object.entries(recentManifest.files || {})) {
+          if (!meta || !meta.new_hash) continue
+          changed.push(fileRel)
+          const bp = safeBackupPath(join(recentPath, 'backup'), meta.backupName || '')
+          let pre = null
+          let result = null
+          try { if (bp && existsSync(bp)) pre = sha256(readFileSync(bp)) } catch {}
+          try { result = sha256(readFileSync(join(this.projectRoot, fileRel))) } catch {}
+          fileHashes[fileRel] = { pre, intended: meta.new_hash, result, readback_verified: result != null && result === meta.new_hash }
+        }
+        return {
+          status: 'committed', already_committed: true, txn_id: txnId,
+          files: changed, files_changed: changed.length,
+          files_included: Object.keys(recentManifest.files || {}).length,
+          file_hashes: fileHashes,
+          next_step: 'Transaction was already committed; nothing to do. Use action=info to inspect it.',
+        }
+      }
       return makeError(ErrorCodes.TXN_NOT_FOUND, `Transaction not found: ${txnId}`, { txnId })
     }
     const manifest = this._readManifest(txnId)
     const filesChanged = Object.keys(manifest.files)
-    // 批10-1：commit 复检——staged 后外部改动（hash 不符）或坏语法内容不得入档
+    // R3-CE17（专家 R3 裁决 §2，P0）：旧实现在「hash 前置检查」与「语法校验」之间隔着 await，
+    // await 之后**不再复检**就直接定档 —— 校验窗口内的第三方写入会拿到假绿灯
+    // （status='committed' + receipt.files[].status='committed'，而 readback_verified=false）。
+    // 修法三步：① 对待提交文件加 .mlock（与 write_symbol/batch 共用，只排他合作写入者）；
+    // ② 校验完成后、定档之前对**全组**复检 hash（不是只看最后一个）；
+    // ③ 定档后回读失配则不给绿灯（把 readback 绑到结果状态，不再只输出一个 false）。
+    const evidenceFiles = []
     for (const [fileRel, meta] of Object.entries(manifest.files || {})) {
       if (meta.skipped || !meta.new_hash) continue
+      evidenceFiles.push(fileRel)
+    }
+    const locks = []
+    try {
+      // 排序加锁：本函数是**全仓唯一同时持有多把 .mlock 的写入者**（2026-10-29 全仓核对：
+      // writeSymbols / applyEdits / createFile / write-journal 恢复路径 / fix_imports 都是
+      // 「拿一把 → finally 放一把」，不构成顺序反转）。
+      // 若将来新增第二个多锁写入者，必须沿用同一路径排序，否则两者会互等至 30s 超时
+      // （不是死锁，但会退化成 TIMEOUT 而不是干净的 commit_conflict）。
+      for (const fileRel of [...evidenceFiles].sort()) {
+        const lock = await acquireLock(join(this.projectRoot, fileRel), 30000)
+        if (lock.locked) {
+          return {
+            error: 'commit_conflict', code: 'FILE_LOCKED', file: fileRel, retryable: true, txn_id: txnId,
+            message: 'file is locked by another writer; commit was not attempted',
+            suggestion: 'retry after the other writer finishes',
+            staged_effect_visible: true, transaction_finalized: false,
+          }
+        }
+        locks.push(lock)
+      }
+      return await this._finalizeCommit(txnId, txnPath, manifest, filesChanged, evidenceFiles)
+    } finally {
+      for (const l of locks) { try { l.release() } catch {} }
+    }
+  }
+
+  // R3-CE17：调用方须已持有 evidenceFiles 的全部 .mlock——本方法在排他区内完成
+  // 「前置检查 -> 语法校验 -> 全组 hash 复检 -> 定档 -> 回读」。
+  async _finalizeCommit(txnId, txnPath, manifest, filesChanged, evidenceFiles) {
+    const conflict = (code, fileRel, message, suggestion) => ({
+      error: 'commit_conflict', code, file: fileRel, message, txn_id: txnId,
+      suggestion: suggestion || 're-read the file, then re-edit or rollback; commit was not finalized',
+      // LH-S1-05 / CE17：staged 时文件已被本事务改过——拒绝提交不等于「从未写入」
+      staged_effect_visible: true,
+      transaction_finalized: false,
+    })
+    // 第一轮：hash 前置检查 + 语法校验（原有语义保持不变）
+    for (const fileRel of evidenceFiles) {
+      const meta = manifest.files[fileRel]
       const guard = _guardWritePath(this.projectRoot, fileRel)
-      if (guard.blocked) {
-        return { error: 'commit_conflict', code: 'PATH_BLOCKED', file: fileRel, message: guard.detail, txn_id: txnId }
-      }
+      if (guard.blocked) return conflict('PATH_BLOCKED', fileRel, guard.detail)
       const abs = join(this.projectRoot, fileRel)
-      if (!existsSync(abs)) {
-        return { error: 'commit_conflict', code: 'FILE_NOT_FOUND', file: fileRel, message: 'staged file missing at commit time', txn_id: txnId }
-      }
+      if (!existsSync(abs)) return conflict('FILE_NOT_FOUND', fileRel, 'staged file missing at commit time')
       const curBuf = readFileSync(abs)
       if (sha256(curBuf) !== meta.new_hash) {
-        return { error: 'commit_conflict', code: 'EXTERNAL_CHANGE', file: fileRel, message: 'file changed after staging (external writer); commit refused', txn_id: txnId, suggestion: 'rollback or re-edit the file, then commit again' }
+        return conflict('EXTERNAL_CHANGE', fileRel, 'file changed after staging (external writer); commit refused', 'rollback or re-edit the file, then commit again')
       }
       const validation = await this._validateContent(fileRel, curBuf.toString('utf-8'))
       if (shouldBlockValidation(this.safety, validation)) {
-        return { error: 'commit_blocked', code: 'VALIDATION_FAILED', file: fileRel, validation, diagnostics: validation.diagnostics || [], txn_id: txnId, suggestion: 'fix the marked region with a small edit, then commit again' }
+        return {
+          error: 'commit_blocked', code: 'VALIDATION_FAILED', file: fileRel, validation,
+          diagnostics: validation.diagnostics || [], txn_id: txnId,
+          suggestion: 'fix the marked region with a small edit, then commit again',
+          staged_effect_visible: true, transaction_finalized: false,
+        }
+      }
+    }
+    // 第二轮（R3-CE17 核心）：校验期间可能已被外部改写——尤其是「先校验过」的文件。
+    // 必须复检全组，不能只看最后一个校验的文件。
+    for (const fileRel of evidenceFiles) {
+      const meta = manifest.files[fileRel]
+      const abs = join(this.projectRoot, fileRel)
+      if (!existsSync(abs)) return conflict('FILE_NOT_FOUND', fileRel, 'file disappeared during commit validation')
+      const observed = sha256(readFileSync(abs))
+      if (observed !== meta.new_hash) {
+        return conflict('EXTERNAL_CHANGE', fileRel,
+          'file changed during commit validation (external writer); commit refused, transaction stays staged',
+          're-read the file and reconcile with the external change; do not assume your staged edit is still in place')
       }
     }
     // r8(D4)：淘汰键 = commit 时间——目录 mtime 是 begin 时间，交错事务下“最晚提交”会被误删
@@ -620,16 +857,61 @@ export class TransactionStore {
     this._cleanRecent(3)
     // 批10-1：回执带每文件行数变化（+/- 真值走 git no-index，缺 git 时退行数差）
     const stats = []
+    // G1-R2（专家§3/§7 必交项）：commit 回执必须能核对「改的是哪个版本」。
+    // R3-CE17：回读不再只是「报告一个 false」——它必须绑到结果状态上（不给绿灯）。
+    const fileHashes = {}
+    const unverified = []
     for (const fileRel of filesChanged) {
       const meta = manifest.files[fileRel] || {}
       if (!meta.new_hash) continue
+      const bp = safeBackupPath(join(recentPath, 'backup'), meta.backupName || '')
+      const preHash = bp && existsSync(bp) ? sha256(readFileSync(bp)) : null
+      let resultHash = null
       try {
         const curText = readFileSync(join(this.projectRoot, fileRel), 'utf-8')
-        const bp = safeBackupPath(join(recentPath, 'backup'), meta.backupName || '')
+        resultHash = sha256(Buffer.from(curText, 'utf-8'))
         stats.push(_diffStats(fileRel, bp ? readFileSync(bp, 'utf-8') : '', curText, bp, join(this.projectRoot, fileRel)))
-      } catch {}
+      } catch {
+        // 定档后被删除/不可读：同样不得当作已验证
+      }
+      const verified = resultHash != null && resultHash === meta.new_hash
+      if (!verified) unverified.push(fileRel)
+      // pre      —— 事务原像（backup）内容 hash
+      // intended —— 本事务最后一次写入内容的 hash（= manifest.new_hash）
+      // result   —— 定档后独立读回的真实内容 hash
+      fileHashes[fileRel] = { pre: preHash, intended: meta.new_hash, result: resultHash, readback_verified: verified }
     }
-    return { status: 'committed', files_changed: filesChanged.length, files: filesChanged, stats }
+    // R22-F20（2026-11-05 重启后真机实测）：filesChanged 是「事务登记过的文件」——
+    // 编辑失败/无改动的文件也在其中（manifest.files 在尝试编辑前就登记，供 rollback 用）。
+    // 旧实现直接拿它当 files_changed → 2 个文件只改了 1 个也报 2；
+    // 同一个回包里 stats / file_hashes 却只含真改过的（它们按 new_hash 过滤），自相矛盾。
+    // 现在：files_changed/files 只算真有 new_hash 的；登记总数走新增的 files_included。
+    const changedFiles = filesChanged.filter((f) => manifest.files[f]?.new_hash)
+    const base = {
+      files_changed: changedFiles.length,
+      files: changedFiles,
+      files_included: filesChanged.length,
+      stats,
+      file_hashes: fileHashes,
+      // R3-CE17（专家§2 末条）：不得暗示数据库式隔离
+      isolation: {
+        level: 'cooperating_writers_only',
+        note: 'commit holds .mlock on the staged files, which excludes cooperating malong writers only; non-cooperating external writers are detected at the final re-check and read-back, not prevented',
+      },
+    }
+    if (unverified.length > 0) {
+      return {
+        ...base,
+        status: 'committed_unverified',
+        manifest_state: 'committed',
+        effect: 'external_change_observed',
+        outcome_uncertain: true,
+        unverified_files: unverified,
+        message: 'the transaction manifest was finalized, but read-back does not match the intended content (' + unverified.join(', ') + '): an external writer changed the file after the final re-check. Your change is NOT confirmed to be in place.',
+        suggestion: 're-read the affected file(s) and reconcile; do not assume the commit succeeded',
+      }
+    }
+    return { ...base, status: 'committed', effect: 'verified' }
   }
 
   async undoCommit(txnId) {
@@ -710,7 +992,21 @@ export class TransactionStore {
       try {
         const curHash = sha256(readFileSync(destPath))
         const backupHash = sha256(readFileSync(resolvedBackup))
-        if (meta.new_hash && curHash !== backupHash && curHash !== meta.new_hash) {
+        // LH-S1-02 / LH-CE04 修复（2026-10-29，专家§3 P0）：与 rollback 同一处理——
+        // 按三项关系分流，既堵住「new_hash 缺失 → 防护全失」，又不过度拒绝无副作用的恢复：
+        //   a) curHash === backupHash  → 从未被本事务改动，恢复是 no-op，放行
+        //   b) new_hash 缺失且内容已变 → missing_new_hash（不自动恢复，人工复核）
+        //   c) new_hash 存在但都不等   → external_change
+        if (curHash === backupHash) {
+          _atomicWrite(destPath, readFileSync(resolvedBackup, 'utf-8'), { fsync: true, preservePermissions: true })
+          filesRestored++
+          continue
+        }
+        if (!meta.new_hash) {
+          skipped.push({ file: fileRel, reason: 'missing_new_hash', detail: 'restoration anchor (new_hash) is absent while the file differs from the backup; refusing automatic undo — the current content cannot be proven to be this transaction\'s effect. Verify manually.' })
+          continue
+        }
+        if (curHash !== meta.new_hash) {
           skipped.push({ file: fileRel, reason: 'external_change' })
           continue
         }
@@ -803,7 +1099,23 @@ export class TransactionStore {
       try {
         const curHash = sha256(readFileSync(destPath))
         const backupHash = sha256(readFileSync(resolvedBackup))
-        if (meta.new_hash && curHash !== backupHash && curHash !== meta.new_hash) {
+        // LH-S1-02 / LH-CE04 修复（2026-10-29，专家§3 P0）：
+        // `meta.new_hash &&` 短路导致 new_hash 缺失时外部改动防护整体失效。
+        // 但不能一律拒绝——必须按「当前内容相对备份的三种关系」分别处理：
+        //   a) curHash === backupHash  → 本事务从未改动该文件，恢复是无副作用的 no-op，放行
+        //   b) new_hash 缺失且 curHash !== backupHash → 无法证明当前内容出自本事务
+        //      → missing_new_hash（不自动恢复，转人工复核）
+        //   c) new_hash 存在但两者都不等 → external_change
+        if (curHash === backupHash) {
+          _atomicWrite(destPath, readFileSync(resolvedBackup, 'utf-8'), { fsync: true, preservePermissions: true })
+          filesRestored++
+          continue
+        }
+        if (!meta.new_hash) {
+          skipped.push({ file: fileRel, reason: 'missing_new_hash', detail: 'restoration anchor (new_hash) is absent while the file differs from the backup; refusing automatic rollback — the current content cannot be proven to be this transaction\'s effect. Verify manually.' })
+          continue
+        }
+        if (curHash !== meta.new_hash) {
           skipped.push({ file: fileRel, reason: 'external_change' })
           continue
         }
@@ -816,11 +1128,11 @@ export class TransactionStore {
 
     // R22-⑯：skipped 文件不删目录——rollback 能力保留供重试
     if (skipped.length > 0) {
-      return { status: 'rolled_back_partial', retryable: true, files_restored: filesRestored, skipped }
+      return { status: 'rolled_back_partial', retryable: true, files_restored: filesRestored, files: Object.keys(manifest.files || {}), skipped }
     }
 
     rmSync(txnPath, { recursive: true, force: true })
-    const res = { status: 'rolled_back', files_restored: filesRestored }
+    const res = { status: 'rolled_back', files_restored: filesRestored, files: Object.keys(manifest.files || {}) }
     return res
   }
 
@@ -828,6 +1140,12 @@ export class TransactionStore {
     if (!_isSafeTxnId(txnId)) return null
     try {
       return this._readManifest(txnId)
+    } catch {}
+    // R22-F35：已提交事务在 recent/ 下；info 必须能核对，而不是报 TXN_NOT_FOUND。
+    const recentPath = join(this.txnRoot, 'recent', txnId)
+    try {
+      const m = JSON.parse(readFileSync(join(recentPath, 'manifest.json'), 'utf-8'))
+      return { ...m, location: 'recent' }
     } catch {
       return null
     }

@@ -2,6 +2,21 @@
 
 本文件只记面向使用者的变更要点；完整开发历史（含内部计划、验收与复核记录）见 `git log` 与开发仓。
 
+## 0.6.x
+
+- **[0.6.1]** (2026-11-05): 感知闭环、中文检索、TRACE、事务回执四条线收口；解析器升至 0.3.39。
+  - **事务与回执（真缺陷修复）**：① 同一事务内连续编辑同一文件后 rollback 只回退一半（备份被后续编辑覆盖）——修后回到 begin 时字节；② `edit_transaction` 的 `staged` 未说明磁盘已写入，补 `effect/written_to_disk/state_commit/note` 无歧义事实字段；③ commit 的 `files_changed` 虚报；④ 回滚/undo 的 effect 口径与 CAS 措辞对齐；⑤ patch 的 create/delete 回执、modify 的 pre/intended 哈希补全；⑥ `old_string` 未命中时给出最近匹配定位；⑦ 批量写入的计数与事务边界同回执一致；⑧ 跨编辑吸收外部写入（CE11/CE12）与缺恢复锚时禁止自动 undo（CE04）。均补失败路径测试。
+  - **路由与建议面**：中文目标路由失效（标识符抢路由）、`code_check` 被说成前置条件、推荐了 `code_check` 却不列它、`next_action` 不可执行、工具调用早于 ready、空转建议等自用实录缺陷修复；候选排序加证据层，零命中兜底按模块取样。
+  - **中文检索（P0–P3）**：新增注释语料检索 `comment-search`（结果放独立 `comment_matches`，不混入符号命中）；`search_terms` 扩展词、`search-log` MISS 采集（默认关闭）；覆盖率分母分离、注释扫描投影与工作区修正；`outline` 的 `lines` 语义、文档与空结果盲区修正。
+  - **TRACE v0（默认 off，本地文件、不联网、不上报）**：记录工具调用耗时/成败/是否验证；固定 `<stateDir>/trace/`，旧位置残留可见迁移提示；按天保留与轮转；新增 `trace-triage` 分析脚本、隐私测试与 `TRACE-GUIDE.md`。
+  - **诊断与身份**：新增 `malong-selfcheck` 自检脚本（先确认装的是哪一版）；新增 `build.rs` 把 git commit 注入解析器，health 的 `build_commit` 不再恒 `unknown`；watchdog 堆上限真正生效、诊断日志丢失数值修正。
+  - **工具质量**：`fix_imports` 提案可应用性四处修复（跨语言不提案、点号模块名、块注释插入位置、语法护栏模拟）；`code_audit` 的 dead_code 尊重 `files` 范围；`verify_pipeline` 的 `timed_out` 三字段与 evidence 失真修正；`file-arg` 二进制/文档扩展；数据库关闭态与健康检查修正。
+  - **Parse 0.3.39**：块语句内的词法声明进入索引（depth==1 → 祖先链判定）；解析器版本与构建期 commit 注入。
+  - **发布验收**：新增 MCP 纵切 / DSH 宿主 / 工作区 / 崩溃边界四个可复用验收脚本及安全测试；`reprep.sh` 硬拦 `.pyc`/`__pycache__` 进发布物。
+  - **包根文档**：`DOGFOOD-2026-11-05.md`、`P3-COLLECT.md`、`SEARCH-BASELINE.md`、`SEARCH-ROADMAP.md`、`TRACE-GUIDE.md` 随包（`malong/docs/` 不入库）。
+  - 版本位：`package.json` / `lang-parser.js` / `GRAPH_VERSION` / `package-lock.json` ×2 / `dsh/bundle/package.json` 均为 0.6.1；parse `Cargo.toml`/`Cargo.lock` 为 0.3.39。全链 `npm test` **223 文件**。
+  - **发布仓 Windows 全链复核（2026-11-06）**：① 223 条 `&&` 链约 8.5KB，超出 cmd.exe 8191 字符上限（`npm test` 直接「命令行太长」）→ `npm test` 改走分层 runner，长链移到 `test:all`；② `fix_imports` 的 ESM specifier 在 Windows 由 `path.relative` 产反斜杠（`\u` 被语法护栏拦下、`\s` 被吞成 `s` 指向错文件）→ 归一为 `/` 并补断言；③ `test-txn-rollback-scope` 用 `URL.pathname` 拼出 `N:\N:\…` → `fileURLToPath`；④ `test-dev-collect` 写死 POSIX PATH 导致找不到 bash → 继承宿主 PATH；⑤ `test-malong-selfcheck` 依赖本地构建的 `dsh/bundle/server`（CI 全新检出没有该 gitignore 目录）→ 改为自造双布局沙箱，路径断言兼容 Windows 反斜杠；⑥ `test-watchdog-log` 用字面 `\n` 匹配源码，CRLF 检出下恒失配 → 读取后归一化行尾；⑦ `test-heap-limit-argv` 用字面 `\n}\n` 切函数体，同样受 CRLF 影响 → 归一化行尾；⑧ `test-acceptance-scripts-safety` 直接 `import('N:\\…')` 被当成 URL 协议 → 改走 `pathToFileURL`；⑨ **真缺陷**：undo/rollback 的 `safeBackupPath` 用 `resolve()` 后的绝对路径与**未解析**的 `backupDir` 比前缀——Windows 驱动器相对路径（`\tmp\…`）下合法备份全被判 `backup_escape`（undo 回 `undone_partial`、0 文件还原）→ 先把根 resolve 再比较，越界与 symlink 防护不变；⑩ `test-s4-audit` 的 scope 指纹只取 size+取整 mtime，Windows 同尺寸快速重写常落在同一时间戳刻度（实测 7/8 次 delta=0.000）→ 证据「假新鲜」随机出现，用例显式推进 mtime 固化；⑪ `test-variable-refs`/`test-decl-ranges` 的随机测试端口 `31000+pid%20000` 会落进 Windows 动态端口段（49152+，实测 49544 被 TIME_WAIT 占住 → daemon bind 失败静默退出）→ 收窄到 `<49152`。合同按流程重生成（仅 `fix_imports` handler 哈希变更）。**复核结果：全链 `npm test` 223/223 文件 EXIT=0（607.9s，Windows 10.0.26200 / Node 22）；前三轮各暴露 1 处问题（ac20 并发负载偶发 `ATOMIC_WRITE_FAILED`——单跑 3×45/45 不复现、与 0.5.29 同型；s4 时间戳刻度；端口落入动态段），后两者已按 ⑩⑪ 修复；`cargo test` 99/99（parse 0.3.39）。**
+
 ## 0.5.x
 
 - **[0.5.29]** (2026-10-27): 修 bracket 校验在 shell / JS 私有名上的**误报拦截**，并给 shell 改动补上真语法判据（`bash -n`）——起因是使用者反馈：「给 ci.sh 加一行注释被 malong 校验器拒了；只插入一行纯注释做对照也被拒，报错行号全在没碰的地方」。**反馈属实，是 liuhe 真 bug。**

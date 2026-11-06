@@ -59,7 +59,18 @@ DSH Agent → malong__read_symbol(...) (no workspace_dir)
 
 ## Verify
 
+0. **先确认加载的是哪一版**（排障第一步，别跳过）：
+   ```bash
+   node <malong>/scripts/malong-selfcheck.mjs
+   # 或指向实际安装物
+   node <malong>/scripts/malong-selfcheck.mjs --dir /path/to/installed/malong
+   ```
+   逐条 grep 实际文件，确认关键修复在这个安装物里。**exit=1 = 装的是旧版**，
+   先重建/重装再谈其他问题——否则你排查的可能是早就修好的东西。
+   「找不到目标文件」也算不通过（跳过 ≠ 通过）。
+
 1. Open dsh web, pick a workspace (e.g. `/path/to/projectA`) and create a conversation
+
 2. Ask the agent to read a symbol (it will call `malong__read_symbol` automatically, no path needed)
 3. Confirm the index was built:
    ```bash

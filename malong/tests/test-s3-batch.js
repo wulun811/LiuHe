@@ -109,7 +109,8 @@ assert(r.item_index === 1, `item_index=输入下标 1（旧实现为组内 idx=0
 mkTask('task_nb', [])
 r = await batch.handle({ workspace_dir: WS, task_id: 'task_nb', dry_run: false, request_id: 'rq_nb', writes: [{ edit_mode: 'patch', locator: { file_path: C }, patch: { old_string: 'x', new_string: 'X' } }] }, ctx)
 assert(r.error === 'VERSION_CONFLICT' && r.conflict_type === 'NO_BASE', `批无 base → NO_BASE（得 ${r.error}/${r.conflict_type}）`)
-assert(/symbol read does not establish a file base/.test(r.message || ''), `批 NO_BASE 文案点明 symbol 读不建立 file base（得 ${r.message}）`)
+assert(/read_ref/.test(r.message || '') && /prior read/.test(r.message || ''), `批 NO_BASE 文案说清该补什么（得 ${r.message}）`)
+assert(!/does not establish a file base/.test(r.message || ''), `批 NO_BASE 文案不得再声称符号读建不了基准（得 ${r.message}）`)
 assert(r.next_action?.args && !('params' in r.next_action) && r.next_action.args.workspace_dir === WS && r.next_action.args.task_id === 'task_nb' && r.next_action.args.locator?.file_path === C, `批错误 next_action 全参可执行（得 ${JSON.stringify(r.next_action)}）`)
 
 // ── 5c2. WP08R-3 A2：预览免 base（无 read_ref 也 OK，先看再读）+ apply 仍 NO_BASE（5c 已证）──
@@ -282,6 +283,33 @@ writeFileSync(join(WS, J1), J1C)
 mkTask('task_valjson', [material('rj', J1, J1C)])
 r = await batch.handle({ workspace_dir: WS, task_id: 'task_valjson', writes: [patchW('rj', '"version":"1.0.0"', '"version":"2.0.0"')] }, ctx)
 assert(r.ok === true && r.observation && r.observation.effect === 'preview', '含 URL 的合法 JSON 批预演成功（得 ok=' + r.ok + ' err=' + r.error + ' msg=' + String(r.message || '').slice(0, 70) + '）')
+
+// ── 无变化批写：同一批重放（内容已是意图态）不得报「Applied」──
+// 真机试用（2026-10-30）：同一批写第二次应用，code_batch 回 summary="Applied batch…"、
+// effect=workspace_write、committed=true，并且新增一个事务 + undo 令牌；但 diff 是空的、
+// 写入前后文件哈希完全相同。同一个事实，code_patch 报 already_applied（不建事务），
+// code_batch 报 Applied（建事务）—— 用户看到的是一个“改了什么”的假象。
+{
+  const P = 'src/np.txt'
+  writeFileSync(join(WS, P), 'keep\nAAA\n')
+  const taskId = 'task_noop'
+  mkTask(taskId, [material('rp', P, 'keep\nAAA\n')])
+
+  const first = await batch.handle({ workspace_dir: WS, task_id: taskId, read_ref: 'rp', dry_run: false, writes: [patchW('rp', 'AAA', 'BBB')] }, ctx)
+  assert(first.ok === true && first.observation?.committed === true, '无变化批：首次应用成功')
+  assert(read(P) === 'keep\nBBB\n', '无变化批：首次确实改了文件')
+  assert(!first.observation?.no_effect, '无变化批：首次不得被当成无变化')
+
+  // 重放同一批：old_string 已不存在、new_string 已存在 → 无变化
+  const before = read(P)
+  const again = await batch.handle({ workspace_dir: WS, task_id: taskId, read_ref: first.observation.write_read_refs[P], dry_run: false, writes: [patchW('rp', 'AAA', 'BBB')] }, ctx)
+  assert(again.ok === true, '无变化批：重放仍成功（幂等）')
+  assert(read(P) === before, '无变化批：重放不得改变文件内容')
+  assert(again.observation?.no_effect === true, `无变化批：必须标 no_effect（得 ${JSON.stringify(again.observation?.no_effect)}，summary=${String(again.observation?.summary || '').slice(0, 60)}）`)
+  assert(!/^Applied batch/.test(String(again.observation?.summary || '')), `无变化批：summary 不得声称 Applied（得 ${String(again.observation?.summary || '').slice(0, 60)}）`)
+  assert(!Array.isArray(again.observation?.diff) || again.observation.diff.every(d => !d.diff?.lines_changed), '无变化批：不得报告有行变更的 diff')
+  assert(again.observation?.receipt?.files?.[0]?.status !== 'written' || again.observation?.no_effect === true, '无变化批：receipt 不得把无变化文件标 written')
+}
 
 console.log('\n=== test-s3-batch: ' + pass + ' passed, ' + fail + ' failed ===')
 process.exit(fail > 0 ? 1 : 0)

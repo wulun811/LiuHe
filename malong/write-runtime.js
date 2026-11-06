@@ -9,11 +9,53 @@ import {
 } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import { sha256 } from './hash-utils.js'
-import { validateFilePath } from './error-codes.js'
+import { validateFilePath, findClosestMatch } from './error-codes.js'
+// F16：与 edit_transaction 共用同一「最接近匹配」判据（error-codes.js 单一来源），
+// 让 patch 类失败也能指出「你大概想改哪一行」，而不是只回一句 not found。
+const _patchNotFoundError = (scopeText, oldStr, where) => ({
+  code: 'PATCH_OLD_STRING_NOT_FOUND',
+  message: `old_string not found in ${where}`,
+  ...(() => {
+    try {
+      const c = findClosestMatch(scopeText, String(oldStr))
+      return c ? { closest_match: c } : {}
+    } catch { return {} }
+  })(),
+})
 import { guardRealPath } from './path-guard.js'
 import { extractSignatureLine, langOf } from './symbol-anchors.js'
 import { checkFileStaleness } from './staleness.js'
 import { countOccurrences, makeSimpleDiff, applyReplace, applyBodyEdit, applyInsertAfter, checkBracketBalance } from './write-edit.js'
+
+// R21-F06（2026-11-05 自用试用）：already_applied 幂等判据【唯一维护点】。
+// 旧实现在 code_patch 单写路径与 code_batch 组预检里各写了一份「new_string 在作用域内出现过」，
+// 两处都过宽：1 个字符的 new_string（'x'、'}'）必然命中 →
+// old_string 明明不存在也报 already_applied + committed:true，而磁盘一个字节没改（假成功）。
+// 自用实测：单写路径修好之后 code_batch 仍然假成功——所以必须共用同一判据，不能各写一份。
+//
+// 判据（去空白后）：
+//   a) new_string ≥ 4 字符 → 有辨识度；或
+//   b) 新旧串等长（≥2）且只差大小写 → 明确的同形替换（'two'→'TWO'）
+export function patchLooksAlreadyApplied(scopeText, oldString, newString) {
+  if (typeof oldString !== 'string' || !oldString) return false
+  if (typeof newString !== 'string' || !newString) return false
+  if (countOccurrences(scopeText, oldString) !== 0) return false
+  if (countOccurrences(scopeText, newString) === 0) return false
+  const stripWs = (x) => String(x == null ? '' : x).replace(/\s+/g, '')
+  const oldId = stripWs(oldString)
+  const newId = stripWs(newString)
+  // 判据的真正目标：区分「这次替换已经生效」与「new_string 只是文件里本来就有的偶然片段」。
+  //   · old_string 有实质长度（≥2）→ 这是一次有意义的替换单元，new_string 出现即视为已生效
+  //     （'AAA'→'BBB'、'two'→'TWO' 都属此类）
+  //   · old_string 本身是单字符 → 替换单元没有辨识度，new_string 出现不能证明任何事
+  //   · new_string 是单字符/空 → 同上，偶然命中概率极高（实测 'x'、'}' 造成假成功）
+  if (oldId.length < 2) return false
+  if (newId.length < 2) return false
+  // new_string 是 old_string 的子串碎片（如 old='returnValue' new='value'）时，
+  // 「已存在」很可能只是因为旧文本里本来就有它 → 不认幂等
+  if (oldId.toLowerCase().includes(newId.toLowerCase()) && oldId.toLowerCase() !== newId.toLowerCase()) return false
+  return true
+}
 import { validateShellSyntax } from './shell-syntax.js'
 import { createJournal, updateJournalState, auditLog, recoverJournals, recoverTransactions, pruneJournals, JOURNAL_ROOT, JOURNAL_RETENTION_HOURS, createBatchMarker, updateBatchMarker, finishBatchMarker } from './write-journal.js'
 import { registerWriter } from './writer-registry.js'
@@ -352,8 +394,10 @@ export async function writeSymbol(args, context) {
       error: {
         code: 'VERSION_CONFLICT',
         conflict_type: 'NO_BASE',
-        message: 'base_version is required for the first write of each file: read the FILE first with code_read (a symbol read does not establish a file base).',
-        suggestion: 'Call code_read with locator {file_path} (whole file, no budget needed), then retry the same write with its read_ref.',
+        // 文案不得出现 read_symbol：handler 层会把该词全局改成 code_read（dogfood-050 P3），
+        // 一改就变成“code_read 没有 read_ref”——事实相反，且与本修正要解决的问题同型。
+        message: 'base_version is required for the first write of each file: supply a base from a prior read of that file (a read returns the file version / read_ref).',
+        suggestion: 'Read that file first (the read returns the version to pass as base_version / read_ref), then retry the same write.',
         next_action: { tool: 'read_symbol', params: { locator: { file_path: filePath } } },
       },
       trace_id,
@@ -451,7 +495,11 @@ export async function writeSymbol(args, context) {
           ? 'Re-read the symbol and regenerate content.'
           : conflict.type === 'SYMBOL_DELETED' ? 'Symbol was deleted; re-read the file.'
           : conflict.type === 'FILE_CHANGED'
-            ? 'File changed externally; re-read (read_symbol) and retry with the fresh version.'
+            // R21-F08（2026-11-05 自用实测）：原文案一口咬定「外部改的」，
+            // 但最常见的原因是调用方自己上一次写入让文件前进了——不是外部竞争。
+            // 而且上一次写回执里已经给了可复用的 write_read_refs（wbase_*），
+            // 比重新 code_read 更快。文案必须把这条更优路径说出来，且不再断言来源。
+            ? 'The file changed since your base_version — either an external edit or your own previous write. File changed externally is the common reading; if you wrote it yourself, reuse the write_read_refs (wbase_*) returned by that write as read_ref instead of re-reading. Otherwise re-read (code_read) to get a fresh version, then retry.'
             : 'Resolve ambiguity via symbol_id.'
         return {
           success: false,
@@ -489,7 +537,21 @@ export async function writeSymbol(args, context) {
       }
       const occurrences = countOccurrences(scopeContent, oldString)
       if (occurrences === 0) {
-        if (newString && countOccurrences(scopeContent, newString) > 0) {
+        // R21-F06（2026-11-05 自用试用实测）：幂等判据过宽导致【假成功】。
+        // 旧实现只看「new_string 在文件里出现过」→ 1 个字符的 new_string（如 'x'）
+        // 必然命中，于是 old_string 明明不存在也报 already_applied，回执写
+        // committed:true / effect=workspace_write，而磁盘一个字节没改。
+        // 用户看到 "Applied edit (... already present)"，实际什么都没写。
+        //
+        // 收紧判据：new_string 必须有辨识度才允许判幂等。
+        // 旧实现只看「new_string 在文件里出现过」→ 单字符（'x'、'}'）必然命中，
+        // 于是 old_string 明明不存在也报 already_applied + committed:true，而磁盘没改（假成功）。
+        //
+        // 判据（去空白后）：
+        //  a) new_string ≥ 4 字符 → 有辨识度；或
+        //  b) 新旧串等长（≥2）且只有大小写差异 → 明确的同形替换（'two'→'TWO'）
+        // 其余一律 PATCH_OLD_STRING_NOT_FOUND。报错比假成功安全。
+        if (patchLooksAlreadyApplied(scopeContent, oldString, newString)) {
           alreadyApplied = true
           newLines = lines
           pipelineStep(pipeline, 'patch_match', 'ok', { status: 'already_applied' })
@@ -497,8 +559,13 @@ export async function writeSymbol(args, context) {
           pipelineStep(pipeline, 'patch_match', 'error', { reason: 'old_string_not_found' })
           return {
             success: false,
-            error: { code: 'PATCH_OLD_STRING_NOT_FOUND', message: `old_string not found in ${symbol ? 'symbol body' : 'file'}` },
-            suggestion: 'Re-read the file (file changed?) and regenerate the patch.',
+            // R22-F16（2026-11-05 真机手感实测）：code_patch 与 code_batch 的
+            // old_string 未找到只回一句 not found，而 edit_transaction 早在
+            // transaction-store 里给出了 closest_match（行号/相似度/原文片段）。
+            // 同一种失败，一个入口告诉你大概想改哪一行，另一个让你重读整个文件重猜。
+            // findClosestMatch 本来就是 error-codes.js 的公共函数，这里只是接上。
+            error: _patchNotFoundError(scopeContent, oldString, symbol ? 'symbol body' : 'file'),
+            suggestion: 'Re-read the file (file changed?) and regenerate the patch; closest_match (when present) shows the nearest line — fix only that part instead of resending everything.',
             trace_id,
           }
         }
@@ -605,6 +672,7 @@ export async function writeSymbol(args, context) {
         dry_run: true,
         diff,
         validation,
+        ...(patchNewStringOmitted ? { warning: 'patch.new_string omitted — old_string will be removed (explicit empty string if deletion is intended)' } : {}),
         new_version: { file: { hash: `sha256:${sha256(newContent)}` } },
         safety_report: {
           collision: conflict ? { status: conflict.type === 'CLEAN' ? 'clean' : conflict.type } : { status: 'no_base' },
@@ -690,6 +758,10 @@ export async function writeSymbol(args, context) {
     }
     successResult = {
       success: true,
+      // R16j（2026-11-01）：回读比对已做（readFileSync 后与 newContent 全串比对，
+      // 不一致直接返回 READBACK_MISMATCH），所以这里如实申报。申报缺失会让轨迹里
+      // 每次写都是 verification=not_run——「写入但未验证」恒亮，等于没有这个信号。
+      readback_verified: true,
       symbol_id: symbol?.stable_id || null,
       txn_id: journal.txnId,
       ...(patchNewStringOmitted ? { warning: 'patch.new_string omitted — old_string will be removed (explicit empty string if deletion is intended)' } : {}),
@@ -990,7 +1062,7 @@ export async function writeSymbols(args, context) {
           }
         } else if (editMode === 'patch' && w?.patch?.old_string) {
           const patchScope = symbol && range ? lines.slice(range[0] - 1, range[1]).join('\n') : lines.join('\n')
-          if (countOccurrences(patchScope, w.patch.old_string) === 0 && w.patch.new_string && countOccurrences(patchScope, w.patch.new_string) > 0) {
+          if (patchLooksAlreadyApplied(patchScope, w.patch.old_string, w.patch.new_string)) {
             groupResults.push({ file_path: fp, symbol_id: symbol?.stable_id || null, edit_mode: editMode, status: 'already_applied' })
             pipelineStep(pipeline, 'idempotency', 'ok', { status: 'already_applied', file: fp })
             continue
@@ -1011,7 +1083,7 @@ export async function writeSymbols(args, context) {
         // 冲突判定：组内首个真实写项做 file-level（文件基线）；后续项仅符号级（文件已在批内变更）
         const itemBase = w?.base_version
         if (firstReal && !itemBase && !force && !isCreateGroup && !dryRun) {
-          failed = { file: fp, itemIndex: inputIndex, error: { code: 'VERSION_CONFLICT', conflict_type: 'NO_BASE', message: 'base_version is required for the first write of each file: read the FILE first with code_read (a symbol read does not establish a file base).', suggestion: 'Call code_read with locator {file_path} (whole file, no budget needed), then resubmit the SAME writes with that read_ref.', next_action: { tool: 'read_symbol', params: { locator: { file_path: fp } } } } }
+          failed = { file: fp, itemIndex: inputIndex, error: { code: 'VERSION_CONFLICT', conflict_type: 'NO_BASE', message: 'base_version is required for the first write of each file: supply a base from a prior read of that file (a read returns the file version / read_ref).', suggestion: 'Read that file first, then resubmit the SAME writes with the version / read_ref it returns.', next_action: { tool: 'read_symbol', params: { locator: { file_path: fp } } } } }
           break
         }
         if (firstReal && itemBase) {
@@ -1256,6 +1328,9 @@ export async function writeSymbols(args, context) {
     partial_failures: partialFailures,
     items,
     diff: allDiffs,
+    // R16j：只有「真的写了、且没有失败件」时才申报回读已验证；
+    // best_effort 有失败件、或 dry_run（压根没写）都不算
+    ...((!failed && !dryRun && written.length > 0 && fileFailures.length === 0) ? { readback_verified: true } : {}),
     intended_files: Object.keys(intendedFiles).length ? intendedFiles : undefined,
     undo,
     reindex,
@@ -1290,7 +1365,7 @@ function applyBatchItem(lines, range, w, symbol, editMode, boundary, preserveDec
       if (newString && countOccurrences(scopeContent, newString) > 0) {
         return { lines, status: 'already_applied' }
       }
-      return { error: { code: 'PATCH_OLD_STRING_NOT_FOUND', message: `old_string not found in ${symbol ? 'symbol body' : 'file'}` } }
+      return { error: _patchNotFoundError(scopeContent, oldString, symbol ? 'symbol body' : 'file') }
     }
     if (occurrences > 1) {
       return { error: { code: 'PATCH_OLD_STRING_AMBIGUOUS', message: `old_string matches ${occurrences} times`, suggestion: 'Include more surrounding context in old_string.' } }

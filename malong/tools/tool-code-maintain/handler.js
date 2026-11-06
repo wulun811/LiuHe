@@ -6,7 +6,7 @@ import { existsSync } from 'node:fs'
 import {
   makeError, envelope, getTask, updateTaskCas, findOperation, payloadHash, newOperationId,
   newEvidenceId, traceId, fileHash, operationEvent, ensureTaskVersion, assertTaskWritable, taskHeader, unknownTaskError, normalizeReadToolText, executableNextAction,
-  forwardWriteErrorDetail,
+  forwardWriteErrorDetail, stateCommitPendingText,
 } from '../entry-shared.js'
 import { writeSymbols } from '../../write-runtime.js'
 import { serializeReceipt, opGuarantee } from '../../workflow/receipt.js'
@@ -194,7 +194,7 @@ export async function handle(args, context) {
     return envelope({
       task: taskHeader({ ...task, revision: currentRev, node: 'maintain' }),
       observation: {
-        summary: `Maintain applied to ${files.length} file(s), but task state commit raced (${cas2.code}); retry with the same request_id to finalize.`,
+        summary: stateCommitPendingText('code_maintain', `Maintain applied to ${files.length} file(s)`, cas2.code, args.request_id).summary,
         effect: 'workspace_write', committed: false, result_kind: 'partial', files, diff: r.diff || null, operation: finalOp,
         receipt: serializeReceipt({
           kind: 'maintain', operation_id: finalOp.operation_id, request_id: args?.request_id || null,
@@ -285,7 +285,8 @@ export function reconcileMaintain(workspaceDir, task_id, expectedRev, op, route,
     const cas = updateTaskCas(workspaceDir, task_id, expectedRev, (t) => operationEvent(t, fin, { node: 'maintain', result_kind: 'partial' }))
     if (!cas.ok) {
       // 第二轮审查：CAS 失败不得宣称 committed——文件已是 intended 态但 op 未收口，如实报待重试
-      return makeError('state_commit_pending', `recovered maintain detected but state commit raced (${cas.code}); retry with the same request_id`, 'Retry with the same request_id to finalize.')
+      const txt = stateCommitPendingText('code_maintain', 'recovered maintain detected', cas.code, op.request_id)
+      return makeError('state_commit_pending', txt.message, txt.suggestion)
     }
     return envelope({
       task: { task_id, revision: cas.task.revision, route, node: 'maintain', lifecycle },

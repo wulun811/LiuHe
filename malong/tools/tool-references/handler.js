@@ -135,8 +135,8 @@ export async function handle(args, context) {
     result.misuse_warning = misuseWarning
   }
 
-  if (result.results.length > 0) {
-    result.next_step = `For test refs: find_tests(file="${fileArg || ''}")`
+  if (result.results.length > 0 && fileArg) {
+    result.next_step = `For test refs: find_tests(file="${fileArg}")`
   }
 
   return result

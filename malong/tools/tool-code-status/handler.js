@@ -1,5 +1,5 @@
 // code_status — S1 只读入口：任务/材料摘要（不持久化）。
-import { makeError, envelope, getTask, listTasks, ensureTaskVersion, ACTIONS_NOTE, buildTaskNextAction, completionProjection, unknownTaskError } from '../entry-shared.js'
+import { makeError, envelope, getTask, listTasks, ensureTaskVersion, ACTIONS_NOTE, buildTaskNextAction, completionProjection, unknownTaskError, taskHeader } from '../entry-shared.js'
 import { capped } from '../../workflow/output-budget.js'
 import { currentEvidence } from '../../workflow/evidence.js'
 import { projectEffectiveState } from '../../workflow/effective-state.js'
@@ -42,15 +42,21 @@ export async function handle(args) {
     const nextAction = buildTaskNextAction({ workspaceDir, task_id, task, p })
     // 14-B AC03：null = done 空动作；合同字段与说明由同一判定透出（与 read/check/control 同源）
     const completion = nextAction === null ? completionProjection({ workspaceDir, task, p }) : null
+    const lastCheck = [...evidence].reverse().find(e => ['test', 'typecheck', 'lint'].includes(e.kind))
+    const lastCheckFailed = !!lastCheck && lastCheck.result === 'failed'
     const nextStep = completion
       ? completion.note
       : (task.lifecycle === 'cancelled'
         ? 'Task is cancelled (terminal); code_control(action=reopen) to continue, or start a new code_task.'
-        : (task.result_kind === 'partial'
-          ? 'Unvalidated edit pending (result_kind=partial): follow next_action (code_check), or code_read another candidate.'
-          : 'Follow next_action (structured args), or code_read another candidate.'))
+        : (lastCheckFailed
+          ? 'Last check FAILED (' + lastCheck.kind + '): fix the code with code_patch, then re-run code_check (next_action has the exact args).'
+          : (task.result_kind === 'partial'
+            ? 'Unvalidated edit pending (result_kind=partial): validation is optional until you finish (next_action has the exact args), or code_read another candidate.'
+            : 'Follow next_action (structured args), or code_read another candidate.')))
     return envelope({
-      task: { task_id: task.task_id, revision: task.revision, route: task.route, node: task.node, lifecycle: task.lifecycle },
+      // C 档：看任务的主入口必须带 route_source——否则「这条路由是猜的」只有创建那一刻看得到，
+      // 之后回来查任务就无从分辨（这才是「做不到就说清楚」要防的漏）。
+      task: taskHeader(task),
       observation: {
         summary: `Task ${task.task_id} (route=${task.route}, node=${task.node || 'n/a'}) holds ${task.materials.length} read material(s); evidence ${evidence.length} (stale ${staleEvidence.length}); operations ${ops.length}${inFlight ? ` (${inFlight} in-flight)` : ''}${mats.truncated ? ` (showing ${mats.items.length}, ${mats.omitted} more — expand by read_ref)` : ''}.`,
         node: task.node || null,
@@ -65,7 +71,7 @@ export async function handle(args) {
         materials_truncated: mats.truncated,
         read_refs: (task.materials || []).map(m => m.read_ref),
       },
-      allowed_actions: [...new Set(['code_read', 'code_status', nextAction?.tool].filter(Boolean))],
+      allowed_actions: [...new Set(['code_read', 'code_status', ...(lastCheckFailed ? ['code_patch'] : []), nextAction?.tool].filter(Boolean))],
       extra: {
         next_action: nextAction,
         ...(completion ? { progress: completion.progress, mechanical_requirements_met: completion.mechanical_requirements_met, goal_judgment: completion.goal_judgment } : {}),

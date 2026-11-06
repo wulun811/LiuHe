@@ -3,7 +3,7 @@
 //        accept 记台账带理由、再 run 该发现被抑制、ledger 列表、参数/闭集/串线错误。
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdirSync, writeFileSync, rmSync, utimesSync } from 'node:fs'
 import os from 'node:os'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -110,6 +110,10 @@ assert(jev?.limitations?.some(l => l.includes('NOT scanned')), `J3 未扫描文�
   writeFileSync(join(WS, 'outside2.js'), 'export const out2 = 1\n')
   assert(!evidence.isEvidenceStale(WS, sev), 'scope 外文件变化 → sub 证据不 stale')
   writeFileSync(join(WS, 'sub', 'a.js'), 'export const subA = 2\n')
+  // Windows：同尺寸快速重写常常落在同一个 mtime 时间戳刻度（实测 7/8 次 delta=0.000），
+  // 而 scope 指纹只取 size+取整 mtime → 依时钟推进与否随机假新鲜。显式推进 mtime 固化场景。
+  const bumped = new Date(Date.now() + 2000)
+  utimesSync(join(WS, 'sub', 'a.js'), bumped, bumped)
   assert(evidence.isEvidenceStale(WS, sev), 'scope 内文件变化 → sub 证据 stale')
   assert(evidence.staleEvidenceIds(WS, store.getTask(WS, tidWs)).includes(sev.evidence_id), 'staleEvidenceIds 纳入 scope 证据')
 

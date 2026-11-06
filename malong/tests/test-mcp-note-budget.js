@@ -41,17 +41,19 @@ function mkTask(ws, id) {
   return t
 }
 
-console.log('== ① mcp_note 透传进 evidence.actual.notice ==')
+console.log('== ① 单阶段成功路径不得出现"必然超时"预报（B7：DSH 实录反例）==')
 {
   const ws = mkWs('note', BODY_PASS)
   mkTask(ws, 'task_note')
-  // timeout=300000 → verify_pipeline 钳到 110000 → 1 阶段 × 110s > 100s → 生成 mcp_note
+  // B7 修正：旧断言把「单阶段 + 传大 timeout → 必报 120s hard timeout」锁成了正确行为，
+  // 但单阶段 timeout 已被上钳到 110s，不可能超预算——3.9 秒成功却预报"必然超时"
+  // 正是 DSH 回报的 ev_1081bc2e。这条断言本身是错的，改为断言不得出现。
   const r = await check.handle({ workspace_dir: ws, task_id: 'task_note', checks: ['test'], run: true, timeout: 300000 }, ctx)
   const ev = r.observation && r.observation.evidence && r.observation.evidence[0]
   assert(ev && ev.result === 'passed', '检查通过（得 ' + (ev && ev.result) + '）')
   const notice = (ev && ev.actual && ev.actual.notice) || ''
-  assert(/120s hard timeout/.test(notice), 'evidence.notice 带 mcp_note（得 ' + JSON.stringify(notice) + '）')
-  assert(/will definitely time out/.test(notice), 'notice 含「必然超时」原文')
+  assert(!/will definitely time out/.test(notice),
+    '单阶段成功路径不得挂"必然超时"（得 ' + JSON.stringify(notice) + '）')
 }
 
 console.log('== ② 超时 → next_action 指向 code_check(async=true)，不是 code_patch ==')
@@ -87,11 +89,14 @@ console.log('== ③ 真失败（非超时）仍指向 code_patch ==')
 
 console.log('== ④ background 路径不打 mcp_note（既有语义不变） ==')
 {
+  // B7：原用单阶段对比，把"单阶段也误报"锁成前提。改用**多阶段**对比——
+  // 那才是 background/foreground 真正的差异点（单阶段本就不该报，见 ①）。
   const ws = mkWs('bg', BODY_PASS)
-  const bg = await pipeline.handle({ workspace_dir: ws, stages: 'test', timeout: 300000 }, Object.assign({}, ctx, { background: true }))
+  const stages = 'lint,typecheck,test'
+  const bg = await pipeline.handle({ workspace_dir: ws, stages, timeout: 300000 }, Object.assign({}, ctx, { background: true }))
   assert(!bg || !bg.mcp_note, 'background 不打 mcp_note（得 ' + JSON.stringify(bg && bg.mcp_note) + '）')
-  const fg = await pipeline.handle({ workspace_dir: ws, stages: 'test', timeout: 300000 }, ctx)
-  assert(fg && typeof fg.mcp_note === 'string' && /120s/.test(fg.mcp_note), 'foreground 打 mcp_note（得 ' + JSON.stringify(fg && fg.mcp_note) + '）')
+  const fg = await pipeline.handle({ workspace_dir: ws, stages, timeout: 300000 }, ctx)
+  assert(fg && typeof fg.mcp_note === 'string' && /120s/.test(fg.mcp_note), '多阶段 foreground 打 mcp_note（得 ' + JSON.stringify(fg && fg.mcp_note) + '）')
 }
 
 console.log('\n=== test-mcp-note-budget: ' + pass + ' passed, ' + fail + ' failed ===')

@@ -473,6 +473,44 @@ const ctxNone = { codeIndexService: null }
   await handle({ workspace_dir: ws, action: 'rollback', txn_id: b2.txnId }, ctxOk)
 }
 
+// ── G0（2026-10-29）：LH-S1-01 + LH-S1-05 回归──
+// LH-S1-01：同事务内连续编辑同一文件，rollback 必须回到 begin() 之前的原始内容。
+//   旧实现：_commitStagedContent 无条件用当前 content 覆盖备份，第 2 次编辑时
+//   content 已含第 1 次编辑的结果 → 备份变成「半途状态」→ rollback 返回 rolled_back
+//   却只回退到半途，第 1 次编辑的改动永久留在文件里（谎报恢复成功）。
+// LH-S1-05：status:'staged' 时文件已经真实写盘，回执必须显式承认（不能只有 staged 一个词）。
+{
+  const FT = 's101.js'
+  const ORIG101 = 'const a = 1\nconst b = 2\nconst c = 3\n'
+  f(FT, ORIG101)
+  const b101 = await handle({ workspace_dir: ws, action: 'begin', name: 'g0-s101' }, ctxOk)
+
+  const e1 = await handle({
+    workspace_dir: ws, action: 'edit', txn_id: b101.txnId, file: FT,
+    edits: [{ old_string: 'const a = 1', new_string: 'const a = 10' }],
+  }, ctxOk)
+  assert(e1.status === 'staged', 'S1-01 edit#1 staged（得 ' + JSON.stringify(e1.status || e1.error_code) + '）')
+
+  // LH-S1-05 断言（就在第 1 次编辑后）：已写盘必须可见
+  assert(e1.written_to_disk === true, 'S1-05 staged 回执显式声明已写盘（得 ' + JSON.stringify(e1.written_to_disk) + '）')
+  assert(e1.effect === 'workspace_write', 'S1-05 staged 回执带 effect=workspace_write（得 ' + JSON.stringify(e1.effect) + '）')
+  assert(e1.state_commit === 'pending', 'S1-05 事务未终结→state_commit=pending（得 ' + JSON.stringify(e1.state_commit) + '）')
+  assert(typeof e1.note === 'string' && /written to disk/i.test(e1.note), 'S1-05 note 明说 already written to disk（得 ' + JSON.stringify(e1.note) + '）')
+  assert(read(FT) === 'const a = 10\nconst b = 2\nconst c = 3\n', 'S1-05 staged 时磁盘确实已改（得 ' + JSON.stringify(read(FT)) + '）')
+
+  const e2 = await handle({
+    workspace_dir: ws, action: 'edit', txn_id: b101.txnId, file: FT,
+    edits: [{ old_string: 'const b = 2', new_string: 'const b = 20' }],
+  }, ctxOk)
+  assert(e2.status === 'staged', 'S1-01 edit#2 staged（得 ' + JSON.stringify(e2.status || e2.error_code) + '）')
+  assert(read(FT) === 'const a = 10\nconst b = 20\nconst c = 3\n', 'S1-01 两次编辑都落盘（得 ' + JSON.stringify(read(FT)) + '）')
+
+  const rb101 = await handle({ workspace_dir: ws, action: 'rollback', txn_id: b101.txnId }, ctxOk)
+  assert(rb101.status === 'rolled_back', 'S1-01 rollback 回报 rolled_back（得 ' + JSON.stringify(rb101.status) + '）')
+  // 核心断言：rolled_back 不得谎报——必须真的回到 begin() 之前
+  assert(read(FT) === ORIG101, 'S1-01 rollback 必须回到原始内容（得 ' + JSON.stringify(read(FT)) + '，期望 ' + JSON.stringify(ORIG101) + '）')
+}
+
 try { rmSync(ws, { recursive: true, force: true }) } catch {}
 
 console.log('== test-edit-txn-guard: ' + pass + ' passed, ' + fail + ' failed ==')

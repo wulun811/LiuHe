@@ -154,7 +154,15 @@ async function apply(ctx, config) {
     // dogfood-050 r5：U 状态目录统一适配——新 mcp-server 只认 MALONG_STATE_DIR（getStateDir()，
     // 默认 ~/.config/malong），--workspace 仅作旧状态迁移源（baseDir/data/malong-mcp）。
     // 旧桥接只传 --workspace：升级到 0.5.0 代码后 DSH 状态会落进宿主共享目录与 opencode 混用。
-    const c = spawn(process.execPath, [serverPath, "--workspace", stateDir, "--max-old-space-size=512"], {
+    //
+    // B8：`--max-old-space-size` 必须放在 **脚本路径之前**。node 把脚本名之后的参数
+    // 全部交给脚本（process.argv），V8 完全看不到——旧写法
+    //   spawn(node, [serverPath, '--workspace', ..., '--max-old-space-size=512'])
+    // 里那个 512 从来没生效（实测：--max-old-space-size 出现在 argv 而不在 execArgv）。
+    // 更糟的是 mcp-server 的 checkV8HeapLimit() 读 process.argv，恰好读到这串，
+    // 于是日志打印 "V8 heap=512MB" —— **报告了一个实际不存在的上限**。
+    // 现在放到 serverPath 之前，同时保留 argv 侧标记供 checkV8HeapLimit 识别。
+    const c = spawn(process.execPath, ['--max-old-space-size=512', serverPath, "--workspace", stateDir], {
       cwd: dirname(serverPath),
       stdio: ["pipe", "pipe", "pipe"],
       env: {

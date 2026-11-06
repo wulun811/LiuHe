@@ -53,12 +53,23 @@ function journalWriterAlive(dir) {
   try { process.kill(pid, 0); return true } catch (e) { return e?.code === 'EPERM' }
 }
 
+// GATE-03（专家 0.6.1 §3，P1）：旧实现 try{}catch{} 全吞且无返回值——
+// 调用方写了 committed 就以为持久化了，实际上恢复时会看到旧的 staged/缺失状态。
+// 新语义：永远返回结构化结果，失败时带上可展示的 error；【不抛异常】（调用方多为 finally 路径，抛了会盖掉真实结果）。
+// 注意：这里仍不改变「写失败后事务真实状态」——只是把事实报出来，不得虚构持久化。
 export function updateJournalState(dir, state) {
   try {
-    const cur = JSON.parse(readFileSync(join(dir, 'state.json'), 'utf-8'))
+    const raw = readFileSync(join(dir, 'state.json'), 'utf-8')
+    let cur
+    try { cur = JSON.parse(raw) } catch (e) {
+      return { ok: false, error: `state.json is not valid JSON: ${e.message}`, dir }
+    }
     // r9(F6)：原子写
     atomicWrite(join(dir, 'state.json'), JSON.stringify({ ...cur, ...state }, null, 2), { fsync: true })
-  } catch {}
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: e?.message || String(e), code: e?.code, dir }
+  }
 }
 
 export function auditLog(workspaceDir, entry) {
@@ -386,6 +397,7 @@ export async function recoverTransactions(workspaceDir, options = {}) {
     }
     let anyLanded = false
     let anyExternal = false
+    let anyLandedUnrecorded = false
     let knownCount = 0
     // 审核补：backup 目录在 txn 内（.ai-transactions/<txn>/backup/）——守卫前缀须按 txn 计算
     const backupRoot = resolve(join(dir, 'backup'))
@@ -414,7 +426,15 @@ export async function recoverTransactions(workspaceDir, options = {}) {
       } catch { continue }
       knownCount++
       if (curHash === oldHash) continue // 未落盘
+      // G1-R1 / LH-CE16（专家§2.1）：崩溃窗口分类必须区分三种事实，不能混成一种。
+      //   landed            —— 当前 == 本事务记录的新 hash（写盘 + manifest 都已落）
+      //   landed_unrecorded —— 当前 == last_txn_effect_hash，但 new_hash 缺失/不符
+      //                        （写盘成功、manifest 更新前进程被杀）—— 事实是「已写但未归档」，
+      //                        不能当成 external，也不能当成「从未写」
+      //   external          —— 当前既非 backup 也非任何本事务记录的 hash —— 他人改动
+      // 后者两者都不得自动恢复（会悄悄覆盖）；一律 needs_review，只分类理由不同。
       if (meta.new_hash && curHash === meta.new_hash) anyLanded = true
+      else if (meta.last_txn_effect_hash && curHash === meta.last_txn_effect_hash) anyLandedUnrecorded = true
       else anyExternal = true
     }
     if (knownCount === 0) {
@@ -433,6 +453,19 @@ export async function recoverTransactions(workspaceDir, options = {}) {
       try {
         atomicWrite(join(dir, 'manifest.json'), JSON.stringify(manifest, null, 2), { fsync: true })
         recovered.push({ txn_id: d.name, action: 'needs_review', reason: 'external change detected' })
+      } catch {}
+      continue
+    }
+    if (anyLandedUnrecorded && !anyLanded) {
+      // G1-R1 / LH-CE16：写盘已发生、manifest 未归档（崩溃在 manifest 更新前）。
+      // 事实不完整（不知这是不是本事务最后一次写）→ needs_review，不得自动标 committed_recovered
+      // （那会让 undo 把未确认的内容当本事务产物删掉）。
+      manifest.state = 'needs_review'
+      manifest.recovered_at = new Date().toISOString()
+      manifest.recovery_reason = 'write_landed_unrecorded'
+      try {
+        atomicWrite(join(dir, 'manifest.json'), JSON.stringify(manifest, null, 2), { fsync: true })
+        recovered.push({ txn_id: d.name, action: 'needs_review', reason: 'write landed but manifest not updated (crash window); verify manually before undo' })
       } catch {}
       continue
     }
@@ -569,12 +602,23 @@ export function pruneJournals(workspaceDir, opts = {}) {
   const cutoff = now - maxAgeHours * 3600 * 1000
   let pruned = 0, kept = 0
   const deleted = []
+  const keptSample = []
+  // R7-CE19 同型（专家 0.6.1 §3 横向要求）：清扫必须用【允许名单】。
+  // 旧实现对 state 不可解析直接 continue（既不计 kept 也不报原因），且未知状态不在保护名单 → 会被当终态删。
+  const SWEEPABLE = ['committed', 'committed_recovered', 'rolled_back', 'abandoned', 'failed', 'undone']
+  const keepIt = (id, reason) => { kept++; if (keptSample.length < 20) keptSample.push({ txn_id: id, reason }) }
   for (const txnDir of readdirSync(root)) {
     if (txnDir.startsWith('.')) continue          // 跳过 .last_prune 等隐藏项
     const dir = join(root, txnDir)
     let state = null
-    try { state = JSON.parse(readFileSync(join(dir, 'state.json'), 'utf-8')) } catch { continue }
-    if (PRUNE_PROTECTED_STATES.includes(state.state)) { kept++; continue }
+    try { state = JSON.parse(readFileSync(join(dir, 'state.json'), 'utf-8')) } catch {
+      keepIt(txnDir, 'state_unparseable: cannot prove terminal state; preserved for manual review')
+      continue
+    }
+    if (!state || typeof state.state !== 'string' || !SWEEPABLE.includes(state.state)) {
+      keepIt(txnDir, `state_not_sweepable:${state && state.state}`)
+      continue
+    }
     const ts = state.committed_at || state.rolled_back_at || state.abandoned_at || state.failed_at
     let tsMs = ts ? Date.parse(ts) : NaN
     if (!Number.isFinite(tsMs)) { try { tsMs = statSync(dir).mtimeMs } catch { continue } }
@@ -585,7 +629,7 @@ export function pruneJournals(workspaceDir, opts = {}) {
     pruned++
     if (deleted.length < 20) deleted.push(txnDir)
   }
-  return { pruned, kept, skipped_throttle: false, dry_run: dryRun, max_age_hours: maxAgeHours, deleted_sample: deleted }
+  return { pruned, kept, skipped_throttle: false, dry_run: dryRun, max_age_hours: maxAgeHours, deleted_sample: deleted, kept_sample: keptSample }
 }
 
 // ── 16-B：批量 undo（专家复验 §5）——同批 journal 共享 batch_id ──

@@ -99,9 +99,9 @@ export async function handle(args, context) {
     }
     if (mode === 'search') {
       // G2-A：真委派 code_search（意图/内容搜索）——不再用 mode=symbols 冒充（§8.4 假替代修正）。
-      if (typeof args?.query !== 'string' || !args.query) return { fail: fail('missing_parameter', 'search requires query') }
+      if (typeof args?.query !== 'string' || !args.query) return { fail: fail('missing_parameter', 'search requires query', 'Pass query="<literal text or identifier>"; search_terms are optional extra hypotheses and cannot replace query.') }
       if (typeof context?.codeSearchService?.search !== 'function') return { fail: fail('capability_unavailable', 'code search service unavailable in this context', `Describe the original tool: code_query(mode="capability", name="code_search").`) }
-      return { r: await codeSearchHandle({ workspace_dir: workspaceDir, query: args.query, limit: args.limit }, context) }
+      return { r: await codeSearchHandle({ workspace_dir: workspaceDir, query: args.query, limit: args.limit, search_terms: args.search_terms }, context) }
     }
     if (mode === 'tests') {
       // G2-A：真委派 find_tests（测试文件候选）——不再用 code_check(test) 跑全量冒充（§8.4）。
@@ -215,7 +215,9 @@ export async function handle(args, context) {
     : mode === 'body'
     ? { read_only: true, live_file_read: true, note: 'Live file content read; external edits may have landed — confirm against current file when it matters.' }
     : mode === 'search'
-    ? { read_only: true, static_not_runtime: true, note: 'Intent/content search over the index (original code_search semantics), not symbol-name matching.' }
+    // F2-L0：旧文案与新文案自相矛盾（matching_note 说「按符号名匹配」、本行说「不是按符号名匹配」），
+    // 且没说怎么读 coverage——现统一为确定性 token/意图搜索 + 覆盖率读法。
+    ? { read_only: true, static_not_runtime: true, note: 'Deterministic token/intent search over the index (NOT semantic/embedding). Each hit carries matched (which query tokens it hit) and coverage (hit tokens / searchable tokens); hits with coverage<0.5 are returned in partial_matches, not results. Partial hits are not answers.' }
     : mode === 'tests'
     ? { read_only: true, static_not_runtime: true, note: 'Test-file candidates from naming conventions + reference scan; candidates are not proof of coverage.' }
     : mode === 'validate'

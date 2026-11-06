@@ -67,5 +67,35 @@ assert(cbDesc.includes('locator.file_path'), 'code_batch 描述含 locator.file_
 assert(cpDesc.includes('locator.file_path'), 'code_patch 描述含 locator.file_path（嵌套说明修正）')
 assert(noOutputSignal.length === 0, `低分四工具描述均含输出信号（缺: ${noOutputSignal.join(', ') || '无'}）`)
 
+// 4) R14（2026-10-30 自用试用教训）：npm test 是【硬编码清单】——新写的 tests/test-*.js
+//    忘了登记的话，它就算红了全链也照样绿（本轮 test-route-source.js 就真漏了一整轮）。
+//    守卫一：tests/ 下每个 test-*.js 必须属于【至少一个 npm 套件】（test / test:perf / …）。
+//    守卫二：性能基线（时间阈值类）不进日常链——按需 `npm run test:perf` 拉起。
+//    依据：日常链被机器负载抖动挡住正确性回归（2026-10-30 实测：write P95 5190ms 超阈，
+//    同一台机 HEAD 基线 1031~1447ms、当前树 422~466ms，纯环境噪声）。
+{
+  const pkg = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-8'))
+  const scripts = pkg.scripts || {}
+  const refs = (v) => [...String(v || '').matchAll(/tests\/([\w.-]+\.js)/g)].map((m) => m[1])
+  const daily = new Set(refs(scripts['test:all'] || scripts.test))
+  const perf = new Set(refs(scripts['test:perf']))
+  const everySuite = new Set(Object.values(scripts).flatMap((v) => refs(v)))
+  const testFiles = readdirSync(__dirname).filter((f) => /^test-.*\.js$/.test(f)).sort()
+
+  const unregistered = testFiles.filter((f) => !everySuite.has(f))
+  assert(testFiles.length > 150, `test-*.js 数量合理（${testFiles.length}）`)
+  assert(unregistered.length === 0, `tests/test-*.js 均归属某个 npm 套件（无归属: ${unregistered.join(', ') || '无'}）`)
+
+  // 性能基线：日常链里不许有（否则一条环境抖动能挡住后面全部正确性测试）
+  const PERF_BASELINES = ['test-mvp-latency.js']
+  const perfInDaily = PERF_BASELINES.filter((f) => daily.has(f))
+  const perfMissing = PERF_BASELINES.filter((f) => !perf.has(f))
+  assert(perfInDaily.length === 0, `性能基线不进日常链（应在 test:perf，实际混入: ${perfInDaily.join(', ') || '无'}）`)
+  assert(perfMissing.length === 0, `性能基线必须能由 test:perf 拉起（缺: ${perfMissing.join(', ') || '无'}）`)
+
+  const phantom = [...everySuite].filter((f) => !existsSync(join(__dirname, f)))
+  assert(phantom.length === 0, `npm 套件不得指向不存在的文件（幽灵: ${phantom.join(', ') || '无'}）`)
+}
+
 console.log(`\n=== test-manifest-quality: ${pass} passed, ${fail} failed ===`)
 process.exit(fail > 0 ? 1 : 0)

@@ -11,18 +11,14 @@ env away: export `MALONG_INTERFACE=classic|diagnostic` on the dsh host.)
 ```bash
 dsh plugin --profile web add @jieai/dsh-malong-bridge
 pkill -f "dsh web"
-dsh web --port 3456 --host 0.0.0.0
+dsh web --port 3456 --host 127.0.0.1
 ```
 
-Works out of the box for the MCP server itself: the bridge locates the bundled
-`server/mcp-server.js` (complete toolset backend; better-sqlite3 ships
-cross-platform precompiled binaries, with a vendored sql.js WASM fallback).
-
-**Parser prerequisite (one-time per machine)**: the Rust parsing service
-`malong-parse` is NOT bundled in this tarball. Install it yourself or point
-`MALONG_PARSE_BIN` at a binary (see Platform support below). If it cannot be
-resolved, tool calls that need parsing fail with an explicit resolution error
-listing the searched locations.
+`--host` must be one concrete local address. `dsh` **rejects wildcard addresses**
+(`0.0.0.0`, `::`); the default is loopback. For remote access, bind an explicit
+interface **and** put authentication/firewall in front yourself: this UI grants
+file read/write and shell execution to anyone who can reach the port, and the
+token in the printed URL is not a substitute for network controls.
 
 > **pnpm 10 warns `Ignored build scripts: better-sqlite3`**: that is pnpm's
 > default security policy (blocks dependency postinstall scripts). Run
@@ -43,7 +39,7 @@ listing the searched locations.
 ```bash
 dsh plugin --profile web remove @jieai/dsh-malong-bridge
 pkill -f "dsh web"
-dsh web --port 3456 --host 0.0.0.0
+dsh web --port 3456 --host 127.0.0.1
 ```
 
 ## Configuration (optional, zero-config by default)
@@ -73,24 +69,68 @@ DSH Agent → malong__read_symbol(...) (no workspace_dir)
   `MALONG_STATE_DIR`, unrelated to any project directory.
 - **Zero intrusion**: does not touch dsh's node_modules; dsh upgrades are safe.
 
-> **Platform support**: `malong-parse` (the Rust parsing service) is NOT bundled
-> with this tarball. It is resolved at runtime by `parse-bin.js`, in this order:
-> `MALONG_PARSE_BIN` / `MALONG_PARSE_BIN_ALT` env → an installed
-> `@jieai/malong-parse-<platform>-<arch>` package (only if you installed one;
-> this bundle no longer declares such optionalDependencies) → the bundled
-> `server/bin/malong-parse` (legacy layout; absent in this tarball) →
-> `~/.local/bin/malong-parse` → a sibling `../malong-parse/target/{release,debug}`
-> dev build.
->
-> Point it explicitly when installing by hand, e.g.
-> `MALONG_PARSE_BIN=/opt/malong-parse/malong-parse` (Linux) or
-> `MALONG_PARSE_BIN=C:\tools\malong-parse\malong-parse.exe` (Windows).
->
-> **0.5.13 note**: this bundle no longer declares `optionalDependencies` for the
-> platform packages. They were pinned to `0.5.9`, a version that was never
-> published (npm tops out at `0.4.8`), so they could never install and only
-> produced a silent `catch {}` miss on every resolution. Install the binary
-> yourself (`~/.local/bin/malong-parse`) or point `MALONG_PARSE_BIN` at one.
+> **Platform support**: verified on **Linux x86-64** only (Ubuntu 24.04, glibc
+> ≥ 2.34). Windows and macOS are **not verified** for this release — see
+> **Parser setup** below before assuming they work.
+
+## Parser setup (`malong-parse`)
+
+This tarball contains the bridge and the MCP server, **not** the Rust parser.
+`npm install` alone does not give you working parsing. Two separate things must
+hold:
+
+1. **The binary must exist.** Resolution order (`parse-bin.js`):
+   `MALONG_PARSE_BIN` → `MALONG_PARSE_BIN_ALT` → an installed
+   `@jieai/malong-parse-<platform>-<arch>` package (none is published yet) →
+   `server/bin/malong-parse` (legacy layout, absent here) →
+   `~/.local/bin/malong-parse` → a sibling `../malong-parse/target/{release,debug}`
+   dev build.
+   The last entry is why a dev checkout works without any env var — do not rely
+   on that for an installed setup.
+2. **A daemon must be reachable.** The MCP server connects to a shared Unix
+   socket at `/tmp/malong-parse-<uid>.sock` (`MALONG_SOCKET` overrides it) and
+   spawns a daemon if none is running. The daemon is **per-user, shared by all
+   sessions** — which is why an unrelated running daemon can make a wrong
+   `MALONG_PARSE_BIN` look like it works (you get a `DRIFT` warning in `health`
+   instead of a failure).
+
+Recommended install:
+
+```bash
+# Linux x86-64 asset shipped alongside this release
+install -Dm755 malong-parse-linux-x64-0.3.39 ~/.local/bin/malong-parse
+malong-parse --version   # confirm it runs at all
+```
+
+Then, in the dsh host environment:
+
+```bash
+export MALONG_PARSE_BIN="$HOME/.local/bin/malong-parse"   # optional but explicit
+```
+
+**Verify it, don't assume it.** `invoke_capability(name='health')` reports a
+`Parse Service` line; check three things: `connected=true`, the daemon's
+`size`/`exe` matches the binary you installed, and `drift.detected` is false.
+
+**When it is genuinely missing**, parse-dependent calls fail with an explicit
+message naming every searched location:
+
+```
+malong-parse binary not found. Searched: <candidates...>.
+Set MALONG_PARSE_BIN (Windows: point at the .exe) or install it (~/.local/bin/malong-parse).
+```
+
+**Degradation is partial, and it is not a clean fallback.** Indexing,
+`outline`/`symbols` and symbol search need the parser. `code_read`, `code_status`
+and plain text editing keep working off the static index and the filesystem, so
+a missing parser shows up as *empty or absent* symbol results rather than as a
+hard stop. Treat "tools respond" as **not** evidence that parsing works —
+check `health`.
+
+> **glibc**: the shipped Linux binary is dynamically linked against
+> **GLIBC_2.34** (highest versioned symbol). Older distros (e.g. CentOS 7,
+> Ubuntu 20.04) will fail at load time with `GLIBC_2.34 not found`; build from
+> source there or use a newer base image. It is not "any Linux x64".
 
 On Windows, replacing an existing source file uses the inbox Windows PowerShell
 and .NET `File.Replace` with a hidden process to preserve the target's ACL.
@@ -113,6 +153,10 @@ capability unique to LiuHe.
 | Log shows `mcp tools/list timeout` | Verify the install is complete (`dsh plugin` reports no node_modules errors); restart dsh |
 | No `malong__*` tools in the conversation | Confirm the bundle layer is attached (`dsh web --dump-config \| grep malong`); hard-refresh the browser |
 | Call fails with `missing_parameter: workspace_dir` | The conversation has no workspace (no cwd) to inject; pass a path in the prompt |
+| `malong-parse binary not found. Searched: ...` | Install the parser (see **Parser setup**) or set `MALONG_PARSE_BIN` |
+| Tools respond but `outline`/symbol search is empty | Parser unreachable or wrong binary. Check `health` → `Parse Service` (`connected`, `size`/`exe`, `drift.detected`). Tools responding is not proof parsing works |
+| `health` shows `DRIFT: daemon binary ... differs` | A stale per-user daemon is running an older build. Stop it (`pkill -x malong-parse`) and let the next call respawn from the resolved binary |
+| `FILE_NOT_INDEXED` after a crash | Run `invoke_capability(name='reindex', args={workspace_dir, blocking:true})`. `reindex` is asynchronous by default |
 | Plugin stops working after a dsh upgrade | The plugin lives at the profile layer, upgrades do not affect it; if the cordis interface changes, reinstall the plugin |
 
 ## Index Rules (Transparency)

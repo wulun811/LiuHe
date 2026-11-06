@@ -8,7 +8,7 @@ function detectMisuse(args) {
   if (symbol && line === 0) {
     return {
       warning: 'likely_wrong_tool',
-      suggestion: `You provided symbol="${symbol}" but no line number. For symbol-level impact analysis, use impact_analysis(symbol="${symbol}") which includes risk level and test references. call_chain is designed for line-level precision when you know the line but not the symbol name.`
+      suggestion: `You provided symbol="${symbol}" but no line number. For symbol-level impact analysis, use impact_analysis(symbol="${symbol}", file="${args.file}") which includes risk level and test references. call_chain is designed for line-level precision when you know the line but not the symbol name.`
     }
   }
   return null

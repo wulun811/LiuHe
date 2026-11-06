@@ -43,6 +43,9 @@
 
 闭环：`code_task`（resolve 候选+影响面）→ `code_read`（拿 read_ref/版本）→ `code_patch|code_batch|code_maintain`（写，带 operation+证据）→ `code_check`（run=true/async=true 落证据）→ `code_control`（status/resume/expand/reopen/job/cancel_job）。
 
+- **路由三态（C 档，2026-10-30）**：`task.route_source` ∈ `explicit`（调用方指定）/ `inferred`（命中关键词，附 `task.route_evidence` 原文）/ `default`（一个词都没命中，兜底 `understand`）。`inferred` 与 `default` 都会在 `observation.route_note` 说明来源；`default` 额外列出可选 route 取值与 `switch_route` 纠正路径。**路由是关键词词典，不是意图理解**：中文/非 ASCII 目标换个说法就命中不上（实测词面重合 3/3、换个说法 0/3），所以路由结果一律标注来源，不得当作「工具读懂了」。`route=review` 决定 audit 完成契约是否生效——判错会影响闭环，请按 `route_note` 纠正。
+
+
 - `result_kind`：写后 `partial`；检查通过且有 patch → `validated`。
 - `result_stale` + `stale_reason`（13-B）：统一走 `workflow/evidence.effectiveState`（code_status / code_control / next_action 同一口径）；reason ∈ `goal_change`（switch_route 后 goal_revision 漂移）> `file_change`（依赖文件/最后写哈希变化）> `pending_work`（indeterminate 后台结果）；**同类证据取最新**——旧 failed 不压新 passed（R1）；**14-B AC18：同 kind 按 scope 取代——同 scope 后继取代、异 scope 独立（后查文件不吞先查文件的范围证明）**；stale validated 的 `next_action` 按 route 给 `code_check`/`code_audit`，不再指向完成复核。
 - `validated` 完成交还（13-B/C；14-B AC03 收口）：`route=review` 的完成态由 audit 驱动——仅测试通过且无 audit 证据时 next_action 仍指 `code_audit`。**14-A AC30：audit 证据绑定 goal_revision + 依赖适用性——旧目标/文件漂移/未运行（skipped）不算完成审查，重跑 `code_audit` 并说明不适原因。** **14-B AC03：非 review 路线机械要求满足（validated 且未陈旧、无在途 job/op）→ `next_action:null` + `progress:"done"` + `mechanical_requirements_met:true` + `goal_judgment:"host_required"`（仅工具侧完成；五出口同源 completionProjection）；review 路线保留 awaiting_decision（findings 交还）。**
@@ -87,7 +90,27 @@
 8. **空仓库 git_worktree 裸报错？** 已修（R4）：`no_commits` + initial commit 引导。
 9. **cancel 后写工具还能调吗？** 不能——5 写入口一律 `task_cancelled`（preview 也拒）；同 request_id 重放已成功操作仍可 dedup 复核；用 `code_control(action="reopen")` 显式恢复，或新建任务。
 10. **budget_hint=50 为什么还返回 200 字符？** floor=200（`budget.effective` 回传实际生效值）；0=全文（上限 100000）。
-11. **中文 goal 返回零候选？** 符号检索只认 ASCII 标识符——`content_scan.skipped=non_ascii_goal` + `scan_warnings` 会显式提示；把标识符用反引号括起或传 `target={file|symbol}`；首屏文案明示「零命中不代表不存在」。
+11. **中文 goal 返回零候选？** 符号检索只认 ASCII 标识符。`content_scan.skipped` 分三档，别把它们当成一句话：`non_ascii_goal`（goal 里真的没有 ASCII 标识符）、`tokens_too_short`（有标识符，但都短于内容扫描的 6 字符门槛，会附 `short_tokens` 点名）、`no_token_in_goal`。零命中不代表不存在（首屏文案已明示）。
+    出路：传 `target={file|symbol}`；或对短标识符（`CSV`/`API`/`SQL`/`DSH` 这类）用 `code_query(mode="search")` —— 它不做 6 字符限制。
+    **反引号不能绕过 ≥6 限制**（实测：裸写与反引号结果完全相同），别把它当万能解。
 12. **文件改了但状态还说 validated？** 13-B 起 `result_stale:true` + `stale_reason:"file_change"`，next_action 指回 `code_check`；resume 文案按原因区分（goal 变更 ≠ 文件变更）。**14-A：在途优先——后台 job/写操作进行中时 `progress:"waiting"` 指向 `code_control`（job/status），先等待/核对再决定（AC31）。**
 13. **换了目标后重跑旧测试算完成吗？** 不算：goal_revision 漂移 → `stale_reason:"goal_change"`；`route=review` 的完成态由 audit 驱动，测试通过不等于安全审查完成。
 14. **code_check 报 failed，但代码没问题？** 多半是**请求预算截断**：前台阶段上限 110s（请求硬上限 120s），跑更久的套件会被判超时——这不是代码缺陷。证据里 `actual.notice` 会带「120s hard timeout … will definitely time out」原文、`limitations` 明说 NOT a code defect，且 next_action 直接指 `code_check(async=true)`（后台 600s 上限）——跟着它走即可，别去改代码。
+15. **code_audit 传了 `files`，为什么某些 check 还是扫全库？** 两类语义，现已统一：`code_review`/`security_review`/`exception_guard`/`guard_patterns`/`code_quality` 按 `files` 逐文件审；`dead_code`/`config_drift` 原本只认 `scope`、**完全忽略 `files`**（DSH 2026-11-02 实录：传 3 个文件却报 88 条全库死代码）。**现已修**：`dead_code` 也接受 `files`（逐文件转 file-scope 扫描），且 `scope` 优先于 `files`；两者都不传时仍扫全库。注意死代码是启发式扫描，零发现不等于不存在。
+16. **`fix_imports`/`code_maintain` 的 import 提案能直接 apply 吗？** 2026-11-02 前不能（DSH 实录：照着 apply 会坏文件），四处已修：① JS/TS 的 specifier 曾是 Python 点号路径（`a.b.c` → ESM 裸包名报错），现给相对路径并保留真实扩展名；② 文件头有 `/** */` 块注释时 import 会插到注释与既有 import 块之前，现整段注释视为可跳过区；③ 语法护栏只匹配"插入单行"形态、从未验证真实提案（整段文件头替换），现按真实语义逐条 apply 后验；④ `node --check x.js` 对含 ESM import 的坏语法返回 **exit=0**（.js 按 CJS 解析），护栏因此全程失效——现按真实后缀落盘、.js 走 `--input-type=module`。另修：无注释头文件曾**静默不给提案**。`node --check` 抓不到同名重复导入（exit=0），已加 `findDuplicateImport` 显式判据。
+
+17. **`code_check` 返回 failed，但 evidence 的 `notice` 说「will definitely time out」？** 2026-11-02 起分两种，看 `actual` 里的字段：
+    - 有 `timed_out: true` + `timed_out_ms` → **真超时**（请求预算截断，不是代码缺陷）。旧实现只在超时时写 `timed_out`，其它路径什么都不写，调用方无法区分"被超时杀"与"自己退出 1"；现在 `killed` / `timed_out` / `timed_out_ms` 分别透传。
+    - 没有 `timed_out`、`exit_code: 1` → **进程自己退出了非零**，是真失败，去看 `stderr_tail`。
+    - `failed` 时 `stderr_tail` 一定会出现（哪怕是空串）——"确认没有 stderr"与"没采集"必须可区分。
+    - 另：单阶段**不会**再报「will definitely time out」（旧判据是 `阶段数 × timeout > 100s`，而 timeout 已被钳到 110s，单阶段恒成立→必然误报；3.9 秒成功的 evidence 里挂着"必然超时"）。现在只有多阶段叠加超预算才预警。
+
+18. **`actual.truncated` 是什么意思？** 是**索引扫描**被截断（检查只覆盖部分树），**不是** stdout 被截断。因为它挨着 `ran`/`exit_code`/`stdout_tail`，极易读成后者。现新增 `scan_truncated` 为准，`truncated` 保留作别名兼容。看到 `scan_truncated: true` 时：结论只覆盖已扫描的部分树，不代表全仓通过。
+
+19. **`code_query(mode="outline")` 的 `lines` 是文件行数吗？符号为什么查不到？** 2026-11-02 起：
+    - `lines` = **真实行数**（按换行符切分；末行无换行也算一行）。旧实现写的是 `max(symbol.end_line)`，即「最后一个被识别符号的结束行」——311 行的脚本会报成 71 行，据此判断文件大小会直接读错。覆盖到哪单独写在 `outline_end_line` / `outline_coverage`；覆盖不全时附 `outline_note`。
+    - **注意 `lines` 不等于 `wc -l`**：`wc -l` 数的是换行符个数，末行无换行时会比 `lines` 少 1（3 行、无尾换行的文件：`wc -l` = 2，`lines` = 3）。拿 `wc -l` 当 oracle 核对会报「假差 1」。
+    - **盲区必须知道**（2026-11-02 起，与解析器 `is_module_scope_binding()` 一致）：**进**——顶层声明，以及顶层 `try` / `catch` / `if` 体内的声明（`export const` / `export function` 也算）；**不进**——函数体内、循环体（`for` / `while` / `for-of`，含循环变量绑定）、class 静态块与方法体内的声明。所以 `mode="symbols"` 查不到 ≠ 符号不存在；需要时用 `mode="body"` 直接读文件。
+    - `.md`/`.rst`/`.txt` 等文档**按设计不在符号索引**。`mode="outline"`/`mode="symbols"` 对它们只会返回 `FILE_NOT_INDEXED`，现在的建议指向 `mode="body"`，不再让你去跑无效的 `reindex`；文档搜索走 `mode="search"` 的 `doc_results`。
+
+20. **中文查询 `comment_search.reason = "query_has_no_searchable_tokens"` 是什么意思？** 2026-11-02 前这个字段会**撒谎**：注释扫描被传了索引 state 目录（里面只有 `code-index.db`），永远扫到 0 个源码文件；上层读不到 `query_tokens`，就归因成「你的查询没有可检索词」。现已修：扫描真实 workspace；空语料正确报 `no_source_files_in_scope`；`query_tokens` 在所有返回路径都透传。若仍看到 `query_has_no_searchable_tokens`，那才是真的查询里没有可切分的词。

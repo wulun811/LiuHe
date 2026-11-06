@@ -16,6 +16,7 @@ import { ensureGitExclude } from './git-exclude.js'
 import { resolveFileArg, normalizeFilePath } from './file-arg.js'
 import { sha256 } from './hash-utils.js'
 import { computeFileAnchors } from './symbol-anchors.js'
+import { INDEX_SCOPE_NOTE } from './index-scope.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -88,6 +89,28 @@ CREATE TABLE IF NOT EXISTS meta (
 // P2-C1：与 file-collector 的 DEFAULT_CACHED_EXT 对齐（旧缺 .ts/.tsx → outline-reader 对 .ts 永久 not_indexed）
 // r28：补齐 .jsx/.mts/.cts + 新增 C/C++/Java/Bash（与 malong-parse ext_to_language 对齐）；.h/.hh 不入索引（大量 venv 头文件）
 const CACHED_EXT = new Set(['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.mts', '.cts', '.py', '.go', '.rs', '.c', '.cpp', '.cc', '.cxx', '.hpp', '.hh', '.hxx', '.java', '.sh', '.bash'])
+
+// R17-B2（2026-11-02 DSH 实测）：outline 的 lines 一直是 Math.max(symbol.end_line)，
+// 那是「最后一个被识别符号的结束行」，不是文件行数。顶层 try/if/for 里的声明不进符号索引
+// （malong-parse 对 lexical_declaration 有 depth==1 守卫），311 行的脚本会报成 71 行，
+// 调用方据此判断文件大小会直接读错。lines 改成真实行数，覆盖到哪单独用 outline_end_line 说。
+export function computeOutlineLineFields(symbols, totalLines) {
+  const list = Array.isArray(symbols) ? symbols : []
+  const endLine = list.length > 0 ? Math.max(...list.map((s) => Number(s.end_line) || 0)) : 0
+  const total = Number(totalLines) || 0
+  const lines = total > 0 ? total : endLine
+  const out = { lines, outline_end_line: endLine }
+  if (total > 0 && endLine !== total) {
+    out.outline_coverage = endLine > 0 ? `1-${endLine}` : 'none'
+    // 覆盖说明的唯一真相源在 index-scope.js（outline_note 与 symbol-search 零命中建议共用）。
+    // 两处各写一份会再次漂开：2026-11-02 DSH 复验就是「实现已经收了顶层 try 里的声明，
+    // 通知里还说顶层 try/if/for/while 的声明都没索引」——提示把能用的能力说成盲区。
+    out.outline_note = endLine > 0
+      ? `outline covers lines 1-${endLine} of ${total}. ${INDEX_SCOPE_NOTE} A symbol missing from outline/symbols may still exist there; read the file before concluding it is absent.`
+      : `no symbols were extracted from this file (${total} lines). ${INDEX_SCOPE_NOTE} Read the file directly before concluding the symbol is absent.`
+  }
+  return out
+}
 // 15（P3）：CJS 解构别名 per-local import ref 的 call_expr 标记——模块级查询（dep_graph/
 // getModuleGraph/getCallGraph/跨文件解析）必须排除，避免本地绑定名被当成模块依赖
 const ALIAS_LOCAL_MARKER = '__alias__'
@@ -1051,6 +1074,22 @@ class CodeIndex {
       if (total >= 2) return 'medium'
     }
     return 'low'
+  }
+
+  // R17-B2：outline 的 lines 需要「真实行数」——按换行符切分；末行无换行也算一行。
+  // 这【不等于】wc -l：wc -l 数的是换行符个数，末行无换行时会比 lines 少 1
+  //（3 行、无尾换行的文件：wc -l=2，lines=3）。拿 wc -l 当 oracle 核对会报假差 1（DSH 2026-11-02 复验）。
+  // 读不到文件时返回 0，由 computeOutlineLineFields 退回符号终点，不得报 0 行。
+  _countFileLines(filePath) {
+    const absPath = this._currentWorkspace ? join(this._currentWorkspace, filePath) : filePath
+    if (!existsSync(absPath)) return 0
+    try {
+      const content = readFileSync(absPath, 'utf-8')
+      if (!content) return 0
+      let n = 0
+      for (let i = 0; i < content.length; i++) if (content.charCodeAt(i) === 10) n++
+      return content.endsWith('\n') ? n : n + 1
+    } catch { return 0 }
   }
 
   _extractDocstrings(filePath, symbols) {
@@ -2165,6 +2204,9 @@ class CodeIndex {
 
         const docstrings = self._extractDocstrings(filePath, symbols)
         const decorators = self._extractDecorators(filePath, symbols)
+        // R17-B2：lines 必须是文件行数，不是「最后一个符号的结束行」——后者在顶层 try/if/for
+        // 内的声明不进索引时会远小于真实行数（实测 311 行报 71 行）。
+        const lineFields = computeOutlineLineFields(symbols, self._countFileLines(normPath))
 
         const rootSymbols = symbols.filter(s => !symbols.some(c => c.start_line <= s.start_line && c.end_line >= s.end_line && c.id !== s.id))
         const truncated = maxItems > 0 && rootSymbols.length > maxItems
@@ -2174,7 +2216,7 @@ class CodeIndex {
 
         const result = {
           file: normPath,
-          lines: symbols.length > 0 ? Math.max(...symbols.map(s => s.end_line)) : 0,
+          ...lineFields,
           tokens_estimate: f.size ? Math.ceil(f.size / 3) : 0,
           mtime: f.mtime || 0,
           truncated,

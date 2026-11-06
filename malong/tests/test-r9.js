@@ -248,16 +248,24 @@ console.log('── H11 stale txn sweep ──')
 {
   const { TransactionStore } = await imp(join(MALONG, 'tools/tool-edit-transaction/transaction-store.js'))
   const ws = tmp('sweep')
-  const stale = join(ws, '.ai-transactions', 'orphan-txn')
-  mkdirSync(join(stale, 'backup'), { recursive: true })
-  writeFileSync(join(stale, 'manifest.json'), '{}')
   const old = new Date(Date.now() - 8 * 24 * 3600 * 1000)
-  utimesSync(stale, old, old)
+  // R7-CE19（专家 2026-10-30 P0）：旧断言把「manifest 为 {}（state 未知）超龄就删」当成合同，
+  // 这恰好是被认定的缺陷——未知状态的事务可能已经落盘，删了就丢掉唯一恢复原像。
+  // 新合同：未知态一律保留；只有【可证明的终态】才回收。
+  const unproven = join(ws, '.ai-transactions', 'orphan-txn')
+  mkdirSync(join(unproven, 'backup'), { recursive: true })
+  writeFileSync(join(unproven, 'manifest.json'), '{}')
+  utimesSync(unproven, old, old)
+  const proven = join(ws, '.ai-transactions', 'terminal-txn')
+  mkdirSync(join(proven, 'backup'), { recursive: true })
+  writeFileSync(join(proven, 'manifest.json'), JSON.stringify({ txnId: 'terminal-txn', state: 'committed' }))
+  utimesSync(proven, old, old)
   const fresh = join(ws, '.ai-transactions', 'live-txn')
   mkdirSync(join(fresh, 'backup'), { recursive: true })
-  writeFileSync(join(fresh, 'manifest.json'), '{}')
-  const store = new TransactionStore(ws)
-  assert(!existsSync(stale), '超龄（8 天）孤儿事务目录被清扫')
+  writeFileSync(join(fresh, 'manifest.json'), JSON.stringify({ txnId: 'live-txn', state: 'committed' }))
+  new TransactionStore(ws)
+  assert(existsSync(unproven), 'R7-CE19：超龄但状态不可证明的目录保留（旧实现误删）')
+  assert(!existsSync(proven), '超龄且可证明终态（committed）的目录正常回收')
   assert(existsSync(fresh), '新鲜事务目录保留')
   try { rmSync(ws, { recursive: true, force: true }) } catch {}
 }

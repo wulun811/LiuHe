@@ -5,7 +5,7 @@
 import { existsSync } from 'node:fs'
 import {
   makeError, envelope, getTask, updateTaskCas, findOperation, payloadHash, newOperationId,
-  newEvidenceId, operationEvent, ensureTaskVersion, fileHash, sha256Hex, assertTaskWritable, taskHeader, unknownTaskError,
+  newEvidenceId, operationEvent, ensureTaskVersion, fileHash, sha256Hex, assertTaskWritable, taskHeader, unknownTaskError, stateCommitPendingText,
 } from '../entry-shared.js'
 import { handle as gitWorktreeHandle } from '../tool-git-worktree/handler.js'
 import { normalizeChanges, previewChanges, classifyWorktreeResult, WORKTREE_RULES_VERSION } from '../../workflow/worktree.js'
@@ -163,7 +163,10 @@ export async function handle(args, context) {
         casR = updateTaskCas(workspaceDir, task_id, curT.revision, (t) => operationEvent(t, fin, { node: 'worktree', result_kind: 'partial' }))
         if (casR.ok) break
       }
-      if (!casR || !casR.ok) return makeError('state_commit_pending', `recovered worktree detected but state commit raced (${casR?.code || 'task_gone'}); retry with the same request_id`, 'Retry with the same request_id to finalize.')
+      if (!casR || !casR.ok) {
+        const txt = stateCommitPendingText('code_worktree', 'recovered worktree detected', casR?.code || 'task_gone', op.request_id)
+        return makeError('state_commit_pending', txt.message, txt.suggestion)
+      }
       return envelope({
         task: taskHeader(casR.task),
         observation: {

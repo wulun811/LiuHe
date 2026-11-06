@@ -5,6 +5,7 @@ import { randomBytes, createHash } from 'node:crypto'
 import { join, relative, isAbsolute } from 'node:path'
 import { DEFAULT_IGNORE_DIRS, collectFilesWithDirStats, parseMalongignore } from '../file-collector.js'
 import * as store from './entry-store.js'
+import { isTerminalLifecycle } from './entry-store.js'
 import { projectEffectiveState, inflightFacts } from '../workflow/effective-state.js'
 import { checkAttempts, latestCheckScope, checkScopeForJob, unresolvedStoppedAttempt, stoppedAttemptResolutions, resolvedStoppedCheckOperationIds } from '../workflow/check-attempts.js'
 import { listJobs } from '../workflow/jobs.js'
@@ -19,13 +20,46 @@ export function makeError(code, message, suggestion) {
   return { ok: false, error: code, code, message, ...(suggestion ? { suggestion } : {}), trace_id: traceId() }
 }
 
+// 2026-11-05 发布前走查：state_commit_pending 的文案不能默认调用方传了 request_id。
+// 有 rid → 用同一个 rid 重试；没有 → 明确让调用方重跑工具（recovered-write 守卫防二次写入）。
+export function stateCommitPendingText(tool, what, code, requestId) {
+  const rid = typeof requestId === 'string' && requestId.trim() ? requestId.trim() : null
+  const tail = rid
+    ? 'retry with the same request_id to finalize'
+    : `no request_id was supplied — re-run ${tool} to record the result`
+  return {
+    summary: `${what}, but task state commit raced (${code}); ${tail}.`,
+    message: `${what} but task state commit raced (${code}); ${rid ? 'retry with the same request_id' : `no request_id was supplied — re-run ${tool} to record the result`}.`,
+    suggestion: rid
+      ? 'Retry with the same request_id to finalize.'
+      : `Re-run ${tool} with the same arguments to record the result; the recovered-write guard prevents a second write.`,
+  }
+}
+
 // WP08R-5 P4：未知 task_id 错误可执行化——附同 workspace 活跃任务候选（防模型编造 task id 后无路可走）
 export function unknownTaskError(workspaceDir, task_id) {
   let actives = []
-  try { actives = (listTasks(workspaceDir) || []).filter(t => t.lifecycle !== 'cancelled').map(t => t.task_id).slice(0, 3) } catch {}
+  // D-02（专家裁决 A）：活跃候选必须排除全部终态（旧实现只排 cancelled，
+  // 于是把 task_completed / task_abandoned 当成「可复用」推荐给 LLM —— 与写守卫矛盾）。
+  try { actives = (listTasks(workspaceDir) || []).filter(t => !isTerminalLifecycle(t.lifecycle)).map(t => t.task_id).slice(0, 3) } catch {}
+  // R21-F10（2026-11-05 真机轨迹复盘）：B 池 14 天 20 次 task_not_found，
+  // 逐条核对后【没有一条是编造 id】——全部是「任务不在当前状态目录里」。
+  // 任务按 MALONG_STATE_DIR 隔离（entry-store 的 baseDir），换宿主/换 profile
+  // （opencode 的 ~/.config/malong vs dsh 的 ~/.local/state/malong-dsh）就会看不见，
+  // 但旧文案一口咬定「不要编造 task_id」，把用户引到完全错误的方向。
+  // 现在按有/无活跃任务分两种说法，并把 state dir 这条最常见成因摆出来。
+  const stateHint = (() => {
+    try {
+      const d = process.env.MALONG_STATE_DIR
+      return d ? ` (current MALONG_STATE_DIR=${d})` : ''
+    } catch { return '' }
+  })()
   const suggestion = actives.length
     ? 'Re-use an active task in this workspace (' + actives.join(', ') + ') or call code_task {workspace_dir, goal} to create a new one.'
-    : 'Call code_task {workspace_dir, goal} to create a task first — do not invent a task_id.'
+    : 'No active task for this task_id in this workspace. Tasks are stored per MALONG_STATE_DIR' + stateHint +
+      ', so a task created by another host/profile (e.g. opencode vs dsh) or after changing the state dir is not visible here. '
+      + 'Call code_task {workspace_dir, goal} to create a task first — do not invent a task_id. '
+      + 'If you were mid-task, re-create the task and reuse your last read_ref/write_read_refs.'
   return makeError('task_not_found', 'Unknown task_id: ' + task_id, suggestion)
 }
 
@@ -56,7 +90,20 @@ export function executableNextAction(na, ctx) {
 // 而默认（真出错的主路径）只回一句「syntax/bracket errors detected」——P1-3 把临时路径
 // 换成真实文件名的成果在主路径上完全作废，用户只能靠关掉校验才能看见它查出了什么。
 // 修法：详情字段集中在此转发，三个 handler 不再各自维护白名单（防再次漂移）。
-export const WRITE_ERROR_DETAIL_KEYS = ['validation', 'assembled_excerpt', 'hint', 'txn_id']
+// G1-R2（2026-10-29 专家§3）：版本冲突/写入失败需要透出的事实字段也集中在此。
+// 专家说的「集中管理允许透出的语义字段、禁止静默漏传必须字段」正是这个清单的职责——
+// 白名单本身不是问题，散落在各 handler 里才是问题。
+export const WRITE_ERROR_DETAIL_KEYS = [
+  'validation', 'assembled_excerpt', 'hint', 'txn_id',
+  // 版本冲突证据（LH-CE11/CE12）：让调用方能核对「我以为是哪版、实际是哪版」
+  'expected_hash', 'actual_hash', 'observation', 'note', 'reason',
+  'current_version', 'file', 'failed_edits', 'diagnostics',
+  // R22-F16（2026-11-05 手感实测）：patch 类失败的最接近匹配证据。
+  // 这是本仓库反复出现的同型缺陷：write-runtime 产出了字段，白名单没转 → 静默丢弃。
+  // closest_match 是 error-codes.findClosestMatch 的返回值（line/similarity/snippet），
+  // 纯文件内容派生，不含路径或密钥。
+  'closest_match',
+]
 
 export function forwardWriteErrorDetail(r) {
   const e = (r?.error && typeof r.error === 'object') ? r.error : {}
@@ -72,20 +119,40 @@ export function forwardWriteErrorDetail(r) {
 
 // LH-001：终态写守卫——cancelled 任务拒绝一切新副作用操作（已完成操作的无副作用结果核对
 // 由调用方先行的 request_id dedup 分支放行）。返回 error 对象，或 null（可写）。
+// D-02（2026-10-29 专家裁决 A）：终态任务拒绝新的副作用写入。
+// 历史问题：写守卫只拦 cancelled，但终态枚举有 4 个（pruneTasks 已当终态清理）。
+// 实测 completed/done/abandoned 均可写盘 —— 等于「往一个即将被清理的任务里写」。
+// 判据统一在 entry-store.isTerminalLifecycle（单一来源，不在此处重复定义）。
+export { isTerminalLifecycle }
+
 export function assertTaskWritable(task) {
-  if (task?.lifecycle === 'cancelled') {
+  if (!isTerminalLifecycle(task?.lifecycle)) return null
+  const lc = task.lifecycle
+  if (lc === 'cancelled') {
     return makeError(
       'task_cancelled',
       `task ${task.task_id} is cancelled (terminal): new writes/operations are closed.`,
       'Call code_control(action="reopen") to continue this task, or create a new task with code_task.',
     )
   }
-  return null
+  // completed/done/abandoned：只能查询历史，不能再写。不提供不可执行的 reopen 建议
+  // （code_control.reopen 目前只接受 cancelled），改为明确说「新建任务」。
+  return makeError(
+    'task_terminal',
+    `task ${task.task_id} is ${lc} (terminal): new writes/operations are closed. Its history stays readable.`,
+    'This task is finished. Start a new task with code_task {workspace_dir, goal} to continue the work; do not reuse a finished task_id.',
+  )
 }
 
 // 统一任务头：透出真实 lifecycle（禁止各 handler 硬编码 active）
 export function taskHeader(task) {
-  return { task_id: task.task_id, revision: task.revision, route: task.route, node: task.node, lifecycle: task.lifecycle }
+  return {
+    task_id: task.task_id, revision: task.revision, route: task.route, node: task.node, lifecycle: task.lifecycle,
+    // C 档：route 是建议不是理解——来源必须跟着每个回包走，否则使用者无从判断该不该信。
+    // 仅在任务记录里存在时输出（旧任务/旧快照不凭空造字段）。
+    ...(task.route_source ? { route_source: task.route_source } : {}),
+    ...(task.route_evidence ? { route_evidence: task.route_evidence } : {}),
+  }
 }
 
 export function envelope({ task = null, observation = null, allowed_actions = [], extra = {} }) {
@@ -148,7 +215,7 @@ export function hasNonAscii(s) { return /[^\x00-\x7F]/.test(String(s ?? '')) }
 // S3.3（T20）：任务 schema/graph 版本。新建任务盖章；读/写入口对「更新的版本」显式拒绝（不猜）。
 // 旧任务（无 schema_version）视为当前兼容，不强制迁移、不写盘（向后兼容 fixtures）。
 export const TASK_SCHEMA_VERSION = 1
-export const GRAPH_VERSION = '0.5.29'
+export const GRAPH_VERSION = '0.6.1'
 export function ensureTaskVersion(task) {
   const v = task?.schema_version
   if (v == null) return { ok: true, legacy: true }
@@ -241,20 +308,97 @@ export function writeBasesForOperation(task, operationId) {
 }
 
 // 路由推断：goal 关键词 → plan §6.2 enum（显式 route 优先，服务端不再改）
+//
+// 2026-10-30 自用试用修正：此前只有英文正则，中文目标几乎全部落到 understand：
+//   实现一个导出 CSV 的功能 → understand（应为 change）
+//   审查这个模块的安全风险 → understand（应为 review，review 才触发 audit 完成契约）
+// 这不是标签问题：route 决定 audit 完成契约、maintain/system 的结构展开、以及
+// 每个路线的 next_action 指引。所以每组补中文词表，中英必须同路口。
+//
+// 顺序即优先级（change > diagnose > review > maintain > document > isolate > system）：
+// 「修复登录失败」是改动而不是诊断——改动动词在前就是这个意思。
 const ROUTES = [
-  ['change', /\b(add|implement|change|modify|refactor|fix|rename|edit|update|remove|delete|support)\b/i],
-  ['diagnose', /\b(bug|error|fail|crash|why|debug|broken|incorrect|wrong|diagnose)\b/i],
-  ['review', /\b(review|audit|risk|security|quality|lint)\b/i],
-  ['maintain', /\b(clean|dead[ -]?code|dependency|upgrade|maintain)\b/i],
-  ['document', /\b(document|docstring|comment)\b/i],
-  ['isolate', /\b(isolate|minimal|repro|bisect)\b/i],
-  ['system', /\b(architecture|structure|overview|map|orient|entry point|initializ)\b/i],
+  ['change',
+    // B6-route：英文侧**不**加 write/make/build——实测会抢走
+    // 「write documentation for X」(应 document) 与「make a minimal repro」(应 isolate)。
+    // 中文侧补词是安全的（"写一个脚本" ≠ "写文档"），英文侧语义歧义太大，不动。
+    // R22-F17（2026-11-05 真机手感实测）：英文动词改为**句首锚定**（允许 please/how do I 等前缀）。
+    // 旧实现全串匹配 → goal 里出现函数名 add 就必然 change：
+    //   「document the add function」→ change（应 document）
+    //   「why does add return empty」→ change（应 diagnose）
+    //   「the add function is broken」→ change（应 diagnose）
+    // add/support 是最常见的函数名，不能当句中出现的中缀动词用。
+    /^\s*(?:(?:please|pls|can you|could you|would you|help me|i (?:want|need) to|we (?:want|need) to|how (?:do|can|should) i|how to)\s+)*\b(add|implement|change|modify|refactor|fix|rename|edit|update|remove|delete|support)\b/i,
+    // B6-route：补「造东西」类动词——实测缺失导致 goal 提到"文档"时被 document 抢走。
+    // DSH 现场「写一个文档命令闸门脚本」本质是实现代码，却路由成 document（不做代码定位）。
+    // 补词而非改排序：排序是全局影响，词表缺口是确定性可枚举的。
+    // R22-F17：加上/加入/支持 移到弱信号表（WEAK_ROUTES）——它们是常见名词/标识符；
+    // 补「改」单字：实测「改 alpha 的返回值」原本一条都不命中 → 默认 understand。
+    // `改` 只在不构成「改动/改进」这类名词时才算动作（实测：裸纳入会把「评审这次改动」抢成 change）。
+    /(新增|添加|实现|修改|改成|改进|改为|重构|修复|重命名|删除|移除|替换|更新|补上|接入|迁移|搬到|移到|移动|调整|改造|扩展|写个|写一个|做一个|做个|加一个|加个|搭一个|搭个|补一个|补个|接到|接进|完成|落地|改(?!(?:动|进|善|期|天)))/],
+  ['diagnose',
+    // `error` 移到弱信号：goal 里的 `Error` 多为类型名（「…抛 Error」是改动，不是诊断）。
+    /\b(bug|fail|crash|why|debug|broken|incorrect|wrong|diagnose)\b/i,
+    /(为什么|为啥|报错|崩溃|失败|异常|排查|定位|根因|不工作|坏了|超时|死循环|卡住)/],
+  ['review',
+    /\b(review|audit|risk|security|quality|lint)\b/i,
+    /(审查|评审|复查|安全风险|风险点|质量检查|静态检查)/],
+  ['maintain',
+    /\b(clean|dead[ -]?code|dependency|upgrade|maintain)\b/i,
+    /(清理|死代码|依赖升级|升级依赖|维护|陈旧|过时)/],
+  ['document',
+    // 0.6.1：documentation/docstring 复数与派生形式以前匹配不上（\bdocument\b 只认原形）
+    // B6-route：补 readme / changelog / 说明 等常见文档产物形态（实测"readme 里有一句话说不清"落 understand）
+    /\b(document\w*|docstring\w*|comment\w*|readme\w*|changelog\w*|manual|guide|tutorial)\b/i,
+    /(文档|注释|读我|说明文档|说明书|说明里|白皮书|手册|自述|readme)/i],
+  ['isolate',
+    /\b(isolate|minimal|repro|bisect)\b/i,
+    /(最小复现|隔离|二分|最小化|缩小范围)/],
+  ['system',
+    /\b(architecture|structure|overview|map|orient|entry point|initializ)\b/i,
+    /(架构|总览|概览|结构|入口|初始化|调用链|模块划分)/],
+]
+// R22-F17：弱信号词表——这些词既是动作词，也常是名词/标识符（支持、加上、加入）。
+// 只有在**所有路线都没有强信号**时才使用：避免「为什么不支持并发上传」被 change 抢走，
+// 同时保留「给 greet() 加上校验」「让它支持 X」这类真实改动目标。
+const WEAK_ROUTES = [
+  ['change', null, /(加上|加入|支持)/],
+  // error 也常是类型名/字段名：「给 greet 加上…抛 Error」是改动，不是诊断。
+  ['diagnose', /\b(error)\b/i, null],
 ]
 export function inferRoute(goal) {
-  const g = String(goal || '')
-  for (const [r, re] of ROUTES) if (re.test(g)) return r
-  return 'understand'
+  return inferRouteDetailed(goal).route
 }
+
+// C 档（2026-10-30 用户决策）：「不砍能力，砍承诺」——
+// 关键词匹配是词典，不是理解：换个说法就失效（实测词面重合 3/3、换说法 0/3）。
+// 所以把「猜的」标出来，而不是继续假装读懂了。
+//   · source='inferred'：命中某个词 → 同时给出 evidence，让人能自己核验对不对
+//   · source='default' ：一个词都没命中 → 兜底 understand，并由调用方告知使用者
+//   · source='explicit'：调用方自己指定（由 handler 填入，此处不产生）
+export function inferRouteDetailed(goal) {
+  // 输入可能是任意对象；toString 抛错不得把异常抛给调用方（路由只是建议，不应当中断入口）
+  let g = ''
+  try { g = String(goal ?? '') } catch { g = '' }
+  const firstMatch = (re) => {
+    if (!re) return null
+    const m = g.match(re)
+    return m ? m[0] : null
+  }
+  // R22-F17：强信号优先（跨路线，路线顺序仍决定平手优先级）；弱信号只在全无强信号时兜底。
+  for (const [route, re, cjk] of ROUTES) {
+    const ev = firstMatch(re) || firstMatch(cjk)
+    if (ev) return { route, source: 'inferred', evidence: ev }
+  }
+  for (const [route, re, cjk] of WEAK_ROUTES) {
+    const ev = firstMatch(re) || firstMatch(cjk)
+    if (ev) return { route, source: 'inferred', evidence: ev }
+  }
+  return { route: 'understand', source: 'default', evidence: null }
+}
+
+// 路由可选项（提示文案用；与 ROUTES + understand 同源）
+export const ROUTE_CHOICES = ['understand', ...ROUTES.map(r => r[0])]
 
 const STOP = new Set([
   'the', 'and', 'for', 'with', 'that', 'this', 'from', 'into', 'list', 'find', 'every', 'each',
@@ -295,9 +439,17 @@ export async function ensureIndexed(codeIndexService, workspaceDir) {
   })
   const files = pre.files.map(f => f.path)
   const changed = await codeIndexService.indexBatch(files, workspaceDir, undefined, { prune: !pre.truncated })
+  // F3（2026-10-29 自用试用修正）：files_indexed 是「本次写入的文件数」，不是「索引里有多少文件」。
+  // 索引已最新时它是 0，旧字段名让调用方读成「根本没有索引」，进而怀疑后续所有结果。
+  const indexedThisRun = Array.isArray(changed) ? changed.length : 0
   return {
     files_scanned: files.length,
-    files_indexed: Array.isArray(changed) ? changed.length : 0,
+    files_indexed: indexedThisRun,
+    files_indexed_this_run: indexedThisRun,
+    index_state: indexedThisRun > 0 ? 'indexed' : 'fresh_noop',
+    index_state_note: indexedThisRun > 0
+      ? 'index updated this run (files_indexed_this_run = files written; total indexed files is >= this)'
+      : 'index already up to date for the scanned files (fresh_noop); files_indexed==0 does NOT mean the workspace is unindexed',
     truncated: !!pre.truncated,
     files,
   }
@@ -382,6 +534,84 @@ function browseWhy(rank) {
         : rank === 3 ? 'structure order fallback'
           : 'fallback (low-information path)'
 }
+
+// R16（真机试用 F2）：零命中兜底的**取样**。旧实现先把整张表按字母序 slice(0,20) 再排序——
+// 池子里只有字母序第一段（本仓前 20 有 13 个属 integration/liuhe-lite），后面的 rank 再准也没用。
+// 新取样：按顶层目录分组 → 有入口点的组优先 → 其余按文件数降序；组间轮转取，铺满上限为止。
+// 非主体目录（integration/examples/vendor/docs…）先跳过，主体目录不够铺满时才回填并显式标注。
+// 纯本地确定性（只数文件、看路径名），不读依赖图、不做语义判断。
+const BROWSE_PRIMARY_DIRS = new Set(['src', 'lib', 'app', 'internal', 'core', 'server', 'pkg', 'packages', 'cmd', 'tools', 'source'])
+const BROWSE_NON_PRIMARY_DIRS = new Set(['integration', 'integrations', 'examples', 'example', 'demo', 'demos', 'samples', 'sample', 'third_party', 'third-party', 'vendor', 'docs', 'doc', 'documentation', 'fixtures', 'fixture'])
+export function selectBrowseSample(files, { limit = 20, entryFiles = [] } = {}) {
+  const list = (Array.isArray(files) ? files : []).map(browseNorm).filter(Boolean)
+  const entrySet = new Set((Array.isArray(entryFiles) ? entryFiles : []).map(browseNorm))
+  const groups = new Map()
+  for (const f of list) {
+    const segs = f.split('/')
+    const dir = segs.length > 1 ? segs[0] : '.'
+    if (!groups.has(dir)) groups.set(dir, { dir, files: [], entries: 0 })
+    const g = groups.get(dir)
+    g.files.push(f)
+    if (entrySet.has(f)) g.entries++
+  }
+  for (const g of groups.values()) {
+    // 组内：入口文件优先，其余按路径字节序（确定性）
+    g.files.sort((a, b) => (entrySet.has(b) ? 1 : 0) - (entrySet.has(a) ? 1 : 0) || (a < b ? -1 : a > b ? 1 : 0))
+  }
+  const groupRank = (g) => {
+    if (g.entries > 0) return 0
+    const d = g.dir.toLowerCase()
+    if (BROWSE_PRIMARY_DIRS.has(d)) return 1
+    if (BROWSE_NON_PRIMARY_DIRS.has(d)) return 3
+    return 2
+  }
+  const all = [...groups.values()].map(g => ({ g, rank: groupRank(g) }))
+  all.sort((a, b) => a.rank - b.rank || b.g.files.length - a.g.files.length || (a.g.dir < b.g.dir ? -1 : a.g.dir > b.g.dir ? 1 : 0))
+  const picked = []
+  const took = new Map()
+  const takePass = (rank) => {
+    let moved = false
+    for (const { g, rank: r } of all) {
+      if (r !== rank || picked.length >= limit) continue
+      const i = took.get(g.dir) || 0
+      if (i >= g.files.length) continue
+      picked.push(g.files[i])
+      took.set(g.dir, i + 1)
+      moved = true
+    }
+    return moved
+  }
+  for (const rank of [0, 1, 2]) while (picked.length < limit && takePass(rank)) { /* 轮转铺满 */ }
+  let fellBack = false
+  if (picked.length < limit) {
+    const before = picked.length
+    while (picked.length < limit && takePass(3)) { /* 主体不够 → 回填非主体 */ }
+    fellBack = picked.length > before
+  }
+  const modules = all
+    .map(({ g, rank }) => ({
+      dir: g.dir, files: g.files.length, sampled: took.get(g.dir) || 0, has_entry_point: g.entries > 0,
+      priority: rank === 0 ? 'entry_point' : rank === 1 ? 'primary' : rank === 3 ? 'non_primary' : 'other',
+    }))
+    .filter(m => m.sampled > 0)
+    .sort((a, b) => b.sampled - a.sampled || b.files - a.files || (a.dir < b.dir ? -1 : 1))
+  const skipped = all
+    .filter(({ g }) => !(took.get(g.dir) || 0) && BROWSE_NON_PRIMARY_DIRS.has(g.dir.toLowerCase()))
+    .map(({ g }) => ({ dir: g.dir, files: g.files.length, reason: 'non-primary dir (examples/integration/vendor/docs) — sampled only when primary modules cannot fill the limit' }))
+  return {
+    files: picked,
+    sampling: {
+      strategy: 'breadth_by_top_dir',
+      files_considered: list.length,
+      sampled: picked.length,
+      limit,
+      modules: modules.slice(0, 8),
+      ...(skipped.length ? { skipped_dirs: skipped.slice(0, 8) } : {}),
+      ...(fellBack ? { fell_back_to_non_primary: true } : {}),
+      note: 'SAMPLE across top-level modules (deterministic breadth-first) — NOT query hits and NOT a relevance ranking. Narrow with target={file|symbol} or search_terms.',
+    },
+  }
+}
 function pickBrowseSymbols(symbols, maxSymbols) {
   const arr = (Array.isArray(symbols) ? symbols : []).filter(s => s && s.name && !s.name.startsWith('__'))
   const preferred = arr.filter(s => s.kind !== 'variable')
@@ -406,7 +636,11 @@ export function buildZeroHitGuidance(modules, { workspaceDir, task_id, entryFile
       next_action: {
         tool: 'code_read',
         args: { workspace_dir: workspaceDir, task_id, locator },
-        note: 'Browse entries (ranked: entry points > business dirs > docs; NOT query hits). Read a concrete file/symbol, or refine with search_terms=[...] / target={file|symbol} when irrelevant.',
+        // R16：只有入口点才叫“推荐”；其它都是样本，要说出来（之前把样本写成推荐，让人白读）。
+        ...(entrySet.has(browseNorm(first.file)) ? {} : { sample_only: true }),
+        note: 'Browse entries (ranked: entry points > business dirs > docs; NOT query hits).'
+          + (entrySet.has(browseNorm(first.file)) ? '' : ' This file is a SAMPLE from the largest modules, not a match — pass target={file|symbol} or search_terms to narrow.')
+          + ' Read a concrete file/symbol, or refine with search_terms=[...] (English identifier guesses — hypotheses, not verified names) / target={file|symbol} when irrelevant.',
       },
       next_step: 'code_read(workspace_dir="' + workspaceDir + '", task_id="' + task_id + '", locator=' + JSON.stringify(locator) + ')',
     }
@@ -418,7 +652,7 @@ export function buildZeroHitGuidance(modules, { workspaceDir, task_id, entryFile
       args: { workspace_dir: workspaceDir, task_id, locator: { file_path: '<path>' } },
       template: true,
       required_args: ['locator.file_path'],
-      note: 'Zero candidates and no readable structure modules: pass a concrete file path, or refine with search_terms=[...] / target={file|symbol}.',
+      note: 'Zero candidates and no readable structure modules: pass a concrete file path, or refine with search_terms=[...] (English identifier guesses — hypotheses, not verified names) / target={file|symbol}.',
     },
     next_step: 'code_read(workspace_dir="' + workspaceDir + '", task_id="' + task_id + '", locator={"file_path":"<path>"}) — pass a concrete file path, or refine with search_terms=[...] / target={file|symbol}.',
   }
@@ -552,9 +786,17 @@ export function buildTaskNextAction({ workspaceDir, task_id, task, read_ref = nu
     return {
       tool: 'code_check',
       args: { workspace_dir: workspaceDir, task_id, ...checkReuseArgs(task, ['test'], { workspaceDir }), run: true },
-      note: lastCheckFailed
-        ? `The last check FAILED (${lastCheck.kind}): fix the code, then re-run code_check (run=true) with these args (same scope).`
-        : 'A prior edit is unvalidated (result_kind=partial): run checks before further edits.',
+      // R22-F18（2026-11-05 轨迹实测）：旧文案把「未验证」说成「进一步编辑前必须先跑」。
+      // 实现并不拦后续编辑；轨迹里两次检查之间平均连写 29.4 次（p90=125），
+      // code_check 建议采纳率 A 池 0%（64 次）/ B 池 5%（180 次中 9 次）。
+      // 把可选动作说成前置条件，只会训练调用方忽略 next_action。
+      // 但「上次检查 FAILED」不是可选项——那是真失败后的必修，不能一起标可选。
+      ...(lastCheckFailed
+        ? { note: `The last check FAILED (${lastCheck.kind}): fix the code, then re-run code_check (run=true) with these args (same scope).` }
+        : {
+            optional: true,
+            note: 'A prior edit is unvalidated (result_kind=partial). Validation is NOT a precondition for further edits — keep editing if you are mid-task; run code_check (run=true) once when the task is done (it runs the repo test command; can be slow in large repos).',
+          }),
     }
   }
   // 13-B（专家 c2a83e4 P2-a）：有效状态统一口径——validated 但失效（goal 漂移/文件变化/后台不确定）不得先进完成分支
@@ -650,10 +892,21 @@ export function buildTaskNextAction({ workspaceDir, task_id, task, read_ref = nu
   // WP03（12.5 八路线）：路线是分类与推荐，不复制八套流程——其余五路线显式只读出口。
   // 涉写/隔离的能力在 note 中点名，但缺载荷/锚点不算可直接调用（不假装可直接应用）。
   if (task?.route === 'understand') {
+    // R22-F27（2026-11-05 极限风暴）：旧实现把 understand 的 next_action 指回 code_status，
+    // 形成 status → status 自环（照做不前进）。优先指向真实候选；内容命中（kind=content）
+    // 不是可读符号，按既有约定不得作为读取目标。
+    const c = Array.isArray(task.candidates) ? task.candidates.find(x => x?.locator && x.kind !== 'content') : null
+    if (c?.locator) {
+      return {
+        tool: 'code_read',
+        args: { workspace_dir: workspaceDir, task_id, locator: c.locator },
+        note: 'Route=understand: read the top candidate to gather evidence; more candidates via code_control(action="expand", ref="candidates"). Answering from evidence is yours; no test run is required.',
+      }
+    }
     return {
-      tool: 'code_status',
-      args: { workspace_dir: workspaceDir, task_id },
-      note: 'Route=understand: read the listed candidates (code_read) until the requested material is read or no coverage is confirmed — answering from evidence is yours; no test run is required.',
+      tool: 'code_control',
+      args: { workspace_dir: workspaceDir, task_id, action: 'expand', ref: 'candidates' },
+      note: 'Route=understand: list candidates, then code_read the relevant one; no test run is required.',
     }
   }
   if (task?.route === 'diagnose') {
@@ -934,6 +1187,10 @@ function enrich(codeIndexService, file, name, kind, startLine, endLine, type) {
 const TEST_PATH_RE = /(^|\/)(tests?|__tests__|spec|__mocks__)(\/|$)|\.(test|spec)\.[^/]+$|_test\.[^/]+$/i
 // 12-D：非生产路径（基准/工具脚本）——非 legacy 臂不进内容候选，符号候选与 tests 同层降权
 // 13-E（live 狗粮）：dsh/bundle/ 是 .gitignore 的构建副本（reprep.sh 产物）——副本内容不应进候选挤占生产入口
+// R16（真机试用 F2）：原来 benchmark 与 bundle 合在一个正则里，于是 dsh/bundle 的候选被标成
+// benchmark_path（谎报归因）。降权保留，标签分开：基准说基准，生成物说生成物。
+const BENCH_PATH_RE = /(^|\/)(benchmarks?|bench)(\/|$)/i
+const GENERATED_PATH_RE = /(^|\/)(dsh\/bundle|bundle|bundled|dist|build|out|generated)(\/|$)/i
 const NON_PROD_PATH_RE = /(^|\/)(benchmarks?|bench)(\/|$)|(^|\/)dsh\/bundle(\/|$)/i
 
 // 正文内容扫描（dogfood ①）：distinctive token 可能只出现在正文/字符串里（如 MALONG_INTERFACE），
@@ -1012,7 +1269,9 @@ function matchScore(token, name, filePath) {
     if (np.includes(p)) { if (s < 30) s = 30; continue }
     if (p.length >= 5 && np.some(q => q.length >= 5 && (q.includes(p) || p.includes(q)))) { if (s < 20) s = 20 }
   }
-  if (s === 0 && t.length >= 4) {
+  // R16（真机试用 F2）：路径段全等匹配原来被 length>=4 挡住 → DSH/API/CSV/CLI 这类 3 字符 token
+  // 永远拿不到路径证据（score=0），只能靠插入序。子串分支仍保持 >=5 控噪。
+  if (s === 0 && t.length >= 3) {
     const fp = String(filePath || '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)
     if (fp.includes(t)) s = 15
     else if (t.length >= 5 && fp.some(p => p.length >= 5 && p.includes(t))) s = 12
@@ -1113,17 +1372,28 @@ export async function findCandidates(codeIndexService, workspaceDir, goal, targe
       else add({ name: hit.token, kind: 'content', file_path: hit.file, symbol_id: null, range: [hit.lines?.[0] || 1, hit.lines?.[0] || 1], signature: null, locator: { file_path: hit.file } })
     }
   } else if (scanMeta) {
+    // R15（2026-10-30 重启后真机试用）：归因必须与实际相符——三种情况分开说，
+    // 不能把「token 太短」说成「没有 token」。实测：goal「实现一个导出 CSV 的功能」
+    // → extractTokens 返回 ['CSV']，却被回成「no distinctive ASCII token」，
+    // 且给出的补救「用反引号」并不改变 ≥6 这条规则（做了对照实验，裸写与反引号结果完全相同）。
+    const MIN_CONTENT_TOKEN = 6
     const skipped = distinctive.length
       ? 'no files to scan'
-      : tokens.length === 0 && goalNonAscii
-        ? 'non_ascii_goal'
-        : (goalNonAscii ? 'non-ASCII goal: no distinctive ASCII token; quote identifiers in backticks' : 'no distinctive token (>=6 chars) in goal')
+      : tokens.length === 0
+        ? (goalNonAscii ? 'non_ascii_goal' : 'no_token_in_goal')
+        : 'tokens_too_short'
+    const shortTokens = skipped === 'tokens_too_short' ? tokens.slice(0, 6) : []
     scanMeta.content = {
       files_considered: files.length,
       files_scanned: 0,
       skipped,
-      ...(skipped === 'non_ascii_goal' ? { hint: 'Non-ASCII goals cannot drive content scan. Pass target={file:"<path>"} (absolute or workspace-relative; target-directed scan covers .malongignore), target={symbol:"Name"}, or quote ASCII identifiers in backticks (e.g. `FooBar`).' } : {}),
-      ...(tokens.length === 0 && goalNonAscii ? { non_ascii_goal: true } : {}),
+      ...(skipped === 'non_ascii_goal' ? { hint: 'Non-ASCII goals cannot drive content scan. Pass target={file:"<path>"} (absolute or workspace-relative; target-directed scan covers .malongignore), target={symbol:"Name"}, or quote ASCII identifiers in backticks (e.g. `FooBar`, at least 6 chars).' } : {}),
+      ...(skipped === 'tokens_too_short' ? {
+        short_tokens: shortTokens,
+        min_token_length: MIN_CONTENT_TOKEN,
+        hint: `Content scan needs tokens of at least ${MIN_CONTENT_TOKEN} chars, but the goal only has shorter token(s): ${shortTokens.join(', ')}. Short tokens ARE still used for symbol search (findDefinitions/searchSymbols) — only the raw-text scan is skipped. Backticks do NOT lift this limit. Use target={file:"<path>"} or target={symbol:"Name"}, or code_query(mode="search", query="${shortTokens[0] || ''} ...") for raw-text matching.`,
+      } : {}),
+      ...(goalNonAscii ? { non_ascii_goal: true } : {}),
       truncated: false,
       max_files: 0,
       max_bytes: 0,
@@ -1220,7 +1490,8 @@ export async function findCandidates(codeIndexService, workspaceDir, goal, targe
       segs.includes('plans') || segs.some(s => s.startsWith('plan-'))
   }
   const isTestPath = (f) => TEST_PATH_RE.test(toPosix(f))
-  const isBenchPath = (f) => NON_PROD_PATH_RE.test(toPosix(f))
+  const isBenchPath = (f) => BENCH_PATH_RE.test(toPosix(f))
+  const isGeneratedPath = (f) => GENERATED_PATH_RE.test(toPosix(f))
   const matchedTermsOf = (e) => tokens.filter(t => matchScore(t, e.c.name, fileOf(e)) > 0)
   // 12-D：同名歧义（≥2 候选精确同名）→ 精确名证据不具区分度，不吃加成
   const exactDf = new Map()
@@ -1259,6 +1530,7 @@ export async function findCandidates(codeIndexService, workspaceDir, goal, targe
     if (isNoisyPath(file)) score -= 40
     if (isTestPath(file)) score -= 40
     if (isBenchPath(file)) score -= 40
+    if (isGeneratedPath(file)) score -= 40
     return score
   }
   // 12-B：排序原因/命中词回执（专家 05109e1：候选需可解释、可消歧）
@@ -1272,7 +1544,18 @@ export async function findCandidates(codeIndexService, workspaceDir, goal, targe
     if (isNoisyPath(fileOf(e))) parts.push('noisy_path')
     if (isTestPath(fileOf(e))) parts.push('test_path')
     if (isBenchPath(fileOf(e))) parts.push('benchmark_path')
-    return parts.length ? parts.join('+') : 'fuzzy'
+    if (isGeneratedPath(fileOf(e))) parts.push('generated_bundle')
+    // R16：没有 token 证据也没有锚点 → 不是 fuzzy（fuzzy 意味着有模糊匹配），是没匹配上。
+    // 只按路径档位被捞回来的行必须自己说出来，不能借 fuzzy 装作匹配过。
+    const hasEvidence = matchedTermsOf(e).length > 0 || !!e.anchor ||
+      (!!targetFile && (fileOf(e) === targetFile || (!!targetDir && fileOf(e).startsWith(targetDir + '/'))))
+    if (!hasEvidence) return 'no_token_match'
+    if (!parts.length) {
+      // R16：区分「符号名模糊命中」与「只靠路径命中」——后者证据弱，不能也叫 fuzzy
+      const nameHit = tokens.some(t => matchScore(t, e.c.name, '') > 0)
+      return nameHit ? 'fuzzy' : 'path_hit'
+    }
+    return parts.join('+')
   }
   // 12-D：噪声目录候选末位分层（显式锚点/target 例外）——仓内副本不挤占生产入口
   // F3（0.5.14 Windows 复核）：档位细化为「生产实现 0 / 测试夹具 1 / 噪声目录 2」——原实现只把噪声挪后，
@@ -1281,14 +1564,30 @@ export async function findCandidates(codeIndexService, workspaceDir, goal, targe
     const f = fileOf(e)
     if (e.anchor) return 0
     if (targetFile && (f === targetFile || (targetDir && f.startsWith(targetDir + '/')))) return 0
-    if (isNoisyPath(f)) return 2
+    if (isNoisyPath(f) || isBenchPath(f) || isGeneratedPath(f)) return 2
     if (isTestyPath(f)) return 1
     return 0
   }
-  const ordered = [...seen.values()].sort((a, b) => pathTier(a) - pathTier(b) || scoreOf(b) - scoreOf(a) || a.order - b.order)
+  // R16（真机试用 F2）：路径档位只在**同证据层**内做 tiebreak，不能压过证据本身。
+  // 旧排序 pathTier 先于 score → 零证据的模糊召回（tier 0）压过有路径证据的行（tier 2）：
+  // 实测 goal「把 DSH 的启动流程理顺」把 malong-parse/src/server.rs 两个零证据函数排到
+  // dsh-bridge.mjs 前面。零证据行仍然列出（透明），但永远排在证据行之后。
+  const hasEvidence = (e) => matchedTermsOf(e).length > 0 || !!e.anchor ||
+    (!!targetFile && (fileOf(e) === targetFile || (!!targetDir && fileOf(e).startsWith(targetDir + '/'))))
+  const ordered = [...seen.values()].sort((a, b) =>
+    (hasEvidence(b) ? 1 : 0) - (hasEvidence(a) ? 1 : 0) ||
+    pathTier(a) - pathTier(b) || scoreOf(b) - scoreOf(a) || a.order - b.order)
   // F3：候选置信度（诚实声明）——首位是否为生产实现 + 命中强度；低置信时上游不得把夹具当可信目标推下一步
   const topEntry = ordered[0] || null
-  const bestProd = ordered.find(e => pathTier(e) === 0) || null
+  // R16：best_production 必须同时「生产档位」+「有 token 证据」——否则 next_action 会把
+  // 一个零证据的模糊召回当成推荐目标（实测：DSH 目标被指到 malong-parse 的握手测试）。
+  // R21-F04：best_production 必须是【可推荐的读取目标】。
+  // kind=content 的注释命中虽然满足「生产档位 + 有证据」，但它的 name 不是符号，
+  // 推荐成 locator 会让 code_read 报 SYMBOL_NOT_FOUND（实测 goal「让 outline 支持 python」）。
+  // 因此优先取真正的符号；只有完全没有符号候选时才退回 content 行（并由上层降级为读整文件）。
+  const bestProd = ordered.find(e => pathTier(e) === 0 && hasEvidence(e) && e.c.kind !== 'content')
+    || ordered.find(e => pathTier(e) === 0 && hasEvidence(e))
+    || null
   const topScore = topEntry ? scoreOf(topEntry) : 0
   const bestProdScore = bestProd ? scoreOf(bestProd) : 0
   const confidenceLevel = !topEntry ? 'none'

@@ -1,7 +1,7 @@
 // workflow/orient.js — S5.3 路由纵切首屏（system/isolate/document）。
 // 纯本地确定性推导：入口点探测（FS）、最小复现边界（复用 impact）、文档覆盖（启发式）。
 // 不猜业务影响；不写盘；启发式结果一律附 limitation 由调用方声明。
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 // 常见入口候选（存在才列入）
@@ -14,6 +14,19 @@ const ENTRY_CANDIDATES = [
 ]
 
 // system 路由：入口点探测（package.json main/bin/module + 约定文件名）
+// R16（真机试用 F2）：只看 workspace 根时，单仓多包（liuhe/malong/package.json）的入口恒为空，
+// 零命中兜底因此只能看到字母序第一个目录。现在下探一层子包（有界：最多 40 个子目录，跳过构建产物）。
+const SUBPACKAGE_SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', 'out', 'coverage', 'vendor', '.cache', 'tmp', 'temp'])
+const SUBPACKAGE_ENTRY_CANDIDATES = ['index.js', 'index.mjs', 'index.cjs', 'index.ts', 'main.js', 'main.mjs', 'server.js', 'mcp-server.js', 'cli.js']
+function packageEntryFields(pkg) {
+  const out = []
+  if (!pkg || typeof pkg !== 'object') return out
+  if (typeof pkg.main === 'string') out.push(pkg.main)
+  if (typeof pkg.module === 'string') out.push(pkg.module)
+  if (typeof pkg.bin === 'string') out.push(pkg.bin)
+  else if (pkg.bin && typeof pkg.bin === 'object') for (const v of Object.values(pkg.bin)) if (typeof v === 'string') out.push(v)
+  return out
+}
 export function detectEntryPoints(workspaceDir) {
   const fromPackage = []
   try {
@@ -24,8 +37,32 @@ export function detectEntryPoints(workspaceDir) {
     else if (pkg.bin && typeof pkg.bin === 'object') for (const v of Object.values(pkg.bin)) if (typeof v === 'string') fromPackage.push(v)
   } catch { /* 无/坏 package.json 不阻断 */ }
   const conventional = ENTRY_CANDIDATES.filter(p => existsSync(join(workspaceDir, p)))
-  const files = [...new Set([...fromPackage, ...conventional])].filter(f => existsSync(join(workspaceDir, f)))
-  return { from_package: [...new Set(fromPackage)], conventional, files }
+  // R16：单仓多包下探一层（确定性：子目录名字节序）
+  const fromSubpackages = []
+  const subConventional = []
+  let subdirs = []
+  try {
+    subdirs = readdirSync(workspaceDir, { withFileTypes: true })
+      .filter(d => d.isDirectory() && !d.name.startsWith('.') && !SUBPACKAGE_SKIP_DIRS.has(d.name))
+      .map(d => d.name).sort().slice(0, 40)
+  } catch { /* 不可读就不探测，不阻断 */ }
+  for (const d of subdirs) {
+    let pkg = null
+    try { pkg = JSON.parse(readFileSync(join(workspaceDir, d, 'package.json'), 'utf-8')) } catch { pkg = null }
+    for (const rel of packageEntryFields(pkg)) {
+      const clean = String(rel).replace(/^\.\//, '')
+      if (existsSync(join(workspaceDir, d, clean))) fromSubpackages.push(d + '/' + clean)
+    }
+    for (const c of SUBPACKAGE_ENTRY_CANDIDATES) if (existsSync(join(workspaceDir, d, c))) subConventional.push(d + '/' + c)
+  }
+  const files = [...new Set([...fromPackage, ...conventional, ...fromSubpackages, ...subConventional])].filter(f => existsSync(join(workspaceDir, f)))
+  return {
+    from_package: [...new Set(fromPackage)],
+    conventional,
+    ...(fromSubpackages.length ? { from_subpackages: [...new Set(fromSubpackages)] } : {}),
+    ...(subConventional.length ? { subpackage_conventional: [...new Set(subConventional)] } : {}),
+    files,
+  }
 }
 
 // isolate 路由：由 impact（callers/callees）构造最小复现边界（root + 传递被调者，深度受限）

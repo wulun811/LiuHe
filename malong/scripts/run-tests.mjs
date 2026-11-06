@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // 测试分层运行器（0.5.18 后续，纯测试基建）
-// 目的：开发时不再等 9 分钟全链；全链/快速层共用同一份 package.json test 链，避免第二份清单漂移。
+// 目的：开发时不再等 9 分钟全链；全链/快速层共用同一份 package.json test:all 链，避免第二份清单漂移。
 //
 // 用法：
 //   node scripts/run-tests.mjs --lane=fast   跑 tests/fast-list.json（核心 + 快）
@@ -19,7 +19,17 @@ const argv = process.argv.slice(2)
 const laneArg = argv.find(a => a.startsWith('--lane='))
 const lane = laneArg ? laneArg.split('=')[1] : 'fast'
 
-const all = pkg.scripts.test.split('&&').map(s => s.trim()).filter(Boolean)
+const all = (() => {
+  // 0.6.1 Windows 修复：223 条 && 链约 8.5KB，超出 cmd.exe 8191 字符上限——
+  // `npm test` 会在 npm 层直接报「命令行太长」，一个测试都跑不起来。
+  // 链清单移到 test:all，test 只留一行 runner；这里读清单并逐文件 spawn（每条命令都很短）。
+  const chain = pkg.scripts['test:all'] || pkg.scripts.test || ''
+  if (/run-tests\.mjs/.test(chain)) {
+    console.error('package.json scripts.test 指回了 runner：缺少 test:all 链清单')
+    process.exit(2)
+  }
+  return chain.split('&&').map(s => s.trim()).filter(Boolean)
+})()
 const fileOf = (cmd) => {
   const m = cmd.match(/tests\/([a-z0-9-]+\.js)/)
   return m ? m[1] : null

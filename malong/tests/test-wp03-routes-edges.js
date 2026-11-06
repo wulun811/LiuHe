@@ -55,13 +55,20 @@ assert(exits.change.tool === 'code_patch' && exits.change.template === true && e
 assert(exits.review.tool === 'code_audit' && exits.maintain.tool === 'code_maintain' && exits.maintain.args.action === 'plan', 'review → audit、maintain → 只读 plan')
 const readonlyRoutes = ['understand', 'diagnose', 'document', 'isolate', 'system']
 for (const route of readonlyRoutes) {
-  assert(exits[route].tool === 'code_status' && /Route=/.test(exits[route].note || ''), `${route} → 只读出口 + 路线特定说明（不假装可直接调用写/隔离工具）`)
+  if (route === 'understand') {
+    // R22-F27：understand 不再指回 code_status 自环；无候选时先 expand candidates。
+    assert(exits[route].tool === 'code_control' && exits[route].args?.action === 'expand' && exits[route].args?.ref === 'candidates', 'understand → 列候选（不再 status 自环）')
+  } else {
+    assert(exits[route].tool === 'code_status' && /Route=/.test(exits[route].note || ''), `${route} → 只读出口 + 路线特定说明（不假装可直接调用写/隔离工具）`)
+  }
 }
 
 console.log('== 机械跟随非模板建议不空转 ==')
 for (const route of readonlyRoutes) {
-  const r = await status.handle({ ...exits[route].args }, ctx)
-  assert(r.ok === true, `跟随 ${route} 出口建议（code_status）可直接调用不空转`)
+  const na = exits[route]
+  const h = na.tool === 'code_control' ? control : status
+  const r = await h.handle({ ...na.args }, ctx)
+  assert(r.ok === true, `跟随 ${route} 出口建议（${na.tool}）可直接调用不空转`)
 }
 {
   const r = await audit.handle({ ...exits.review.args }, ctx)

@@ -31,6 +31,50 @@ fn collect_binding_names(node: Node, source: &str, out: &mut Vec<(String, u32, u
     }
 }
 
+// R17-B3（2026-11-02 DSH 实测）：块语句里的词法声明也要收。
+// 旧实现用 `depth == 1` 判顶层：depth 是解析树层数，顶层 `try { const x = ... }` 里的 x
+// 在 depth 3，于是「整段脚本包在顶层 try 里」的门禁脚本声明全丢（实测 311 行的
+// kernel/scripts/pack-smoke.mjs 只索引到第 71 行）。
+// 正确判据不是层数，而是祖先链：到 program 之间没有函数 / 类 / 循环，就是模块级绑定。
+fn is_module_scope_binding(node: Node) -> bool {
+    let parent = match node.parent() {
+        Some(p) => p,
+        None => return true,
+    };
+    // export const x = ... —— export_statement 是透明包装，继续看它挂在哪
+    let scope = if parent.kind() == "export_statement" {
+        match parent.parent() {
+            Some(g) => g,
+            None => return true,
+        }
+    } else {
+        parent
+    };
+    if scope.kind() == "program" {
+        return true;
+    }
+    // 只接受块语句（try/catch/if 的花括号体）；for (const x of ...) 的 x 不算模块级绑定
+    if scope.kind() != "statement_block" {
+        return false;
+    }
+    let mut cur = scope.parent();
+    while let Some(a) = cur {
+        match a.kind() {
+            "program" => return true,
+            "function_declaration" | "function_expression" | "arrow_function"
+            | "generator_function" | "generator_function_declaration"
+            | "method_definition" | "class_declaration" | "class_expression"
+            | "class_body" | "static_block" | "field_definition"
+            | "for_statement" | "for_in_statement" | "while_statement" | "do_statement" => {
+                return false
+            }
+            _ => {}
+        }
+        cur = a.parent();
+    }
+    false
+}
+
 pub fn extract_all(tree: &Tree, source: &str) -> super::ExtractResult {
     let mut symbols = Vec::with_capacity(256);
     let mut refs = Vec::with_capacity(128);
@@ -99,7 +143,7 @@ pub fn extract_all(tree: &Tree, source: &str) -> super::ExtractResult {
                 }
             }
             "lexical_declaration" | "variable_declaration" => {
-                if depth == 1 || node.parent().is_none() {
+                if is_module_scope_binding(node) {
                     for i in 0..node.child_count() {
                         if let Some(c) = node.child(i) {
                             if c.kind() == "variable_declarator" {
@@ -252,7 +296,7 @@ pub fn extract_symbols(tree: &Tree, source: &str) -> (Vec<Symbol>, Vec<Import>) 
                 }
             }
             "lexical_declaration" | "variable_declaration" => {
-                if depth == 1 || node.parent().is_none() {
+                if is_module_scope_binding(node) {
                     for i in 0..node.child_count() {
                         if let Some(c) = node.child(i) {
                             if c.kind() == "variable_declarator" {
@@ -795,5 +839,32 @@ function f(err) {
         let (syms, _) = extract_symbols(&tree, src);
         let srange = |name: &str| syms.iter().find(|s| s.name == name).map(|s| (s.start_line, s.end_line));
         assert_eq!(srange("cfg"), Some((1, 4)), "extract_symbols same range");
+    }
+
+    #[test]
+    fn block_scope_bindings_are_module_level() {
+        // R17-B3：顶层 try/catch/if 里的 const 必须收（旧实现 depth == 1 全丢）
+        let src = "const top = 1;\ntry {\n  const inTry = 2;\n  const arrowInTry = (x) => x + 1;\n} catch (e) {\n  const inCatch = 3;\n}\nif (top) {\n  const inIf = 4;\n}\n";
+        let tree = parse_js(src);
+        let result = extract_all(&tree, src);
+        let names: Vec<&str> = result.symbols.iter().map(|s| s.name.as_str()).collect();
+        for want in ["top", "inTry", "arrowInTry", "inCatch", "inIf"] {
+            assert!(names.contains(&want), "module-level binding missing: {} (got {:?})", want, names);
+        }
+        let range = |name: &str| result.symbols.iter().find(|s| s.name == name).map(|s| s.start_line);
+        assert_eq!(range("inTry"), Some(3), "inTry line");
+        assert_eq!(range("arrowInTry"), Some(4), "arrowInTry line");
+    }
+
+    #[test]
+    fn local_bindings_stay_out_of_index() {
+        // 反面：函数内 / 循环体 / for-of 绑定 / class 静态块都不得进索引
+        let src = "function outer() {\n  const localInFn = 1;\n  if (localInFn) {\n    const deeper = 2;\n  }\n}\nfor (const item of [1]) {\n  const inFor = item;\n}\nclass C {\n  static { const inStatic = 3; }\n}\n";
+        let tree = parse_js(src);
+        let result = extract_all(&tree, src);
+        let names: Vec<&str> = result.symbols.iter().map(|s| s.name.as_str()).collect();
+        for bad in ["localInFn", "deeper", "inFor", "item", "inStatic"] {
+            assert!(!names.contains(&bad), "local binding leaked into index: {} (got {:?})", bad, names);
+        }
     }
 }

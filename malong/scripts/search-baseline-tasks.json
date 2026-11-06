@@ -1,0 +1,75 @@
+[
+  {
+    "id": "CN01",
+    "category": "原词直命中",
+    "goal": "修改反馈文件轮转的字节上限",
+    "accept": ["tool-feedback/handler.js"],
+    "expect": "可以命中"
+  },
+  {
+    "id": "CN02",
+    "category": "跨中英名称",
+    "goal": "理清 DSH 启动流程",
+    "accept": ["dsh/"],
+    "expect": "可以命中"
+  },
+  {
+    "id": "CN03",
+    "category": "中文换说法（词面不重合）",
+    "goal": "让每次工具调用都留下一条记录",
+    "accept": ["trace.js"],
+    "search_terms": ["trace", "call_id", "appendFileSync"],
+    "expect": "裸查询应失配，带扩展词应能救回"
+  },
+  {
+    "id": "CN04",
+    "category": "歧义词",
+    "goal": "事务回滚",
+    "accept": ["tool-edit-transaction/"],
+    "search_terms": ["undoTransaction", "rollback"],
+    "expect": "可以命中但可能歧义"
+  },
+  {
+    "id": "CN05",
+    "category": "只有注释（实现名不同）",
+    "goal": "反馈文件多大才会被轮转",
+    "accept": ["tool-feedback/handler.js"],
+    "search_terms": ["MAX_FEEDBACK_BYTES", "rotateIfNeeded"],
+    "expect": "裸查询可能只命中注释"
+  },
+  {
+    "id": "CN06",
+    "category": "只有文档",
+    "goal": "怎么开启 TRACE 模式",
+    "accept": ["TRACE-GUIDE.md"],
+    "expect": "应进文档栏，而不是实现栏"
+  },
+  {
+    "id": "CN07",
+    "category": "中英混合",
+    "goal": "code_task 的路由三态怎么判定",
+    "accept": ["tools/entry-shared.js", "tool-code-task/handler.js"],
+    "expect": "可以命中"
+  },
+  {
+    "id": "CN08",
+    "category": "未实现的功能",
+    "goal": "实现一个导出 CSV 的功能",
+    "accept": null,
+    "expect": "应说清没有，不许硬推无关文件"
+  },
+  {
+    "id": "CN09",
+    "category": "工作区外 / 范围受限",
+    "goal": "上一轮审核报告里的 G2 结论在哪",
+    "accept": null,
+    "expect": "应说清不在本工作区范围"
+  },
+  {
+    "id": "CN10",
+    "category": "模糊目标（弱证据）",
+    "goal": "把质量分数算得更准",
+    "accept": null,
+    "expect": "不应给出高置信度的修改目标"
+  }
+]

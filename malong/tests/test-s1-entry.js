@@ -147,6 +147,10 @@ assert(r.ok === false && (r.code === 'SYMBOL_NOT_FOUND' || r.error === 'SYMBOL_N
 r = await readMod.handle({ workspace_dir: join(TMP, 'other'), task_id: taskId, locator: { file_path: 'src/admin.js', name: 'login' } }, ctx)
 assert(r.error === 'task_not_found', 'code_read 跨 workspace → task_not_found（状态按 ws 命名空间隔离）')
 assert(/do not invent a task_id/.test(r.suggestion || ''), `WP08R-5 P4：无活跃任务 → 明确禁止编造 + 引导 code_task（得 ${r.suggestion}）`)
+// R21-F10（2026-11-05 真机轨迹复盘）：B 池 14 天 20 次 task_not_found 里没有一条是编造 id，
+// 全部是"任务不在当前状态目录"。文案必须点出这条最常见成因，否则用户会一直以为是自己写错 id。
+assert(/MALONG_STATE_DIR/.test(r.suggestion || ''),
+  `R21-F10：无活跃任务时必须说明任务按 MALONG_STATE_DIR 隔离（得 ${String(r.suggestion || '').slice(0, 120)}）`)
 
 // ── code_read 成功 + read_ref 复用 ──
 r = await readMod.handle({ workspace_dir: TMP, task_id: taskId, locator: { file_path: 'src/admin.js', name: 'login' } }, ctx)
@@ -260,6 +264,28 @@ assert(tNa.observation?.content_scan?.skipped === 'non_ascii_goal', '非 ASCII g
 assert((tNa.observation?.scan_warnings || []).some(w => /non-ASCII/i.test(w)), '非 ASCII goal 首屏提示（得 ' + JSON.stringify(tNa.observation?.scan_warnings) + '）')
 assert(/target=/.test(tNa.observation?.content_scan?.hint || ''), '7-B non_ascii_goal 附可执行缩小目标 hint（得 ' + JSON.stringify(tNa.observation?.content_scan?.hint) + '）')
 assert(/not proof of absence/.test(tNa.observation?.summary || ''), '零命中文案标注不代表不存在（得 ' + tNa.observation?.summary + '）')
+
+// ── CN-P0（专家 2026-10-31 中文语义方案 §9）：原查询守恒 + search_terms 只是假设 ──
+{
+  const qi = tNa.observation?.query_interpretation
+  assert(qi && qi.original_query === '修复登录空密码漏洞', 'CN-P0 query_interpretation 保留原查询（得 ' + JSON.stringify(qi && qi.original_query) + '）')
+  assert(Array.isArray(qi?.ascii_identifiers_in_query) && qi.ascii_identifiers_in_query.length === 0, 'CN-P0 原话无可检索 ASCII 标识符时如实为空（得 ' + JSON.stringify(qi && qi.ascii_identifiers_in_query) + '）')
+  assert(qi && !('search_terms_source' in qi), 'CN-P0 未传 search_terms 时不得声称来源（得 ' + JSON.stringify(qi && qi.search_terms_source) + '）')
+  assert(/HYPOTHESES/.test(qi?.note || ''), 'CN-P0 文案说明扩展词是假设（得 ' + (qi && qi.note) + '）')
+  assert(/search_terms/.test(tNa.observation?.summary || ''), 'CN-P0 零候选 summary 指向 search_terms（得 ' + tNa.observation?.summary + '）')
+  const withTerms = await taskMod.handle({ workspace_dir: TMP, goal: '修复登录空密码漏洞', search_terms: ['password', 'login'], request_id: 'req_cn_p0_terms' }, ctx)
+  const qi2 = withTerms.observation?.query_interpretation
+  assert(qi2?.search_terms_source === 'caller_hypothesis', 'CN-P0 传了 search_terms 标 caller_hypothesis（得 ' + JSON.stringify(qi2 && qi2.search_terms_source) + '）')
+  assert(JSON.stringify(qi2?.search_terms_used) === JSON.stringify(['password', 'login']), 'CN-P0 记录实际使用的扩展词（得 ' + JSON.stringify(qi2 && qi2.search_terms_used) + '）')
+  assert(qi2?.original_query === '修复登录空密码漏洞', 'CN-P0 扩展词不覆盖原查询（得 ' + JSON.stringify(qi2 && qi2.original_query) + '）')
+
+  // P1：控制符扩展词必须被拒，且丢弃原因可判读（与 code_search 同一套规则）
+  const dirtyTask = await taskMod.handle({ workspace_dir: TMP, goal: '修复登录空密码漏洞', search_terms: ['ok_term', 'bad\u0000x'], request_id: 'req_cn_p1_dirty' }, ctx)
+  const dq = dirtyTask.observation?.query_interpretation || {}
+  assert((dq.search_terms_used || []).includes('ok_term'), 'P1 合法扩展词保留（得 ' + JSON.stringify(dq.search_terms_used) + '）')
+  assert(!(dq.search_terms_used || []).some(t => t.includes('\u0000')), 'P1 控制符扩展词被拒（得 ' + JSON.stringify(dq.search_terms_used) + '）')
+  assert((dq.search_terms_dropped || []).some(d => d.reason === 'control_char'), 'P1 丢弃原因含 control_char（得 ' + JSON.stringify(dq.search_terms_dropped) + '）')
+}
 
 // ── 8-A（2026-10-07 专家复测 §1）：零候选给可调用 next_action + 真实 next_candidates（不再只给 <path> 模板）──
 {
@@ -388,6 +414,43 @@ if (prevState === undefined) delete process.env.MALONG_ENTRY_STATE; else process
   assert(/Showing top 8 of \d+ candidate/.test(tBulk.observation?.summary || ''), `A4 summary 明示截断（得 ${tBulk.observation?.summary}）`)
   const tFew = await taskMod.handle({ workspace_dir: TMP, goal: 'which admin login handles empty password', target: { symbol: 'login' } }, ctx)
   assert(!tFew.observation?.candidates_truncated && tFew.observation?.candidates_total === undefined, 'A4 未截断时不加噪声字段（得 ' + JSON.stringify({ total: tFew.observation?.candidates_total, truncated: tFew.observation?.candidates_truncated }) + '）')
+}
+
+// ── R15（2026-10-30 重启后真机试用）：有 token 但都 <6 字符 → 不得说「没有 token」 ──
+// 实测缺陷：goal「实现一个导出 CSV 的功能」里 extractTokens 返回 ['CSV']，
+// 但内容扫描要求 token ≥6 字符把它丢了，归因写成「no distinctive ASCII token」（= 说你没给线索），
+// 而且给出的补救「用反引号引标识符」实测无效——反引号不改变 ≥6 这条规则。
+{
+  const a = await taskMod.handle({ workspace_dir: TMP, goal: '实现一个导出 CSV 的功能', request_id: 'req_short_tok_a' }, ctx)
+  const cs = a.observation?.content_scan || {}
+  assert(cs.skipped === 'tokens_too_short', `短 token → skipped=tokens_too_short（得 ${JSON.stringify(cs.skipped)}）`)
+  assert((cs.short_tokens || []).includes('CSV'), `短 token 必须被点名（得 ${JSON.stringify(cs.short_tokens)}）`)
+  assert(!/no distinctive ASCII token/i.test(String(cs.skipped)), `归因不得否认 token 存在（得 ${JSON.stringify(cs.skipped)}）`)
+  assert(/CSV/.test(String(cs.hint || '')), `hint 要点名那个短 token（得 ${JSON.stringify(cs.hint)}）`)
+  assert(/backtick/i.test(String(cs.hint || '')) && /(not|n't|cannot|不能|无效|不改变)/i.test(String(cs.hint || '')), `hint 必须说明反引号不突破 6 字符（得 ${JSON.stringify(cs.hint)}）`)
+  assert(/code_query/.test(String(cs.hint || '')), `hint 要给真能用的出路 code_query(mode=search)（得 ${JSON.stringify(cs.hint)}）`)
+  // R22-F17：短 token 只被排除在「裸文本扫描」之外，符号检索仍在用它们——
+  // 两种通道不分开说，读起来就像「给了短标识符等于没给」（真机实测过这个误读）。
+  assert(/symbol search/i.test(String(cs.hint || '')), `hint 必须说明短 token 仍参与符号检索（得 ${JSON.stringify(cs.hint)}）`)
+  assert(cs.non_ascii_goal === true, `非 ASCII 目标该标记保留（得 ${JSON.stringify(cs.non_ascii_goal)}）`)
+
+  const w = (a.observation?.scan_warnings || []).join(' ')
+  assert(!/no ASCII identifiers were found/i.test(w), `首屏警告不得说「没找到 ASCII 标识符」（得 ${JSON.stringify(w)}）`)
+  assert(/CSV/.test(w), `首屏警告要点名短 token（得 ${JSON.stringify(w)}）`)
+  assert(/symbol search/i.test(w), `首屏警告也要区分「符号检索仍可用」与「裸文本扫描被跳过」（得 ${JSON.stringify(w)}）`)
+
+  // 反引号版本：归因必须一致（不能退回到「你没有 token」那套说法）
+  const b = await taskMod.handle({ workspace_dir: TMP, goal: '把 `CSV` 导出的编码问题修好', request_id: 'req_short_tok_b' }, ctx)
+  assert(b.observation?.content_scan?.skipped === 'tokens_too_short', `反引号短 token 归因一致（得 ${JSON.stringify(b.observation?.content_scan?.skipped)}）`)
+  assert((b.observation?.content_scan?.short_tokens || []).includes('CSV'), '反引号短 token 也要点名（得 ' + JSON.stringify(b.observation?.content_scan?.short_tokens) + '）')
+
+  // ASCII 目标、只有短 token：同样不许说「没有 token」
+  const d = await taskMod.handle({ workspace_dir: TMP, goal: 'fix CSV', request_id: 'req_short_tok_d' }, ctx)
+  assert(d.observation?.content_scan?.skipped === 'tokens_too_short', `ASCII 短 token 归因（得 ${JSON.stringify(d.observation?.content_scan?.skipped)}）`)
+
+  // 完全无 token 的中文目标：保持原归因 non_ascii_goal（不得被新分支吞掉）
+  const e = await taskMod.handle({ workspace_dir: TMP, goal: '看看这个文件里面都有什么', request_id: 'req_short_tok_e' }, ctx)
+  assert(e.observation?.content_scan?.skipped === 'non_ascii_goal', `无 token 仍归 non_ascii_goal（得 ${JSON.stringify(e.observation?.content_scan?.skipped)}）`)
 }
 
 console.log(`\n=== test-s1-entry: ${pass} passed, ${fail} failed ===`)

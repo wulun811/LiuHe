@@ -3,6 +3,7 @@
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import { parseMalongignore } from '../../file-collector.js'
+import { INDEX_SCOPE_NOTE } from '../../index-scope.js'
 
 export async function handle(args, context) {
   const { codeIndexService, getWorkspaceDir } = context
@@ -74,6 +75,11 @@ export async function handle(args, context) {
     res.suggestion = refreshedStale > 0
       ? `No symbols match "${query}" after refreshing ${refreshedStale} stale file(s) — the index is up to date for the scanned files. Try a different casing or a shorter substring.`
       : `No symbols match "${query}". Matching is ASCII case-insensitive (SQLite LIKE); non-ASCII is case-sensitive: try a shorter substring or another case. Only call reindex(workspace_dir="${workspaceDir}") if files were recently added.`
+    // R18-B11：索引「新」不等于「全」——空结果必须随回执说明盲区，
+    // 否则调用方会把「没索引到」读成「不存在」并重写已有的函数。
+    // 边界文案的唯一真相源在 index-scope.js：上一轮此处写着「顶层 try/if/for/while 都不索引」，
+    // 而解析器实际已收顶层 try/catch/if 里的声明——提示与实现相反（DSH 复验）。
+    res.suggestion += ' ' + INDEX_SCOPE_NOTE + ' If the name is declared in one of those places, read the file directly before concluding it does not exist.'
     // R2：工作区有 .malongignore 时提示“排除文件不可搜”——避免零命中误判为拼写问题
     try {
       const rules = parseMalongignore(join(workspaceDir, '.malongignore'))

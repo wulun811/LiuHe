@@ -14,6 +14,17 @@ import { getStateDir } from '../host-config.js'
 
 const TASK_ROOT = 'entry-tasks'
 
+// D-02（2026-10-29 专家裁决 A）：任务终态的唯一判据。
+// 旧实现有三套不一致的定义：写守卫只拦 cancelled、pruneTasks 认 4 个、
+// unknownTaskError 排除 1 个 —— 同一个事实在不同消费者眼里不同，
+// 结果是「写守卫放行 → 写进一个即将被清理的任务」。
+// 定义放底层 store，由 entry-shared / prune / 候选列表共同复用（避免循环依赖）。
+const TERMINAL_LIFECYCLES = new Set(['cancelled', 'completed', 'done', 'abandoned'])
+
+export function isTerminalLifecycle(lifecycle) {
+  return typeof lifecycle === 'string' && TERMINAL_LIFECYCLES.has(lifecycle)
+}
+
 // E2 stateless 臂：MALONG_ENTRY_EPHEMERAL=1 → 每进程一个临时根，进程重启即丢（同进程内仍持久）。
 // 与 stateful 臂共用同一套 store 逻辑（不改写路径），仅后端根不同——保证能力匹配、只差“跨重启存活”。
 let EPHEMERAL_ROOT = null
@@ -107,6 +118,12 @@ export function rebuildTask(workspaceDir, taskId) {
       if (ev.route) t.route = ev.route
       if (ev.goal != null) t.goal = ev.goal
       if (ev.goal_revision != null) t.goal_revision = ev.goal_revision
+      // C 档：显式改路由后，旧推断证据必须在重放里也消失——否则删快照重建会「复活」
+      // 一条已经不成立的推断（快照与事件不一致，正是 W1 窗口最容易骗人的地方）。
+      if (ev.route_source) {
+        t.route_source = ev.route_source
+        if (ev.route_source !== 'inferred') delete t.route_evidence
+      }
       applyRevisionFields(t, ev)
     } else if (ev.type === 'lifecycle') {
       t.lifecycle = ev.lifecycle
@@ -232,7 +249,8 @@ function pruneTaskDir(d, { maxAgeHours = 24, dryRun = false } = {}) {
     let task = null
     try { task = JSON.parse(readFileSync(p, 'utf-8')) } catch {}
     // S3 审查修复：真实 Task 终态为 cancelled/completed（§7.1）；保留 done/abandoned 兼容旧数据
-    const terminal = task && ['cancelled', 'completed', 'done', 'abandoned'].includes(task.lifecycle)
+    // D-02：终态判据统一到 isTerminalLifecycle（与写守卫/活跃候选共用同一份定义）
+    const terminal = task && isTerminalLifecycle(task.lifecycle)
     let tsMs = NaN
     try { tsMs = statSync(p).mtimeMs } catch {}
     if (!terminal || !(tsMs < cutoff)) { kept++; continue }

@@ -204,14 +204,21 @@ writeSymbols({
   ],
 }, { codeIndexService: null, langParserService: null, getWorkspaceDir: () => ws }).catch(() => {})`
   const { spawn } = await import('node:child_process')
-  const childProc = spawn(process.execPath, ['-e', child], { env: { ...process.env, MOD: join(__dirname, '..', 'write-runtime.js'), WS: ws } })
+  const childProc = spawn(process.execPath, ['-e', child], { env: { ...process.env, MOD: join(__dirname, '..', 'write-runtime.js'), WS: ws }, stdio: ['ignore', 'ignore', 'pipe'] })
+  let childErr = ''
+  childProc.stderr.on('data', (d) => { childErr += String(d) })
   // 轮询 f1 提交（内容变化）→ 精确 kill
+  // R15（2026-10-30 全链抖动）：旧实现只等 5s（50×100ms）。机器忙时子进程光是启动 Node + 加载模块
+  // 就可能超过 5s，崩溃点没就位 → 两条断言假红（实测链内 31/2、单跑 33/0）。
+  // 这不是产品回归，是测试把「机器多快」当成了前提。改为 20s 预算 + 子进程早退探测：
+  // 早退就把 stderr 带出来（真错因可见），而不是干等 5s 后只说「还没提交」。
   let f1Committed = false
-  for (let i = 0; i < 50; i++) {
+  for (let i = 0; i < 200; i++) {
     await new Promise(r => setTimeout(r, 100))
     if (readFileSync(f1, 'utf-8').includes('f1b')) { f1Committed = true; break }
+    if (childProc.exitCode !== null) break
   }
-  assert(f1Committed, 'f1 在 kill 前已提交（崩溃点就位）')
+  assert(f1Committed, 'f1 在 kill 前已提交（崩溃点就位）' + (childErr ? `（子进程 stderr: ${childErr.slice(-300)}）` : ''))
   if (f1Committed) {
     // R22-⑯：等子进程释放 f1 锁（此时它已阻塞在 f2 锁上）——kill 后 f1.mlock 不残留，
     // recoverBatches 的 acquireLock 立即成功，避免慢盘 CI 上 30s 竞态挂死
@@ -219,8 +226,11 @@ writeSymbols({
       await new Promise(r => setTimeout(r, 25))
     }
     childProc.kill('SIGKILL')
+  } else {
+    // 没就位也必须收尾：否则子进程会抱着 f2 锁等到 30s 超时，把整条链拖住
+    try { childProc.kill('SIGKILL') } catch {}
   }
-  await new Promise(r => childProc.once('exit', r))
+  if (childProc.exitCode === null) await new Promise(r => childProc.once('exit', r))
   f2Lock.release()
   // R22-⑯：子进程 SIGKILL 后锁残留——手动释放后再恢复
   releaseBatchLock(ws)

@@ -195,8 +195,25 @@ async function invoke(check, { workspaceDir, files, scope, maxFindings, context,
   const warnings = []
   try {
     if (check === 'dead_code') {
-      const r = await deadCodeH({ workspace_dir: workspaceDir, scope: scope || undefined, ...(typeof o.include_files === 'boolean' ? { include_files: o.include_files } : {}) }, context)
-      if (r?.error) error = r.error; else { ran = true; for (const d of (r.dead_code || [])) raws.push({ raw: d, file: d.file || d.path || null }); for (const w of (r.warnings || [])) warnings.push(w) }
+      // B5：`files` 在其它 check 里是"只审这几个文件"，dead_code 却只认 scope 且完全忽略
+      // files → 同一个参数两种语义（DSH 实录 2.5 实测：files=[3 个] 时 dead_code 仍扫全库，
+      // 报 88 条与传入文件无关的 info）。这里让 files 生效：逐个文件转成 file scope 扫描。
+      // 保持 scope 优先（显式 scope 仍覆盖 files），与 security_review 的优先级一致。
+      if (!scope && files.length) {
+        let anyRan = false
+        for (const f of files) {
+          let r = null
+          try { r = await deadCodeH({ workspace_dir: workspaceDir, scope: f, ...(typeof o.include_files === 'boolean' ? { include_files: o.include_files } : {}) }, context) } catch (e) { r = { error: 'check_failed', message: e.message } }
+          if (r?.error) { error = r.error; errored.push({ file: f, error: r.error }); continue }
+          anyRan = true
+          for (const d of (r.dead_code || [])) raws.push({ raw: d, file: d.file || d.path || null })
+          for (const w of (r.warnings || [])) warnings.push(w)
+        }
+        ran = anyRan
+      } else {
+        const r = await deadCodeH({ workspace_dir: workspaceDir, scope: scope || undefined, ...(typeof o.include_files === 'boolean' ? { include_files: o.include_files } : {}) }, context)
+        if (r?.error) error = r.error; else { ran = true; for (const d of (r.dead_code || [])) raws.push({ raw: d, file: d.file || d.path || null }); for (const w of (r.warnings || [])) warnings.push(w) }
+      }
     } else if (check === 'security_review') {
       // G2-C：优先级 scope > source > files（classic 口径：scope wins over file/source）
       if (scope) {

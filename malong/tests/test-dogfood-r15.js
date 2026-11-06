@@ -153,6 +153,13 @@ const staleWrite = await ws.handle(
 )
 assert(staleWrite.error && staleWrite.error.conflict_type === 'FILE_CHANGED', `P3b-2 外部修改后写 → FILE_CHANGED（得 ${staleWrite.error && staleWrite.error.conflict_type}）`)
 assert(staleWrite.error.suggestion && staleWrite.error.suggestion.includes('File changed externally'), `P3b-2 FILE_CHANGED 建议文案指向重读（得 ${staleWrite.error.suggestion}）`)
+// R21-F08（2026-11-05 自用实测）：最常见情形其实是"自己上一次写"让 base 变旧，
+// 而写回执里已给了可复用的 write_read_refs（wbase_*）。文案必须把这更优路径说出来，
+// 否则用户只会去重新 code_read（多一次往返），不知道有现成的 base。
+assert(/wbase_\*/.test(String(staleWrite.error.suggestion)),
+  `P3b-2 建议文案必须提到可复用的 write_read_refs(wbase_*)（得 ${staleWrite.error.suggestion}）`)
+assert(!/^File changed externally;/.test(String(staleWrite.error.suggestion)),
+  `P3b-2 不得再无条件断言"外部改的"——自己写也会导致同样的冲突（得 ${staleWrite.error.suggestion}）`)
 
 console.log(`\n== test-dogfood-r15: ${pass} passed, ${fail} failed ==`)
 process.exit(fail > 0 ? 1 : 0)

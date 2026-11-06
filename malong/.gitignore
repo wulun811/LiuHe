@@ -9,3 +9,6 @@ metadata.json
 dsh/bundle/server/
 dsh/bundle/*.tgz
 dsh/bundle/dsh-bridge.mjs
+
+# edit_batch 原子写的临时文件（测试残留，勿提交）
+tools/tool-batch-edit/.edit_batch_tmp_*.json

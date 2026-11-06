@@ -45,12 +45,44 @@ let r = await patch.handle({ workspace_dir: WS, task_id: 'task_p', read_ref: 're
 assert(r.ok === true && r.observation?.effect === 'preview' && r.observation?.dry_run === true, '缺省 dry_run → 预览')
 assert(readFileSync(join(WS, F), 'utf-8') === ORIG, '预览不落盘')
 
+// ── P-A（2026-10-30 自用试用）："无 diff" 不得报成 "Preview OK" ──
+// 背景：old_string 匹配 0 次、但 new_string 已在文件里 → write-runtime 返回
+// status='already_applied'（正确的幂等去重），但 *不带 diff*。旧预览层只看
+// vHardFail（语法硬失败），于是 r.diff=null 被当成 "Preview OK"，
+// 下一步还教调用方 dry_run:false 去 apply 一个什么都不改的补丁。
+// 对调用方而言这是一次完全无效的编辑，却拿到了 OK。
+{
+  const rNoop = await patch.handle({ workspace_dir: WS, task_id: 'task_p', read_ref: 'read_1', edit_mode: 'patch',
+    patch: { old_string: '文件里根本没有这段', new_string: 'beta' } }, ctx)
+  assert(rNoop.ok === true, `P-A 已就绪的补丁不报错（得 ${rNoop.ok}）`)
+  assert(rNoop.observation?.already_applied === true, `P-A 必须显式告知 already_applied（得 ${JSON.stringify(rNoop.observation?.already_applied)}）`)
+  assert(!/Preview OK/i.test(String(rNoop.observation?.summary)), `P-A 不得再说 Preview OK（得 ${rNoop.observation?.summary}）`)
+  assert(/already/i.test(String(rNoop.observation?.summary)), `P-A summary 要说清是 already applied（得 ${rNoop.observation?.summary}）`)
+  assert(!(rNoop.next_action?.tool === 'code_patch' && rNoop.next_action?.args?.dry_run === false),
+    `P-A 不得再建议 dry_run:false 去 apply（得 ${JSON.stringify(rNoop.next_action)}）`)
+  assert(typeof rNoop.next_step === 'string' && /already/i.test(rNoop.next_step), `P-A next_step 也要说清（得 ${rNoop.next_step}）`)
+  assert(readFileSync(join(WS, F), 'utf-8') === ORIG, 'P-A 预览不落盘')
+}
+
+// ── P-A 对照组：正常改动仍要影响只给 "Preview OK"，不得误伤 ──
+{
+  const rOk = await patch.handle({ workspace_dir: WS, task_id: 'task_p', read_ref: 'read_1', edit_mode: 'patch',
+    patch: { old_string: 'gamma', new_string: 'GAMMA' } }, ctx)
+  assert(/Preview OK/i.test(String(rOk.observation?.summary)), `P-A 真改动仍报 Preview OK（得 ${rOk.observation?.summary}）`)
+  assert(rOk.observation?.diff?.lines_changed >= 1, 'P-A 真改动带 diff')
+  assert(rOk.next_action?.tool === 'code_patch' && rOk.next_action?.args?.dry_run === false, 'P-A 真改动仍给 apply 建议')
+}
+
 // ── 正常：apply 落盘 + revision 递增（prepared→succeeded）──
 r = await patch.handle({ workspace_dir: WS, task_id: 'task_p', read_ref: 'read_1', edit_mode: 'patch', patch: { old_string: 'beta', new_string: 'BETA' }, dry_run: false, request_id: 'req_apply_1' }, ctx)
 assert(r.ok === true && r.observation?.effect === 'workspace_write' && r.observation?.committed === true, 'apply 落盘')
 assert(readFileSync(join(WS, F), 'utf-8') === 'alpha\nBETA\ngamma\n', '文件已改')
 assert(r.task.revision === 3, `revision 1→3（prepared+succeeded，得 ${r.task?.revision}）`)
 assert(r.observation?.operation?.state === 'succeeded', 'operation 记 succeeded')
+// R16k（2026-11-01）：写路径做了回读比对，但回执里只有 `readback: 'enforced'`（策略口号），
+// 没有 `readback_verified: true`（事实）——上层（trace / 调用方）无法据此判断「验过了」。
+// 做了就要用可判读的字段说出来。
+assert(r.observation?.receipt?.readback_verified === true, `回执必须申报 readback_verified=true（得 ${JSON.stringify(r.observation?.receipt?.readback_verified)}）`)
 
 // ── 去重：同 request_id 同载荷 → 幂等，不再写 ──
 const r2 = await patch.handle({ workspace_dir: WS, task_id: 'task_p', read_ref: 'read_1', edit_mode: 'patch', patch: { old_string: 'beta', new_string: 'BETA' }, dry_run: false, request_id: 'req_apply_1' }, ctx)
@@ -78,7 +110,11 @@ assert(rnb.next_action?.tool === 'code_read' && rnb.next_action?.args?.workspace
 assert(readFileSync(join(WS, F), 'utf-8') === 'alpha\nBETA\ngamma\n', '无 base 预览不落盘')
 const rnbA = await patch.handle({ workspace_dir: WS, task_id: 'task_nb', locator: { file_path: F }, edit_mode: 'patch', patch: { old_string: 'alpha', new_string: 'ALPHA' }, dry_run: false }, ctx)
 assert(rnbA.error === 'VERSION_CONFLICT' && rnbA.conflict_type === 'NO_BASE', `无 base apply → 仍 NO_BASE（得 ${rnbA.error}/${rnbA.conflict_type}）`)
-assert(/symbol read does not establish a file base/.test(rnbA.message || ''), `NO_BASE 文案点明 symbol 读不建立 file base（得 ${rnbA.message}）`)
+// 2026-10-30 修正：旧断言锁的是「a symbol read does not establish a file base」，但实测
+// code_read 的符号读/行范围读都能当 read_ref 用（直接 patch 成功）；真正缺的是“没传 read_ref”。
+// 而且 handler 层会把文案里的该工具名全局改成 code_read，写进去反而变成相反结论。
+assert(/read_ref/.test(rnbA.message || '') && /prior read/.test(rnbA.message || ''), `NO_BASE 文案说清该补什么（得 ${rnbA.message}）`)
+assert(!/does not establish a file base/.test(rnbA.message || ''), `NO_BASE 文案不得再声称符号读建不了基准（得 ${rnbA.message}）`)
 assert(rnbA.next_action?.args?.workspace_dir === WS && rnbA.next_action?.args?.task_id === 'task_nb' && rnbA.next_action?.args?.locator?.file_path === F, `NO_BASE next_action 全参可执行（得 ${JSON.stringify(rnbA.next_action)}）`)
 
 // ── WP08R-3 A3：批量劝导（同 task 同文件第 2 次弱 / 第 3 次起强；预览也带）──

@@ -53,18 +53,22 @@ export function searchDocFiles(rootDir, query, { limit = 10, maxFiles = DOC_SCAN
   try { files = collectDocFiles(rootDir, { maxFiles }) } catch { files = [] }
   if (!files.length) return []
 
-  // 匹配词优先级：整串（最具体）> 空白分隔的整词 > CJK 3 字滑窗
-  // 0.5.26 修复：滑窗只作用于 CJK 段——旧版对「整个 query 串」滑窗，把英文也切成
-  // ntr/tri/ent 之类碎片去撞 CONTRIBUTING/Agent，真命中被挤出前 10（混排 query 实测复现）
+  // 匹配词优先级：整串（最具体）> 空白分隔的整词 > CJK 3 字滑窗；同时记住“这条命中的是哪种词”，
+  // 否则 3 字滑窗撞出来的噪音会被当成“文档讲到了这件事”（2026-11-01 实测：88% 的文档命中是 3 字片段）。
   const needles = []
-  const push = (n) => { if (n && !needles.includes(n)) needles.push(n) }
-  push(q)
-  for (const w of q.split(/\s+/)) if (w.length >= 2) push(w)
+  const needleKind = new Map()
+  const push = (n, kind) => {
+    if (!n) return
+    if (!needles.includes(n)) { needles.push(n); needleKind.set(n, kind) }
+    else if (needleKind.get(n) === 'cjk_trigram' && kind !== 'cjk_trigram') needleKind.set(n, kind)
+  }
+  push(q, 'exact_query')
+  for (const w of q.split(/\s+/)) if (w.length >= 2) push(w, 'word')
   // CJK 长句没有空格分词 → 退化为 3 字滑窗（"…关于版本协商机制…" → "版本协" 能命中）
   // 只对长 CJK 段滑窗：短词整串包含即可，滑窗只会制造噪音
   for (const run of q.match(/[\u4e00-\u9fa5]+/g) || []) {
     if (run.length <= 6) continue
-    for (let i = 0; i + 3 <= run.length && needles.length < 48; i++) push(run.slice(i, i + 3))
+    for (let i = 0; i + 3 <= run.length && needles.length < 48; i++) push(run.slice(i, i + 3), 'cjk_trigram')
   }
   const lowers = needles.map((n) => n.toLowerCase())
 
@@ -79,6 +83,7 @@ export function searchDocFiles(rootDir, query, { limit = 10, maxFiles = DOC_SCAN
     } catch { continue }
     const lines = content.split('\n')
     const fh = []
+    const triHits = new Set()
     for (let i = 0; i < lines.length; i++) {
       const low = lines[i].toLowerCase()
       // 取「最长」的命中词（最具体），不是第一个——否则碎片会盖掉整句命中
@@ -89,13 +94,29 @@ export function searchDocFiles(rootDir, query, { limit = 10, maxFiles = DOC_SCAN
         if (low.includes(n)) { best = k; bestLen = n.length }
       }
       if (best < 0) continue
-      fh.push({ file: rel, line: i + 1, text: lines[i].trim().slice(0, 200), matched: needles[best], score: bestLen })
+      const needle = needles[best]
+      const kind = needleKind.get(needle) || 'word'
+      if (kind === 'cjk_trigram') {
+        // 同一行可能同时命中多个不同滑窗——“命中几个不同片段”是“这份文档讲没讲这件事”的判据，
+        // 只记最长那一个会把多滑窗文档误降为单滑窗（2026-11-01 测试 ⑧ 抓到）。
+        for (const n of needles) if (needleKind.get(n) === 'cjk_trigram' && low.includes(n)) triHits.add(n)
+      }
+      fh.push({
+        file: rel, line: i + 1, text: lines[i].trim().slice(0, 200),
+        matched: needle, score: bestLen, match_basis: kind,
+        ...(kind === 'cjk_trigram' ? { weak: true } : {}),
+      })
       if (fh.length > maxHitsPerFile) {
         // 只留该文件最具体的若干条
         let min = 0
         for (let k = 1; k < fh.length; k++) if (fh[k].score < fh[min].score) min = k
         fh.splice(min, 1)
       }
+    }
+    // 单个 3 字滑窗不足以说明“文档讲到了这件事”：同一文件至少命中 2 个不同滑窗才算弱相关。
+    // 整串/整词命中不受此限（它们本身就够具体）。实测 10 条中文查询：3 字噪音命中下降 75%。
+    if (triHits.size < 2) {
+      for (let i = fh.length - 1; i >= 0; i--) if (fh[i].weak) fh.splice(i, 1)
     }
     // 每文件配额：一个文件不能独占结果位
     fh.sort((a, b) => (b.score - a.score) || (a.line - b.line))

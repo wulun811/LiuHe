@@ -5,7 +5,7 @@
 import * as parseClient from './parse-client.js'
 
 export const name = 'malong-lang-parser'
-export const version = '0.5.29'
+export const version = '0.6.1'
 
 let _core
 

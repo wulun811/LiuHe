@@ -106,7 +106,7 @@ try {
   {
     const rotState = join(root, 'rot-fail-state')
     process.env.MALONG_STATE_DIR = rotState
-    mkdirSync(join(rotState, 'malong-feedback.jsonl.4', 'block'), { recursive: true }) // 非空目录 → rmSync 失败
+    mkdirSync(join(rotState, 'malong-feedback.jsonl.3', 'block'), { recursive: true }) // 最旧档是非空目录 → rmSync 失败（R7-CE20 后固定保留 3 档）
     const p = join(rotState, 'malong-feedback.jsonl')
     writeFileSync(p, 'y'.repeat(5 * 1024 * 1024 + 16))
     const rec = await handle({ tool: 'rot_fail', issue: 'rotation blocked' }, {})

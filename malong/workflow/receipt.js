@@ -31,8 +31,14 @@ export function serializeReceipt(input = {}) {
     kind: input.kind || 'unknown',
     operation_id: input.operation_id || null,
     request_id: input.request_id || null,
-    effect: 'workspace_write',
-    state_commit: input.committed === true ? 'committed' : 'pending',
+    // R22-F20b（2026-11-05 风暴试用）：no-op 批次不得继续写 effect='workspace_write'。
+    // 允许调用方显式覆盖；未给时保持旧默认（其余 surface 行为不变）。
+    effect: input.effect || 'workspace_write',
+    state_commit: input.state_commit || (input.committed === true ? 'committed' : 'pending'),
+    // R16k（2026-11-01）：回读已验证必须可判读。此前只给 limitations 里一段文字
+    // （“enforced on this path”就是一句口号），上层（trace / 调用方）读不出“验过了”。
+    // 仅当调用方明确给出布尔时带出，不给就不出现（不臆造）。
+    ...(typeof input.readback_verified === 'boolean' ? { readback_verified: input.readback_verified } : {}),
     result_kind: input.result_kind || 'partial',
     op_class: input.op_class || 'modify',
     files: files.slice(0, 50).map(f => ({

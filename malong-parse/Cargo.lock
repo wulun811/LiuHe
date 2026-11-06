@@ -374,7 +374,7 @@ dependencies = [
 
 [[package]]
 name = "malong-parse"
-version = "0.3.37"
+version = "0.3.39"
 dependencies = [
  "chrono",
  "human-panic",

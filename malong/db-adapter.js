@@ -414,3 +414,23 @@ export async function createDb(path, opts = {}) {
 export function getBackendName() {
   return detectBackend()
 }
+
+// 关闭态判据——**后端中立**（专家 R16o 裁决 §5.4）。
+//
+// 真实缺陷（专家在无 native better-sqlite3 的环境独立复现）：
+//   测试用 `db.open === false` 判「stop 关闭全部句柄」。但 `open` 是 better-sqlite3
+//   的专属属性；sql.js fallback（SqlJsDb）维护的是 `_closed`，根本没有 `open`。
+//   于是同一份产品代码：native 后端 18/18 PASS，sql.js 后端 17/18 FAIL，
+//   而失败信息看起来像「stop 没关句柄」——把一个测试判据的可移植性问题，
+//   误报成产品停机故障。
+//
+// 合同：
+//   · 任一后端表示「已关闭」的属性为真 → 已关闭
+//   · 两个属性都读不到（未知后端）→ **fail-closed 判为未关闭**
+//     宁可让测试红，也不要因为读不到属性而假装通过
+export function isDbClosed(db) {
+  if (!db || typeof db !== 'object') return false
+  if (db.open === false) return true
+  if (db._closed === true) return true
+  return false
+}

@@ -481,6 +481,51 @@ async function runStage(stage, dir, timeout, stopDir, signal = null) {
   return base
 }
 
+// F1（2026-10-29 自用试用修正）：预览必须给出**真实命令行**，且不执行任何东西。
+// 旧行为：code_check(run=false) 只回「1 check(s) [test] requested」，调用方无法判断
+// 会跑单文件还是整条全链。本仓要求全链进内存围栏（否则 OOM 会杀用户终端），
+// 于是守纪律的 LLM 只能绕过 code_check 自己套 shell —— 一个检查工具因此不可用。
+// 这里镜像 runStage 的选择逻辑，但只计算不执行：与真实执行同源，避免预览再骗一次。
+export function previewStagePlan(dir, stopDir, kinds = ['test']) {
+  const out = []
+  for (const stage of kinds) {
+    const scripts = detectScripts(dir, stopDir)
+    const pm = detectPkgManager(dir, stopDir)
+    let entry
+    if (stage === 'lint') {
+      entry = scripts.lint
+        ? { will_run: true, command: `${pm} run ${scripts.lint}`, cwd: dir, scope: 'project lint script' }
+        : { will_run: true, command: 'npx --no-install eslint .', cwd: dir, scope: 'eslint fallback (no project lint script)' }
+    } else if (stage === 'test') {
+      if (scripts.test) {
+        entry = { will_run: true, command: `${pm} run ${scripts.test}`, cwd: dir, scope: 'project test script' }
+      } else {
+        const pyT = detectPythonTestTarget(dir, stopDir)
+        entry = pyT.detected
+          ? { will_run: true, command: `${pyT.python} -m pytest -q`, cwd: pyT.cwd, scope: 'pytest (no npm test script)' }
+          : { will_run: false, command: null, cwd: dir, reason: 'no_test_target', notice: 'No test script in package.json and no pytest project detected; nothing to run.' }
+      }
+    } else if (stage === 'typecheck') {
+      if (scripts.typecheck) {
+        const body = (readPkgScripts(dir, stopDir) || {})[scripts.typecheck]
+        const miss = scriptToolUnavailableReason(body, 1, dir)
+        entry = miss
+          ? { will_run: false, command: null, cwd: dir, reason: miss.reason, notice: 'typecheck script runs "' + miss.cmd + '", not resolvable here' }
+          : { will_run: true, command: `${pm} run ${scripts.typecheck}`, cwd: dir, scope: 'project typecheck script' }
+      } else {
+        const resolved = resolveTypecheck(dir)
+        entry = resolved.unavailable
+          ? { will_run: false, command: null, cwd: dir, reason: resolved.reason, notice: resolved.notice }
+          : { will_run: true, command: `${resolved.cmd} ${(resolved.args || []).join(' ')}`.trim(), cwd: dir, scope: 'tsc fallback' }
+      }
+    } else {
+      entry = { will_run: false, command: null, cwd: dir, reason: 'unknown_stage' }
+    }
+    out.push({ kind: stage, ...entry })
+  }
+  return out
+}
+
 export async function handle(args, context) {
   const { getWorkspaceDir } = context
   const workspaceDir = args?.workspace_dir
@@ -576,11 +621,17 @@ export async function handle(args, context) {
           : 'partial: passed ' + passedStages.join(', ') + '; not executed ' + unexecuted.join(', '),
     }),
   }
-  // r10e(F3)：MCP 请求超时 120s 硬限制——多阶段全链（lint+test+typecheck × timeout）超预算时预警，
+  // r10e(F3)：MCP 请求超时 120s 硬限制——多阶段全链超预算时预警，
   // 否则工具超时后服务端仍继续跑、占满 semaphore 槽导致其他工具排队 60s 超时（实测 verify_pipeline 全链 3-4 分钟）
+  //
+  // B7（DSH 实录 2026-11-02）：判据写成 `wanted.length * timeout > 100s`，而 timeout 已被
+  // 上钳到 110s → **单阶段也必然触发**，于是 `npm run typecheck` 3.9 秒成功、exit 0 的
+  // evidence 里却挂着「will definitely time out」。这不是"文案噪音"——预报与结果矛盾时
+  // 调用方会先怀疑自己。判据必须是"真的会超"：单阶段只要 timeout 已被钳到上限内就不可能超，
+  // 只有多阶段才可能叠加超过请求预算。
   const totalBudgetMs = wanted.length * timeout
-  const mcp_note = (!isBackground && totalBudgetMs > 100_000)
-    ? `MCP request has a 120s hard timeout: ${wanted.length} stages × ${Math.round(timeout / 1000)}s budget = ${Math.round(totalBudgetMs / 1000)}s, will definitely time out. Suggest stages=lint single-stage, or use test_bridge(action="run") to batch by file scope.`
+  const mcp_note = (!isBackground && wanted.length > 1 && totalBudgetMs > 100_000)
+    ? `MCP request has a 120s hard timeout: ${wanted.length} stages × ${Math.round(timeout / 1000)}s budget = ${Math.round(totalBudgetMs / 1000)}s, will definitely time out. Suggest stages=<one> single-stage, or use test_bridge(action="run") to batch by file scope.`
     : null
   return {
     status,

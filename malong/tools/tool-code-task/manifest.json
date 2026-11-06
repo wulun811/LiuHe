@@ -2,7 +2,7 @@
   "name": "code_task",
   "version": "0.1.1",
   "interface": "graph",
-  "description": "Start here for any change: describe the goal, get candidates + structure + impact in one call. Planning only — does not itself edit or check; then code_read → code_patch / code_batch → code_check.",
+  "description": "Start here for any change: goal → candidates + structure + impact. Does not itself edit or check; then code_read → code_patch / code_batch → code_check. Matching is literal, not Chinese semantics: pass search_terms (English identifier guesses, hypotheses) for a non-English goal.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -10,7 +10,7 @@
       "goal": { "type": "string", "description": "Coding goal." },
       "route": { "type": "string", "enum": ["understand", "change", "diagnose", "review", "maintain", "document", "isolate", "system"], "description": "Inferred when omitted." },
       "target": { "type": "object", "description": "Anchor {file, symbol, line}.", "properties": { "file": { "type": "string" }, "symbol": { "type": "string" }, "line": { "type": "integer" } } },
-      "search_terms": { "type": "array", "items": { "type": "string" }, "description": "Extra terms (≤8)." },
+      "search_terms": { "type": "array", "items": { "type": "string" }, "description": "English identifier guesses for a non-English goal (≤8). HYPOTHESES, not verified names." },
       "request_id": { "type": "string", "description": "Correlation id." }
     },
     "required": ["workspace_dir", "goal"]

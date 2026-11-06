@@ -7,7 +7,7 @@ import { existsSync } from 'node:fs'
 import {
   makeError, envelope, getTask, updateTaskCas, findOperation, payloadHash, newOperationId,
   traceId, fileHash, operationEvent, ensureTaskVersion, assertTaskWritable, taskHeader, unknownTaskError, addWriteBasesToTask, writeBasesForOperation,
-  forwardWriteErrorDetail,
+  forwardWriteErrorDetail, stateCommitPendingText,
 } from '../entry-shared.js'
 import { writeSymbols } from '../../write-runtime.js'
 import { serializeReceipt, opGuarantee } from '../../workflow/receipt.js'
@@ -90,6 +90,7 @@ export async function handle(args, context) {
     })
   }
   const files = [...new Set(normalized.map(n => n.file_path))]
+  const allCreate = normalized.length > 0 && normalized.every(n => n.create === true)
   const allOrNothing = args?.policy?.all_or_nothing !== false
   const dry_run = args?.dry_run !== false
 
@@ -172,7 +173,7 @@ export async function handle(args, context) {
           ? `Preview has validation errors for ${previewErrorFiles.length} file(s) (${previewErrorFiles.join(', ')}); apply will be blocked unless safety.block_on_validation_error=false. No file changed.`
           : `Preview OK for ${normalized.length} edit(s) across ${files.length} file(s), mode=${allOrNothing ? 'all_or_nothing' : 'best_effort'}. No file changed.`,
         effect: 'preview', dry_run: true, files,
-        ...((previewHasErrors || noBasePreview) ? { warning: [previewHasErrors ? 'syntax/bracket validation failed — apply will be blocked unless safety.block_on_validation_error=false' : null, noBasePreview ? 'no base_version for: ' + missingBaseFiles.join(', ') + ' — applying requires file-level reads first (a symbol read does not establish a file base)' : null].filter(Boolean).join(' ') } : {}),
+        ...((previewHasErrors || noBasePreview) ? { warning: [previewHasErrors ? 'syntax/bracket validation failed — apply will be blocked unless safety.block_on_validation_error=false' : null, noBasePreview ? 'no base_version for: ' + missingBaseFiles.join(', ') + ' — applying requires a read_ref for each file; code_read each file, then resubmit with the refs it returns' : null].filter(Boolean).join(' ') } : {}),
         ...(noBasePreview ? { preview_without_base: true } : {}),
         intended_files: r.intended_files || null, diff: r.diff || null, validation: r.validation || null,
         ...(r.partial_failures ? { partial_failures: r.partial_failures } : {}),
@@ -181,7 +182,7 @@ export async function handle(args, context) {
       extra: {
         request_id: args?.request_id,
         next_action: applyNextAction,
-        next_step: noBasePreview ? 'Preview only (no file changed; no base_version). Read the FILE(s) first with code_read, then resubmit the same writes with read_refs and dry_run:false.' : (writesEchoBytes <= 2048 ? 'Preview only. To apply, call code_batch with next_action.args (dry_run=false).' : 'Preview only. To apply, reuse your previous writes with dry_run=false (payload too large to echo).'),
+        next_step: noBasePreview ? 'Preview only (no file changed; no base_version). code_read each file first, then resubmit the same writes with the read_refs it returns and dry_run:false.' : (writesEchoBytes <= 2048 ? 'Preview only. To apply, call code_batch with next_action.args (dry_run=false).' : 'Preview only. To apply, reuse your previous writes with dry_run=false (payload too large to echo).'),
       },
     })
   }
@@ -226,6 +227,11 @@ export async function handle(args, context) {
     op = prepared
   }
 
+  // 实际写入前的文件哈希（不能拿 base_versions：那是调用方“声称”的基准，
+  // 重放旧载荷时它已过期，用它对比会把“文件没变”误判成“变了”）
+  const actualPre = {}
+  for (const f of files) { try { actualPre[f] = fileHash(workspaceDir, f) } catch { actualPre[f] = null } }
+
   const r = await runBatch(writeArgs, false, context)
   const now = new Date().toISOString()
 
@@ -248,6 +254,27 @@ export async function handle(args, context) {
     ...(r.rolled_back ? { rolled_back: r.rolled_back } : {}),
     ...(r.partial_failures ? { partial_failures: r.partial_failures } : {}),
   }
+  // ── 无变化判定（2026-10-30 自用试用修正）──
+  // 同一批重放（old_string 已不存在、new_string 已在文件里）确实会成功，但写入前后
+  // 文件哈希完全相同。旧实现照样报 "Applied batch" + effect=workspace_write + 新建事务/undo——
+  // 用户看到的是“改了什么”的假象，而 code_patch 对同一事实报 already_applied。
+  // 同一事实必须同一说法：按哈希判定是否真的变了，变了才说 Applied。
+  const preHashByFile = new Map(Object.entries(actualPre))
+  const partialFailures = Array.isArray(r.partial_failures) ? r.partial_failures : []
+  const resultHashes = finalOp.result_hashes || {}
+  // 只有真有结果 hash 的文件才算「成功处理」；失败文件没有 result hash。
+  // 旧实现拿 files.length 当成功数：best_effort 下 1 写 1 失败也报 "Applied to 2 file(s)"，
+  // 且把失败文件在回执里标成 written（result=null），与事实相反。
+  const successfulFiles = files.filter(f => resultHashes[f] != null)
+  const unchangedFiles = successfulFiles.filter(f => {
+    const pre = preHashByFile.get(f) || null
+    const post = resultHashes[f] || null
+    return !!pre && !!post && pre === post
+  })
+  const writtenFiles = successfulFiles.filter(f => !unchangedFiles.includes(f))
+  const noEffect = successfulFiles.length > 0 && unchangedFiles.length === successfulFiles.length
+  const fileStatus = (f) => resultHashes[f] == null ? 'failed' : (unchangedFiles.includes(f) ? 'unchanged' : 'written')
+
   let writeBases = {}
   const cas2 = updateTaskCas(workspaceDir, task_id, currentRev, (t) => {
     const ev = operationEvent(t, finalOp, { node: 'edit', result_kind: 'partial' })
@@ -260,13 +287,14 @@ export async function handle(args, context) {
     return envelope({
       task: taskHeader({ ...task, revision: currentRev, node: 'edit' }),
       observation: {
-        summary: `Batch applied to ${files.length} file(s), but task state commit raced (${cas2.code}); retry with the same request_id to finalize.`,
+        summary: stateCommitPendingText('code_batch', `Batch applied to ${files.length} file(s)`, cas2.code, args.request_id).summary,
         effect: 'workspace_write', committed: false, result_kind: 'partial', files, diff: r.diff || null, operation: finalOp,
         receipt: serializeReceipt({
           kind: 'batch', operation_id: finalOp.operation_id, request_id: args.request_id || null,
-          ...opGuarantee('batch'),
-          files: files.map(f => ({ file: f, status: 'written', pre_file_hash: (finalOp.base_versions || []).find(b => b.file === f)?.base || null, intended_file_hash: finalOp.result_hashes?.[f] || null, result_file_hash: finalOp.result_hashes?.[f] || null })),
+          ...opGuarantee('batch', allCreate),
+          files: files.map(f => ({ file: f, status: fileStatus(f), pre_file_hash: (finalOp.base_versions || []).find(b => b.file === f)?.base || null, intended_file_hash: resultHashes[f] || null, result_file_hash: resultHashes[f] || null })),
           committed: false, result_kind: 'partial', index_sync: r.reindex || null,
+          readback_verified: r.readback_verified === true,
           ...(r.partial_failures ? { partial_failures: r.partial_failures } : {}),
           ...(r.rolled_back ? { rolled_back: r.rolled_back } : {}),
           txn_id: r.txn_id || null,
@@ -278,21 +306,40 @@ export async function handle(args, context) {
   }
 
   // P3（0.5.17）：write_bases 已在记录成功操作的同一 CAS 里登记（不额外推 revision）
-  const partial = r.partial_failures ? ` (${r.partial_failures.length} file(s) failed in best_effort mode)` : ''
+  const counts = []
+  if (writtenFiles.length) counts.push(writtenFiles.length + ' written')
+  if (unchangedFiles.length) counts.push(unchangedFiles.length + ' unchanged')
+  if (partialFailures.length) counts.push(partialFailures.length + ' failed')
+  const summary = noEffect
+    ? 'No change applied — ' + unchangedFiles.length + ' file(s) already matched' + (partialFailures.length ? ', ' + partialFailures.length + ' failed' : '') + '. result_kind=partial (no checks run).'
+    : 'Batch applied: ' + (counts.join(', ') || 'no file changed') + ' (' + files.length + ' file(s)). result_kind=partial (no checks run).'
   return envelope({
     task: taskHeader(cas2.task),
     observation: {
-      summary: `Applied batch to ${files.length} file(s)${partial}. result_kind=partial (no checks run).`,
-      effect: 'workspace_write', committed: true, result_kind: 'partial', mode: r.mode,
+      summary,
+      // R21-F06b（2026-11-05 自用试用）：noEffect 时不能写 committed:true。
+      // 实测对「old_string 不存在 + new_string 已在文件里」的批次，回执同时给了
+      // no_effect:true / unchanged_files / committed:true，自相矛盾——
+      // 什么都没提交却声称 committed，调用方（和轨迹里的 state_commit）会被误导。
+      effect: noEffect ? 'no_change' : 'workspace_write',
+      committed: !noEffect,
+      result_kind: 'partial', mode: r.mode,
+      ...(noEffect ? { no_effect: true, unchanged_files: unchangedFiles, state_commit: 'not_attempted' } : {}),
       files, diff: r.diff || null, reindex: r.reindex || null, operation: finalOp,
       ...(Object.keys(writeBases).length ? { write_read_refs: writeBases } : {}),
       ...(r.partial_failures ? { partial_failures: r.partial_failures } : {}),
       ...(r.rolled_back ? { rolled_back: r.rolled_back } : {}),
       receipt: serializeReceipt({
         kind: 'batch', operation_id: finalOp.operation_id, request_id: args?.request_id || null,
-        ...opGuarantee('batch'),
-        files: files.map(f => ({ file: f, status: 'written', pre_file_hash: (finalOp.base_versions || []).find(b => b.file === f)?.base || null, intended_file_hash: finalOp.result_hashes?.[f] || null, result_file_hash: finalOp.result_hashes?.[f] || null })),
-        committed: true, result_kind: 'partial', index_sync: r.reindex || null, readback: 'enforced',
+        ...opGuarantee('batch', allCreate),
+        files: files.map(f => ({ file: f, status: fileStatus(f), pre_file_hash: (finalOp.base_versions || []).find(b => b.file === f)?.base || null, intended_file_hash: resultHashes[f] || null, result_file_hash: resultHashes[f] || null })),
+        effect: noEffect ? 'no_change' : 'workspace_write',
+        state_commit: noEffect ? 'not_attempted' : 'committed',
+        committed: !noEffect, result_kind: 'partial', index_sync: r.reindex || null,
+        // R16k：回读比对已做（不一致返回 READBACK_MISMATCH），如实申报；
+        // 仅 'enforced' 这种口号字段，上层（trace/调用方）读不出「验过了」。
+        readback_verified: r.readback_verified === true,
+        readback: 'enforced',
         ...(r.partial_failures ? { partial_failures: r.partial_failures } : {}),
         ...(r.rolled_back ? { rolled_back: r.rolled_back } : {}),
         txn_id: r.txn_id || null,
@@ -300,8 +347,10 @@ export async function handle(args, context) {
     },
     allowed_actions: ['code_read', 'code_batch', 'code_check', 'code_status'],
     extra: {
-      request_id: args?.request_id, result_kind: 'partial', undo: r.undo || null,
-      next_step: 'Run code_check (run=true) to validate, or preview another batch with code_batch (dry_run defaults true). write_read_refs (wbase_*) are valid bases for the next edit — no re-read needed.',
+      request_id: args?.request_id, result_kind: 'partial', undo: noEffect ? null : (r.undo || null),
+      next_step: noEffect
+        ? 'No changes were written (idempotent no-op). Re-read if you expected a change; otherwise continue with the task.'
+        : 'Run code_check (run=true) to validate, or preview another batch with code_batch (dry_run defaults true). write_read_refs (wbase_*) are valid bases for the next edit — no re-read needed.',
     },
   })
 }
@@ -334,7 +383,8 @@ export function reconcileBatch(workspaceDir, task_id, expectedRev, op, route, li
     const cas = updateTaskCas(workspaceDir, task_id, expectedRev, (t) => operationEvent(t, fin, { node: 'edit', result_kind: 'partial' }))
     if (!cas.ok) {
       // 第二轮审查：CAS 失败不得宣称 committed——文件已是 intended 态但 op 未收口，如实报待重试
-      return makeError('state_commit_pending', `recovered batch detected but state commit raced (${cas.code}); retry with the same request_id`, 'Retry with the same request_id to finalize.')
+      const txt = stateCommitPendingText('code_batch', 'recovered batch detected', cas.code, op.request_id)
+      return makeError('state_commit_pending', txt.message, txt.suggestion)
     }
     const revision = cas.task.revision
     return envelope({

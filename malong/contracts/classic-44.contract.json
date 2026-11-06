@@ -62,7 +62,7 @@
       "manifest_sha256": "sha256:85dd06b8b6f2450ac029825f909ba29f95d5d425178a8497f6d88f8c1a04259c",
       "schema_sha256": "sha256:acd801ea4a8596493bf2e3b0c0fc1ef4399d57b5ff901ce87b6288b5835d627b",
       "handler": "./handler.js",
-      "handler_sha256": "sha256:3c46ffa14507ff527c8a1a70af4ccd309ecf030417b4f315032d6e37dfe41612",
+      "handler_sha256": "sha256:d5ace52db779ddc2ab484ac966de1e45e2b7975cfcd3ce40c1b5e746833dc642",
       "params": {
         "required": [
           "file",
@@ -193,7 +193,7 @@
       "manifest_sha256": "sha256:bcb5eddcb8434d8c1d073a6fc963ec0da815337e60438d5176327854f32e85fb",
       "schema_sha256": "sha256:041b05273eefc32230f60e63739bd3d0cebe43cdba8f7e9fe566578d57b4dd1d",
       "handler": "./handler.js",
-      "handler_sha256": "sha256:787520fbc24cae5a8ca136fae5861b1d98f0e5476bd93e0cbd6bb8cabe38c5aa",
+      "handler_sha256": "sha256:79d6cefa8c932a95798206fc247f2f3c7b6407499db36edc316828924c9224b8",
       "params": {
         "required": [
           "query",
@@ -213,7 +213,9 @@
         "tests/test-code-query.js",
         "tests/test-g3-acceptance.js",
         "tests/test-mcp-server.js",
-        "tests/test-s5-catalog.js"
+        "tests/test-s5-catalog.js",
+        "tests/test-search-coverage.js",
+        "tests/test-search-log.js"
       ],
       "unresolved": [
         "effects",
@@ -564,7 +566,7 @@
       "manifest_sha256": "sha256:f7d82319af095c4d3ade75a4aca0441b204aa8e45f1d8d59adc4745604b1cc5c",
       "schema_sha256": "sha256:bade4ed048417e8d54c7cacae5ed5aeaa36123e6d39477700a86a87255e82593",
       "handler": "./handler.js",
-      "handler_sha256": "sha256:5179137fab4a966c2ae14095b8bc2f5c8c5fae5553cb517557c8dddf7d90a0cf",
+      "handler_sha256": "sha256:7b5d185c0adbd79a6649716d76d5a315b6660ae638e3063ae6280c5e0a712429",
       "params": {
         "required": [
           "action",
@@ -618,11 +620,15 @@
         "source": "manifest.inputSchema.properties.action.enum"
       },
       "test_refs": [
+        "tests/test-edit-transaction-ok-field.js",
         "tests/test-g3-acceptance.js",
         "tests/test-graph-catalog-budget.js",
         "tests/test-s1-entry.js",
         "tests/test-s5-catalog.js",
         "tests/test-tool-registry.js",
+        "tests/test-txn-begin-uncommitted.js",
+        "tests/test-txn-commit-files-changed.js",
+        "tests/test-txn-edit-multi-hint.js",
         "tests/test-workflow-closure.js"
       ],
       "unresolved": [
@@ -686,7 +692,7 @@
       "manifest_sha256": "sha256:ef2c207df1b8c693a877842d500a781f07b28153f1fe1f3064b34947062003ff",
       "schema_sha256": "sha256:21374438f842b640c52f2b9e05e33a68d69e7005eb12a594925e55f3b98506c5",
       "handler": "./handler.js",
-      "handler_sha256": "sha256:73687ba082bea8b35c964583d9d79e401a9674d70464d7e08696124583bcb272",
+      "handler_sha256": "sha256:e40838fbd94a1057d36e4a432e2c6618bd45002129b248fa2e62e768ab63f8a8",
       "params": {
         "required": [],
         "properties": [
@@ -783,7 +789,7 @@
       "manifest_sha256": "sha256:8e1c548a4e2f7b3b197061f67c7d223a336eda0cf0022c8f913e4c8c0b0409df",
       "schema_sha256": "sha256:43ec76ce8ade61b82256020539bd370614ab5efb5ac28bf6e6985eeafbfe610f",
       "handler": "./handler.js",
-      "handler_sha256": "sha256:014b54b430f157d5e85ce631252c96acd0c9198c49bbbde4a3f43e783867f283",
+      "handler_sha256": "sha256:8208acdbb880ea010e98fcb5819450c8682863fec7a0e2ca49ab8f2f7283923b",
       "params": {
         "required": [
           "file",
@@ -947,7 +953,7 @@
       "manifest_sha256": "sha256:b2a2bda9a5d385c54b015776281c11ba9f3f6567d671a0a9a1e5b5a4b09b81a1",
       "schema_sha256": "sha256:63fd6fbaf327d6915692fa71f87160eca34c414fc23fa58d4c905c41b70b6efd",
       "handler": "./handler.js",
-      "handler_sha256": "sha256:eee1cab3d577f40d51535e49edeeaaf321cc6781581d91c8bcf74d72f4d7ebab",
+      "handler_sha256": "sha256:acf1a3c09200b732a187afedf4e277c60276a5bcc50e0c741a2b1672895e3a4c",
       "params": {
         "required": [],
         "properties": [
@@ -979,6 +985,7 @@
         "tests/test-r9.js",
         "tests/test-s5-catalog.js",
         "tests/test-tool-registry.js",
+        "tests/test-trace-e2e.js",
         "tests/test-verify.js"
       ],
       "unresolved": [
@@ -1342,6 +1349,7 @@
         "tests/test-s4-maintain.js",
         "tests/test-s5-catalog.js",
         "tests/test-tool-registry.js",
+        "tests/test-trace-v0.js",
         "tests/test-wp07-host-contract.js"
       ],
       "unresolved": [
@@ -1366,7 +1374,7 @@
       "manifest_sha256": "sha256:d06673477307b583503f0343ed71a484034a77f847a670e326c44eda1ff7a883",
       "schema_sha256": "sha256:136ebc37c2e05596d711d412febab496fcd131f8515e79d60d939993f14b7766",
       "handler": "./handler.js",
-      "handler_sha256": "sha256:130c9b38fa73c264b2f3b6ac547ecc9ab27d293e0090e077eabe4b618de656ce",
+      "handler_sha256": "sha256:177c1bded93463ef664507647fe1f9bc6da428275f02e80327dfe4d3076922f1",
       "params": {
         "required": [
           "symbol",
@@ -1431,6 +1439,7 @@
       },
       "test_refs": [
         "tests/test-code-query.js",
+        "tests/test-comment-search.js",
         "tests/test-g3-acceptance.js",
         "tests/test-health-check.js",
         "tests/test-mcp-server.js",
@@ -1439,7 +1448,8 @@
         "tests/test-repo-map.js",
         "tests/test-s5-catalog.js",
         "tests/test-symbol-search.js",
-        "tests/test-tool-registry.js"
+        "tests/test-tool-registry.js",
+        "tests/test-trace-triage.js"
       ],
       "unresolved": [
         "effects",
@@ -1768,7 +1778,7 @@
       "manifest_sha256": "sha256:877387c111e9e0c01b09efe00d98ee218b0acf1eb36c54b46710d31e7fa3498e",
       "schema_sha256": "sha256:59d44124ad8859a1402310f26c5a696803e234c80f4c69f1733bdd31758d8092",
       "handler": "./handler.js",
-      "handler_sha256": "sha256:e505f0a657ea674fbd0473904ede7cb884a43fb5f289076dd06db16a09154ac7",
+      "handler_sha256": "sha256:a3e301150670c0d683a3fcf3429ac3f3f3d127b95ec1eb8604c4a7844e2fc5f4",
       "params": {
         "required": [
           "query",
@@ -1955,7 +1965,7 @@
       "manifest_sha256": "sha256:c89a7a063fb34109f4075f812fca3bce26f73f02c80554564992c2f2bc3c379d",
       "schema_sha256": "sha256:42928f1de6dbe0881ea837216912697f2e1140f7feb2aba8ecb132fd044dff97",
       "handler": "./handler.js",
-      "handler_sha256": "sha256:88fc3884cd2eed0e7a763099eb5969f5e8619a8cbe9f182fef56abe9265c6a11",
+      "handler_sha256": "sha256:1ca1a89bb5b2e75d1528560a306bebcdb3a7c1fa1cc4a76a4dba25afd308b7a2",
       "params": {
         "required": [
           "workspace_dir"
@@ -1999,7 +2009,7 @@
       "manifest_sha256": "sha256:e5970228e0d657da74badd6597a53becb5688abdbd584edc80f8c47da4991ee5",
       "schema_sha256": "sha256:cb077be33d4eadd3f8b76671ae69ae75eeec902500498652d0d032475732e51a",
       "handler": "./handler.js",
-      "handler_sha256": "sha256:2e45c2b322f9af3d9bf45f37420d5e04ee15ae0a46b0c1d587c491d4b89a693a",
+      "handler_sha256": "sha256:9c8b4f307369b3082a837bb0128c2f70e16b62b55552769424a51c01c8ed0450",
       "params": {
         "required": [
           "base_version",

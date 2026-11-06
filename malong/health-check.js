@@ -8,6 +8,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const SCHEMA_VERSION = 1
 
 import { readStateFile } from './host-config.js'
+import { MEMORY_THRESHOLDS } from './watchdog-log.js'
 
 // r37：宿主中立——默认 ~/.config/malong，读取兼容旧 ~/.config/opencode/ 回退（数据不丢）
 // Y001 债务3：双路径聚合——0AIT 等旧副本仍写旧路径（无 host-config 的版本滞后），
@@ -125,11 +126,12 @@ export async function runHealthCheck({ stateDir, toolsDir, workspacesDir, regist
     const heapMB = Math.round(mem.heapUsed / 1048576)
     const heapTotalMB = Math.round(mem.heapTotal / 1048576)
 
-    // 内存检查
-    if (rssMB > 800) {
-      add('Memory RSS', 'FAIL', `${rssMB}MB > 800MB threshold`)
-    } else if (rssMB > 600) {
-      add('Memory RSS', 'WARN', `${rssMB}MB > 600MB (consider restart)`)
+    // 内存检查（阈值集中定义在 watchdog-log.js 的 MEMORY_THRESHOLDS——
+    // 旧实现这里写死 600/800，与 mcp-server 的 480 不在一处，容易漂移）
+    if (rssMB > MEMORY_THRESHOLDS.failMB) {
+      add('Memory RSS', 'FAIL', `${rssMB}MB > ${MEMORY_THRESHOLDS.failMB}MB threshold (heap=${heapMB}MB)`)
+    } else if (rssMB > MEMORY_THRESHOLDS.warnMB) {
+      add('Memory RSS', 'WARN', `${rssMB}MB > ${MEMORY_THRESHOLDS.warnMB}MB (consider restart; heap=${heapMB}MB)`)
     } else {
       add('Memory RSS', 'PASS', `${rssMB}MB RSS, ${heapMB}/${heapTotalMB}MB heap`)
     }
@@ -180,6 +182,19 @@ export async function runHealthCheck({ stateDir, toolsDir, workspacesDir, regist
         try { identity = await parseService.getIdentity?.() } catch (e) { identity = { error: (e && e.message) || 'identity_failed' } }
         if (identity && !identity.error) {
           const d = identity.daemon
+          // R18-B12（2026-11-02 DSH 复验）：解析器二进制可能未注入 commit（src/server.rs 的
+          // option_env!("MALONG_GIT_COMMIT")），于是 daemon 恒自报 "unknown"——一个恒为 "unknown" 的
+          // 字段比没有更坏：看起来像值，又永远判不出来。这里归一成 null 并标明来源。
+          // 注意：drift 判据【不】用 build_commit（只看 exe 真路径 + size），所以 commit 缺失不会让
+          // 漂移检测失效——但它不能假装自己是个可用信号。
+          if (d && typeof d === 'object') {
+            if (d.build_commit === 'unknown' || d.build_commit === '') {
+              d.build_commit = null
+              d.build_commit_source = 'not_embedded'
+            } else if (d.build_commit) {
+              d.build_commit_source = 'embedded'
+            }
+          }
           const daemonOk = !!(d && !d.error)
           const daemonDesc = daemonOk
             ? ('daemon v' + d.version + ' pid=' + d.pid + ' uptime=' + d.uptime + 's' + (d.exe_path ? ' exe=' + d.exe_path : '') + (d.exe_size != null ? ' size=' + d.exe_size : '') + (d.build_commit && d.build_commit !== 'unknown' ? ' commit=' + d.build_commit : ''))

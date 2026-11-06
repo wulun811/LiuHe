@@ -248,8 +248,35 @@ function main() {
   }
   const { ok, errors } = verifyContract(contract)
   if (check) {
-    if (!ok) { console.error('contract verify FAILED:'); for (const e of errors) console.error('  - ' + e); process.exit(1) }
-    console.log('contract verify OK: ' + contract.tools.length + ' tools')
+    // G1-R1 修复（2026-10-29）：旧实现把 buildContract() 的结果（从磁盘现算）直接交给
+    // verifyContract 自校验 —— 等于「拿新结果验证它自己」，永远通过，改了 handler
+    // 也报 contract verify OK。这是假阴性，会让冻结合同失去存在意义。
+    // 正确做法：验证磁盘上【已冻结】的合同文件是否仍与当前源码一致。
+    if (!existsSync(CONTRACT_PATH)) {
+      console.error('contract verify FAILED: 合同文件不存在: ' + CONTRACT_PATH)
+      process.exit(1)
+    }
+    let frozen = null
+    try {
+      frozen = JSON.parse(readFileSync(CONTRACT_PATH, 'utf-8'))
+    } catch (e) {
+      console.error('contract verify FAILED: 合同文件不是合法 JSON: ' + e.message)
+      process.exit(1)
+    }
+    const drift = verifyContract(frozen)
+    if (!drift.ok) {
+      console.error('contract verify FAILED（冻结合同 vs 当前磁盘源码）:')
+      for (const e of drift.errors) console.error('  - ' + e)
+      console.error('\n若确认改动合法：node scripts/gen-capability-contract.mjs 重新生成并显式提交。')
+      process.exit(1)
+    }
+    // 合同自身结构也必须合法（防止「磁盘合同与磁盘源码都一致但合同本身不合规」）
+    if (!ok) {
+      console.error('contract verify FAILED（合同结构）:')
+      for (const e of errors) console.error('  - ' + e)
+      process.exit(1)
+    }
+    console.log('contract verify OK: ' + frozen.tools.length + ' tools (冻结文件与当前源码一致)')
     return
   }
   mkdirSync(dirname(CONTRACT_PATH), { recursive: true })

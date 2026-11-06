@@ -43,7 +43,7 @@ const FROZEN = {
   code_task: { params: ['goal', 'request_id', 'route', 'search_terms', 'target', 'workspace_dir'], required: ['workspace_dir', 'goal'] },
   code_read: { params: ['budget_hint', 'expected_state_revision', 'locator', 'mode', 'read_ref', 'task_id', 'workspace_dir'], required: ['workspace_dir', 'task_id'] },
   code_status: { params: ['task_id', 'workspace_dir'], required: ['workspace_dir'] },
-  code_query: { params: ['budget_hint', 'category', 'cursor', 'depth', 'dir', 'file', 'kind', 'limit', 'line', 'max_tokens', 'mode', 'name', 'new_content', 'options', 'page', 'page_size', 'query', 'rich', 'symbol', 'workspace_dir'], required: ['workspace_dir', 'mode'] },
+  code_query: { params: ['budget_hint', 'category', 'cursor', 'depth', 'dir', 'file', 'kind', 'limit', 'line', 'max_tokens', 'mode', 'name', 'new_content', 'options', 'page', 'page_size', 'query', 'rich', 'search_terms', 'symbol', 'workspace_dir'], required: ['workspace_dir', 'mode'] },
   code_audit: { params: ['action', 'checks', 'expected_state_revision', 'files', 'fingerprint', 'max_findings', 'options', 'reason', 'scope', 'task_id', 'workspace_dir'], required: ['workspace_dir', 'task_id'] },
   code_batch: { params: ['allow_unsafe_no_base', 'dry_run', 'expected_state_revision', 'policy', 'read_ref', 'request_id', 'safety', 'task_id', 'workspace_dir', 'writes'], required: ['workspace_dir', 'task_id', 'writes'] },
   code_check: { params: ['async', 'checks', 'expected_state_revision', 'request_id', 'run', 'task_id', 'timeout', 'verifier', 'workdir', 'workspace_dir'], required: ['workspace_dir', 'task_id'] },
@@ -60,7 +60,7 @@ const KEY_PHRASES = {
   code_task: ['code_batch', 'code_check'],
   code_read: ['budget_hint'],
   code_status: ['task_id'],
-  code_query: ['outline', 'references', 'capabilities', 'validate'],
+  code_query: ['outline', 'references', 'capabilities', 'validate', 'search_terms'],
   code_audit: ['checks'],
   code_batch: ['locator.file_path', 'dry_run'],
   code_check: ['test/typecheck/lint'],
@@ -104,6 +104,9 @@ for (const name of GRAPH_TOOLS) {
   for (const [p, pv] of Object.entries(props)) assert((pv.description || '').trim().length > 0, `${name}.${p}: 顶层参数描述非空`)
 }
 assert(total <= BUDGET_TOTAL, `13 工具目录总预算 ≤${BUDGET_TOTAL}B（实际 ${total}）`)
+// 2026-11-01：留出余量，避免“加一个字段就必须现场删字”的循环（加 search_terms 时实测只剩 27B）。
+const slack = BUDGET_TOTAL - total
+assert(slack >= 200, `13 工具目录余量 ≥200B（实际 ${slack}B）`)
 
 // 失败路径自检：校验函数必须能拒绝坏样本（防测试本身假绿）
 const padded = structuredClone(manifests.code_status)

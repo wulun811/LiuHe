@@ -36,7 +36,9 @@ if (!TEST_BIN) {
   console.error('  FAIL: test daemon binary not found (tried:', TEST_BIN_CANDIDATES.join(' | '), ') — install malong-parse (SKIP was silent-green)')
   process.exit(1)
 }
-const TEST_PORT = 31000 + (process.pid % 20000)
+// Windows：31000+pid%20000 会落进 49152+ 的动态端口段（实测 49544 被 TIME_WAIT 占住，
+// daemon bind 失败后静默退出）；压到 <49152 避开。
+const TEST_PORT = 31000 + (process.pid % 17000)
 const SOCK = IS_WIN ? '' : join(os.tmpdir(), 'opencode', `s3-test-${process.pid}.sock`)
 if (IS_WIN) process.env.MALONG_PORT = String(TEST_PORT)
 else process.env.MALONG_SOCKET = SOCK

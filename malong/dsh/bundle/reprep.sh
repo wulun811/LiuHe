@@ -14,9 +14,10 @@ rsync -a \
   --exclude='/bin/' \
   --exclude='.gitignore' --exclude='.ai-patterns.json' --exclude='PROJECT_RULES.md' \
   --exclude='.ai-transactions' --exclude='.malongignore.bak' \
+  --exclude='__pycache__' --exclude='*.pyc' \
   "$MALONG_ROOT" server/
 
-echo "[reprep] parser binaries NOT bundled; optionalDependencies removed in 0.5.13 (declared 0.5.9 never existed) — SET MALONG_PARSE_BIN or install ~/.local/bin/malong-parse; see README Platform support"
+echo "[reprep] parser binaries NOT bundled — SET MALONG_PARSE_BIN or install ~/.local/bin/malong-parse; see README 'Parser setup'"
 
 echo "[reprep] copying bridge ..."
 # 0.5.13：一体包所需的 serverPath 回退已上移到 dsh-bridge.mjs 源码（defaultServerPath），
@@ -26,6 +27,15 @@ cp "$MALONG_ROOT/dsh/dsh-bridge.mjs" dsh-bridge.mjs
 node --check dsh-bridge.mjs
 
 echo "[reprep] bundle tree ready: $(du -sh server | cut -f1) server/"
+
+# R20-F03-D：构建产物不得入发布物。rsync 已排除，这里再做一次硬拦截——
+# 排除规则一旦被改坏，构建直接失败，而不是静默把 .pyc 发出去。
+if find server -name '*.pyc' -o -name '__pycache__' | grep -q .; then
+  echo "[reprep] ERROR: server/ 含 Python 构建产物（.pyc/__pycache__），拒绝打包：" >&2
+  find server -name '*.pyc' -o -name '__pycache__' >&2
+  exit 1
+fi
+
 if [ "${1:-}" = "--pack" ]; then
   npm pack
 fi

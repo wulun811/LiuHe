@@ -219,5 +219,38 @@ assert(r.budget && r.budget.effective === 100000, 'budget_hint 超上限 → eff
   assert(r.budget.marker_overhead >= 10, '7-B 回传 marker_overhead（得 ' + JSON.stringify(r.budget.marker_overhead) + '）')
 }
 
+// ── 6. D-02（2026-10-29 专家裁决 A）：全部终态拒绝副作用写入，且活跃候选不再推荐终态任务 ──
+// 旧实现写守卫只拦 cancelled，实测 completed/done/abandoned 都能写盘（与 pruneTasks 把
+// 它们当终态清理相矛盾）。专家裁定：终态 = 关闭，延续工作应新建任务。
+{
+  for (const lc of ['completed', 'done', 'abandoned']) {
+    const id = 't_term_' + lc
+    mkTask(id, { lifecycle: lc })
+    writeFileSync(join(WS, F), ORIG)
+    const res = await patch.handle({ workspace_dir: WS, task_id: id, locator: { file_path: F }, patch: PATCH, dry_run: false }, ctx)
+    assert(res.ok === false, 'D-02 ' + lc + ' 任务拒绝写入（得 ' + JSON.stringify(res.ok) + '）')
+    assert(res.error === 'task_terminal', 'D-02 ' + lc + ' 错误码为 task_terminal（得 ' + JSON.stringify(res.error) + '）')
+    assert(readFileSync(join(WS, F), 'utf-8') === ORIG, 'D-02 ' + lc + ' 拒绝时磁盘未被改动')
+  }
+  // 单一判据：isTerminalLifecycle 对 4 个终态均 true，active 为 false
+  const { isTerminalLifecycle } = store
+  for (const lc of ['cancelled', 'completed', 'done', 'abandoned']) {
+    assert(isTerminalLifecycle(lc) === true, 'D-02 isTerminalLifecycle(' + lc + ')=true')
+  }
+  assert(isTerminalLifecycle('active') === false, 'D-02 isTerminalLifecycle(active)=false')
+  // 终态查询仍可读（不得因为拒绝写入就把任务变成不可读）
+  const st = await statusMod.handle({ workspace_dir: WS, task_id: 't_term_completed' }, ctx)
+  assert(st.ok !== false, 'D-02 终态任务历史仍可查询（得 ' + JSON.stringify(st.error || 'ok') + '）')
+  // 活跃候选不得推荐终态任务
+  const unk = shared.unknownTaskError(WS, 'task_does_not_exist')
+  const cands = /workspace \(([^)]*)\)/.exec(unk.suggestion || '')
+  if (cands) {
+    const list = cands[1].split(',').map(s => s.trim())
+    assert(!list.some(x => /^t_term_/.test(x)), 'D-02 活跃候选不含终态任务（得 ' + JSON.stringify(list) + '）')
+  } else {
+    assert(!!unk.suggestion && /code_task/.test(unk.suggestion), 'D-02 无活跃候选时引导新建任务（得 ' + JSON.stringify(unk.suggestion) + '）')
+  }
+}
+
 console.log('=== test-entry-lifecycle: ' + pass + ' passed, ' + fail + ' failed ===')
 process.exit(fail > 0 ? 1 : 0)

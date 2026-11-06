@@ -229,6 +229,10 @@ mkdirSync(TMP, { recursive: true })
   const finalContent = readFileSync(join(wsDir, 'z.js'), 'utf-8')
   const bytes = Buffer.byteLength(finalContent, 'utf-8')
   assert(okR.success === true, `size: 写成功（得 ${JSON.stringify(okR.error)}）`)
+  // 2026-11-01（R16j）：写路径确实做了回读比对（不一致 → READBACK_MISMATCH + indeterminate），
+  // 但成功后没有申报，于是轨迹里每次写都是 verification=not_run——「写入但未验证」恒亮、
+  // 等于没有这个信号（同 effect=unknown 的毛病）。做了就要说做了。
+  assert(okR.readback_verified === true, `回读声明：写成功后必须申报 readback_verified=true（得 ${okR.readback_verified}）`)
   assert(okR.new_version?.file?.size === bytes, `size: new_version.file.size = UTF-8 字节 ${bytes}（得 ${okR.new_version?.file?.size}）`)
   assert(bytes !== finalContent.length, `size 前置：本例字节≠码元（bytes=${bytes} units=${finalContent.length}）`)
   const conflictR = await wr.writeSymbol({

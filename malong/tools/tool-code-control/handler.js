@@ -273,7 +273,11 @@ function doSwitchRoute(workspaceDir, task, args) {
     t.route = route
     t.goal = newGoal
     t.goal_revision = nextGoalRev
-    return { type: 'route_changed', data: { route, goal: newGoal, goal_revision: nextGoalRev } }
+    // C 档：route 已被使用者显式纠正 → 来源改为 explicit，并清掉旧的「命中词」证据。
+    // 否则任务里会同时留着「新 route」和「旧推断证据」，下一位读者无从判断该信哪个。
+    t.route_source = 'explicit'
+    delete t.route_evidence
+    return { type: 'route_changed', data: { route, goal: newGoal, goal_revision: nextGoalRev, route_source: 'explicit' } }
   })
   if (!cas.ok) return makeError(cas.code === 'REVISION_CONFLICT' ? 'revision_conflict' : 'task_not_found', `switch_route failed: ${cas.code}`, 'Retry with the current revision.')
   return envelope({

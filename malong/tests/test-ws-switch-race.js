@@ -10,6 +10,10 @@ import { tmpdir } from 'node:os'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const imp = (p) => import(pathToFileURL(p).href)
+// 专家 R16o 裁决 §5.4：关闭态判据必须后端中立。此处用 `db.open === false` 会在
+// 无 native better-sqlite3 的环境（sql.js 后端只有 `_closed`）产生假红——
+// 同一份产品代码 native 18/18、sql.js 17/18，且失败信息误指“stop 没关句柄”。
+const { isDbClosed } = await imp(join(__dirname, '..', 'db-adapter.js'))
 const MALONG_DIR = join(__dirname, '..')
 
 let pass = 0, fail = 0
@@ -156,12 +160,12 @@ assert(loopErrs === 0, `T1 并发 20 轮无未收口错误（错 ${loopErrs} 轮
   for (const p of extra) await svc.initWorkspace(p)
   assert((codeIndex._handles?.size ?? 0) >= 3, `T2 多 ws 句柄表非空（得 ${codeIndex._handles?.size ?? 0}）`)
   assert((codeIndex._handles?.size ?? 99) <= 4, `T2 LRU 封顶 4（得 ${codeIndex._handles?.size ?? 99}）`)
-  const closed = [...(codeIndex._handles?.values() ?? [])].filter((h) => h.db.open === false).length
+  const closed = [...(codeIndex._handles?.values() ?? [])].filter((h) => isDbClosed(h.db)).length
   assert(closed === 0, 'T2 表内句柄均为开启态')
 }
 
 const allDbs = [...(codeIndex._handles?.values() ?? [])].map((h) => h.db)
 await codeIndex.stop().catch(() => {})
-assert(allDbs.length > 0 && allDbs.every((db) => db.open === false), 'T2 stop 关闭全部句柄')
+assert(allDbs.length > 0 && allDbs.every((db) => isDbClosed(db)), 'T2 stop 关闭全部句柄')
 console.log('test-ws-switch-race: ' + pass + ' passed, ' + fail + ' failed')
 process.exit(fail ? 1 : 0)
