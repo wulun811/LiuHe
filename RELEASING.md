@@ -1,7 +1,7 @@
 # RELEASING — npm 发布操作手册（给 CI 维护团队）
 
 LiuHe 的 npm 发布链：打 `v*` 标签 → 4 平台 runner 构建 → 发 npm 平台包 → 发 npm 主包。
-主包 `@jieai/dsh-malong-bridge` 已在 npmjs 发布至 0.5.29（4 平台包 + 主包齐备）。下一个版本：升版本并全链测试后，打对应 `v<version>` tag 触发本流水线全自动发布（4 平台包 + 主包 + GitHub Release tarball）。
+主包 `@jieai/dsh-malong-bridge` 已在 npmjs 发布至 0.6.1（4 平台包 + 主包齐备）。下一个版本：升版本并全链测试后，打对应 `v<version>` tag 触发本流水线全自动发布（4 平台包 + 主包 + GitHub Release tarball）。
 
 ## 1. 前置配置（一次性）
 
