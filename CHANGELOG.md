@@ -4,6 +4,16 @@
 
 ## 0.6.x
 
+- **[0.6.3]** (2026-11-11): 两种默认关闭的运行模式（工作区零改动 / 只读）、DSH 宿主生命周期修复、better-sqlite3 降为可选依赖。
+  - **`MALONG_NO_GIT_EXCLUDE=1`（LH-WO-005A，默认关闭）**：跳过全部 git exclude 写入；索引/事务产物改写到 `$MALONG_STATE_DIR/workspace-artifacts/<工作区哈希>/`，真实 worktree 的 `git_dir/common_dir` 保持逐字节不变，工作区内不出现 `.malong/`、`.ai-transactions/`。
+  - **`MALONG_READONLY=1`（LH-WO-005B，默认关闭）**：在 handler 产生副作用之前拒绝工作区/git/命令类能力（`code_patch`、`code_batch`、`edit_transaction`、apply/run 动作、`invoke_capability`）并返回 `readonly_mode`；只读与纯状态路径保持可用。两模式均有真实 git worktree 与直连 MCP 的回归测试。
+  - **DSH 生命周期（0.6.2）**：cordis 4 不再触发 dispose 事件 → 改用 `ctx.effect` 注册清理；先 SIGTERM、2s 后 SIGKILL；fiber 卸载后不再重启子进程。
+  - **better-sqlite3 可选**：改为 `optionalDependencies`（`^11.10.0`）并在启动时用 `:memory:` 打开/关闭探针选择后端，pnpm 忽略 build scripts 时回退 sql.js；bundle `engines.node` 提到 `>=22.19`。
+  - **发布仓 Windows 修复（4 处）**：① `test-db-adapter` 用 `fs.cpSync` 从非 ASCII 路径递归复制会静默中止（Node 22.19 / Windows）→ 改逐文件复制；② 两个新模式的测试以工作区为 cwd 启动服务器，懒启动的 parse 守护进程继承 cwd 后锁住 `rmSync(ws)` → 改用 `os.tmpdir()` 作 cwd；③ `verify_pipeline`：`taskkill /T` 后 cmd.exe 可能以 0 退出，超时被杀的 stage 会被误报 `passed` → 被杀一律记非 0；④ `spawn-guard`：taskkill 偶发静默失败导致等满子进程自然结束（实测 62s）→ 失败时退化为 SIGKILL。合同按流程重生成。
+  - **测试修正**：`test-outline-lines-semantics` 的 ⑥ 直接调用 `svc._countFileLines`（CodeIndex 私有方法，注册的服务上没有它），异常被 catch 吞掉成「malong-parse 不可用」→ 改走公开的 `getFileOutline` 端到端断言，⑤⑥ 现在都真实执行。
+  - 版本位：`package.json` / `package-lock.json` / `lang-parser.js` / `GRAPH_VERSION` / `dsh/bundle/package.json` 均为 0.6.3；parse 仍为 0.3.39。
+  - **发布仓 Windows 全链复核（2026-11-11）**：全链 `npm test` **226/226 文件 EXIT=0（666.9s，Windows 10.0.26200 / Node 22）**；定点：readonly 34/34、no-git-exclude 32/32、db-adapter 24/24、verify-pipeline 127/127、spawn-guard 23/23、outline-lines 16/16、classic 合同 347/347；`cargo test` 99/99（parse 0.3.39，源码重建）。首轮失败点为 outline ⑤——本机守护进程仍是旧的 v0.3.37 二进制，重建 0.3.39 后通过（CI 始终从源码构建，不受影响）。
+
 - **[0.6.1]** (2026-11-05): 感知闭环、中文检索、TRACE、事务回执四条线收口；解析器升至 0.3.39。
   - **事务与回执（真缺陷修复）**：① 同一事务内连续编辑同一文件后 rollback 只回退一半（备份被后续编辑覆盖）——修后回到 begin 时字节；② `edit_transaction` 的 `staged` 未说明磁盘已写入，补 `effect/written_to_disk/state_commit/note` 无歧义事实字段；③ commit 的 `files_changed` 虚报；④ 回滚/undo 的 effect 口径与 CAS 措辞对齐；⑤ patch 的 create/delete 回执、modify 的 pre/intended 哈希补全；⑥ `old_string` 未命中时给出最近匹配定位；⑦ 批量写入的计数与事务边界同回执一致；⑧ 跨编辑吸收外部写入（CE11/CE12）与缺恢复锚时禁止自动 undo（CE04）。均补失败路径测试。
   - **路由与建议面**：中文目标路由失效（标识符抢路由）、`code_check` 被说成前置条件、推荐了 `code_check` 却不列它、`next_action` 不可执行、工具调用早于 ready、空转建议等自用实录缺陷修复；候选排序加证据层，零命中兜底按模块取样。

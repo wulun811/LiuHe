@@ -94,8 +94,13 @@ async function execStage(cmd, args, cwd, timeout, signal = null) {
   // r45: stdio stdin='ignore'（spawnWithGroup 默认）——从 stdin 读的命令不再挂起
   // S3.2：signal 透传——job 取消时杀进程组（T13）
   const res = await spawnWithGroup(cmd, args, { cwd, timeout, maxBuffer: 1024 * 1024, signal }).catch((e) => ({ code: undefined, stdout: '', stderr: '', killed: false, error: e }))
+  // Windows 复核实测：taskkill /T 结束后 cmd.exe 可能以 0 退出，若照抄 code 会让
+  // 「超时被杀」的 stage 得到 passed=true（runStage 以 exitCode===0 判定）。被杀一律非 0。
+  const exitCode = res.killed === true
+    ? (typeof res.code === 'number' && res.code !== 0 ? res.code : 1)
+    : (res.code !== null && typeof res.code === 'number' ? res.code : 1)
   return {
-    exitCode: res.code !== null && typeof res.code === 'number' ? res.code : 1,
+    exitCode,
     killed: res.killed,
     timed_out: res.killed ? { timeout_ms: timeout } : null,
     stdout: (res.stdout || '').trim(),

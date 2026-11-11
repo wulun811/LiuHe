@@ -34,7 +34,14 @@ async function runBridge(modulePath, label) {
   let disposeFn = null
   const ctx = {
     tools: { register: (def) => registered.set(def.name, def) },
-    on: (evt, fn) => { if (evt === 'dispose') disposeFn = fn },
+    // cordis 4: fiber unload runs effect disposers; it does not emit "dispose".
+    effect: (execute) => {
+      disposeFn = execute()
+      return disposeFn
+    },
+    on: (evt) => {
+      if (evt === 'dispose') throw new Error('cordis 4 does not emit a dispose event; use ctx.effect')
+    },
   }
   const bridge = modulePath.startsWith('file:') ? await import(modulePath) : await imp(modulePath)
   assert(typeof bridge.apply === 'function', label + '：bridge 导出 apply')
@@ -47,6 +54,7 @@ async function runBridge(modulePath, label) {
     })
   } catch (e) { applyError = e }
   assert(!applyError, label + '：bridge apply 成功（' + (applyError ? applyError.message : 'ok') + '）')
+  assert(typeof disposeFn === 'function', label + '：注册 effect 生命周期清理')
   return { registered, dispose: disposeFn }
 }
 

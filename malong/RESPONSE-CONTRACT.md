@@ -11,7 +11,7 @@
 | `observation.committed` | 是否真的落盘 | 预览=false；拦截=false |
 | `observation.result_kind` | `partial`（写/检查未验证）→ `validated`（检查通过且有 patch） | `skipped` 不算通过 |
 | `observation.evidence[]` | 检查证据（kind/result/source/provenance/rule_version/depends_on/actual） | `actual` 含 `stdout_tail/stderr_tail`（尾 600 字符）可排障 |
-| `error` / `code` / `message` / `suggestion` | 错误响应恒为 `{ok:false, error:<code>, code, message, suggestion?}` | 常见码：`INVALID_INPUT` `NO_MATCH` `VERSION_CONFLICT` `BATCH_LOCK_BUSY` `TXN_NOT_FOUND` `FILE_EXISTS` `VALIDATION_FAILED` `workspace_mismatch` `workspace_not_indexed` `service_unavailable` `no_commits` |
+| `error` / `code` / `message` / `suggestion` | 错误响应恒为 `{ok:false, error:<code>, code, message, suggestion?}` | 常见码：`INVALID_INPUT` `NO_MATCH` `VERSION_CONFLICT` `BATCH_LOCK_BUSY` `TXN_NOT_FOUND` `FILE_EXISTS` `VALIDATION_FAILED` `workspace_mismatch` `workspace_not_indexed` `service_unavailable` `no_commits` `readonly_mode` |
 | `allowed_actions` | **推荐**下一步，不是权限表（ADR-004） | 活跃任务上仍可调 code_patch/code_check/… |
 | `task.lifecycle` | 任务生命期（`active`/`cancelled`） | 写响应透出真实值；cancelled 拒绝新写（见 §三一） |
 | `next_action` | 结构化下一步 `{tool, args, note?, template?, required_args?, awaiting_decision?, progress?}` | `template:true` 表示需补齐 `required_args` 才能直接调用；其余 args 取出即可调用；`awaiting_decision:true` = 完成/有发现，交还使用者决定（13-C）；`progress:"waiting"` = 在途（live job / prepared·running·indeterminate op），先等待或核对，勿重复启动（14-A AC31）；**14-B AC03：`next_action:null` + `progress:"done"` + `mechanical_requirements_met:true` + `goal_judgment:"host_required"` = 工具侧机械要求已满足（仅工具侧完成声明，业务目标交宿主判断；review 路线保留 awaiting_decision）** |
@@ -29,6 +29,27 @@
 - 双命名空间（Q1）：经典事务在 `.ai-transactions/recent/`（last-3 窗口）；写链（write_symbol/code_patch 等）在 `.malong/journal/`（24h）。`undo_commit` 未命中经典则自动回退写链；外部改动 → `EXTERNAL_CHANGE` 拒绝；`created` 事务的 undo = 删除文件。
 - 新建文件（Q2）：`create:true` + `content`（写响应/`code_patch`/`code_batch` 同语义）；`edit_transaction(action="edit", create:true)` 同样支持（事务内新建，rollback/undo_commit 按哈希守卫删除，已存在 → INVALID_INPUT）；文件已存在 → `FILE_EXISTS`（写链）；禁 `base_version`/`patch`；父目录自动创建；批内回滚 = 删新建文件。
 - 写后 `observation.reindex` 给出索引状态（`ok` / `skipped_large` / `non-code: not_indexed`）。
+
+## 二点五、只读与 Git 元数据开关（LH-WO-005A/005B）
+
+两个环境变量都默认关闭，只有显式 `=1` 才生效；不设置时行为与 0.6.x 一致，不要求客户端改协议。
+
+### `MALONG_NO_GIT_EXCLUDE=1`（005A）
+
+- `initWorkspace()` **不调用** `ensureGitExclude()`：不创建/不追加 worktree 的 `git_dir/info/exclude`，也不改 `git_common_dir` 下任何文件。
+- 索引、任务、journal、backup 全部落 `$MALONG_STATE_DIR`；业务工作区不创建 `.malong/`、`.ai-transactions/`。外置位置为 `$MALONG_STATE_DIR/workspace-artifacts/<workspace-hash>/.malong/` 与 `.../.ai-transactions/`。
+- 若因权限/只读挂载等原因无法写 exclude，任务/索引仍正常；`code_task` 不因此失败。
+- 不改被跟踪的 `.gitignore`；不是“把产物加进 exclude 隐藏”，而是根本不写 Git 元数据。
+
+### `MALONG_READONLY=1`（005B）
+
+这是**应用级只读保证，不是 OS 级沙箱**：适合可信六合服务的内部集成，不能据此允许不可信进程任意访问仓库。
+
+- **拒绝**（在 handler 之前，原子拒绝）：`code_patch`、`code_batch`、`edit_transaction`（全部 action）、`code_maintain(action="apply", dry_run=false)`、`code_worktree(action="apply", dry_run=false)`、`code_check(run=true)`、`code_control(action="resume|reopen|expand|switch_route")`、`code_query(mode="validate")`、`health(action="restart")`；`invoke_capability` 的 `workspace_write` / `git` / `command` 类能力（如 `write_symbol`、`write_symbols`、`edit_batch`、`git_worktree`、`debug_runner`、`test_bridge`）。
+- **放行**：`code_task`、`code_read`、`code_query` 其余模式、`code_status`、`code_audit`；`code_check(run=false)`、`code_maintain(action="plan")`、`code_worktree(action="preview|status")`、`code_control(action="status|job|cancel|cancel_job")`；`health(action="check|cleanup")` 与仅 state 写能力（如 `reindex`、`feedback`、`gc`）。
+- 拒绝发生在**任何 backup/journal/task operation/ledger 写入之前**：业务文件哈希不变，不新建 `.malong/`、`.ai-transactions/`，不产生半写文件或残留 journal/backup。
+- 形状：`{ok:false, error:"readonly_mode", code:"readonly_mode", error_code:"readonly_mode", tool, action?: string|null, message, suggestion, readonly_mode:true}`。
+- `code_task` 仍受 005A 约束：readonly 下也不写 `.git/info/exclude`；journal/事务状态（如有仅 state 操作）外置到 `$MALONG_STATE_DIR`。
 
 ## 三、状态层（graph + stateful）
 

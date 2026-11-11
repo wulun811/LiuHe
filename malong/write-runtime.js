@@ -58,6 +58,7 @@ export function patchLooksAlreadyApplied(scopeText, oldString, newString) {
 }
 import { validateShellSyntax } from './shell-syntax.js'
 import { createJournal, updateJournalState, auditLog, recoverJournals, recoverTransactions, pruneJournals, JOURNAL_ROOT, JOURNAL_RETENTION_HOURS, createBatchMarker, updateBatchMarker, finishBatchMarker } from './write-journal.js'
+import { externalWorkspaceArtifacts } from './workspace-artifacts.js'
 import { registerWriter } from './writer-registry.js'
 import { replaceFilePreservingMetadataSync } from './windows-file-replace.js'
 
@@ -781,7 +782,7 @@ export async function writeSymbol(args, context) {
         expires_at: new Date(Date.now() + JOURNAL_RETENTION_HOURS * 3600 * 1000).toISOString(),
         retention_hours: JOURNAL_RETENTION_HOURS,
         via: 'edit_transaction(action=undo_commit)',
-        reverse: { file: filePath, backup: `${JOURNAL_ROOT}/journal/${journal.txnId}/backup/${basename(filePath)}` },
+        reverse: { file: filePath, backup: reverseBackupPath(journal.dir, journal.txnId, filePath) },
       },
       pipeline,
       trace_id,
@@ -846,6 +847,14 @@ export async function writeSymbol(args, context) {
 
 function pipelineStep(pipeline, step, status, extra = {}) {
   pipeline.push({ step, status, ...extra })
+}
+
+// LH-WO-005A: keep the public undo hint meaningful when journals moved to
+// $MALONG_STATE_DIR/workspace-artifacts. Default mode keeps the historical
+// workspace-relative string byte-for-byte.
+function reverseBackupPath(journalDir, txnId, filePath) {
+  if (externalWorkspaceArtifacts()) return join(journalDir, 'backup', basename(filePath))
+  return `${JOURNAL_ROOT}/journal/${txnId}/backup/${basename(filePath)}`
 }
 
 // ---------- P4：write_symbols 批量（§6.4 隐式 all_or_nothing 事务 + §16.4 锁序 + 附录 D） ----------
@@ -1313,7 +1322,7 @@ export async function writeSymbols(args, context) {
     scope: written.length > 1 ? (batchId ? 'batch' : 'per_file') : 'single',
     ...(batchId ? { batch_id: batchId } : {}),
     ...(written.length > 1 && !batchId ? { entries: written.map(wf => ({ file: wf.filePath, txn_id: wf.txnId })), note: 'Batch marker unavailable (degraded non-lock error): undo each entry txn_id separately.' } : {}),
-    reverse: written.map(wf => ({ file: wf.filePath, backup: `${JOURNAL_ROOT}/journal/${wf.txnId}/backup/${basename(wf.filePath)}` })),
+    reverse: written.map(wf => ({ file: wf.filePath, backup: reverseBackupPath(wf.journalDir, wf.txnId, wf.filePath) })),
   } : null
 
   // r8(F10)：批次正常结束 → 移除标记

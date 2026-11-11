@@ -260,16 +260,64 @@ async function apply(ctx, config) {
     })
   }
 
+  // 0.6.2 (R1): cordis 4 fiber unloading does not emit a "dispose" event.
+  // Register cleanup as a fiber effect; ctx.effect runs the factory now and
+  // calls the returned disposer on unload / hot reload / bundle removal.
+  let startupSleep = null
+  const sleep = (ms) => new Promise((resolve) => {
+    if (disposed) { resolve(); return }
+    const timer = setTimeout(() => {
+      startupSleep = null
+      resolve()
+    }, ms)
+    if (typeof timer.unref === "function") timer.unref()
+    startupSleep = { timer, resolve }
+  })
+
+  let disposeOnce = false
+  const disposeBridge = () => {
+    if (disposeOnce) return
+    disposeOnce = true
+    disposed = true
+    if (restartTimer) {
+      clearTimeout(restartTimer)
+      restartTimer = null
+    }
+    if (startupSleep) {
+      clearTimeout(startupSleep.timer)
+      startupSleep.resolve()
+      startupSleep = null
+    }
+    const c = child
+    failFast(new Error("malong-dsh-bridge disposed"))
+    if (!c) return
+    try { c.kill("SIGTERM") } catch {}
+    const killTimer = setTimeout(() => {
+      if (c.exitCode === null && c.signalCode === null) {
+        try { c.kill("SIGKILL") } catch {}
+      }
+    }, 2000)
+    if (typeof killTimer.unref === "function") killTimer.unref()
+  }
+
+  if (typeof ctx.effect === "function") {
+    ctx.effect(() => disposeBridge, "malong-dsh-bridge lifecycle")
+  } else if (typeof ctx.on === "function") {
+    // cordis v3 fallback; cordis v4 never emits a "dispose" event.
+    ctx.on("dispose", disposeBridge)
+  }
+
   // 首次连接：重试直到成功（spawn 失败 / init 超时都继续退避）
   let tools = null
   while (tools === null && !disposed) {
     tools = await connect()
     if (tools === null) {
       logger(`initial connect failed; retrying in ${Math.round(backoffMs / 1000)}s`)
-      await new Promise((r) => setTimeout(r, backoffMs))
+      await sleep(backoffMs)
     }
   }
-  logger(`bridge ready (${tools.length} tools, version=${BRIDGE_VERSION})`)
+  if (disposed) return
+  logger("bridge ready (" + tools.length + " tools, version=" + BRIDGE_VERSION + ")")
 
   let registered = 0
   for (const tool of tools) {
@@ -328,15 +376,6 @@ async function apply(ctx, config) {
   }
   logger(`registered ${registered} tools (serverName=${SERVER_NAME}, interface=${effectiveInterface}, entryState=${effectiveEntryState}, stateDir=${stateDir})`)
 
-  ctx.on("dispose", () => {
-    disposed = true
-    if (restartTimer) {
-      clearTimeout(restartTimer)
-      restartTimer = null
-    }
-    failFast(new Error("malong-dsh-bridge disposed"))
-    child?.kill()
-  })
 }
 
 export { apply }

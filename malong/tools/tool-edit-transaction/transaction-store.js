@@ -11,6 +11,8 @@ import { guardRealPath, isSafeTxnId, atomicWrite } from '../../path-guard.js'
 import { sha256 } from '../../hash-utils.js'
 import { restoreJournal } from '../../write-journal.js'
 import { ensureGitExclude, isGitRepo } from '../../git-exclude.js'
+import { txnRoot as txnRootFor } from '../../workspace-artifacts.js'
+import { noGitExcludeMode, readonlyMode } from '../../host-config.js'
 
 // r9：统一走共享 path-guard（realpath 越界守卫 / txnId 消毒 / 原子写）
 const _guardWritePath = guardRealPath
@@ -80,7 +82,7 @@ export class TransactionStore {
     this.projectRoot = projectRoot
     this.langParser = opts.langParser || null
     this.safety = opts.safety || null
-    this.txnRoot = join(projectRoot, '.ai-transactions')
+    this.txnRoot = txnRootFor(projectRoot)
     if (!existsSync(this.txnRoot)) {
       mkdirSync(this.txnRoot, { recursive: true })
     }
@@ -1179,6 +1181,8 @@ export class TransactionStore {
   }
 
   _ensureGitignore() {
+    // LH-WO-005A/005B: never write .git/info/exclude or .gitignore in opt-in modes.
+    if (noGitExcludeMode() || readonlyMode()) return
     // dogfood-050 修复：git 仓内优先写 .git/info/exclude——旧实现恒写 .gitignore，
     // git 仓里反而制造未跟踪 .gitignore 噪声（与 ensureGitExclude 双机制不同步）
     if (isGitRepo(this.projectRoot)) {

@@ -27,6 +27,16 @@ export function ensureStateDir() {
   return dir
 }
 
+// LH-WO-005A/005B: opt-in server policies. Exactly "1" enables each switch;
+// unset (or any other value) keeps the historical 0.6.x behavior byte-for-byte.
+export function noGitExcludeMode() {
+  return process.env.MALONG_NO_GIT_EXCLUDE === '1'
+}
+
+export function readonlyMode() {
+  return process.env.MALONG_READONLY === '1'
+}
+
 // 新路径（写入方用）
 export function resolveStateFile(name) {
   return join(getStateDir(), name)

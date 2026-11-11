@@ -15,6 +15,7 @@ import {
 import { ledgerClaim, ledgerLookup, ledgerRecord, ledgerRelease } from '../outlet-ledger.js'
 import { sanitizeAdvisory, collectAdvisoryFields, extractInvokeActions } from '../../workflow/action-map.js'
 import { validateArgsConservative } from '../outlet-schema.js'
+import { readonlyCapabilityViolation, readonlyError } from '../../workflow/readonly.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const TOOLS_ROOT = resolve(join(__dirname, '..'))
@@ -156,6 +157,12 @@ export async function handle(args, context) {
   //   → 参数/加载类失败绝不留下「执行中」，纠错不被 prepared 锁死。
   const effects = effectsOf(name)
   const sideEffect = !(effects.length === 1 && effects[0] === 'read')
+  // LH-WO-005B: this must run before task operations / outlet claims below.
+  // A rejected capability must leave no prepared operation, ledger entry, or backup.
+  {
+    const denied = readonlyCapabilityViolation(name, effects, rawArgs)
+    if (denied) return readonlyError(denied)
+  }
   const reqId = typeof args?.request_id === 'string' && args.request_id ? args.request_id : null
   const { workspace_dir: _ignWs, task_id: _ignTask, request_id: _ignReq, ...payloadArgs } = rawArgs
   const payload_hash = payloadHash({ capability: name, args: payloadArgs })

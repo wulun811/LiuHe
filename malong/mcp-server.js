@@ -329,7 +329,7 @@ async function initModules() {
   try {
     const { getBackendName } = await import('./db-adapter.js')
     if (getBackendName() === 'sql.js') {
-      safeLog('SQLITE BACKEND: running on vendored sql.js (sandbox) — better-sqlite3 not installed.')
+      safeLog('SQLITE BACKEND: running on vendored sql.js (sandbox) — better-sqlite3 native binding unavailable.')
       safeLog('SQLITE UPGRADE: run `cd malong && npm ci` (or `npm install better-sqlite3`) to enable the full SQLite backend;')
       safeLog('SQLITE UPGRADE: if npm install is not possible (offline / no build toolchain), the sandbox backend works as a fallback.')
     } else {

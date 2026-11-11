@@ -8,6 +8,17 @@ manually.
 daily entry. The classic full catalog (44) and the diagnostic tier (18) are still one
 env away: export `MALONG_INTERFACE=classic|diagnostic` on the dsh host.)
 
+> **0.6.2 upgrade notes**: lifecycle cleanup now uses cordis 4 `ctx.effect`
+> (no orphan `mcp-server.js` after disable/uninstall); `better-sqlite3` is
+> optional with a `^11.10.0` floor; the 512 MB heap and GC behavior are
+> documented under **Memory and lifecycle**.
+>
+> **0.6.3 additive switches**: `MALONG_NO_GIT_EXCLUDE=1` keeps real git
+> worktrees byte-identical (no `.git/info/exclude`, journals/transactions under
+> `$MALONG_STATE_DIR/workspace-artifacts/`); `MALONG_READONLY=1` rejects
+> workspace/git/command writes with `readonly_mode`. Both are off by default;
+> see `RESPONSE-CONTRACT.md` §2.5 for the exact allow/deny list.
+
 ```bash
 dsh plugin --profile web add @jieai/dsh-malong-bridge
 pkill -f "dsh web"
@@ -20,19 +31,20 @@ interface **and** put authentication/firewall in front yourself: this UI grants
 file read/write and shell execution to anyone who can reach the port, and the
 token in the printed URL is not a substitute for network controls.
 
-> **pnpm 10 warns `Ignored build scripts: better-sqlite3`**: that is pnpm's
-> default security policy (blocks dependency postinstall scripts). Run
-> `pnpm approve-builds` and check `better-sqlite3` in the list (or edit
-> `~/.dsh/profiles/web/pnpm-workspace.yaml` and add `better-sqlite3` under
-> `onlyBuiltDependencies`, then `pnpm rebuild better-sqlite3`).
-> Without this, better-sqlite3 has no native binary and tool calls will fail.
+> **better-sqlite3 is optional since 0.6.2** and is declared as `^11.10.0`
+> (the first 11.x release verified on Node 24). If pnpm skips its build
+> script (`Ignored build scripts: better-sqlite3`) or the native build fails,
+> installation still succeeds and the server automatically falls back to the
+> vendored sql.js WASM backend (`server/vendor/`, zero native deps). The
+> startup log shows which backend is active; both use SQLite with compatible
+> data files. The native backend is faster on large indexes, but the fallback
+> is functional. To opt into the native backend:
 >
-> **Native build fallback**: better-sqlite3 ships prebuilt binaries for common
-> platforms (Node 20+); if your platform lacks a prebuilt and you have no build
-> toolchain (Windows: Visual Studio Build Tools for node-gyp), the server
-> automatically falls back to the vendored sql.js WASM backend
-> (`malong/vendor/`, zero native deps) — the startup log shows which backend is
-> active. Both backends use SQLite with compatible data files.
+> ```bash
+> pnpm approve-builds    # check better-sqlite3
+> # or add better-sqlite3 under onlyBuiltDependencies in the profile's
+> # pnpm-workspace.yaml, then: pnpm rebuild better-sqlite3
+> ```
 
 ## Uninstall
 
@@ -69,8 +81,28 @@ DSH Agent → malong__read_symbol(...) (no workspace_dir)
   `MALONG_STATE_DIR`, unrelated to any project directory.
 - **Zero intrusion**: does not touch dsh's node_modules; dsh upgrades are safe.
 
-> **Platform support**: verified on **Linux x86-64** only (Ubuntu 24.04, glibc
-> ≥ 2.34). Windows and macOS are **not verified** for this release — see
+## Memory and lifecycle
+
+- The bridge starts `mcp-server` with `--max-old-space-size=512` **before** the
+  script path, so V8 actually enforces a 512 MB old-space cap. This is a heap
+  cap, not an RSS cap; native buffers and the parser daemon are outside it.
+- If a very large workspace exhausts the heap, the child exits and the bridge
+  rejects in-flight calls with a retryable error, then restarts with exponential
+  backoff (1s → 30s). Indexes are on disk, so retry after the restart.
+- Periodic GC is only enabled when the child is started with `--expose-gc`.
+  The bridge does not add it by default; `periodic GC disabled, memory
+  monitoring still on` in the log is expected. The watchdog still reports
+  memory warnings without `global.gc`.
+- On DSH fiber unload (disable, remove, hot reload), the bridge registers a
+  cordis `ctx.effect` disposer: it stops restart scheduling, rejects pending
+  calls, sends `SIGTERM`, and escalates to `SIGKILL` after 2s. It never
+  restarts after disposal. (0.6.1 used the cordis v3 `ctx.on("dispose")` event,
+  which cordis 4 no longer emits; if you still see orphan `mcp-server.js`
+  processes, you are running an older bundle.)
+
+> **Platform / runtime support**: verified on **Linux x86-64** with Node
+> **22.19+** (the bundle's `engines` floor; DSH 0.2.2 itself requires a newer
+> Node). Windows and macOS are **not verified** for this release — see
 > **Parser setup** below before assuming they work.
 
 ## Parser setup (`malong-parse`)

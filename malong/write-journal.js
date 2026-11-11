@@ -7,6 +7,7 @@ import { randomBytes } from 'node:crypto'
 import { sha256 } from './hash-utils.js'
 import { guardRealPath, atomicWrite, isSafeTxnId } from './path-guard.js'
 import { acquireLock } from './write-runtime.js'
+import { journalRoot as journalRootFor, txnRoot as txnRootFor } from './workspace-artifacts.js'
 
 export const JOURNAL_ROOT = '.malong'
 const AUDIT_LOG = 'audit.log'
@@ -21,7 +22,7 @@ const PRUNE_PROTECTED_STATES = ['created', 'staged', 'needs_review']  // 在途/
 export function createJournal(workspaceDir, filePath, absPath, originalContent, state) {
   // Encode ownership before mkdir publishes the directory to other processes.
   const txnId = `txn_${Date.now()}_${randomBytes(4).toString('hex')}_p${process.pid}`
-  const dir = join(workspaceDir, JOURNAL_ROOT, 'journal', txnId)
+  const dir = join(journalRootFor(workspaceDir), 'journal', txnId)
   mkdirSync(join(dir, 'backup'), { recursive: true })
   // 14-C AC20/AC21（真双进程实测）：先落 pid 证据再写任何事务文件——他进程恢复凭此判活，
   // 不把在途 createJournal（manifest/state 未写完窗口）当孤儿删（旧实现 rmSync 整目录 →
@@ -74,7 +75,7 @@ export function updateJournalState(dir, state) {
 
 export function auditLog(workspaceDir, entry) {
   try {
-    appendFileSync(join(workspaceDir, JOURNAL_ROOT, AUDIT_LOG), JSON.stringify({ ts: new Date().toISOString(), ...entry }) + '\n')
+    appendFileSync(join(journalRootFor(workspaceDir), AUDIT_LOG), JSON.stringify({ ts: new Date().toISOString(), ...entry }) + '\n')
   } catch {}
 }
 
@@ -82,7 +83,7 @@ export function auditLog(workspaceDir, entry) {
 // best_effort 批崩溃后已提交文件是「用户确认的成功结果」，不得回滚 ──
 
 function _batchesDir(workspaceDir) {
-  return join(workspaceDir, JOURNAL_ROOT, 'batches')
+  return join(journalRootFor(workspaceDir), 'batches')
 }
 
 function _batchPath(workspaceDir, batchId) {
@@ -193,7 +194,7 @@ export function finishBatchMarker(workspaceDir, batchId) {
 }
 
 export async function recoverJournals(workspaceDir, options = {}) {
-  const root = join(workspaceDir, JOURNAL_ROOT, 'journal')
+  const root = join(journalRootFor(workspaceDir), 'journal')
   if (!existsSync(root)) return []
   const recovered = []
   for (const d of readdirSync(root, { withFileTypes: true })) {
@@ -312,7 +313,7 @@ export async function recoverJournals(workspaceDir, options = {}) {
 // 都不等 → 外部修改。全未落盘 → abandoned（删目录+审计）；任一已落盘 → committed_recovered
 // （保留目录供 undo，不移动 recent）；任一外部修改 → needs_review（保留，永不覆盖）。
 export async function recoverTransactions(workspaceDir, options = {}) {
-  const txnRoot = join(workspaceDir, '.ai-transactions')
+  const txnRoot = txnRootFor(workspaceDir)
   if (!existsSync(txnRoot)) return []
   const recovered = []
   // R22-④（审核修复）：commit 会把事务 rename 到 recent/——R4b 的 index_pending 补抽必须扫 recent/。
@@ -496,7 +497,7 @@ async function recoverBatches(workspaceDir, recovered) {
   if (!existsSync(dir)) return
   // R22-⑯：批次锁存活 → 有批次在运行中，跳过恢复（非崩溃残留，防并发踩踏）
   if (_isBatchLockAlive(workspaceDir)) return
-  const journalRoot = join(workspaceDir, JOURNAL_ROOT, 'journal')
+  const journalRoot = join(journalRootFor(workspaceDir), 'journal')
   for (const bf of readdirSync(dir)) {
     if (!bf.endsWith('.json')) continue
     try {
@@ -584,7 +585,7 @@ export function pruneJournals(workspaceDir, opts = {}) {
   const maxAgeHours = Number(opts.maxAgeHours) > 0 ? Number(opts.maxAgeHours) : DEFAULT_MAX_AGE_HOURS
   const dryRun = opts.dryRun === true
   const force = opts.force === true
-  const root = join(workspaceDir, JOURNAL_ROOT, 'journal')
+  const root = join(journalRootFor(workspaceDir), 'journal')
   if (!existsSync(root)) return { pruned: 0, kept: 0, skipped_throttle: false, dry_run: dryRun }
 
   const marker = join(root, PRUNE_MARKER)
@@ -637,7 +638,7 @@ export function pruneJournals(workspaceDir, opts = {}) {
 // 任一成员阻断（外部改动/非终态/备份缺失/路径守卫）→ 整批拒绝，不部分恢复；
 // 通过后按写序逆序逐文件恢复（逐文件加锁）；已写前态/已撤销成员幂等跳标。
 function _batchMemberJournals(workspaceDir, batchId) {
-  const root = join(workspaceDir, JOURNAL_ROOT, 'journal')
+  const root = join(journalRootFor(workspaceDir), 'journal')
   const members = []
   let entries = []
   try { entries = readdirSync(root, { withFileTypes: true }) } catch { return members }
@@ -659,7 +660,7 @@ async function restoreBatchJournals(workspaceDir, txnId, selfState, selfManifest
   const batchId = selfState.batch_id
   const members = _batchMemberJournals(workspaceDir, batchId)
   if (!members.some(m => m.txnId === txnId)) {
-    members.push({ txnId, dir: join(workspaceDir, JOURNAL_ROOT, 'journal', txnId), state: selfState, manifest: selfManifest })
+    members.push({ txnId, dir: join(journalRootFor(workspaceDir), 'journal', txnId), state: selfState, manifest: selfManifest })
     members.sort((a, b) => String(a.manifest.created_at || '').localeCompare(String(b.manifest.created_at || '')))
   }
   const blocked = []
@@ -741,7 +742,7 @@ export async function restoreJournal(workspaceDir, txnId) {
   if (!isSafeTxnId(txnId)) {
     return { ok: false, code: 'TXN_NOT_FOUND', message: 'Transaction not found: ' + txnId, txn_id: txnId }
   }
-  const dir = join(workspaceDir, JOURNAL_ROOT, 'journal', txnId)
+  const dir = join(journalRootFor(workspaceDir), 'journal', txnId)
   if (!existsSync(dir)) {
     return {
       ok: false, code: 'JOURNAL_NOT_FOUND', message: 'Undo journal not found: ' + txnId, txn_id: txnId,

@@ -13,6 +13,7 @@ import { DEFAULT_IGNORE_DIRS, parseMalongignore, isIgnored } from './file-collec
 import { scanCjsRequires, scanEsmImports } from './cjs-imports.js'
 import { validateFilePath } from './error-codes.js'
 import { ensureGitExclude } from './git-exclude.js'
+import { noGitExcludeMode, readonlyMode } from './host-config.js'
 import { resolveFileArg, normalizeFilePath } from './file-arg.js'
 import { sha256 } from './hash-utils.js'
 import { computeFileAnchors } from './symbol-anchors.js'
@@ -1571,7 +1572,9 @@ class CodeIndex {
         wsContext.enterWith({ ws: resolve(workspaceDir) })
         await initWorkspaceDb(workspaceDir)
         // dogfood-050 P3：索引/事务产物（.malong/、.ai-transactions/）写本地 exclude，避免污染用户 git status（best-effort）
-        ensureGitExclude(workspaceDir)
+        // LH-WO-005A/005B：显式关闭时连调用都不发生（不是 try/catch 后继续），
+        // 保证真实 git worktree 的 git_dir/common_dir 零改动。
+        if (!noGitExcludeMode() && !readonlyMode()) ensureGitExclude(workspaceDir)
         if (!self._watcher || self._watchedDir !== resolve(workspaceDir)) {
           if (self._watcher) { self._watcher.close(); self._watcher = null }
           // r52: 切换时清防抖 timer——旧 timer 触发时 _watchedDir 已指向新 workspace，会把旧 workspace 文件以 ../../ 相对路径写进新库（跨库污染，P0#8 同根因漏网）

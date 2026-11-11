@@ -4,7 +4,7 @@
 // 覆盖：prepare/get/all/run/transaction/pragma/持久化/只读 mtime 重载/坏行容错
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { mkdirSync, writeFileSync, rmSync, existsSync, statSync } from 'node:fs'
+import { mkdirSync, writeFileSync, rmSync, existsSync, statSync, cpSync, readdirSync } from 'node:fs'
 import os from 'node:os'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -161,6 +161,33 @@ console.log(`  backend: ${adapter.getBackendName()}`)
   w2.close()
   assert(ro.prepare('SELECT COUNT(*) AS c FROM s').get().c === 2, 'size 变化触发重载')
   ro.close()
+}
+
+// ── R2 (0.6.2): better-sqlite3 模块在、原生 binding 缺失 → 必须回退 sql.js ──
+// pnpm 忽略 build scripts 时 require('better-sqlite3') 成功（JS 入口在），
+// 只有 new Database() 才会抛 "Could not locate the bindings file"。
+// 旧 detectBackend 只看 require 是否抛错，会误判为 native 后端，所有工具调用失败。
+{
+  const SIM = join(TMP, 'no-native')
+  mkdirSync(join(SIM, 'node_modules', 'better-sqlite3'), { recursive: true })
+  cpSync(join(__dirname, '..', 'db-adapter.js'), join(SIM, 'db-adapter.js'))
+  // 逐文件复制而非 cpSync(recursive)：这台 Node 22 在 Windows 上对含中文的源路径
+  // 做递归 cpSync 会静默硬崩（exit 127，与 state-migrate.js 记录的 0xC0000409 同类）。
+  mkdirSync(join(SIM, 'vendor'), { recursive: true })
+  for (const name of readdirSync(join(__dirname, '..', 'vendor'))) {
+    cpSync(join(__dirname, '..', 'vendor', name), join(SIM, 'vendor', name))
+  }
+  writeFileSync(join(SIM, 'node_modules', 'better-sqlite3', 'package.json'),
+    JSON.stringify({ name: 'better-sqlite3', version: '11.10.0', main: 'index.js' }))
+  writeFileSync(join(SIM, 'node_modules', 'better-sqlite3', 'index.js'),
+    "module.exports = class Database { constructor() { throw new Error('Could not locate the bindings file') } }" + String.fromCharCode(10))
+  const sim = await import(pathToFileURL(join(SIM, 'db-adapter.js')).href)
+  assert(sim.getBackendName() === 'sql.js', 'native 模块在但 binding 缺失 → 回退 sql.js（得 ' + sim.getBackendName() + '）')
+  const db = await sim.createDb(join(SIM, 'fallback.db'))
+  db.exec('CREATE TABLE t (x INTEGER)')
+  db.prepare('INSERT INTO t VALUES (?)').run(7)
+  assert(db.prepare('SELECT x FROM t').get().x === 7, 'binding 缺失时 sql.js 回退可正常读写')
+  db.close()
 }
 
 try { rmSync(TMP, { recursive: true, force: true }) } catch {}

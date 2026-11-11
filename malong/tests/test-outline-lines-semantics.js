@@ -106,8 +106,11 @@ const { INDEX_SCOPE_NOTE } = await imp(join(__dirname, '..', 'index-scope.js'))
     const outlineNames = (o.outline || []).map((n) => n.name)
     assert(outlineNames.includes('sequenceStepsOf'), `⑤ 顶层 try 里的 sequenceStepsOf 必须在 outline 里（得 ${JSON.stringify(outlineNames)}）`)
     // ⑥ lines 是「真实行数」，不是 wc -l：3 行、末行无换行时 wc -l 数出 2
+    // 走公开的 getFileOutline 接线（_countFileLines 是 CodeIndex 私有方法，注册的服务上没有它）
     writeFileSync(join(WS, 'scripts', 'no-trailing-nl.js'), 'const a = 1\nconst b = 2\nconst c = 3')
-    assert(svc._countFileLines('scripts/no-trailing-nl.js') === 3, `⑥ 3 行、末行无换行 → lines=3（wc -l 会是 2，得 ${JSON.stringify(svc._countFileLines('scripts/no-trailing-nl.js'))}）`)
+    await svc.indexBatch([join(WS, 'scripts', 'no-trailing-nl.js')], WS)
+    const o2 = await svc.getFileOutline('scripts/no-trailing-nl.js', {})
+    assert(o2.lines === 3, `⑥ 3 行、末行无换行 → lines=3（wc -l 会是 2，得 ${JSON.stringify(o2.lines)}）`)
   } catch (e) {
     console.log(`  · ⑤ 未执行（malong-parse 不可用：${e && e.message}）`)
   } finally {

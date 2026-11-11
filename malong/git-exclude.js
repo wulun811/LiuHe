@@ -2,6 +2,7 @@
 // 避免污染用户 git status；不改动被跟踪的 .gitignore。best-effort、幂等、兼容 worktree（.git 是文件）。
 import { existsSync, statSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
+import { noGitExcludeMode, readonlyMode } from './host-config.js'
 
 const EXCLUDE_LINES = ['.malong/', '.ai-transactions/']
 const _ensured = new Set()
@@ -27,6 +28,9 @@ export function isGitRepo(workspaceDir) {
 }
 
 export function ensureGitExclude(workspaceDir) {
+  // LH-WO-005A/005B: never call into git-metadata writes in either opt-in mode.
+  // This is an early return, not a try/catch swallow — no directory or file is touched.
+  if (noGitExcludeMode() || readonlyMode()) return false
   try {
     const key = resolve(workspaceDir)
     if (_ensured.has(key)) return false

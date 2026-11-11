@@ -372,7 +372,7 @@ async function handleImpl(args, context) {
             commitResult.warning = `${indexPending.length} file(s) index pending: ${indexPending.join(', ')} — run reindex(workspace_dir=...) to refresh`
             // 审核修复（R18 对齐）：失败记 manifest index_pending——recoverTransactions 启动补抽（与 write-runtime 系同模型）
             // R22-④：commit() 已把事务 rename 到 recent/——写顶层恒失败（静默死代码）。必须写 recent/<txnId>/manifest.json
-            const manifestPath = join(workspaceDir, '.ai-transactions', 'recent', txnId, 'manifest.json')
+            const manifestPath = join(store.txnRoot, 'recent', txnId, 'manifest.json')
             try {
               if (existsSync(manifestPath)) {
                 const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'))
@@ -412,7 +412,7 @@ async function handleImpl(args, context) {
           ...(allReadbackVerified ? { readback: 'enforced', readback_verified: true } : {}),
           index_sync: indexPending.length ? { state: 'partial', pending: indexPending, note: 'run reindex to refresh' } : { state: codeIndexService ? 'synced' : 'not_reported' },
           recovery: {
-            available: existsSync(join(workspaceDir, '.ai-transactions', 'recent', txnId, 'backup')),
+            available: existsSync(join(store.txnRoot, 'recent', txnId, 'backup')),
             checked: 'backup_dir_present',
             note: 'undo_commit restores from recent/<txn>/backup; only the last 3 commits are retained',
           },
@@ -440,7 +440,7 @@ async function handleImpl(args, context) {
           committed: ur.status !== 'undone_partial',
           ...(ur.failures ? { partial_failures: ur.failures } : {}),
           recovery: {
-            available: existsSync(join(workspaceDir, '.ai-transactions', 'recent', txnId)) || existsSync(join(workspaceDir, '.ai-transactions', txnId)),
+            available: existsSync(join(store.txnRoot, 'recent', txnId)) || existsSync(join(store.txnRoot, txnId)),
             checked: 'txn_dir_present',
             note: 'undo restored from backups; remaining recovery assets verified by directory presence',
           },
@@ -505,7 +505,7 @@ async function handleImpl(args, context) {
       const rb = await store.rollback(txnId)
       if (rb && !rb.error && !rb.error_code && rb.status) {
         // WP04：统一 receipt——full rollback 消费备份并删事务目录；partial 保留目录供重试（查实）
-        const txnDirGone = !existsSync(join(workspaceDir, '.ai-transactions', txnId))
+        const txnDirGone = !existsSync(join(store.txnRoot, txnId))
         rb.receipt = serializeReceipt({
           kind: 'txn_rollback', operation_id: txnId, request_id: null,
           files: [
@@ -566,7 +566,7 @@ async function handleImpl(args, context) {
           committed: true,
           index_sync: { state: 'not_reported', note: 'reindex after commit refreshes the index' },
           recovery: {
-            available: existsSync(join(workspaceDir, '.ai-transactions', activeA.txnId, 'backup')),
+            available: existsSync(join(store.txnRoot, activeA.txnId, 'backup')),
             checked: 'backup_dir_present',
             note: 'assemble registered a per-file backup before writing; rollback restores it',
           },

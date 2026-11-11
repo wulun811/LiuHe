@@ -46,6 +46,11 @@ DSH Agent → malong__read_symbol(...) (no workspace_dir)
   auto-migrated on first launch). State layout is flat: `<stateDir>/workspaces/<hash>/`.
 - **Zero intrusion**: does not touch dsh's node_modules; dsh upgrades are safe;
   does not depend on `dsh-mcp-client`.
+- **Lifecycle cleanup (0.6.2+)**: uses cordis 4 `ctx.effect`, not the cordis v3
+  `ctx.on("dispose")` event. Disable/remove/hot reload stops restart scheduling,
+  rejects pending calls, sends `SIGTERM`, and escalates to `SIGKILL` after 2s;
+  no orphan `mcp-server.js` survives. The child runs with a 512 MB V8 heap cap;
+  periodic GC is disabled unless started with `--expose-gc`.
 - **Tool set**: since 0.5.22 the bridge exposes the **Six-He line only** — `graph` +
   state layer = **13 tools** (`code_task` / `code_read` / `code_status` / `code_query` /
   `code_audit` / `code_batch` / `code_check` / `code_control` / `code_maintain` /
@@ -136,6 +141,7 @@ Version spots that must all agree (`test-host-config` asserts this): main
 | No `malong__*` tools in the conversation | Confirm `dsh web --dump-config` contains `malong-dsh-bridge` without errors; hard-refresh the browser |
 | Call fails with `missing_parameter: workspace_dir` | The conversation has no workspace (no cwd) to inject; pass a path in the prompt |
 | Plugin stops working after a dsh upgrade | The plugin lives at the profile layer, upgrades do not affect it; if the cordis interface changes, re-run the installer or update the plugin |
+| Orphan `mcp-server.js` after disable/remove | 0.6.1 used the cordis v3 `ctx.on("dispose")` event; upgrade to 0.6.2+ (`ctx.effect`) so unload kills the child |
 
 ## Files
 

@@ -151,7 +151,9 @@ export async function handle(args, context) {
     index_scope: { files_scanned: indexInfo.files_scanned, files_indexed: indexInfo.files_indexed, truncated: !!indexInfo.truncated,
       // WP05：workspace 索引忽略与 Git 忽略明确区分——扫描范围由 .malongignore+内置默认决定，
       // 不读写用户 .gitignore；状态目录的 git 提交排除走 .git/info/exclude，两者互不影响
-      ignore_scope: 'workspace scan: .malongignore + built-in defaults; git tracking: untouched (state dirs excluded via .git/info/exclude)' },
+      ignore_scope: 'workspace scan: .malongignore + built-in defaults; ' + ((process.env.MALONG_NO_GIT_EXCLUDE === '1' || process.env.MALONG_READONLY === '1')
+        ? 'git metadata: untouched (MALONG_NO_GIT_EXCLUDE=1 / MALONG_READONLY=1; .git/info/exclude not written)'
+        : 'git tracking: untouched (state dirs excluded via .git/info/exclude)') },
     created: new Date().toISOString(),
     materials: [],
     candidates: top,

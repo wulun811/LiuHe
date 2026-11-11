@@ -14,6 +14,9 @@ rsync -a \
   --exclude='/bin/' \
   --exclude='.gitignore' --exclude='.ai-patterns.json' --exclude='PROJECT_RULES.md' \
   --exclude='.ai-transactions' --exclude='.malongignore.bak' \
+  --exclude='P3-COLLECT.md' --exclude='TRACE-GUIDE.md' \
+  --exclude='SEARCH-ROADMAP.md' --exclude='SEARCH-BASELINE.md' \
+  --exclude='DOGFOOD-*.md' \
   --exclude='__pycache__' --exclude='*.pyc' \
   "$MALONG_ROOT" server/
 

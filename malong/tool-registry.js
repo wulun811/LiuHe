@@ -6,6 +6,7 @@ import { readdirSync, readFileSync, existsSync, appendFileSync, statSync } from 
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { gateReason } from './workflow/public-catalog.js'
+import { readonlyViolationForTool, readonlyError } from './workflow/readonly.js'
 
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -217,6 +218,15 @@ class ToolRegistry {
     let errorCode = ''
     let result
     try {
+      // LH-WO-005B: reject workspace/git/command effects before the handler can
+      // create a backup, journal, task operation, or business-file write.
+      const denied = readonlyViolationForTool(name, args || {})
+      if (denied) {
+        result = readonlyError(denied)
+        status = 'error'
+        errorCode = 'readonly_mode'
+        return result
+      }
       result = await tool.handler(args, context)
       // R13: ESM 模块缓存——handler 代码磁盘变化不会热加载；stat 检测到变化时贴 note（不自动重载，避免热加载事务风险）
       try {

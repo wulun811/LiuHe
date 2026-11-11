@@ -37,7 +37,7 @@ function run(args) {
   const skipped = (r.stdout.match(/— 找不到目标文件/g) || []).length
   assert(checked >= 15, `① 应真的检查到 ≥15 条修复（得 ${checked}）`)
   assert(skipped === 0, `① 不得有"找不到目标文件"的跳过（得 ${skipped} 条）`)
-  assert(/version\s*:\s*0\.6\.1/.test(r.stdout), '① 应报出版本号')
+  assert(/version\s*:\s*0\.6\.3/.test(r.stdout), '① 应报出版本号')
 }
 
 // ── ② 从子目录调用也必须定位到真正的根（本脚本第一版的 bug）──

@@ -1,6 +1,7 @@
 import { join, extname } from 'node:path'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { ErrorCodes, makeError } from '../../error-codes.js'
+import { txnRoot as txnRootFor } from '../../workspace-artifacts.js'
 
 const MAX_FILES = 50
 const TEST_PATTERNS = [/^test_/, /_test\./, /\.test\./, /\.spec\./, /\/tests?\//, /\/__tests__\//]
@@ -223,7 +224,7 @@ export async function handle(args, context) {
   if (typeof workspaceDir !== 'string' || workspaceDir === '') return makeError(ErrorCodes.INVALID_INPUT, 'workspace_dir is required (string)')
 
   const since = args?.since || 'last_txn'
-  const txnRoot = join(workspaceDir, '.ai-transactions')
+  const txnRoot = txnRootFor(workspaceDir)
 
   const txn = findTxn(txnRoot, since)
   if (!txn) {

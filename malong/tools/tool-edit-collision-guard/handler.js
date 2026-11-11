@@ -5,6 +5,7 @@ import { TransactionStore } from '../tool-edit-transaction/transaction-store.js'
 import { sha256 } from '../../hash-utils.js'
 import { getRegisteredWriter } from '../../writer-registry.js'
 import { getStateDir } from '../../host-config.js'
+import { txnRoot as txnRootFor } from '../../workspace-artifacts.js'
 
 const MAX_SNAPSHOTS = 500
 const LARGE_FILE_BYTES = 1024 * 1024
@@ -87,7 +88,7 @@ function classifyModification(workspaceDir, file, readHash, currentHash) {
       const meta = txn.files?.[file]
       if (!meta || meta.skipped) continue
       const backupName = meta.backupName || file.replace(/[/\\]/g, '__')
-      const backupPath = join(workspaceDir, '.ai-transactions', txn.txnId, 'backup', backupName)
+      const backupPath = join(txnRootFor(workspaceDir), txn.txnId, 'backup', backupName)
       if (!existsSync(backupPath)) continue
       if (contentHashFast(backupPath) === readHash) return 'this_txn'
     }

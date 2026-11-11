@@ -96,8 +96,12 @@ export async function spawnWithGroup(cmd, args, opts = {}) {
 
     const killGroup = (sig) => {
       if (isWin) {
-        // Windows 无进程组：taskkill /T 连孙进程整树强杀
-        try { execFileSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' }) } catch {}
+        // Windows 无进程组：taskkill /T 连孙进程整树强杀。
+        // 全链复核实测：taskkill 偶发被安全软件拦截（无输出、无效果）→ 超时后仍等
+        // 子进程自然结束（62s）。失败时退化为直接终止子进程，至少不悬挂。
+        let killedTree = false
+        try { execFileSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' }); killedTree = true } catch {}
+        if (!killedTree) { try { child.kill('SIGKILL') } catch {} }
       } else {
         try { process.kill(-child.pid, sig) } catch {}
       }

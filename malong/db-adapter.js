@@ -21,7 +21,14 @@ let _sqlJsInit = null
 function detectBackend() {
   if (_backend) return _backend
   try {
-    _require('better-sqlite3')
+    const Database = _require('better-sqlite3')
+    // R2 (0.6.2): require() only proves the JS package exists. pnpm can leave
+    // better-sqlite3 installed without its native binding when build scripts
+    // are ignored; the constructor is where that failure surfaces. Probe a
+    // throwaway in-memory DB so we degrade to sql.js instead of failing every
+    // tool call later.
+    const probe = new Database(':memory:')
+    probe.close()
     _backend = 'better-sqlite3'
   } catch {
     _backend = 'sql.js'

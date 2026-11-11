@@ -415,7 +415,7 @@
       "manifest_sha256": "sha256:0bf2a0212a27efb58798fb041f1da1d15be7832553ca75c78ab0582b0099da7e",
       "schema_sha256": "sha256:5c493917b26d9afd89eba737e8e165a7fa06936ccb49a484dcc1bfc73f97a8ee",
       "handler": "./handler.js",
-      "handler_sha256": "sha256:ec6b0f0abe6fbb9cf7b0fcf8e291572b07aef34fef340f08ea6b03a3529542c6",
+      "handler_sha256": "sha256:e5fc68e63796ddbe36342e47998adfdbffa45dee61542ed1a6ee394ea5369b02",
       "params": {
         "required": [
           "workspace_dir"
@@ -432,6 +432,7 @@
       "test_refs": [
         "tests/test-g3-acceptance.js",
         "tests/test-h07-capability-hints.js",
+        "tests/test-no-git-exclude.js",
         "tests/test-s5-catalog.js",
         "tests/test-workflow-closure.js"
       ],
@@ -482,6 +483,7 @@
         "tests/test-g3-acceptance.js",
         "tests/test-health-check.js",
         "tests/test-r10.js",
+        "tests/test-readonly-mode.js",
         "tests/test-s1-entry.js",
         "tests/test-s5-catalog.js",
         "tests/test-tool-registry.js",
@@ -510,7 +512,7 @@
       "manifest_sha256": "sha256:ee4006b8de8c2e55e846005394a614dcb2c35fb83ab77f1736e211a698bdc694",
       "schema_sha256": "sha256:002d14a15c749fb08abb9b96aa3e4de2f59ce08e760ec03dd53adedd1d2fb303",
       "handler": "./handler.js",
-      "handler_sha256": "sha256:8321144da6746e0d0049df47657e0ba819aa32f4a83868106152f6579eb361d0",
+      "handler_sha256": "sha256:8cf67450196ef7803198f7d14b3d125402bf7561247536474f2980992d6f3fec",
       "params": {
         "required": [
           "action",
@@ -566,7 +568,7 @@
       "manifest_sha256": "sha256:f7d82319af095c4d3ade75a4aca0441b204aa8e45f1d8d59adc4745604b1cc5c",
       "schema_sha256": "sha256:bade4ed048417e8d54c7cacae5ed5aeaa36123e6d39477700a86a87255e82593",
       "handler": "./handler.js",
-      "handler_sha256": "sha256:7b5d185c0adbd79a6649716d76d5a315b6660ae638e3063ae6280c5e0a712429",
+      "handler_sha256": "sha256:2a85e1a4cbafedf40fbd8418d8eb4de0ee865acfeef33c7cd9d06fa144edac93",
       "params": {
         "required": [
           "action",
@@ -623,6 +625,8 @@
         "tests/test-edit-transaction-ok-field.js",
         "tests/test-g3-acceptance.js",
         "tests/test-graph-catalog-budget.js",
+        "tests/test-no-git-exclude.js",
+        "tests/test-readonly-mode.js",
         "tests/test-s1-entry.js",
         "tests/test-s5-catalog.js",
         "tests/test-tool-registry.js",
@@ -887,6 +891,7 @@
       "test_refs": [
         "tests/test-capability-catalog.js",
         "tests/test-g3-acceptance.js",
+        "tests/test-readonly-mode.js",
         "tests/test-s5-catalog.js",
         "tests/test-s5-worktree.js"
       ],
@@ -983,6 +988,7 @@
         "tests/test-mcp-server.js",
         "tests/test-r2-semaphore.js",
         "tests/test-r9.js",
+        "tests/test-readonly-mode.js",
         "tests/test-s5-catalog.js",
         "tests/test-tool-registry.js",
         "tests/test-trace-e2e.js",
@@ -1965,7 +1971,7 @@
       "manifest_sha256": "sha256:c89a7a063fb34109f4075f812fca3bce26f73f02c80554564992c2f2bc3c379d",
       "schema_sha256": "sha256:42928f1de6dbe0881ea837216912697f2e1140f7feb2aba8ecb132fd044dff97",
       "handler": "./handler.js",
-      "handler_sha256": "sha256:1ca1a89bb5b2e75d1528560a306bebcdb3a7c1fa1cc4a76a4dba25afd308b7a2",
+      "handler_sha256": "sha256:9a40a88b20a430577132268a4096a6459cd6d767c00948d7460e7493844962b7",
       "params": {
         "required": [
           "workspace_dir"
@@ -2060,6 +2066,7 @@
         "tests/test-invoke-safety.js",
         "tests/test-invoke-stdio.js",
         "tests/test-r1-retention-protection.js",
+        "tests/test-readonly-mode.js",
         "tests/test-s5-catalog.js",
         "tests/test-tool-registry.js"
       ],

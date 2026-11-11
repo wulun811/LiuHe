@@ -2,7 +2,7 @@
 // 覆盖：① git 目录 → 写入两行 + 幂等 ② worktree（.git 是文件）→ 解析 gitdir ③ 非 git 目录 → 跳过不崩
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
+import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs'
 import os from 'node:os'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -45,6 +45,27 @@ try { rmSync(TMP, { recursive: true, force: true }) } catch {}
   mkdirSync(plain, { recursive: true })
   assert(ensureGitExclude(plain) === false, '③ 非 git 目录跳过')
   assert(ensureGitExclude(join(TMP, 'ghost')) === false, '③ 不存在的目录不崩')
+}
+
+// ⑤ LH-WO-005A/005B：显式开关下连调用都不写 git 元数据（不是 try/catch 后继续）
+{
+  const envRepo = join(TMP, 'repo-env')
+  mkdirSync(join(envRepo, '.git', 'info'), { recursive: true })
+  process.env.MALONG_NO_GIT_EXCLUDE = '1'
+  assert(ensureGitExclude(envRepo) === false, '⑤ MALONG_NO_GIT_EXCLUDE=1 → 返回 false')
+  assert(!existsSync(join(envRepo, '.git', 'info', 'exclude')), '⑤ 不创建 info/exclude')
+  delete process.env.MALONG_NO_GIT_EXCLUDE
+
+  const roRepo = join(TMP, 'repo-readonly-env')
+  mkdirSync(join(roRepo, '.git', 'info'), { recursive: true })
+  process.env.MALONG_READONLY = '1'
+  assert(ensureGitExclude(roRepo) === false, '⑤ MALONG_READONLY=1 → 返回 false')
+  assert(!existsSync(join(roRepo, '.git', 'info', 'exclude')), '⑤ readonly 不创建 info/exclude')
+  delete process.env.MALONG_READONLY
+
+  // Switch off: the same fresh repo now takes the historical path (proves the gate is env-only).
+  assert(ensureGitExclude(roRepo) === true, '⑤ 去掉开关后恢复写入（证明只是门控，不是永久禁用）')
+  assert(readFileSync(join(roRepo, '.git', 'info', 'exclude'), 'utf-8').includes('.malong/'), '⑤ 恢复写入含 .malong/')
 }
 
 // ④ dogfood-050：isGitRepo 判定（transaction-store 复用；修复后 git 仓不写 .gitignore）
