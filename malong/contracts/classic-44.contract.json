@@ -1971,7 +1971,7 @@
       "manifest_sha256": "sha256:c89a7a063fb34109f4075f812fca3bce26f73f02c80554564992c2f2bc3c379d",
       "schema_sha256": "sha256:42928f1de6dbe0881ea837216912697f2e1140f7feb2aba8ecb132fd044dff97",
       "handler": "./handler.js",
-      "handler_sha256": "sha256:9a40a88b20a430577132268a4096a6459cd6d767c00948d7460e7493844962b7",
+      "handler_sha256": "sha256:8a625d61744948b942cc1f62aa8259328ab73be0dc2629b62c715ca087a383fb",
       "params": {
         "required": [
           "workspace_dir"

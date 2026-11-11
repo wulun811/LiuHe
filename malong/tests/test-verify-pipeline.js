@@ -28,7 +28,7 @@ writeFileSync(join(WS, 'sub', 'package.json'), JSON.stringify({
   scripts: { lint: 'node -e "process.exit(1)"' },
 }))
 
-const { handle } = await import(pathToFileURL(join(__dirname, '..', 'tools', 'tool-verify-pipeline', 'handler.js')).href)
+const { handle, parseTestOutput } = await import(pathToFileURL(join(__dirname, '..', 'tools', 'tool-verify-pipeline', 'handler.js')).href)
 const ctx = { getWorkspaceDir: (d) => d }
 
 // ① 契约：缺 workspace_dir
@@ -247,6 +247,30 @@ const ctx = { getWorkspaceDir: (d) => d }
   assert(r.status === 'pass', `⑲c TAP 全绿 status=pass（得 ${r.status}）`)
   assert(r.results?.test?.passedCount === 3, `⑲c TAP passedCount=3（得 ${r.results?.test?.passedCount}）`)
   assert(r.results?.test?.failedCount === 0, `⑲c TAP failedCount=0（得 ${r.results?.test?.failedCount}）`)
+}
+// ⑲f node --test spec reporter（新版 Node 默认；Ubuntu CI 实测 TAP 解析得 0）——
+// 计数取 "ℹ pass N" 汇总行；✖ 在 failing tests 复述段重复出现，不得按标记数虚高
+{
+  const specMix = [
+    '✔ passes (0.9ms)',
+    '✖ fails (0.6ms)',
+    'ℹ tests 2',
+    'ℹ suites 0',
+    'ℹ pass 1',
+    'ℹ fail 1',
+    'ℹ cancelled 0',
+    '✖ failing tests:',
+    'test at tests/mix.test.js:4:1',
+    '✖ fails (0.6ms)',
+    '  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:',
+  ].join('\n')
+  const m = parseTestOutput(specMix, '')
+  assert(m.passed === 1 && m.failed === 1 && m.total === 2, `⑲f spec 混合计数 1/1/2（得 ${JSON.stringify(m)}）`)
+  const specGreen = ['✔ a (0.5ms)', '✔ b (0.4ms)', '✔ c (0.4ms)', 'ℹ tests 3', 'ℹ pass 3', 'ℹ fail 0'].join('\n')
+  const g = parseTestOutput(specGreen, '')
+  assert(g.passed === 3 && g.failed === 0 && g.total === 3, `⑲f spec 全绿计数 3/0/3（得 ${JSON.stringify(g)}）`)
+  const tap = parseTestOutput('1..2\n# tests 2\n# pass 1\n# fail 1\n', '')
+  assert(tap.passed === 1 && tap.failed === 1, `⑲f TAP 计数不受影响（得 ${JSON.stringify(tap)}）`)
 }
 
 // ⑲ live 审查 I1：workspace 根无 package.json 时不得向上爬执行祖先脚本

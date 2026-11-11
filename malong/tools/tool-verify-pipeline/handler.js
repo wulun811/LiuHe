@@ -137,7 +137,7 @@ export function lintUnavailableReason(hasScript, ok, stderr, stdout) {
   return null
 }
 
-function parseTestOutput(stdout, stderr) {
+export function parseTestOutput(stdout, stderr) {
   const combined = stdout + '\n' + stderr
   const lines = combined.split('\n')
   let passed = 0, failed = 0
@@ -153,6 +153,12 @@ function parseTestOutput(stdout, stderr) {
     const tapFail = line.match(/^#\s*fail\s+(\d+)\b/i)
     if (tapPass) passed = parseInt(tapPass[1])
     if (tapFail) failed = parseInt(tapFail[1])
+    // node --test spec（新版 Node 默认 reporter，Ubuntu CI 实测）："ℹ pass N" / "ℹ fail N"。
+    // 只认汇总行：逐用例的 ✔/✖ 标记在「failing tests」复述段会重复出现，按标记数会虚高。
+    const specPass = line.match(/^ℹ\s*pass\s+(\d+)\b/i)
+    const specFail = line.match(/^ℹ\s*fail\s+(\d+)\b/i)
+    if (specPass) passed = parseInt(specPass[1])
+    if (specFail) failed = parseInt(specFail[1])
   }
   if (passed === 0 && failed === 0) {
     // 0.5.25：pytest 进度字符兜底——项目的 pytest 配置常自带 addopts="-q"，叠加我们命令行上的 -q
