@@ -144,6 +144,47 @@ try { rmSync(WS, { recursive: true, force: true }) } catch {}
   }
 }
 
+// ④h3 node --test spec reporter（新版 Node 默认；Ubuntu CI run #71 实测 TAP 解析得 0）——
+// 纯函数锁定：✔/✖ 逐用例 + ℹ 汇总 + failing tests 复述段（test at 定位 / error_type / 断言细节）
+{
+  const { parseNodeTap: parseTapFn } = await import(pathToFileURL(join(__dirname, '..', 'tools', 'tool-test-bridge', 'parsers.js')).href)
+  const specSample = [
+    '✔ passes ok (0.9ms)',
+    '✖ fails here (0.6ms)',
+    'ℹ tests 2',
+    'ℹ suites 0',
+    'ℹ pass 1',
+    'ℹ fail 1',
+    'ℹ cancelled 0',
+    'ℹ skipped 0',
+    'ℹ todo 0',
+    'ℹ duration_ms 12.3',
+    '',
+    '✖ failing tests:',
+    '',
+    'test at tests/mix.test.js:4:1',
+    '✖ fails here (0.6ms)',
+    '  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:',
+    '',
+    '  3 !== 4',
+    '',
+    '      at TestContext.<anonymous> (tests/mix.test.js:4:30)',
+    '      at Test.run (node:internal/test_runner/test:1047:25)',
+  ].join('\n')
+  const p = parseTapFn(specSample)
+  assert(p.summary?.total === 2 && p.summary?.passed === 1 && p.summary?.failed === 1, `④h3 spec summary 1/1/2（得 ${JSON.stringify(p.summary)}）`)
+  assert(p.results?.length === 2 && p.results[0].status === 'passed' && p.results[1].status === 'failed', `④h3 spec 逐用例 status（得 ${JSON.stringify(p.results?.map(x => x.status))}）`)
+  assert(p.failures?.length === 1 && p.failures[0].test === 'fails here', `④h3 spec 失败定位（得 ${JSON.stringify(p.failures?.map(f => f.test))}）`)
+  assert(p.failures?.[0]?.error_type === 'AssertionError', `④h3 spec error_type（得 ${p.failures?.[0]?.error_type}）`)
+  assert(/Expected values|3 !== 4/.test(String(p.failures?.[0]?.error)), `④h3 spec error 细节（得 ${p.failures?.[0]?.error}）`)
+  assert(p.failures?.[0]?.file === 'tests/mix.test.js' && p.failures?.[0]?.line === 4, `④h3 spec test at 定位（得 ${p.failures?.[0]?.file}:${p.failures?.[0]?.line}）`)
+  assert(/mix\.test\.js:4:30/.test(String(p.failures?.[0]?.traceback)), `④h3 spec 堆栈（得 ${String(p.failures?.[0]?.traceback).slice(0, 60)}）`)
+  const pg = parseTapFn(['✔ g1 (0.4ms)', '✔ g2 (0.4ms)', 'ℹ tests 2', 'ℹ pass 2', 'ℹ fail 0'].join('\n'))
+  assert(pg.summary?.passed === 2 && pg.summary?.failed === 0 && pg.failures?.length === 0, `④h3 spec 全绿 2/0（得 ${JSON.stringify(pg.summary)}）`)
+  const pt = parseTapFn('ok 1 - legacy\n# tests 1\n# pass 1\n# fail 0\n')
+  assert(pt.summary?.passed === 1 && pt.results?.[0]?.test === 'legacy', `④h3 TAP 路径不受影响（得 ${JSON.stringify(pt.summary)}）`)
+}
+
 // ④i dogfood-050 修复：package.json `node --test` 自动识别（旧实现 unknown_framework，建议也不给 verify_pipeline）
 {
   const nd2 = join(os.tmpdir(), 'opencode', 'b13-tb-detect-ws')

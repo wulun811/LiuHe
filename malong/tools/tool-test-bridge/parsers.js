@@ -207,9 +207,16 @@ function extractGoFailure(lines, startIdx) {
 
 // dogfood-050 修复：node --test TAP 解析器（旧实现 framework=node 落 default 分支 →
 // 失败时 results/failures 全空，原始 TAP 塞 run_error 且截断——最需失败富化时丢失）
+// Ubuntu CI（run #71）实测：新版 Node 默认 spec reporter（✔/✖ 逐用例 + ℹ pass N 汇总），
+// 纯 TAP 解析得 0/0 → 同一入口按输出形态分派 TAP / spec 两条解析路径。
 export function parseNodeTap(output) {
   const raw = stripAnsi(output)
   const lines = raw.split('\n')
+  if (lines.some((l) => /^ℹ\s*tests\s+\d+/.test(l) || /^[✔✖]\s/.test(l))) return parseNodeSpec(raw, lines)
+  return parseNodeTapFormat(raw, lines)
+}
+
+function parseNodeTapFormat(raw, lines) {
   const results = []
   const failures = []
 
@@ -308,6 +315,79 @@ function parseTapSummary(lines, results) {
   const summary = { total, passed, failed }
   if (skipped > 0) summary.skipped = skipped
   return summary
+}
+
+// node --test spec reporter（新版 Node 默认）：逐用例 ✔/✖/﹣ + ℹ 汇总；失败详情在
+// 「✖ failing tests:」复述段——test at <file>:<line> 定位、缩进的 error 块、堆栈行以 "at " 开头。
+// 汇总只认 ℹ 行：复述段的 ✖ 是重复，按标记数会把失败翻倍。
+function parseNodeSpec(raw, lines) {
+  const results = []
+  const failures = []
+  const byName = new Map()
+  let inFailingSection = false
+  const markRe = /^([✔✖﹣])\s+(.+?)\s+\(([\d.]+)ms\)\s*$/
+  for (const l of lines) {
+    if (/^✖\s*failing tests:/.test(l)) { inFailingSection = true; continue }
+    const m = markRe.exec(l)
+    if (!m || inFailingSection) continue
+    const status = m[1] === '✖' ? 'failed' : m[1] === '✔' ? 'passed' : 'skipped'
+    const entry = { test: m[2].trim(), file: '', status, duration_ms: Math.round(parseFloat(m[3])) }
+    results.push(entry)
+    if (status === 'failed') {
+      const failure = { ...entry, error: '', error_type: 'TestFailure', traceback: '', line: 0 }
+      failures.push(failure)
+      byName.set(entry.test, failure)
+    }
+  }
+
+  // 失败富化：定位 test at 行 + error 块（error_type / 断言细节），堆栈行不进 error
+  let cur = null
+  let pendingLoc = null
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i]
+    if (/^✖\s*failing tests:/.test(l)) { cur = null; pendingLoc = null; continue }
+    const at = /^test at (.+):(\d+):\d+\s*$/.exec(l)
+    if (at) { pendingLoc = { file: at[1], line: parseInt(at[2]) }; continue }
+    const m = markRe.exec(l)
+    if (m && inFailingSection) {
+      cur = byName.get(m[2].trim()) || null
+      if (cur && pendingLoc && !cur.file) { cur.file = pendingLoc.file; cur.line = pendingLoc.line }
+      pendingLoc = null
+      continue
+    }
+    if (!cur) continue
+    if (/^\s+at\s/.test(l)) { cur.traceback = (cur.traceback ? cur.traceback + '\n' : '') + l.trim(); continue }
+    if (!l.trim()) continue
+    const em = /^\s*(\w+(?:\.\w+)*(?:Error|Exception))(?:\s+\[[A-Z_]+\])?:\s*(.*)$/.exec(l)
+    if (em && (!cur.error_type || cur.error_type === 'TestFailure')) {
+      cur.error_type = em[1]
+      if (em[2]) cur.error = em[2]
+      continue
+    }
+    cur.error = (cur.error ? cur.error + '\n' : '') + l.trim()
+    if (cur.error.length > 300) cur.error = cur.error.slice(0, 300)
+  }
+
+  let passed = 0, failed = 0, skipped = 0, total = 0
+  for (const l of lines) {
+    let m
+    if ((m = /^ℹ\s*pass\s+(\d+)\b/i.exec(l))) passed = parseInt(m[1])
+    else if ((m = /^ℹ\s*fail(?:ure)?s?\s+(\d+)\b/i.exec(l))) failed = parseInt(m[1])
+    else if ((m = /^ℹ\s*(?:skipped|cancelled|todo)\s+(\d+)\b/i.exec(l))) skipped += parseInt(m[1])
+    else if ((m = /^ℹ\s*tests\s+(\d+)\b/i.exec(l))) total = parseInt(m[1])
+  }
+  if (passed === 0 && failed === 0 && results.length > 0) {
+    passed = results.filter(r => r.status === 'passed').length
+    failed = results.filter(r => r.status === 'failed').length
+    skipped = results.filter(r => r.status === 'skipped').length
+  }
+  if (total === 0) total = passed + failed + skipped
+  const summary = { total, passed, failed }
+  if (skipped > 0) summary.skipped = skipped
+  if (results.length === 0) {
+    return { results, failures, summary, raw_hint: raw.slice(0, 1000) }
+  }
+  return { results, failures, summary }
 }
 
 export function parseOutput(output, framework) {
