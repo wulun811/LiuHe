@@ -2,10 +2,13 @@ import { existsSync, readdirSync, readFileSync, writeFileSync, accessSync, const
 import net from 'node:net'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createHash } from 'node:crypto'
 
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const SCHEMA_VERSION = 1
+// 0.6.4：daemon exe 的内容哈希缓存（health 可能被频繁调用；13MB 二进制无缓存每次 ~30ms）
+let _exeShaCache = { key: '', sha: null }
 
 import { readStateFile } from './host-config.js'
 import { MEMORY_THRESHOLDS } from './watchdog-log.js'
@@ -206,26 +209,56 @@ export async function runHealthCheck({ stateDir, toolsDir, workspacesDir, regist
             const raw = String(p || '')
             let real = raw
             try { real = realpathSync(raw) } catch { real = raw }
-            return real.replace(/\\/g, '/').toLowerCase()
+            let s = real.replace(/\\/g, '/').toLowerCase()
+            // 0.6.4：Windows 上 resolved 路径可能不带 .exe（配置/历史安装），daemon 报的是真实 exe——
+            // 同一个文件不因后缀误报
+            if (process.platform === 'win32') s = s.replace(/\.exe$/, '')
+            return s
+          }
+          // 0.6.4：路径不同不再直接判漂移。同机可读 daemon exe 时按内容 sha256 判定——
+          // 「同一构建放在两个路径」（npm 平台包一份 + 手动复制一份）是常见部署，不是漂移。
+          let daemonSha = null
+          if (d.exe_path) {
+            try {
+              const st = statSync(d.exe_path)
+              const key = d.exe_path + '|' + st.size + '|' + st.mtimeMs
+              if (_exeShaCache.key === key) daemonSha = _exeShaCache.sha
+              else {
+                daemonSha = createHash('sha256').update(readFileSync(d.exe_path)).digest('hex')
+                _exeShaCache = { key, sha: daemonSha }
+              }
+            } catch { daemonSha = null }
           }
           let drift = null
+          let pathNote = null
           if (daemonOk && d.exe_path && identity.resolved_bin) {
-            if (norm(d.exe_path) !== norm(identity.resolved_bin)) {
+            const samePath = norm(d.exe_path) === norm(identity.resolved_bin)
+            if (samePath) {
+              if (d.exe_size != null && identity.resolved_bin_size != null && d.exe_size !== identity.resolved_bin_size) {
+                drift = 'same exe path but size mismatch (daemon ' + d.exe_size + ' vs resolved ' + identity.resolved_bin_size + ')'
+              }
+            } else if (daemonSha && identity.resolved_bin_sha256) {
+              if (daemonSha !== identity.resolved_bin_sha256) {
+                drift = 'different binary (sha256: daemon ' + daemonSha.slice(0, 12) + ' vs resolved ' + identity.resolved_bin_sha256.slice(0, 12) + ') — parser upgrade pending or MALONG_PARSE_BIN mismatch'
+              } else {
+                pathNote = 'same binary at different path (' + d.exe_path + ')'
+              }
+            } else {
+              // 读不到 daemon exe / 无 sha：保持旧的严格判据（宁可报，不静默漏）
               drift = 'daemon binary (' + d.exe_path + ') differs from resolvable binary (' + identity.resolved_bin + ') — parser upgrade pending or MALONG_PARSE_BIN mismatch'
-            } else if (d.exe_size != null && identity.resolved_bin_size != null && d.exe_size !== identity.resolved_bin_size) {
-              drift = 'same exe path but size mismatch (daemon ' + d.exe_size + ' vs resolved ' + identity.resolved_bin_size + ')'
             }
           }
           const oldDaemon = daemonOk && d.exe_path == null
           parserIdentity = {
             ...identity,
             drift: drift ? { detected: true, reason: drift } : { detected: false },
+            ...(pathNote ? { path_note: pathNote } : {}),
             ...(oldDaemon ? { note: 'daemon predates identity fields (exe_path/exe_size) — rebuild and redeploy to expose build identity' } : {}),
           }
           const resolvedDesc = identity.resolved_bin
             ? ('; resolved=' + identity.resolved_bin + (identity.resolved_bin_sha256 ? ' sha256=' + identity.resolved_bin_sha256.slice(0, 12) : ''))
             : ''
-          add('Parse Service', drift ? 'WARN' : 'PASS', 'rust-service ' + identity.endpoint + ' connected=' + identity.connected + '; ' + daemonDesc + (oldDaemon ? ' (predates identity fields)' : '') + resolvedDesc + (drift ? '; DRIFT: ' + drift : ''))
+          add('Parse Service', drift ? 'WARN' : 'PASS', 'rust-service ' + identity.endpoint + ' connected=' + identity.connected + '; ' + daemonDesc + (oldDaemon ? ' (predates identity fields)' : '') + resolvedDesc + (pathNote ? '; ' + pathNote : '') + (drift ? '; DRIFT: ' + drift : ''))
         } else {
           add('Parse Service', 'PASS', 'rust-service mode, config=' + (parseService.getConfigMode?.() || '?') + (identity && identity.error ? ' (identity: ' + identity.error + ')' : ''))
         }

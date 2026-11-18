@@ -11,7 +11,7 @@
 //   ② 旧安装物必须真的被判为旧（EXIT=1）
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs'
 import { execFile } from 'node:child_process'
 import os from 'node:os'
 
@@ -37,7 +37,7 @@ function run(args) {
   const skipped = (r.stdout.match(/— 找不到目标文件/g) || []).length
   assert(checked >= 15, `① 应真的检查到 ≥15 条修复（得 ${checked}）`)
   assert(skipped === 0, `① 不得有"找不到目标文件"的跳过（得 ${skipped} 条）`)
-  assert(/version\s*:\s*0\.6\.3/.test(r.stdout), '① 应报出版本号')
+  assert(/version\s*:\s*0\.6\.4/.test(r.stdout), '① 应报出版本号')
 }
 
 // ── ② 从子目录调用也必须定位到真正的根（本脚本第一版的 bug）──
@@ -163,6 +163,20 @@ function run(args) {
     assert(/找不到目标文件/.test(r2.stdout), '④ 必须明确报"找不到目标文件"')
     assert(/跳过不等于通过/.test(r2.stdout), '④ 必须说明跳过不算通过')
     rmSync(BARE, { recursive: true, force: true })
+  }
+
+  // ── ⑤ 0.6.4：DSH bundle 必须声明四平台解析器 optionalDependencies ──
+  //    实测反馈：npm 用户装完没有 malong-parse，只能手动去平台包里掏 exe。
+  //    这里锁死「随版本同步声明」——release.yml 的版本改写才有对象可改。
+  {
+    const pkg = JSON.parse(readFileSync(join(MALONG, 'package.json'), 'utf-8'))
+    const bundle = JSON.parse(readFileSync(join(MALONG, 'dsh', 'bundle', 'package.json'), 'utf-8'))
+    const deps = bundle.optionalDependencies || {}
+    for (const p of ['darwin-arm64', 'darwin-x64', 'linux-x64', 'win32-x64']) {
+      const name = '@jieai/malong-parse-' + p
+      assert(deps[name] === pkg.version, `⑤ ${name} 必须声明且与版本同步（得 ${JSON.stringify(deps[name])}，期望 ${pkg.version}）`)
+    }
+    assert(bundle.version === pkg.version, `⑤ bundle 版本与主包一致（得 ${bundle.version} vs ${pkg.version}）`)
   }
   rmSync(TMP, { recursive: true, force: true })
 }

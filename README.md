@@ -187,7 +187,7 @@ node tests/test-db-adapter.js   # 22 assertions: sql.js backend + persistence
 node tests/test-mcp-server.js   # 37 assertions: MCP stdio + daemon round-trip
 ```
 
-> **Windows users:** use `malong-liuhe-0.6.1-windows-x86_64.tar.gz` from GitHub Releases (contains `malong-parse.exe`), extract and put it on PATH; the MCP server auto-starts the daemon, so step 1's `malong-parse &` is not required. The `mkdir -p`/`tar -xzf` above are Unix syntax — on Windows use any extractor (`tar -xzf` works on Win10+).
+> **Windows users:** the easiest path is `npm install @jieai/dsh-malong-bridge` (or the dsh plugin add above) — since 0.6.4 it pulls `@jieai/malong-parse-win32-x64` automatically. If you prefer the tarball, use `malong-liuhe-0.6.4-windows-x86_64.tar.gz` from GitHub Releases (contains `malong-parse.exe`), extract and put it on PATH; the MCP server auto-starts the daemon, so step 1's `malong-parse &` is not required. The `mkdir -p`/`tar -xzf` above are Unix syntax — on Windows use any extractor (`tar -xzf` works on Win10+).
 
 > Note: if the daemon is not running, parse-dependent tools (symbol extraction
 > etc.) degrade; the SQLite-backed tools (repo-map / code-index / health-check)
@@ -220,7 +220,7 @@ malong-parse &                                   # daemon (Unix socket: /tmp/mal
 Prebuilt binaries for Linux x86_64 are committed under
 [`releases/`](releases/) (with `.sha256` checksums) — pick one up instead of building if you prefer.
 
-**Platforms:** Linux and macOS use the Unix socket; on **Windows** the daemon listens on TCP `127.0.0.1:31001` (set `MALONG_PORT` to override) — the MCP server probes and auto-starts `malong-parse.exe` on startup, so no manual launch is needed (if you use the parse-client API directly outside MCP, start it manually). Set `MALONG_SOCKET` to override the Unix socket path.
+**Platforms:** Linux and macOS use the Unix socket; on **Windows** the daemon listens on TCP `127.0.0.1:31001` (set `MALONG_PORT` to override) — the MCP server probes and auto-starts `malong-parse.exe` on startup, and since 0.6.4 `parse-client` also restarts it if it dies mid-session, so no manual launch is needed. Set `MALONG_SOCKET` to override the Unix socket path.
 
 ### Install the toolset
 

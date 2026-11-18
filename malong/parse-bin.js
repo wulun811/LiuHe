@@ -4,9 +4,8 @@
 //       → 包内 server/bin/malong-parse（旧版主包内嵌兼容）
 //       → ~/.local/bin/malong-parse（历史安装）
 //       → dev 源码树 ../malong-parse/target/release|debug（liuhe 仓库内开发）
-// 注（0.5.13）：平台包不再在 DSH bundle 里声明 optionalDependencies——旧版钉的 0.5.9
-// 从未发布过（npm 最高 0.4.8），永远装不上，只会静默走 catch 分支。仓库里也没有
-// npm-platform/ 构建目录。要自动分发需先把平台包真的发出来；当前靠下面分支兜底。
+// 0.6.4：DSH bundle 重新把四个平台包声明进 optionalDependencies（npm 按 os/cpu 只装一个），
+// npm install 后解析链第一跳即可命中；此前 0.5.13 因平台包未发布而只剩兜底分支。
 // 平台枚举：linux-x64 / darwin-x64 / darwin-arm64 / win32-x64。
 import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'

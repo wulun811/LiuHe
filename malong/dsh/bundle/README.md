@@ -100,44 +100,55 @@ DSH Agent → malong__read_symbol(...) (no workspace_dir)
   which cordis 4 no longer emits; if you still see orphan `mcp-server.js`
   processes, you are running an older bundle.)
 
-> **Platform / runtime support**: verified on **Linux x86-64** with Node
-> **22.19+** (the bundle's `engines` floor; DSH 0.2.2 itself requires a newer
-> Node). Windows and macOS are **not verified** for this release — see
-> **Parser setup** below before assuming they work.
+> **Platform / runtime support**: verified on **Linux x86-64**, **Windows x86-64**
+> and **macOS** with Node **22.19+** (the bundle's `engines` floor; DSH 0.2.2
+> itself requires a newer Node). Since 0.6.4 the npm install also pulls the
+> matching `@jieai/malong-parse-<platform>-<arch>` binary — see **Parser setup**.
 
 ## Parser setup (`malong-parse`)
 
-This tarball contains the bridge and the MCP server, **not** the Rust parser.
-`npm install` alone does not give you working parsing. Two separate things must
-hold:
+This tarball contains the bridge and the MCP server. Since 0.6.4 the four
+platform parser packages are declared as `optionalDependencies`, so a normal
+`npm install` installs **exactly one** matching binary (npm filters by
+`os`/`cpu`) and parsing works out of the box. Two things must hold:
 
 1. **The binary must exist.** Resolution order (`parse-bin.js`):
-   `MALONG_PARSE_BIN` → `MALONG_PARSE_BIN_ALT` → an installed
-   `@jieai/malong-parse-<platform>-<arch>` package (none is published yet) →
-   `server/bin/malong-parse` (legacy layout, absent here) →
-   `~/.local/bin/malong-parse` → a sibling `../malong-parse/target/{release,debug}`
-   dev build.
-   The last entry is why a dev checkout works without any env var — do not rely
-   on that for an installed setup.
+   `MALONG_PARSE_BIN` → `MALONG_PARSE_BIN_ALT` → the installed
+   `@jieai/malong-parse-<platform>-<arch>` package → `server/bin/malong-parse`
+   (legacy layout, absent here) → `~/.local/bin/malong-parse` → a sibling
+   `../malong-parse/target/{release,debug}` dev build.
+   A missing platform package (e.g. `npm install --no-optional` / pnpm
+   `ignoredOptionalDependencies`) is the one case that needs a manual install —
+   set `MALONG_PARSE_BIN` or drop the binary in `~/.local/bin`.
 2. **A daemon must be reachable.** The MCP server connects to a shared Unix
-   socket at `/tmp/malong-parse-<uid>.sock` (`MALONG_SOCKET` overrides it) and
-   spawns a daemon if none is running. The daemon is **per-user, shared by all
-   sessions** — which is why an unrelated running daemon can make a wrong
-   `MALONG_PARSE_BIN` look like it works (you get a `DRIFT` warning in `health`
-   instead of a failure).
+   socket at `/tmp/malong-parse-<uid>.sock` (`MALONG_SOCKET` overrides it) on
+   Linux/macOS, and to TCP `127.0.0.1:31001` (`MALONG_PORT` overrides it) on
+   Windows. It spawns a daemon if none is running — on **all** platforms,
+   guarded by a shared spawn lock (`~/.local/share/malong/.parse-spawn.lock` on
+   Windows). Since 0.6.4 `parse-client` also self-heals on Windows: if the
+   daemon dies mid-session it is started again on the next request. The daemon
+   is **per-user, shared by all sessions** — an unrelated running daemon can
+   make a wrong `MALONG_PARSE_BIN` look like it works (you get a `DRIFT` warning
+   in `health` instead of a failure).
 
 Recommended install:
 
 ```bash
-# Linux x86-64 asset shipped alongside this release
+npm install @jieai/dsh-malong-bridge    # pulls the matching parser package too
+```
+
+Manual fallback (optional deps were skipped, or you want a specific build):
+
+```bash
+# asset shipped alongside the release / npm platform package
 install -Dm755 malong-parse-linux-x64-0.3.39 ~/.local/bin/malong-parse
 malong-parse --version   # confirm it runs at all
 ```
 
-Then, in the dsh host environment:
+Then, if you used the manual fallback, point the host at it (optional):
 
 ```bash
-export MALONG_PARSE_BIN="$HOME/.local/bin/malong-parse"   # optional but explicit
+export MALONG_PARSE_BIN="$HOME/.local/bin/malong-parse"   # Windows: ...\malong-parse.exe
 ```
 
 **Verify it, don't assume it.** `invoke_capability(name='health')` reports a

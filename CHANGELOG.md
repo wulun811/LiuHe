@@ -4,6 +4,15 @@
 
 ## 0.6.x
 
+- **[0.6.4]** (2026-11-12): npm 安装体验收口——解析器随安装分发、Windows 守护进程自愈、health 的 DRIFT 假警报修正。
+  - **解析器随 npm 分发（根因修复）**：DSH bundle 自 0.5.13 起不再声明平台包，`npm install @jieai/dsh-malong-bridge` 装完没有 `malong-parse`——新用户只能自己从 `@jieai/malong-parse-win32-x64` 里掏 exe 放进 `~/.local/bin`。现在四个平台包（`@jieai/malong-parse-{darwin-arm64,darwin-x64,linux-x64,win32-x64}`）重新声明为 `optionalDependencies`（npm 按 os/cpu 只装匹配的一个），release 工作流按 tag 版本统一改写；`parse-bin.js` 解析链第一跳即可命中。自检测试锁死「四平台声明且与版本同步」，防止再次漂移。
+  - **Windows 守护进程自愈**：`parse-client` 原先在 Windows 完全不自愈（`_reconnectPromise` 被 `!IS_WIN` 挡住、`_restartProcess` 直接放弃）。现在：连接失败时按共享 spawn 锁自动拉起（与 mcp-server 同一把 `~/.local/share/malong/.parse-spawn.lock`），"活着但无响应"的 daemon 不杀（Windows 无进程组）；就绪判据从 socket 文件改为 TCP 可连；兜底二进制路径补齐 `.exe`；spawn 加 `windowsHide`。实测（隔离端口 31077）：杀 pid → 越过 10s 重启冷却后新 pid 自动拉起、解析继续成功。注意不在连接前探活——探活会多占一次真实连接、改变「断连后单次重试」语义（`test-parse-retry` 抓到 retried 1→3），改为「连不上才拉起」。
+  - **health 的 DRIFT 假警报**：旧判据只比 realpath+size，同一构建的两份拷贝（npm 平台包一份 + 手动复制一份）会误报 WARN。现在路径不同但同机可读 daemon exe 时按 **sha256** 比较：内容一致 → PASS 并附 `path_note`；内容不同 → 仍报真漂移（带双方 sha 前缀）；Windows 比较忽略 `.exe` 后缀差异。读不到 daemon exe 时保留旧的严格判据。
+  - **文档**：bundle README 的平台支持改为 Linux/Windows/macOS 已验证，解析器安装改为「npm 自动」，手动安装降为备选；主 README 的 Windows 说明更新（npm 安装即带解析器、parse-client 中途自愈）。
+  - **未改（上游限制）**：`better-sqlite3 ^11` 在 Node 24 无预编译且 node-gyp 撞 `enable_thin_lto`；降级 sql.js 是设计兜底（可用，大工程略慢）。放宽到 `^12` 需单独做兼容性验证，不在本版。
+  - 版本位：`package.json` / `package-lock.json` / `lang-parser.js` / `GRAPH_VERSION` / `dsh/bundle/package.json` 均为 0.6.4；parse 仍为 0.3.39。合同无漂移（parsers/health/parse-client 均不在合同哈希面）。
+  - **Windows 复核（2026-11-12）**：全链 `npm test` **226/226 文件 EXIT=0（632.6s）**；定点：health-check 58/58（含同内容/异内容 sha 判据）、parse-retry 5/5（预探活方案被它抓出 retried 1→3，已回退）、selfcheck 26/26（含四平台声明锁）、primitives 145/145、mcp-server 39/39、合同 347/347；Windows 自愈隔离端口（31077）实测：杀 pid → 冷却期后自动拉起、解析成功。
+
 - **[0.6.3]** (2026-11-11): 两种默认关闭的运行模式（工作区零改动 / 只读）、DSH 宿主生命周期修复、better-sqlite3 降为可选依赖。
   - **`MALONG_NO_GIT_EXCLUDE=1`（LH-WO-005A，默认关闭）**：跳过全部 git exclude 写入；索引/事务产物改写到 `$MALONG_STATE_DIR/workspace-artifacts/<工作区哈希>/`，真实 worktree 的 `git_dir/common_dir` 保持逐字节不变，工作区内不出现 `.malong/`、`.ai-transactions/`。
   - **`MALONG_READONLY=1`（LH-WO-005B，默认关闭）**：在 handler 产生副作用之前拒绝工作区/git/命令类能力（`code_patch`、`code_batch`、`edit_transaction`、apply/run 动作、`invoke_capability`）并返回 `readonly_mode`；只读与纯状态路径保持可用。两模式均有真实 git worktree 与直连 MCP 的回归测试。

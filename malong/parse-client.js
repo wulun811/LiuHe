@@ -11,7 +11,7 @@ import { spawn } from 'node:child_process'
 import { isInString } from './string-utils.js'
 
 // r31：三平台支持——Unix 用 Unix socket；Windows 无 uid/无 Unix socket，走 TCP 127.0.0.1:MALONG_PORT
-// （daemon 需手动启动，客户端不管理进程）。环境变量 MALONG_SOCKET 覆盖 Unix socket 路径。
+// （0.6.4 起：daemon 不在时客户端自动拉起，spawn 锁与 mcp-server 共用）。环境变量 MALONG_SOCKET 覆盖 Unix socket 路径。
 const IS_WIN = process.platform === 'win32'
 const UID = typeof process.getuid === 'function' ? process.getuid() : 0
 const SOCKET_PATH = IS_WIN ? '' : (process.env.MALONG_SOCKET || `/tmp/malong-parse-${UID}.sock`)
@@ -21,7 +21,10 @@ const PID_PATH = IS_WIN ? '' : (process.env.MALONG_SOCKET ? `${process.env.MALON
 // 第二轮审查：重启锁与 mcp-server 的 spawn 锁统一为同一文件（socket 旁 .parse-spawn.lock，跟随 MALONG_SOCKET）——
 // 旧实现 mcp-server 用 .parse-spawn.lock、parse-client 用 /tmp/malong-parse-${UID}.restart-lock，两把锁互不认，
 // 并发启动时双 daemon 都能成功（Rust 端 bind 前先 unlink socket）
-const RESTART_LOCK = IS_WIN ? '' : join(dirname(SOCKET_PATH), '.parse-spawn.lock')
+// 0.6.4：Windows 也要自愈——锁放用户数据目录，与 mcp-server 的 Windows 锁（r55）同一个文件，跨进程互斥。
+const RESTART_LOCK = IS_WIN
+  ? join(os.homedir(), '.local', 'share', 'malong', '.parse-spawn.lock')
+  : join(dirname(SOCKET_PATH), '.parse-spawn.lock')
 const TCP_PORT = (() => { const n = parseInt(process.env.MALONG_PORT || '31001', 10); return Number.isFinite(n) && n > 0 && n < 65536 ? n : 31001 })()
 
 // r8(F1)：握手认证失败标记——避免 auth 失败后 1s 自动重连死循环
@@ -87,7 +90,8 @@ const CIRCUIT_BREAKER_THRESHOLD = 3
 // r52: MALONG_PARSE_BIN env 覆盖此前只在 describeConfig 生效，_startProcess 用硬编码路径 → env 覆盖静默失效且配置显示与实际运行路径不一致
 // r0.4.5-post5: 统一走 parse-bin.js 共享解析（env → npm 平台包 → 包内 server/bin → ~/.local/bin → dev target）
 import { resolveParseBin, resolveParseBinCandidates } from './parse-bin.js'
-const BINARY_PATH = resolveParseBin() ?? `${process.env.HOME || '/home'}/.local/bin/malong-parse`
+// 0.6.4：兜底路径在 Windows 必须带 .exe（resolveParseBin 落空时旧实现拼出无扩展名路径 → 永远 not found）
+const BINARY_PATH = resolveParseBin() ?? join(os.homedir(), '.local', 'bin', 'malong-parse' + (IS_WIN ? '.exe' : ''))
 
 // R6（0.5.14 复审修复）：解析器不可用且二进制解析为空时，错误里列出已搜位置（进 tool 回执，不再只有一句 not connected）
 function parseUnavailableDetail() {
@@ -157,6 +161,9 @@ export async function connect() {
   // 创建重连 Promise，让其他请求可以等待
   _reconnectPromise = (async () => {
     try {
+      // 0.6.4：Windows 也自愈，但不在连接前探活——探活会多占一次真实连接、改变
+      // 「断连后单次重试」语义（test-parse-retry 实测 retried 从 1 变 3）。
+      // 先直接连；只有连接失败（error 分支）才拉起 daemon 并重试。
       if (!IS_WIN && !existsSync(SOCKET_PATH)) {
         const started = await _startProcess()
         if (!started) {
@@ -218,12 +225,23 @@ export async function connect() {
           resolve(true)
         })
 
-        sock.on('error', (err) => {
+        sock.on('error', async (err) => {
           clearTimeout(timer)
           _connectingSock = null
+          _core?.log('warn', `[parse-client] connection failed: ${err.message}`)
+          // 0.6.4：Windows 无 socket 文件——连不上时才尝试拉起（共享锁内幂等），
+          // 拉起成功后在本 Promise 内重连一次；失败则按原语义交回调用方。
+          if (IS_WIN) {
+            const started = await _startProcess()
+            if (started) {
+              _connecting = false
+              _reconnectPromise = null
+              const ok = await connect().catch(() => false)
+              return resolve(ok === true)
+            }
+          }
           _connecting = false
           _reconnectPromise = null
-          _core?.log('warn', `[parse-client] connection failed: ${err.message}`)
           resolve(false)
         })
       })
@@ -328,6 +346,19 @@ let _restartAttempts = 0
 let _lastRestartTime = 0
 let _childPid = null
 
+// 0.6.4：Windows 没有 socket 文件，就绪判据改成 TCP 可连（300ms 内连上即算起来）
+function _daemonReady() {
+  if (!IS_WIN) return Promise.resolve(existsSync(SOCKET_PATH))
+  return new Promise((resolve) => {
+    const sock = net.createConnection({ host: '127.0.0.1', port: TCP_PORT })
+    let done = false
+    const fin = (ok) => { if (done) return; done = true; clearTimeout(timer); try { sock.destroy() } catch {}; resolve(ok) }
+    const timer = setTimeout(() => fin(false), 300)
+    sock.on('connect', () => fin(true))
+    sock.on('error', () => fin(false))
+  })
+}
+
 async function _startProcess() {
   const now = Date.now()
   if (now - _lastRestartTime < RESTART_COOLDOWN_MS) return false
@@ -339,13 +370,14 @@ async function _startProcess() {
   }
   // r9(H4)：_startProcess 入口也查 RESTART_LOCK——旧实现只有 _restartProcess 拿锁，
   // 拿不到锁的会话 3s 后重连时 socket 仍缺失 → 无锁 spawn 第二个 daemon 抢同一 socket
+  try { mkdirSync(dirname(RESTART_LOCK), { recursive: true }) } catch {}
   try {
     const st = statSync(RESTART_LOCK)
     if (Date.now() - st.mtimeMs < RESTART_LOCK_STALE_MS) {
       _core?.log('info', '[parse-client] restart already in progress, waiting for socket')
       for (let i = 0; i < 30; i++) {
         await new Promise(r => setTimeout(r, 200))
-        if (existsSync(SOCKET_PATH)) {
+        if (await _daemonReady()) {
           _restartAttempts = 0
           return true
         }
@@ -374,6 +406,8 @@ async function _startProcess() {
   const child = spawn(BINARY_PATH, [], {
     stdio: ['ignore', 'ignore', stderrFd],
     detached: true,
+    // 0.6.4：Windows 上 detached 的 console 程序会弹黑窗——隐藏之
+    windowsHide: true,
   })
   // live 审查 K3：spawn 已复制 fd 给子进程，父进程必须关闭，否则每次重启泄漏一个 fd
   if (typeof stderrFd === 'number') { try { closeSync(stderrFd) } catch {} }
@@ -383,16 +417,16 @@ async function _startProcess() {
     _core?.log('error', `[parse-client] spawn error: ${e.message}`)
   })
   child.unref()
-  // wait for socket to appear
+  // wait for the daemon to be reachable (Unix: socket file; Windows: TCP)
   for (let i = 0; i < 30; i++) {
     await new Promise(r => setTimeout(r, 200))
-    if (existsSync(SOCKET_PATH)) {
-      _core?.log('info', `[parse-client] socket ready after ${(i + 1) * 200}ms`)
+    if (await _daemonReady()) {
+      _core?.log('info', `[parse-client] daemon ready after ${(i + 1) * 200}ms`)
       _restartAttempts = 0
       return true
     }
   }
-  _core?.log('warn', `[parse-client] socket not ready after 6s`)
+  _core?.log('warn', `[parse-client] daemon not ready after 6s`)
   return false
 }
 
@@ -482,9 +516,35 @@ function _probeDaemon(timeoutMs = HEALTH_PROBE_TIMEOUT_MS) {
 let _restarting = false
 async function _restartProcess() {
   if (IS_WIN) {
-    _core?.log('warn', '[parse-client] daemon auto-restart not supported on Windows; start malong-parse manually')
-    _circuitOpen = false
-    _circuitFailures = 0
+    // 0.6.4：Windows 也自愈——没有进程组，不能安全杀「挂死但还活着」的 daemon；
+    // 「不在」时按共享 spawn 锁拉起（与 mcp-server 的 Windows 启动路径同锁）。
+    if (_restarting) return
+    _restarting = true
+    try {
+      const alive = await _probeDaemon(1500)
+      if (alive) {
+        _core?.log('warn', '[parse-client] daemon alive but unresponsive; Windows cannot kill a process group — leaving it, retry on next request')
+        _circuitOpen = false
+        _circuitFailures = 0
+        return
+      }
+      _core?.log('info', `[parse-client] daemon not running on Windows — starting ${BINARY_PATH}`)
+      const ok = await _startProcess()
+      _circuitOpen = false
+      _circuitFailures = 0
+      if (ok) {
+        connect().catch(() => {})
+      } else {
+        setTimeout(() => {
+          _circuitOpen = false
+          _circuitFailures = 0
+          _core?.log('info', '[parse-client] circuit breaker half-open after failed start, retrying...')
+          connect().catch(() => {})
+        }, 60000)
+      }
+    } finally {
+      _restarting = false
+    }
     return
   }
   if (_restarting) return // B5：进程内并发触发互斥（两个 daemon 抢同一 socket，孤儿进程泄漏）

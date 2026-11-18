@@ -2,7 +2,8 @@
 // 覆盖：readUsageStats 解析/聚合/success_rate 口径（error 不计成功）、runHealthCheck 检查项
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { mkdirSync, writeFileSync, rmSync, existsSync, utimesSync, symlinkSync, unlinkSync } from 'node:fs'
+import { mkdirSync, writeFileSync, rmSync, existsSync, utimesSync, symlinkSync, unlinkSync, readFileSync, statSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import os from 'node:os'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -92,6 +93,38 @@ const TMP = join(os.tmpdir(), 'opencode', 'health-check-test')
   const r4 = await hc.runHealthCheck({ stateDir: TMP, workspacesDir: join(TMP, 'ws'), semaphore: semX, activeRequests: activeX, log: () => {}, parseService: { ...svcBase, getConfigMode: () => 'uds=/tmp/x.sock' } })
   const p4 = r4.checks.find(c => c.name === 'Parse Service')
   assert(p4 && p4.status === 'PASS' && /uds=\/tmp\/x\.sock/.test(p4.detail), '7-C 旧 service 回退 config（得 ' + p4?.detail + '）')
+
+  // ⑨ 0.6.4：同一构建的两份拷贝（不同路径、内容一致）→ 不报 DRIFT，给 path_note；
+  // 内容不同 → 真漂移（sha 判据，不再只看路径）
+  {
+    const dirA = join(TMP, 'copy-a')
+    const dirB = join(TMP, 'copy-b')
+    mkdirSync(dirA, { recursive: true })
+    mkdirSync(dirB, { recursive: true })
+    const binA = join(dirA, 'malong-parse')
+    const binB = join(dirB, 'malong-parse')
+    writeFileSync(binA, 'same-binary-content')
+    writeFileSync(binB, 'same-binary-content')
+    const shaOf = (p) => createHash('sha256').update(readFileSync(p)).digest('hex')
+    const ident9 = {
+      ...ident,
+      resolved_bin: binB,
+      resolved_bin_size: statSync(binB).size,
+      resolved_bin_sha256: shaOf(binB),
+      daemon: { ...ident.daemon, exe_path: binA, exe_size: statSync(binA).size },
+    }
+    const r9 = await hc.runHealthCheck({ stateDir: TMP, workspacesDir: join(TMP, 'ws'), semaphore: semX, activeRequests: activeX, log: () => {}, parseService: { ...svcBase, getIdentity: async () => ident9 } })
+    const p9 = r9.checks.find(c => c.name === 'Parse Service')
+    assert(p9 && p9.status === 'PASS' && r9.parser_identity?.drift?.detected === false, `⑨ 同内容不同路径不报 DRIFT（得 ${p9?.status} | ${p9?.detail}）`)
+    assert(/same binary at different path/.test(String(r9.parser_identity?.path_note)), `⑨ 必须给出 path_note（得 ${r9.parser_identity?.path_note}）`)
+
+    const binC = join(dirB, 'malong-parse-other')
+    writeFileSync(binC, 'diff-binary-content')
+    const ident10 = { ...ident9, daemon: { ...ident9.daemon, exe_path: binC, exe_size: statSync(binC).size } }
+    const r10 = await hc.runHealthCheck({ stateDir: TMP, workspacesDir: join(TMP, 'ws'), semaphore: semX, activeRequests: activeX, log: () => {}, parseService: { ...svcBase, getIdentity: async () => ident10 } })
+    const p10 = r10.checks.find(c => c.name === 'Parse Service')
+    assert(p10 && p10.status === 'WARN' && /different binary/.test(p10.detail) && r10.parser_identity?.drift?.detected === true, `⑨ 内容不同 → 真漂移 WARN（得 ${p10?.status} | ${p10?.detail}）`)
+  }
 
   // ⑤ Server Identity（buildInfo）
   const r5 = await hc.runHealthCheck({ stateDir: TMP, workspacesDir: join(TMP, 'ws'), semaphore: semX, activeRequests: activeX, log: () => {}, buildInfo: { version: '0.5.0', commit: 'deadbee', pid: 123, node: 'v22.0.0' } })
